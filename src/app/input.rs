@@ -502,10 +502,18 @@ impl App {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                self.search_editor.move_left(shift);
+                if ctrl {
+                    self.search_editor.move_word_left(shift);
+                } else {
+                    self.search_editor.move_left(shift);
+                }
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                self.search_editor.move_right(shift);
+                if ctrl {
+                    self.search_editor.move_word_right(shift);
+                } else {
+                    self.search_editor.move_right(shift);
+                }
             }
             PhysicalKey::Code(KeyCode::Home) => {
                 self.search_editor.move_home(shift);
@@ -670,11 +678,19 @@ impl App {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                self.editor.move_left(shift);
+                if ctrl {
+                    self.editor.move_word_left(shift);
+                } else {
+                    self.editor.move_left(shift);
+                }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                self.editor.move_right(shift);
+                if ctrl {
+                    self.editor.move_word_right(shift);
+                } else {
+                    self.editor.move_right(shift);
+                }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
@@ -793,6 +809,10 @@ impl App {
                 );
                 cursor_moved = true;
                 is_edit = true;
+            }
+            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+                self.editor.select_expand();
+                cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                 if let Some(text) = self.editor.get_selection() {

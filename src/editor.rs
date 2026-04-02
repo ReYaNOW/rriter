@@ -117,6 +117,16 @@ fn is_delimiter(b: u8) -> bool {
     )
 }
 
+fn char_class(b: u8) -> u8 {
+    if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+        0 // Пробельные символы
+    } else if b.is_ascii_punctuation() && b != b'_' {
+        2 // Символы-разделители (пунктуация)
+    } else {
+        1 // Символы слова (буквы, цифры, _, а также кириллица)
+    }
+}
+
 fn extract_spans_for_range(spans: &[ColorSpan], start: usize, end: usize) -> Vec<ColorSpan> {
     let mut res = Vec::new();
     for s in spans {
@@ -746,6 +756,139 @@ impl Editor {
         indent
     }
 
+    pub fn select_expand(&mut self) {
+        let (start, end) = if let Some(anchor) = self.selection_anchor {
+            (anchor.min(self.cursor), anchor.max(self.cursor))
+        } else {
+            (self.cursor, self.cursor)
+        };
+
+        let mut candidates = Vec::new();
+
+        // 1. Выделение слова
+        let mut word_l = start;
+        while word_l > 0 && char_class(self.byte_at(word_l - 1)) == 1 {
+            word_l -= 1;
+        }
+        let mut word_r = end;
+        while word_r < self.len() && char_class(self.byte_at(word_r)) == 1 {
+            word_r += 1;
+        }
+        if word_l < word_r {
+            candidates.push((word_l, word_r));
+        }
+
+        // 2. Выделение полной строки (без \n)
+        let mut line_l = start;
+        while line_l > 0 && self.byte_at(line_l - 1) != b'\n' {
+            line_l -= 1;
+        }
+        let mut line_r = end;
+        while line_r < self.len() && self.byte_at(line_r) != b'\n' {
+            line_r += 1;
+        }
+        candidates.push((line_l, line_r));
+
+        // Выделение строки, очищенной от пробелов в начале и в конце
+        let mut t_line_l = line_l;
+        while t_line_l < line_r
+            && (self.byte_at(t_line_l) == b' ' || self.byte_at(t_line_l) == b'\t')
+        {
+            t_line_l += 1;
+        }
+        let mut t_line_r = line_r;
+        while t_line_r > t_line_l
+            && (self.byte_at(t_line_r - 1) == b' ' || self.byte_at(t_line_r - 1) == b'\t')
+        {
+            t_line_r -= 1;
+        }
+        if t_line_l < t_line_r {
+            candidates.push((t_line_l, t_line_r));
+        }
+
+        // 3. Выделение внутри скобок / блоков (окно 50kb для производительности)
+        let scan_start = start.saturating_sub(50000);
+        let scan_end = (end + 50000).min(self.len());
+        let mut round_stack = Vec::new();
+        let mut curly_stack = Vec::new();
+        let mut square_stack = Vec::new();
+
+        for i in scan_start..scan_end {
+            let b = self.byte_at(i);
+            match b {
+                b'(' => round_stack.push(i),
+                b'{' => curly_stack.push(i),
+                b'[' => square_stack.push(i),
+                b')' => {
+                    if let Some(open) = round_stack.pop() {
+                        candidates.push((open + 1, i));
+                        candidates.push((open, i + 1));
+                    }
+                }
+                b'}' => {
+                    if let Some(open) = curly_stack.pop() {
+                        candidates.push((open + 1, i));
+                        candidates.push((open, i + 1));
+                    }
+                }
+                b']' => {
+                    if let Some(open) = square_stack.pop() {
+                        candidates.push((open + 1, i));
+                        candidates.push((open, i + 1));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Кавычки на текущей строке
+        let mut q_l = line_l;
+        let mut last_double = None;
+        let mut last_single = None;
+        while q_l < line_r {
+            if self.byte_at(q_l) == b'"' {
+                if let Some(open) = last_double {
+                    candidates.push((open + 1, q_l));
+                    candidates.push((open, q_l + 1));
+                    last_double = None;
+                } else {
+                    last_double = Some(q_l);
+                }
+            } else if self.byte_at(q_l) == b'\'' {
+                if let Some(open) = last_single {
+                    candidates.push((open + 1, q_l));
+                    candidates.push((open, q_l + 1));
+                    last_single = None;
+                } else {
+                    last_single = Some(q_l);
+                }
+            }
+            q_l += 1;
+        }
+
+        // 4. Выделение всего документа
+        candidates.push((0, self.len()));
+
+        let mut best = None;
+        let mut min_len = usize::MAX;
+
+        for (l, r) in candidates {
+            // Выбираем только тех кандидатов, которые строго расширяют текущее выделение
+            if l <= start && r >= end && (l < start || r > end) {
+                let len = r - l;
+                if len < min_len {
+                    min_len = len;
+                    best = Some((l, r));
+                }
+            }
+        }
+
+        if let Some((l, r)) = best {
+            self.selection_anchor = Some(l);
+            self.cursor = r;
+        }
+    }
+
     pub fn select_word(&mut self) {
         let mut start = self.cursor;
         let mut end = self.cursor;
@@ -845,6 +988,52 @@ impl Editor {
             }
             self.cursor = next;
         }
+    }
+
+    pub fn move_word_left(&mut self, shift: bool) {
+        self.handle_selection(shift);
+        if self.cursor == 0 {
+            return;
+        }
+
+        let mut p = self.cursor;
+
+        // 1. Скипаем пробелы
+        while p > 0 && char_class(self.byte_at(p - 1)) == 0 {
+            p -= 1;
+        }
+
+        // 2. Скипаем само слово/разделители до начала
+        if p > 0 {
+            let cls = char_class(self.byte_at(p - 1));
+            while p > 0 && char_class(self.byte_at(p - 1)) == cls {
+                p -= 1;
+            }
+        }
+        self.cursor = p;
+    }
+
+    pub fn move_word_right(&mut self, shift: bool) {
+        self.handle_selection(shift);
+        if self.cursor == self.len() {
+            return;
+        }
+
+        let mut p = self.cursor;
+
+        // 1. Скипаем пробелы
+        while p < self.len() && char_class(self.byte_at(p)) == 0 {
+            p += 1;
+        }
+
+        // 2. Скипаем слово, чтобы курсор встал в его конец (как в PyCharm)
+        if p < self.len() {
+            let cls = char_class(self.byte_at(p));
+            while p < self.len() && char_class(self.byte_at(p)) == cls {
+                p += 1;
+            }
+        }
+        self.cursor = p;
     }
 
     pub fn move_home(&mut self, shift: bool) {
