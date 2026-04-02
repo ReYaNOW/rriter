@@ -416,12 +416,56 @@ impl ApplicationHandler for App {
                     &self.recent_files,
                 );
 
-                // Изменяем курсор для основного окна в зависимости от наведения на UI элементы
-                self.window.as_ref().unwrap().set_cursor(if wants_pointer {
+                // Корректно устанавливаем курсор даже когда мышь не двигается
+                let cursor_icon = if wants_pointer {
                     winit::window::CursorIcon::Pointer
+                } else if !self.show_welcome {
+                    let r = self.renderer.as_ref().unwrap();
+                    let mx = r.last_mouse_x;
+                    let my = r.last_mouse_y;
+                    let padding = r.left_padding;
+                    let minimap_w = r.minimap_width;
+                    let s = r.scale_factor;
+                    let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+
+                    let mut is_text = mx > padding && mx < (window_width - minimap_w);
+
+                    if self.show_search && self.search_anim_y > -10.0 {
+                        let search_w = 480.0 * s;
+                        let search_h = 46.0 * s;
+                        let search_x = window_width - minimap_w - search_w - 20.0 * s;
+                        let input_x = search_x + 10.0 * s;
+                        let input_y = self.search_anim_y + 8.0 * s;
+                        let input_w = 260.0 * s;
+                        let input_h = 30.0 * s;
+
+                        if mx >= search_x
+                            && mx <= search_x + search_w
+                            && my >= self.search_anim_y
+                            && my <= self.search_anim_y + search_h
+                        {
+                            if mx >= input_x
+                                && mx <= input_x + input_w
+                                && my >= input_y
+                                && my <= input_y + input_h
+                            {
+                                is_text = true;
+                            } else {
+                                is_text = false;
+                            }
+                        }
+                    }
+
+                    if is_text {
+                        winit::window::CursorIcon::Text
+                    } else {
+                        winit::window::CursorIcon::Default
+                    }
                 } else {
                     winit::window::CursorIcon::Default
-                });
+                };
+
+                self.window.as_ref().unwrap().set_cursor(cursor_icon);
 
                 gl_surface.swap_buffers(gl_context).unwrap();
             }
