@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use tree_sitter::StreamingIterator; // <-- Обязательный импорт для новых версий tree-sitter
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
     pub start: usize,
     pub end: usize,
-    pub color: [f32; 4],
+    pub color:[f32; 4],
 }
 
 pub struct Highlighter {
@@ -16,18 +17,18 @@ pub struct Highlighter {
     pub current_version: u64,
 }
 
-const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
-const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
-const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
+const DRACULA_FG: [f32; 4] =[0.972, 0.972, 0.949, 1.0];
+const DRACULA_COMMENT:[f32; 4] =[0.384, 0.447, 0.643, 1.0];
+const DRACULA_CYAN:[f32; 4] =[0.545, 0.913, 0.992, 1.0];
 const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
-const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
-const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
-const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
-const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
-const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
+const DRACULA_GREEN: [f32; 4] =[0.313, 0.980, 0.482, 1.0];
+const DRACULA_ORANGE: [f32; 4] =[0.973, 0.584, 0.502, 1.0];
+const DRACULA_PINK:[f32; 4] =[1.0, 0.474, 0.776, 1.0];
+const DRACULA_PURPLE:[f32; 4] =[0.741, 0.576, 0.976, 1.0];
+const DRACULA_YELLOW: [f32; 4] =[0.945, 0.980, 0.549, 1.0];
 
 // Специальный маркер для захвата интерполяции до этапа плоских спанов
-const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
+const MARKER_INTERPOLATION: [f32; 4] =[-1.0, 0.0, 0.0, 1.0];
 
 #[derive(Debug)]
 struct Scope {
@@ -77,6 +78,7 @@ impl Highlighter {
                     "sh" | "bash" => "bash",
                     "rs" => "rs",
                     "py" => "py",
+                    "toml" => "toml",
                     _ => "",
                 };
 
@@ -139,6 +141,16 @@ impl Highlighter {
                             "(decorator \"@\" @keyword.control)", 
                             "(decorator (identifier) @py_function)",
                         ])),
+                        // Идеальный нативный импорт из нового пакета!
+                        "toml" => Some((tree_sitter_toml_ng::LANGUAGE.into(), vec![
+                            "(bare_key) @property",
+                            "(string) @string",
+                            "(integer) @number",
+                            "(float) @number",
+                            "(boolean) @boolean",
+                            "(comment) @comment",
+                            "[\"=\" \"[\" \"]\" \"[[\" \"]]\"] @operator",
+                        ])),
                         _ => None,
                     };
 
@@ -165,15 +177,16 @@ impl Highlighter {
 
                                 let mut py_scopes = Vec::new();
                                 if lang_name == "py" {
-                                    for q_str in [
+                                    for q_str in[
                                         "(function_definition parameters: (parameters) @params body: (_) @body)",
                                         "(lambda parameters: (lambda_parameters) @params body: (_) @body)"
                                     ] {
                                         if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                             let mut cursor = tree_sitter::QueryCursor::new();
-                                            let matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
+                                            let mut matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
                                             
-                                            for m in matches {
+                                            // <-- Исправлено: используем while let и .next() вместо for
+                                            while let Some(m) = matches.next() {
                                                 let mut p_node = None;
                                                 let mut b_node = None;
                                                 for cap in m.captures {
@@ -239,13 +252,14 @@ impl Highlighter {
                                     if let Some(query) = query_cache.get(&cache_key) {
                                         success_count += 1;
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        let matches = cursor.matches(
+                                        let mut matches = cursor.matches(
                                             query,
                                             tree.root_node(),
                                             text.as_bytes(),
                                         );
 
-                                        for m in matches {
+                                        // <-- Исправлено: используем while let и .next() вместо for
+                                        while let Some(m) = matches.next() {
                                             for cap in m.captures {
                                                 let name =
                                                     query.capture_names()[cap.index as usize];
@@ -352,8 +366,9 @@ impl Highlighter {
                             }
                         }
                     }
+
                     if !used_ts {
-                        // Lazy load syntect if needed
+                        // Отложенно загружаем syntect
                         if syntect_assets.is_none() {
                             let ps = syntect::parsing::SyntaxSet::load_defaults_newlines();
                             let ts = syntect::highlighting::ThemeSet::load_defaults();
@@ -362,10 +377,12 @@ impl Highlighter {
                         
                         if let Some((ps, ts)) = syntect_assets.as_ref() {
                             let fallback_theme = &ts.themes["base16-ocean.dark"];
-                            if let Some(syntax) = ps
-                                .find_syntax_by_extension(&actual_ext)
-                                .or_else(|| ps.find_syntax_by_extension("txt"))
-                            {
+                            
+                            // Фолбэк для TOML если tree-sitter упадет/не загрузится
+                            let syntax = ps.find_syntax_by_extension(&actual_ext)
+                                .or_else(|| if actual_ext == "toml" { ps.find_syntax_by_extension("ini") } else { None });
+
+                            if let Some(syntax) = syntax {
                                 let mut h = syntect::easy::HighlightLines::new(syntax, fallback_theme);
                                 let mut byte_offset = 0;
                                 for line in syntect::util::LinesWithEndings::from(&text) {
@@ -376,7 +393,7 @@ impl Highlighter {
                                             spans.push(ColorSpan {
                                                 start,
                                                 end,
-                                                color: [
+                                                color:[
                                                     style.foreground.r as f32 / 255.0,
                                                     style.foreground.g as f32 / 255.0,
                                                     style.foreground.b as f32 / 255.0,
@@ -475,7 +492,6 @@ impl Highlighter {
             }
         }
 
-        // Если нам прислали родные цвета из истории, расставляем их!
         if let Some(mut r_spans) = restored_spans {
             for s in &mut r_spans {
                 s.start += offset;
@@ -535,6 +551,7 @@ fn flatten_spans(
     spans.sort_by_key(|s| std::cmp::Reverse(s.end - s.start));
 
     byte_colors.clear();
+    // Базовый цвет для всего файла — всегда яркий DRACULA_FG
     byte_colors.resize(len, DRACULA_FG);
 
     for span in spans {

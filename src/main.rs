@@ -129,18 +129,31 @@ fn main() {
     let mut file_path = None;
     let show_welcome = args.len() <= 1;
 
+    // Сразу загружаем список недавних файлов, чтобы иметь возможность его обновить
+    let mut recent_files = load_recent_files();
+
     if args.len() > 1 {
         let path = &args[1];
         if let Ok(content) = std::fs::read_to_string(path) {
             initial_text = content;
             let f_path = std::path::Path::new(path);
-            file_path = Some(f_path.to_path_buf());
-            let file_name = f_path.file_name().unwrap_or_default().to_string_lossy();
+
+            // Превращаем путь в абсолютный. Если функция упадет, используем оригинальный путь.
+            let abs_path = std::fs::canonicalize(f_path).unwrap_or_else(|_| f_path.to_path_buf());
+
+            file_path = Some(abs_path.clone());
+            let file_name = abs_path.file_name().unwrap_or_default().to_string_lossy();
             title = file_name.into_owned();
 
-            if let Some(e) = f_path.extension() {
+            if let Some(e) = abs_path.extension() {
                 ext = e.to_string_lossy().to_string();
             }
+
+            // Добавляем файл, открытый из консоли, в историю
+            recent_files.retain(|p| p != &abs_path);
+            recent_files.insert(0, abs_path);
+            recent_files.truncate(10);
+            save_recent_files(&recent_files);
         }
     }
 
@@ -195,7 +208,6 @@ Ctrl + Del\tУдалить слово справа от курсора
 
     let show_fps = load_config();
     let highlighter = Highlighter::new();
-    let recent_files = load_recent_files();
 
     let mut app = App {
         gl_config: None,
@@ -239,7 +251,7 @@ Ctrl + Del\tУдалить слово справа от курсора
         save_file_rx: None,
 
         show_welcome,
-        recent_files,
+        recent_files, // Инициализируем обновленным списком
 
         show_search: false,
         search_anim_y: -70.0,

@@ -14,7 +14,14 @@ impl Button {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
     }
 
-    pub fn render(&self, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool) {
+    pub fn render(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
         let hovered = self.is_hovered(mx, my);
 
         let border_color = renderer.theme.sel;
@@ -60,6 +67,8 @@ impl Button {
         }
 
         renderer.draw_string_scaled(&self.text, content_x, text_y, text_color, text_scale);
+
+        hovered
     }
 }
 
@@ -76,7 +85,14 @@ impl IconButton {
         mx >= self.x && mx <= self.x + self.size && my >= self.y && my <= self.y + self.size
     }
 
-    pub fn render(&self, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool) {
+    pub fn render(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
         let hovered = self.is_hovered(mx, my);
 
         let mut bg_color = [0.0, 0.0, 0.0, 0.0];
@@ -112,6 +128,8 @@ impl IconButton {
                 icon_render_size,
             );
         }
+
+        hovered
     }
 }
 

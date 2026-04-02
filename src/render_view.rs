@@ -32,11 +32,12 @@ impl Renderer {
         search_case_sensitive: bool,
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
-    ) {
+    ) -> bool {
         if show_welcome {
-            self.draw_welcome(recent_files);
-            return;
+            return self.draw_welcome(recent_files);
         }
+
+        let mut wants_pointer = false;
 
         let now = std::time::Instant::now();
         if let Some(last) = self.last_frame_time {
@@ -813,15 +814,17 @@ impl Renderer {
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
 
-            btn_case.render(self, mx, my, s, false);
-            btn_up.render(self, mx, my, s, false);
-            btn_down.render(self, mx, my, s, false);
-            btn_close.render(self, mx, my, s, false);
+            wants_pointer |= btn_case.render(self, mx, my, s, false);
+            wants_pointer |= btn_up.render(self, mx, my, s, false);
+            wants_pointer |= btn_down.render(self, mx, my, s, false);
+            wants_pointer |= btn_close.render(self, mx, my, s, false);
         }
 
         if show_quit_dialog {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
         self.flush();
+
+        wants_pointer
     }
 }

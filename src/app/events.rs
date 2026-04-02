@@ -5,7 +5,7 @@ use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentGlContext,
 };
 use glutin::display::{GetGlDisplay, GlDisplay};
-use glutin::surface::{GlSurface, WindowSurface}; // <-- Удален Surface
+use glutin::surface::{GlSurface, WindowSurface};
 use glutin_winit::DisplayBuilder;
 use std::num::NonZeroU32;
 use std::time::Instant;
@@ -207,11 +207,22 @@ impl App {
                             r.gl.viewport(0, 0, dw as i32, dh as i32);
                         }
 
-                        if self.pending_action == PendingAction::Faq {
-                            r.draw_faq(&self.faq_editor, self.faq_scroll_y);
+                        let wants_pointer = if self.pending_action == PendingAction::Faq {
+                            r.draw_faq(&self.faq_editor, self.faq_scroll_y)
                         } else {
-                            r.draw_dialog(&self.base_title);
-                        }
+                            r.draw_dialog(&self.base_title)
+                        };
+
+                        // Изменяем курсор для диалогового окна
+                        self.dialog_window
+                            .as_ref()
+                            .unwrap()
+                            .set_cursor(if wants_pointer {
+                                winit::window::CursorIcon::Pointer
+                            } else {
+                                winit::window::CursorIcon::Default
+                            });
+
                         let _ = dialog_surface.swap_buffers(gl_context);
 
                         r.width = old_w;
@@ -387,7 +398,7 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                self.renderer.as_mut().unwrap().draw(
+                let wants_pointer = self.renderer.as_mut().unwrap().draw(
                     &self.editor,
                     self.scroll_y,
                     blink_alpha,
@@ -404,6 +415,13 @@ impl ApplicationHandler for App {
                     self.show_welcome,
                     &self.recent_files,
                 );
+
+                // Изменяем курсор для основного окна в зависимости от наведения на UI элементы
+                self.window.as_ref().unwrap().set_cursor(if wants_pointer {
+                    winit::window::CursorIcon::Pointer
+                } else {
+                    winit::window::CursorIcon::Default
+                });
 
                 gl_surface.swap_buffers(gl_context).unwrap();
             }

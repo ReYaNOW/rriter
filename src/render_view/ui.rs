@@ -15,7 +15,7 @@ impl Renderer {
         }
     }
 
-    pub fn draw_dialog(&mut self, base_title: &str) {
+    pub fn draw_dialog(&mut self, base_title: &str) -> bool {
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
@@ -61,14 +61,17 @@ impl Renderer {
         let mx = self.dialog_mouse_x;
         let my = self.dialog_mouse_y;
         let pressed = self.dialog_mouse_pressed;
-        btn_save.render(self, mx, my, scale, pressed);
-        btn_discard.render(self, mx, my, scale, pressed);
-        btn_cancel.render(self, mx, my, scale, pressed);
+
+        let mut wants_pointer = false;
+        wants_pointer |= btn_save.render(self, mx, my, scale, pressed);
+        wants_pointer |= btn_discard.render(self, mx, my, scale, pressed);
+        wants_pointer |= btn_cancel.render(self, mx, my, scale, pressed);
 
         self.flush();
+        wants_pointer
     }
 
-    pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32) {
+    pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32) -> bool {
         let scale = self.scale_factor;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
@@ -230,7 +233,9 @@ impl Renderer {
         }
 
         let btn_ok = crate::widgets::get_faq_button(self.width, self.height, scale, self);
-        btn_ok.render(
+        let mut wants_pointer = false;
+
+        wants_pointer |= btn_ok.render(
             self,
             self.dialog_mouse_x,
             self.dialog_mouse_y,
@@ -239,6 +244,7 @@ impl Renderer {
         );
 
         self.flush();
+        wants_pointer
     }
 
     pub fn get_faq_byte_at(
@@ -299,7 +305,7 @@ impl Renderer {
         (total_h - content_h).max(0.0)
     }
 
-    pub fn draw_welcome(&mut self, recent_files: &[std::path::PathBuf]) {
+    pub fn draw_welcome(&mut self, recent_files: &[std::path::PathBuf]) -> bool {
         let scale = self.scale_factor;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
@@ -357,8 +363,8 @@ impl Renderer {
             "Добро пожаловать в RRiter",
             title_x,
             y,
-            [1.0, 1.0, 1.0, 1.0],
-            1.5,
+            [0.741, 0.576, 0.976, 1.0],
+            1.0,
         );
         y += 40.0 * scale;
         self.draw_string_scaled(
@@ -373,13 +379,19 @@ impl Renderer {
         let (btn_new, btn_open) =
             crate::widgets::get_welcome_buttons(content_w, title_x, y, scale, self);
 
-        btn_new.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
-        btn_open.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
+        let mut wants_pointer = false;
+        wants_pointer |= btn_new.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
+        wants_pointer |= btn_open.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
 
         y += 80.0 * scale;
-        self.draw_string_scaled("Недавние файлы", title_x, y, [1.0, 1.0, 1.0, 1.0], 1.1);
+        self.draw_string_scaled(
+            "Недавние файлы",
+            title_x,
+            y,
+            [0.741, 0.576, 0.976, 1.0],
+            1.0,
+        );
 
-        // Линия-разделитель под заголовком (как в FAQ)
         let line_y = y + 20.0 * scale;
         self.push_rect(
             title_x,
@@ -393,12 +405,17 @@ impl Renderer {
 
         let item_h = 44.0 * scale;
         for path in recent_files {
+            if y + item_h > content_y + content_h - 60.0 * scale {
+                break;
+            }
+
             let is_hovered = self.last_mouse_x >= title_x - 10.0 * scale
                 && self.last_mouse_x <= title_x + content_w - 70.0 * scale
                 && self.last_mouse_y >= y
                 && self.last_mouse_y < y + item_h;
 
             if is_hovered {
+                wants_pointer = true;
                 self.push_rounded_rect(
                     title_x - 10.0 * scale,
                     y,
@@ -422,10 +439,9 @@ impl Renderer {
                 title_x + name_w + 15.0 * scale,
                 y + 25.0 * scale,
                 [0.5, 0.5, 0.5, 1.0],
-                0.85,
+                0.95,
             );
 
-            // Тонкий разделитель между элементами списка
             self.push_rect(
                 title_x,
                 y + item_h - 1.0,
@@ -437,6 +453,51 @@ impl Renderer {
             y += item_h;
         }
 
+        let hint_str_1 = "F1";
+        let hint_str_2 = " — Справка (Внутри редактора)";
+        let scale_hint = 0.9;
+
+        let w1 = self.measure_ui_width(hint_str_1, scale_hint) + 16.0 * scale;
+        let w2 = self.measure_ui_width(hint_str_2, scale_hint);
+        let hint_total_w = w1 + w2;
+
+        let hint_x = content_x + content_w - hint_total_w - 30.0 * scale;
+        let hint_y = content_y + content_h - 30.0 * scale;
+
+        let kbd_bg = [0.224, 0.231, 0.251, 1.0];
+        let kbd_border = [0.306, 0.318, 0.341, 1.0];
+        let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
+
+        let kbd_h = 22.0 * scale;
+        let kbd_draw_y = hint_y - 16.0 * scale;
+
+        self.push_rounded_rect(
+            hint_x - 1.0,
+            kbd_draw_y - 1.0,
+            w1 + 2.0,
+            kbd_h + 2.0,
+            4.0 * scale,
+            kbd_border,
+        );
+        self.push_rounded_rect(hint_x, kbd_draw_y, w1, kbd_h, 4.0 * scale, kbd_bg);
+
+        self.draw_string_scaled(
+            hint_str_1,
+            hint_x + 8.0 * scale,
+            hint_y,
+            kbd_text_color,
+            scale_hint,
+        );
+
+        self.draw_string_scaled(
+            hint_str_2,
+            hint_x + w1,
+            hint_y,
+            [0.5, 0.5, 0.55, 1.0],
+            scale_hint,
+        );
+
         self.flush();
+        wants_pointer
     }
 }
