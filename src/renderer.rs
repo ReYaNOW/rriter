@@ -327,7 +327,7 @@ impl Renderer {
                 theme,
                 width: 1000.0,
                 height: 800.0,
-                minimap_width: 150.0,
+                minimap_width: 110.0,
                 line_height: (26.0 * scale_factor).round(),
                 baseline_offset: (19.0 * scale_factor).round(),
                 left_padding: (60.0 * scale_factor).round(),
