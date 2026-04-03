@@ -1,5 +1,3 @@
-#![allow(static_mut_refs)]
-
 mod app;
 mod editor;
 mod highlighter;

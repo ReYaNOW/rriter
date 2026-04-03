@@ -158,7 +158,8 @@ impl Renderer {
             }
         }
 
-        let mut intervals = Vec::new();
+        // Локальный вектор для избежания утечек и реаллокаций вне стека
+        let mut intervals = Vec::with_capacity(64);
         let mut last_phys_line = None;
         let mut last_bottom_y = 0.0;
 
@@ -201,7 +202,7 @@ impl Renderer {
             }
         }
 
-        let mut merged: Vec<ModInterval> = Vec::new();
+        let mut merged: Vec<ModInterval> = Vec::with_capacity(64);
         for int in intervals {
             if let Some(last) = merged.last_mut() {
                 if int.top <= last.bottom + 0.1 && int.state == last.state {
@@ -250,15 +251,26 @@ impl Renderer {
             let y = self.baseline_offset - render_scroll_y + (i as f32 * self.line_height);
             let mut x = self.left_padding;
 
+            // Zero-Allocation рендер номеров строк (без .to_string()!)
             if v_line_info.is_soft_wrap {
                 self.draw_string("↪", self.left_padding * 0.5, y, self.theme.line_num);
             } else {
-                self.draw_string(
-                    &v_line_info.physical_line.to_string(),
-                    10.0,
-                    y,
-                    self.theme.line_num,
-                );
+                let mut n = v_line_info.physical_line;
+                let mut buf = [0u8; 20];
+                let mut idx = 20;
+                if n == 0 {
+                    idx -= 1;
+                    buf[idx] = b'0';
+                } else {
+                    while n > 0 {
+                        idx -= 1;
+                        buf[idx] = b'0' + (n % 10) as u8;
+                        n /= 10;
+                    }
+                }
+                if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
+                    self.draw_string(num_str, 10.0, y, self.theme.line_num);
+                }
             }
 
             let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {

@@ -248,6 +248,7 @@ impl ApplicationHandler for App {
         }
 
         let template = ConfigTemplateBuilder::new().with_transparency(false);
+
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(
             Window::default_attributes()
                 .with_title(format!("{} — RRiter", self.base_title))
@@ -261,6 +262,7 @@ impl ApplicationHandler for App {
             })
             .unwrap();
         let window = window_opt.unwrap();
+
         let raw_window_handle = window.window_handle().unwrap().as_raw();
 
         let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
@@ -287,6 +289,8 @@ impl ApplicationHandler for App {
 
         let gl_surface = unsafe { display.create_window_surface(&gl_config, &attrs).unwrap() };
         let gl_context = not_current_gl_context.make_current(&gl_surface).unwrap();
+
+        // Аппаратный VSync. Драйвер сам ограничит FPS под герцовку монитора (в т.ч. 144Hz и выше)
         let _ = gl_surface.set_swap_interval(
             &gl_context,
             glutin::surface::SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
@@ -427,7 +431,6 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                // ИЗМЕНЕНИЕ: Передаем &mut self.editor в draw
                 let mut wants_pointer = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     self.scroll_y,
@@ -446,7 +449,6 @@ impl ApplicationHandler for App {
                     &self.recent_files,
                 );
 
-                // Отрисовка автодополнения поверх всего интерфейса
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
                     let render_scroll_y = self.scroll_y.round();
@@ -525,89 +527,171 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.016);
+        let mut dt = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
+
+        // Защита от "Wake-up jerk" (рывок после сна).
+        // Если редактор долго спал, dt будет огромным. Урезаем первый кадр
+        // после сна ровно до идеальных 16мс, чтобы анимация не телепортировалась.
+        if dt > 0.1 {
+            dt = 0.016;
+        } else {
+            dt = dt.min(0.05); // Защита от системных лагов
+        }
 
         let mut needs_redraw = false;
 
-        // Физика автодополнения (Анимация + Кинетический скролл)
-        if self.autocomplete_active {
-            if self.autocomplete_anim_progress < 1.0 {
-                self.autocomplete_anim_progress +=
-                    (1.0 - self.autocomplete_anim_progress) * 20.0 * dt;
-                if self.autocomplete_anim_progress > 0.99 {
-                    self.autocomplete_anim_progress = 1.0;
+        // Обработка драг-н-дроп скролла (до интеграции физики)
+        if self.is_dragging && !self.is_dragging_minimap {
+            if let Some(w) = self.window.as_ref() {
+                let wh = w.inner_size().height as f32;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
+
+                let mut drag_scroll_delta = 0.0;
+                if my < 0.0 {
+                    drag_scroll_delta = my;
+                } else if my > wh {
+                    drag_scroll_delta = my - wh;
                 }
-                needs_redraw = true;
+
+                if drag_scroll_delta != 0.0 {
+                    let drag_amount = drag_scroll_delta.abs();
+                    let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
+                    self.target_scroll_y += drag_scroll_delta.signum() * speed * dt;
+                    let max_scroll = self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .get_max_scroll(&self.editor, wh);
+                    self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll);
+                    let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                    let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                    self.editor.set_cursor_at_pos(
+                        mx,
+                        my + self.scroll_y,
+                        self.renderer.as_mut().unwrap(),
+                        false,
+                    );
+                    needs_redraw = true;
+                }
             }
+        }
 
-            let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
-            let abs_diff = diff.abs();
-            let boundary = 15.0;
-            let anim_speed = 15.0; // Идеальная скорость, как у главного редактора
+        // --- SUB-STEPPING (СУБ-ШАГИ ФИЗИКИ) ---
+        // Разбиваем нестабильный dt на идеальные микро-шаги по 4мс (250Hz).
+        // Это делает пружинную физику скролла математически идеальной при ЛЮБОЙ
+        // герцовке монитора и защищает от статтеров Wayland/X11.
+        let fixed_dt = 0.004;
+        let mut time_left = dt;
 
-            let target_v = if abs_diff > boundary {
-                diff * anim_speed
+        while time_left > 0.0 {
+            let step_dt = if time_left > fixed_dt {
+                fixed_dt
             } else {
-                let c = boundary.sqrt() * anim_speed;
+                time_left
+            };
+            time_left -= step_dt;
+
+            // 1. Физика Главного скролла
+            let diff = self.target_scroll_y - self.scroll_y;
+            let abs_diff = diff.abs();
+            let target_v = if abs_diff > 15.0 {
+                diff * self.scroll_anim_speed
+            } else {
+                let c = 15.0_f32.sqrt() * self.scroll_anim_speed;
                 diff.signum() * abs_diff.sqrt() * c
             };
+            let v_factor = 1.0 - (-self.scroll_anim_speed * 4.0 * step_dt).exp();
+            self.scroll_velocity += (target_v - self.scroll_velocity) * v_factor;
+            self.scroll_y += self.scroll_velocity * step_dt;
 
-            let c_stiffness = anim_speed * 4.0;
-            let v_factor = 1.0 - (-c_stiffness * dt).exp();
-            self.autocomplete_scroll_velocity +=
-                (target_v - self.autocomplete_scroll_velocity) * v_factor;
-
-            let step = self.autocomplete_scroll_velocity * dt;
-
-            if abs_diff > 0.0 {
-                if step.abs() >= abs_diff
-                    || diff.signum() != (diff - step).signum()
-                    || abs_diff < 0.01
-                {
-                    self.autocomplete_scroll_y = self.autocomplete_target_scroll_y;
-                    self.autocomplete_scroll_velocity = 0.0;
+            // 2. Физика FAQ скролла
+            if self.dialog_window.is_some() && self.pending_action == PendingAction::Faq {
+                let diff = self.faq_target_scroll_y - self.faq_scroll_y;
+                let abs_diff = diff.abs();
+                let target_v = if abs_diff > 15.0 {
+                    diff * self.faq_scroll_anim_speed
                 } else {
-                    self.autocomplete_scroll_y += step;
-                }
-                needs_redraw = true;
+                    let c = 15.0_f32.sqrt() * self.faq_scroll_anim_speed;
+                    diff.signum() * abs_diff.sqrt() * c
+                };
+                let v_factor = 1.0 - (-self.faq_scroll_anim_speed * 4.0 * step_dt).exp();
+                self.faq_scroll_velocity += (target_v - self.faq_scroll_velocity) * v_factor;
+                self.faq_scroll_y += self.faq_scroll_velocity * step_dt;
             }
+
+            // 3. Физика Автодополнения
+            if self.autocomplete_active {
+                let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
+                let target_v = diff * 15.0;
+                let v_factor = 1.0 - (-60.0 * step_dt).exp();
+                self.autocomplete_scroll_velocity +=
+                    (target_v - self.autocomplete_scroll_velocity) * v_factor;
+                self.autocomplete_scroll_y += self.autocomplete_scroll_velocity * step_dt;
+            }
+        }
+
+        // --- ЛИНЕЙНЫЕ АНИМАЦИИ ---
+        if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {
+            self.autocomplete_anim_progress += (1.0 - self.autocomplete_anim_progress) * 20.0 * dt;
+            if self.autocomplete_anim_progress > 0.99 {
+                self.autocomplete_anim_progress = 1.0;
+            }
+            needs_redraw = true;
+        }
+
+        let target_search_y = if self.show_search { 10.0 } else { -70.0 };
+        if (self.search_anim_y - target_search_y).abs() > 0.5 {
+            self.search_anim_y += (target_search_y - self.search_anim_y) * 20.0 * dt;
+            needs_redraw = true;
+        }
+
+        // --- SNAP & STOP (Остановка анимации в конце) ---
+        // ИЗМЕНЕНИЕ: Уменьшаем пороги для более плавной остановки
+        if (self.target_scroll_y - self.scroll_y).abs() > 0.01 || self.scroll_velocity.abs() > 0.1 {
+            needs_redraw = true;
+        } else {
+            self.scroll_y = self.target_scroll_y;
+            self.scroll_velocity = 0.0;
         }
 
         if self.dialog_window.is_some() && self.pending_action == PendingAction::Faq {
-            let diff = self.faq_target_scroll_y - self.faq_scroll_y;
-            let abs_diff = diff.abs();
-            let boundary = 15.0;
-            let anim_speed = self.faq_scroll_anim_speed;
-
-            let target_v = if abs_diff > boundary {
-                diff * anim_speed
-            } else {
-                let c = boundary.sqrt() * anim_speed;
-                diff.signum() * abs_diff.sqrt() * c
-            };
-
-            let c_stiffness = anim_speed * 4.0;
-            let v_factor = 1.0 - (-c_stiffness * dt).exp();
-            self.faq_scroll_velocity += (target_v - self.faq_scroll_velocity) * v_factor;
-
-            let step = self.faq_scroll_velocity * dt;
-
-            if abs_diff > 0.0 {
-                if step.abs() >= abs_diff
-                    || diff.signum() != (diff - step).signum()
-                    || abs_diff < 0.01
-                {
-                    self.faq_scroll_y = self.faq_target_scroll_y;
-                    self.faq_scroll_velocity = 0.0;
-                } else {
-                    self.faq_scroll_y += step;
-                }
+            // ИЗМЕНЕНИЕ: Уменьшаем пороги для более плавной остановки
+            if (self.faq_target_scroll_y - self.faq_scroll_y).abs() > 0.01
+                || self.faq_scroll_velocity.abs() > 0.1
+            {
                 needs_redraw = true;
                 self.dialog_window.as_ref().unwrap().request_redraw();
+            } else {
+                self.faq_scroll_y = self.faq_target_scroll_y;
+                self.faq_scroll_velocity = 0.0;
             }
         }
 
+        if self.autocomplete_active {
+            // ИЗМЕНЕНИЕ: Уменьшаем пороги для более плавной остановки
+            if (self.autocomplete_target_scroll_y - self.autocomplete_scroll_y).abs() > 0.01
+                || self.autocomplete_scroll_velocity.abs() > 0.1
+            {
+                needs_redraw = true;
+            } else {
+                self.autocomplete_scroll_y = self.autocomplete_target_scroll_y;
+                self.autocomplete_scroll_velocity = 0.0;
+            }
+        }
+
+        // Ограничение скролла
+        if let Some(w) = self.window.as_ref() {
+            let max_scroll = self
+                .renderer
+                .as_mut()
+                .unwrap()
+                .get_max_scroll(&self.editor, w.inner_size().height as f32);
+            self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll);
+            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+        }
+
+        // Обработка каналов
         if let Some(rx) = &self.open_file_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_file_rx = None;
@@ -647,12 +731,6 @@ impl ApplicationHandler for App {
             }
         }
 
-        let target_search_y = if self.show_search { 10.0 } else { -70.0 };
-        if (self.search_anim_y - target_search_y).abs() > 0.5 {
-            self.search_anim_y += (target_search_y - self.search_anim_y) * 20.0 * dt;
-            needs_redraw = true;
-        }
-
         if let Some(last_resize) = self.last_resize_time {
             if now.duration_since(last_resize).as_millis() > 150 {
                 self.last_resize_time = None;
@@ -682,79 +760,6 @@ impl ApplicationHandler for App {
                 self.update_autocomplete();
             }
             needs_redraw = true;
-        }
-
-        if self.is_dragging && !self.is_dragging_minimap {
-            if let Some(w) = self.window.as_ref() {
-                let wh = w.inner_size().height as f32;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
-
-                let mut drag_scroll_delta = 0.0;
-                if my < 0.0 {
-                    drag_scroll_delta = my;
-                } else if my > wh {
-                    drag_scroll_delta = my - wh;
-                }
-
-                if drag_scroll_delta != 0.0 {
-                    let drag_amount = drag_scroll_delta.abs();
-                    let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
-                    self.target_scroll_y += drag_scroll_delta.signum() * speed * dt;
-                    let max_scroll = self
-                        .renderer
-                        .as_mut()
-                        .unwrap()
-                        .get_max_scroll(&self.editor, wh);
-                    self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll);
-                    let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                    let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                    self.editor.set_cursor_at_pos(
-                        mx,
-                        my + self.scroll_y,
-                        self.renderer.as_mut().unwrap(),
-                        false,
-                    );
-                    needs_redraw = true;
-                }
-            }
-        }
-
-        let diff = self.target_scroll_y - self.scroll_y;
-        let abs_diff = diff.abs();
-        let boundary = 15.0;
-
-        let target_v = if abs_diff > boundary {
-            diff * self.scroll_anim_speed
-        } else {
-            let c = boundary.sqrt() * self.scroll_anim_speed;
-            diff.signum() * abs_diff.sqrt() * c
-        };
-
-        let c_stiffness = self.scroll_anim_speed * 4.0;
-        let v_factor = 1.0 - (-c_stiffness * dt).exp();
-        self.scroll_velocity += (target_v - self.scroll_velocity) * v_factor;
-
-        let step = self.scroll_velocity * dt;
-
-        if abs_diff > 0.0 {
-            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01
-            {
-                self.scroll_y = self.target_scroll_y;
-                self.scroll_velocity = 0.0;
-            } else {
-                self.scroll_y += step;
-            }
-            needs_redraw = true;
-        }
-
-        if let Some(w) = self.window.as_ref() {
-            let max_scroll = self
-                .renderer
-                .as_mut()
-                .unwrap()
-                .get_max_scroll(&self.editor, w.inner_size().height as f32);
-            self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll);
-            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
         }
 
         if self.is_focused {

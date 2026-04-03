@@ -4,6 +4,10 @@ use std::fs;
 use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
 
+// Предаллокация вершинного буфера под ~100 000 вершин.
+pub const MAX_VERTICES: usize = 100_000;
+pub const ATLAS_SIZE: i32 = 2048;
+
 #[derive(Clone)]
 pub struct Theme {
     pub bg: [f32; 4],
@@ -48,12 +52,9 @@ pub struct VisualLine {
     pub byte_idx: usize,
     pub physical_line: usize,
     pub is_soft_wrap: bool,
-    // --- ОПТИМИЗАЦИЯ: Кешируем ширину в пикселях ---
     pub whitespace_px_width: f32,
     pub text_px_width: f32,
 }
-
-pub const ATLAS_SIZE: i32 = 2048;
 
 #[derive(Clone)]
 pub struct FontData {
@@ -159,6 +160,9 @@ impl Renderer {
             let vbo = gl.create_buffer().unwrap();
             gl.bind_vertex_array(Some(vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+
+            let vbo_size = (MAX_VERTICES * std::mem::size_of::<Vertex>()) as i32;
+            gl.buffer_data_size(glow::ARRAY_BUFFER, vbo_size, glow::DYNAMIC_DRAW);
 
             let stride = std::mem::size_of::<Vertex>() as i32;
             let pos_loc = gl.get_attrib_location(program, "pos").unwrap();
@@ -331,7 +335,7 @@ impl Renderer {
                 vao,
                 vbo,
                 texture,
-                vertices: Vec::with_capacity(20000),
+                vertices: Vec::with_capacity(MAX_VERTICES),
                 minimap_vertices: Vec::with_capacity(40000),
                 last_minimap_editor_version: u64::MAX,
                 last_minimap_spans_version: u64::MAX,

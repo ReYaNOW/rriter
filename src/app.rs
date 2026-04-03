@@ -204,32 +204,20 @@ impl App {
             let comp_lower = comp.word.to_lowercase();
             if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
                 let is_prefix = comp_lower.starts_with(&prefix_lower);
-
-                // Рассчитываем скоринг на основе близости области видимости (scope)
                 let mut score = 0i64;
                 let scope_bonus = if comp.kind == SymbolKind::Keyword {
                     0
                 } else {
                     let scope_size = comp.scope_end.saturating_sub(comp.scope_start);
                     let sz = scope_size.min(i64::MAX as usize) as i64;
-                    // Чем меньше область видимости (sz), тем выше бонус (локальные переменные в топе)
                     10_000_000 / (sz + 1).max(1)
                 };
                 score += scope_bonus;
-
-                // Штраф за длину слова (короткие совпадения выше)
                 score -= (comp.word.len() as i64) * 10;
-
                 matches.push((is_prefix, score, comp, indices));
             }
         }
 
-        // --- УМНАЯ СОРТИРОВКА (ПРИОРИТЕТЫ) ---
-        // 0. Переменные и параметры (Prefix Match) -> самые важные
-        // 1. Функции (Prefix Match)
-        // 2. Классы и встроенные типы (bool, int и т.д.) (Prefix Match)
-        // 3. Ключевые слова (Prefix Match)
-        // 4. Все остальное (Fuzzy Match) в том же порядке
         matches.sort_by_key(|(is_prefix, score, comp, _)| {
             let type_priority = match comp.kind {
                 SymbolKind::Variable | SymbolKind::Parameter => 0,
@@ -240,10 +228,6 @@ impl App {
             };
 
             let match_priority = if *is_prefix { 0 } else { 1 };
-
-            // Сначала сравниваем по категории совпадения (префикс/не префикс),
-            // затем по типу символа (переменная/функция/класс),
-            // и в конце по скору (локальность).
             (match_priority, type_priority, std::cmp::Reverse(*score))
         });
 
@@ -482,7 +466,6 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
         std::thread::spawn(move || {
-            // ИСПРАВЛЕНИЕ: Установка человеческого заголовка
             let file = rfd::FileDialog::new().set_title("Открыть файл").pick_file();
             let _ = tx.send(file);
         });
@@ -492,7 +475,6 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
         std::thread::spawn(move || {
-            // ИСПРАВЛЕНИЕ: Установка человеческого заголовка
             let file = rfd::FileDialog::new()
                 .set_title("Сохранить файл как...")
                 .set_file_name("Безымянный.txt")

@@ -237,6 +237,9 @@ impl Renderer {
         if self.vertices.is_empty() {
             return;
         }
+
+        let vertex_count = self.vertices.len().min(crate::renderer::MAX_VERTICES);
+
         unsafe {
             let proj = [
                 2.0 / self.width,
@@ -260,13 +263,14 @@ impl Renderer {
             self.gl
                 .uniform_matrix_4_f32_slice(proj_loc.as_ref(), false, &proj);
             self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-            self.gl.buffer_data_u8_slice(
+
+            self.gl.buffer_sub_data_u8_slice(
                 glow::ARRAY_BUFFER,
-                bytemuck::cast_slice(&self.vertices),
-                glow::DYNAMIC_DRAW,
+                0,
+                bytemuck::cast_slice(&self.vertices[..vertex_count]),
             );
-            self.gl
-                .draw_arrays(glow::TRIANGLES, 0, self.vertices.len() as i32);
+
+            self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
         }
         self.vertices.clear();
     }
