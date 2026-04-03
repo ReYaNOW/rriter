@@ -380,12 +380,12 @@ impl Renderer {
         };
 
         let segments = 32;
-        let mut edge = Vec::with_capacity(segments * 4 + 4);
+        self.temp_edge_buffer.clear();
 
         let mut add_arc = |corner_cx: f32, corner_cy: f32, start_angle: f32| {
             for i in 0..=segments {
                 let a = start_angle + (i as f32 * std::f32::consts::PI / 2.0 / segments as f32);
-                edge.push(Vertex {
+                self.temp_edge_buffer.push(Vertex {
                     pos: [corner_cx + a.cos() * r, corner_cy + a.sin() * r],
                     uv: [-1.0, -1.0],
                     color,
@@ -399,11 +399,11 @@ impl Renderer {
         add_arc(x + r, y + r, std::f32::consts::PI);
         add_arc(x + w - r, y + r, 3.0 * std::f32::consts::PI / 2.0);
 
-        for i in 0..edge.len() {
-            let next_i = (i + 1) % edge.len();
+        for i in 0..self.temp_edge_buffer.len() {
+            let next_i = (i + 1) % self.temp_edge_buffer.len();
             self.vertices.push(center);
-            self.vertices.push(edge[i]);
-            self.vertices.push(edge[next_i]);
+            self.vertices.push(self.temp_edge_buffer[i]);
+            self.vertices.push(self.temp_edge_buffer[next_i]);
         }
     }
 }

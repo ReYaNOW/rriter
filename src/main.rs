@@ -10,7 +10,7 @@ use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
 use arboard::Clipboard;
-use dlmalloc::GlobalDlmalloc;
+use mimalloc::MiMalloc;
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -18,7 +18,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
 
 #[global_allocator]
-static ALLOCATOR: GlobalDlmalloc = GlobalDlmalloc;
+static GLOBAL: MiMalloc = MiMalloc;
 
 pub fn load_recent_files() -> Vec<PathBuf> {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());

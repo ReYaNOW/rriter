@@ -1,13 +1,13 @@
 use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
-use std::collections::hash_map::DefaultHasher;
+use rustc_hash::FxHasher;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
 fn hash_lines(s: &str) -> Vec<u64> {
     s.split('\n')
         .map(|line| {
-            let mut hasher = DefaultHasher::new();
+            let mut hasher = FxHasher::default();
             line.hash(&mut hasher);
             hasher.finish()
         })

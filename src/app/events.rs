@@ -530,7 +530,6 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        // ВАЖНОЕ ИЗМЕНЕНИЕ: Возвращаем лимит 0.016 для предотвращения резких рывков при сбоях кадров
         let dt = (now - self.last_frame).as_secs_f32().min(0.016);
         self.last_frame = now;
 
@@ -541,7 +540,6 @@ impl ApplicationHandler for App {
             let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
             let abs_diff = diff.abs();
             if abs_diff > 0.0 {
-                // Считаем всегда при разнице
                 let anim_speed = 15.0;
                 let target_v = if abs_diff > 15.0 {
                     diff * anim_speed
@@ -553,7 +551,6 @@ impl ApplicationHandler for App {
                     (target_v - self.autocomplete_scroll_velocity) * v_factor;
                 let step = self.autocomplete_scroll_velocity * dt;
 
-                // Добавлена проверка abs_diff < 0.01 для полной остановки скорости
                 if step.abs() >= abs_diff
                     || diff.signum() != (diff - step).signum()
                     || abs_diff < 0.01
@@ -572,7 +569,6 @@ impl ApplicationHandler for App {
             let diff = self.faq_target_scroll_y - self.faq_scroll_y;
             let abs_diff = diff.abs();
             if abs_diff > 0.0 {
-                // Считаем всегда при разнице
                 let anim_speed = self.faq_scroll_anim_speed;
                 let target_v = if abs_diff > 15.0 {
                     diff * anim_speed
@@ -583,7 +579,6 @@ impl ApplicationHandler for App {
                 self.faq_scroll_velocity += (target_v - self.faq_scroll_velocity) * v_factor;
                 let step = self.faq_scroll_velocity * dt;
 
-                // Добавлена проверка abs_diff < 0.01 для полной остановки скорости
                 if step.abs() >= abs_diff
                     || diff.signum() != (diff - step).signum()
                     || abs_diff < 0.01
@@ -602,7 +597,6 @@ impl ApplicationHandler for App {
         let diff = self.target_scroll_y - self.scroll_y;
         let abs_diff = diff.abs();
         if abs_diff > 0.0 {
-            // Считаем всегда при разнице
             let anim_speed = self.scroll_anim_speed;
             let target_v = if abs_diff > 15.0 {
                 diff * anim_speed
@@ -613,7 +607,6 @@ impl ApplicationHandler for App {
             self.scroll_velocity += (target_v - self.scroll_velocity) * v_factor;
             let step = self.scroll_velocity * dt;
 
-            // Добавлена проверка abs_diff < 0.01 для полной остановки скорости
             if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01
             {
                 self.scroll_y = self.target_scroll_y;
@@ -758,13 +751,17 @@ impl ApplicationHandler for App {
 
         let is_highlighting = !self.is_highlighted_once;
 
-        if needs_redraw || is_highlighting {
-            if needs_redraw {
-                if let Some(w) = self.window.as_ref() {
-                    w.request_redraw();
-                }
+        // Оптимизация нагрузки на процессор
+        if needs_redraw {
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
             }
-            event_loop.set_control_flow(ControlFlow::Poll);
+            event_loop.set_control_flow(ControlFlow::Wait); // Передача управления winit для немедленной отрисовки
+        } else if is_highlighting {
+            // Если мы только ждем парсер синтаксиса, не стоит насиловать CPU бесконечным Poll
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                now + std::time::Duration::from_millis(5),
+            ));
         } else {
             let next_blink = self.last_action
                 + std::time::Duration::from_millis(

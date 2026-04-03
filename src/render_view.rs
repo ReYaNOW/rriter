@@ -48,6 +48,10 @@ impl Renderer {
                 self.fps = self.frame_count as f32 / self.time_acc;
                 self.frame_count = 0;
                 self.time_acc = 0.0;
+
+                use std::fmt::Write;
+                self.fps_string.clear();
+                let _ = write!(&mut self.fps_string, "FPS: {:.0}", self.fps);
             }
         }
         self.last_frame_time = Some(now);
@@ -158,7 +162,6 @@ impl Renderer {
             }
         }
 
-        // Локальный вектор для избежания утечек и реаллокаций вне стека
         let mut intervals = Vec::with_capacity(64);
         let mut last_phys_line = None;
         let mut last_bottom_y = 0.0;
@@ -251,7 +254,6 @@ impl Renderer {
             let y = self.baseline_offset - render_scroll_y + (i as f32 * self.line_height);
             let mut x = self.left_padding;
 
-            // Zero-Allocation рендер номеров строк (без .to_string()!)
             if v_line_info.is_soft_wrap {
                 self.draw_string("↪", self.left_padding * 0.5, y, self.theme.line_num);
             } else {
@@ -623,10 +625,13 @@ impl Renderer {
         self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
 
         if show_fps {
-            let fps_str = format!("FPS: {:.0}", self.fps);
             let center_x = (self.width - minimap_w) / 2.0;
             self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
-            self.draw_string(&fps_str, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
+
+            // Временно забираем строку, чтобы обойти ошибку заимствования
+            let fps_text = std::mem::take(&mut self.fps_string);
+            self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
+            self.fps_string = fps_text; // Возвращаем обратно
         }
 
         if search_anim_y > -70.0 {
@@ -843,24 +848,43 @@ impl Renderer {
                 is_active: search_case_sensitive,
             };
 
+            if search_results.len() != self.last_search_len
+                || search_current_idx != self.last_search_idx
+            {
+                self.search_res_string.clear();
+                if !search_results.is_empty() {
+                    use std::fmt::Write;
+                    let _ = write!(
+                        &mut self.search_res_string,
+                        "{}/{}",
+                        search_current_idx.unwrap_or(0) + 1,
+                        search_results.len()
+                    );
+                }
+                self.last_search_len = search_results.len();
+                self.last_search_idx = search_current_idx;
+            }
+
+            // Временно забираем строку
+            let temp_res_text = std::mem::take(&mut self.search_res_string);
+
             let res_text = if search_results.is_empty() {
                 if search_editor.get_full_text().is_empty() {
-                    String::new()
+                    ""
                 } else {
-                    "Нет".to_string()
+                    "Нет"
                 }
             } else {
-                format!(
-                    "{}/{}",
-                    search_current_idx.unwrap_or(0) + 1,
-                    search_results.len()
-                )
+                &temp_res_text
             };
 
             if !res_text.is_empty() {
                 let counter_x = input_x + input_w + 10.0 * s;
-                self.draw_string_scaled(&res_text, counter_x, text_y, [0.6, 0.6, 0.6, 1.0], 0.9);
+                self.draw_string_scaled(res_text, counter_x, text_y, [0.6, 0.6, 0.6, 1.0], 0.9);
             }
+
+            // Возвращаем обратно
+            self.search_res_string = temp_res_text;
 
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;

@@ -69,6 +69,7 @@ pub struct Renderer {
     pub vbo: glow::Buffer,
     pub texture: glow::Texture,
     pub vertices: Vec<Vertex>,
+    pub temp_edge_buffer: Vec<Vertex>, // Буфер для избежания аллокаций в push_rounded_rect
 
     pub minimap_vertices: Vec<Vertex>,
     pub last_minimap_editor_version: u64,
@@ -110,6 +111,11 @@ pub struct Renderer {
     pub frame_count: u32,
     pub time_acc: f32,
     pub search_scroll_x: f32,
+
+    pub fps_string: String,
+    pub search_res_string: String,
+    pub last_search_idx: Option<usize>,
+    pub last_search_len: usize,
 
     pub icon_save: Option<glow::Texture>,
     pub icon_discard: Option<glow::Texture>,
@@ -336,6 +342,7 @@ impl Renderer {
                 vbo,
                 texture,
                 vertices: Vec::with_capacity(MAX_VERTICES),
+                temp_edge_buffer: Vec::with_capacity(256),
                 minimap_vertices: Vec::with_capacity(40000),
                 last_minimap_editor_version: u64::MAX,
                 last_minimap_spans_version: u64::MAX,
@@ -371,6 +378,10 @@ impl Renderer {
                 frame_count: 0,
                 time_acc: 0.0,
                 search_scroll_x: 0.0,
+                fps_string: String::new(),
+                search_res_string: String::new(),
+                last_search_idx: None,
+                last_search_len: 0,
                 icon_save,
                 icon_discard,
                 icon_cancel,
