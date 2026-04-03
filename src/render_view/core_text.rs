@@ -321,37 +321,24 @@ impl Renderer {
     }
 
     pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) {
-        let overlap = 0.5;
-        self.push_rect(x + r - overlap, y, w - 2.0 * r + 2.0 * overlap, h, color);
-        self.push_rect(x, y + r - overlap, r, h - 2.0 * r + 2.0 * overlap, color);
-        self.push_rect(
-            x + w - r,
-            y + r - overlap,
-            r,
-            h - 2.0 * r + 2.0 * overlap,
+        let cx = x + w / 2.0;
+        let cy = y + h / 2.0;
+        let center = Vertex {
+            pos: [cx, cy],
+            uv: [-1.0, -1.0],
             color,
-        );
+            is_emoji: 0.0,
+        };
 
+        // ИСПРАВЛЕНИЕ: Увеличиваем число полигонов для идеально круглых и гладких углов (было 16)
         let segments = 32;
-        let add_corner = |vertices: &mut Vec<Vertex>, cx: f32, cy: f32, start_angle: f32| {
-            for i in 0..segments {
-                let a1 = start_angle + (i as f32 * std::f32::consts::PI / 2.0 / segments as f32);
-                let a2 =
-                    start_angle + ((i + 1) as f32 * std::f32::consts::PI / 2.0 / segments as f32);
-                vertices.push(Vertex {
-                    pos: [cx, cy],
-                    uv: [-1.0, -1.0],
-                    color,
-                    is_emoji: 0.0,
-                });
-                vertices.push(Vertex {
-                    pos: [cx + a1.cos() * r, cy + a1.sin() * r],
-                    uv: [-1.0, -1.0],
-                    color,
-                    is_emoji: 0.0,
-                });
-                vertices.push(Vertex {
-                    pos: [cx + a2.cos() * r, cy + a2.sin() * r],
+        let mut edge = Vec::with_capacity(segments * 4 + 4);
+
+        let mut add_arc = |corner_cx: f32, corner_cy: f32, start_angle: f32| {
+            for i in 0..=segments {
+                let a = start_angle + (i as f32 * std::f32::consts::PI / 2.0 / segments as f32);
+                edge.push(Vertex {
+                    pos: [corner_cx + a.cos() * r, corner_cy + a.sin() * r],
                     uv: [-1.0, -1.0],
                     color,
                     is_emoji: 0.0,
@@ -359,19 +346,16 @@ impl Renderer {
             }
         };
 
-        add_corner(&mut self.vertices, x + w - r, y + h - r, 0.0);
-        add_corner(
-            &mut self.vertices,
-            x + r,
-            y + h - r,
-            std::f32::consts::PI / 2.0,
-        );
-        add_corner(&mut self.vertices, x + r, y + r, std::f32::consts::PI);
-        add_corner(
-            &mut self.vertices,
-            x + w - r,
-            y + r,
-            3.0 * std::f32::consts::PI / 2.0,
-        );
+        add_arc(x + w - r, y + h - r, 0.0);
+        add_arc(x + r, y + h - r, std::f32::consts::PI / 2.0);
+        add_arc(x + r, y + r, std::f32::consts::PI);
+        add_arc(x + w - r, y + r, 3.0 * std::f32::consts::PI / 2.0);
+
+        for i in 0..edge.len() {
+            let next_i = (i + 1) % edge.len();
+            self.vertices.push(center);
+            self.vertices.push(edge[i]);
+            self.vertices.push(edge[next_i]);
+        }
     }
 }

@@ -129,7 +129,6 @@ fn main() {
     let mut file_path = None;
     let show_welcome = args.len() <= 1;
 
-    // Сразу загружаем список недавних файлов, чтобы иметь возможность его обновить
     let mut recent_files = load_recent_files();
 
     if args.len() > 1 {
@@ -138,7 +137,6 @@ fn main() {
             initial_text = content;
             let f_path = std::path::Path::new(path);
 
-            // Превращаем путь в абсолютный. Если функция упадет, используем оригинальный путь.
             let abs_path = std::fs::canonicalize(f_path).unwrap_or_else(|_| f_path.to_path_buf());
 
             file_path = Some(abs_path.clone());
@@ -149,7 +147,6 @@ fn main() {
                 ext = e.to_string_lossy().to_string();
             }
 
-            // Добавляем файл, открытый из консоли, в историю
             recent_files.retain(|p| p != &abs_path);
             recent_files.insert(0, abs_path);
             recent_files.truncate(10);
@@ -253,7 +250,7 @@ Ctrl + Del\tУдалить слово справа от курсора
         save_file_rx: None,
 
         show_welcome,
-        recent_files, // Инициализируем обновленным списком
+        recent_files,
 
         show_search: false,
         search_anim_y: -70.0,
@@ -273,6 +270,19 @@ Ctrl + Del\tУдалить слово справа от курсора
 
         is_ready: false,
         is_highlighted_once: false,
+
+        // Автодополнение
+        autocomplete_active: false,
+        autocomplete_options: Vec::new(),
+        autocomplete_selected_idx: 0,
+        autocomplete_anim_progress: 0.0,
+        autocomplete_scroll_y: 0.0,
+        autocomplete_target_scroll_y: 0.0,
+        autocomplete_scroll_velocity: 0.0,
+        autocomplete_hovered_idx: None,
+        autocomplete_rect: None,
+        is_dragging_autocomplete: false,
+        autocomplete_drag_offset_y: 0.0,
     };
 
     app.highlighter.request_update(

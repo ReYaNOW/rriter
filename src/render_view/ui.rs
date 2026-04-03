@@ -15,6 +15,235 @@ impl Renderer {
         }
     }
 
+    pub fn draw_autocomplete(
+        &mut self,
+        x: f32,
+        mut y: f32,
+        options: &[(crate::highlighter::CompletionItem, Vec<usize>)],
+        selected_idx: usize,
+        anim_progress: f32,
+        scroll_y: f32,
+        hovered_idx: Option<usize>,
+    ) -> (f32, f32, f32, f32) {
+        let scale = self.scale_factor;
+
+        let step = 36.0 * scale;
+        let item_h = 28.0 * scale;
+        let padding_top = 8.0 * scale;
+        let padding_bottom = 8.0 * scale;
+
+        let mut max_w = 195.0 * scale;
+        for (opt, _) in options {
+            let w = self.measure_width(opt.word.as_str(), "", 0, opt.word.len());
+            if w + 60.0 * scale > max_w {
+                max_w = w + 60.0 * scale;
+            }
+        }
+
+        max_w = max_w.min(450.0 * scale);
+
+        let visible_items = options.len().min(7);
+
+        let target_h = visible_items as f32 * step + padding_top + padding_bottom;
+        let total_h = options.len() as f32 * step + padding_top + padding_bottom;
+
+        let current_h = target_h * anim_progress;
+
+        if y + target_h > self.height {
+            y -= target_h + 10.0 * scale;
+        } else {
+            y += 10.0 * scale;
+        }
+
+        // --- 1. Отрисовка Тени ---
+        for i in 1..=5 {
+            let offset = i as f32 * scale;
+            let alpha = (0.15 - (i as f32 * 0.03)) * anim_progress;
+            self.push_rounded_rect(
+                x - offset,
+                y - offset,
+                max_w + offset * 2.0,
+                current_h + offset * 2.0,
+                6.0 * scale,
+                [0.0, 0.0, 0.0, alpha],
+            );
+        }
+
+        // --- 2. Рамка и Фон ---
+        let bg_color = [0.15, 0.16, 0.20, 1.0];
+        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.8];
+
+        // ИСПРАВЛЕНИЕ: Делаем рамку толще и математически синхронизируем внутренний радиус
+        let border_width = 1.5 * scale;
+        self.push_rounded_rect(
+            x - border_width,
+            y - border_width,
+            max_w + border_width * 2.0,
+            current_h + border_width * 2.0,
+            5.5 * scale, // Внешний радиус
+            border_color,
+        );
+        self.push_rounded_rect(
+            x,
+            y,
+            max_w,
+            current_h,
+            4.0 * scale, // Внутренний радиус (ровно 5.5 - 1.5), чтобы не было "точек" на углах
+            bg_color,
+        );
+
+        self.flush();
+
+        // --- 3. Scissor Test ---
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (y + current_h)).round() as i32;
+            self.gl.scissor(
+                x.round() as i32,
+                sy,
+                max_w.round() as i32,
+                current_h.round() as i32,
+            );
+        }
+
+        // --- 4. Отрисовка элементов ---
+        let mut current_y = y + padding_top - scroll_y;
+
+        for (i, (item, matches)) in options.iter().enumerate() {
+            if current_y + step < y || current_y > y + current_h {
+                current_y += step;
+                continue;
+            }
+
+            let sel_rect_y = (current_y + (step - item_h) / 2.0).round();
+
+            if i == selected_idx {
+                self.push_rounded_rect(
+                    x + 4.0 * scale,
+                    sel_rect_y,
+                    max_w - 8.0 * scale,
+                    item_h,
+                    4.0 * scale,
+                    [0.25, 0.27, 0.35, 1.0],
+                );
+            } else if Some(i) == hovered_idx {
+                self.push_rounded_rect(
+                    x + 4.0 * scale,
+                    sel_rect_y,
+                    max_w - 8.0 * scale,
+                    item_h,
+                    4.0 * scale,
+                    [0.20, 0.21, 0.28, 1.0],
+                );
+            }
+
+            let mut cx = x + 12.0 * scale;
+
+            let (icon_char, icon_fg) = match item.kind {
+                crate::highlighter::SymbolKind::Class => ("\u{f03d7}", [0.8, 0.9, 1.0, 1.0]),
+                crate::highlighter::SymbolKind::Function => ("\u{f0295}", [0.8, 1.0, 0.8, 1.0]),
+                crate::highlighter::SymbolKind::Variable => ("\u{f0ae7}", [0.9, 0.8, 1.0, 1.0]),
+                crate::highlighter::SymbolKind::Parameter => ("\u{f03ea}", [1.0, 0.9, 0.8, 1.0]),
+                crate::highlighter::SymbolKind::Keyword => ("\u{f030b}", [1.0, 0.8, 0.9, 1.0]),
+                crate::highlighter::SymbolKind::Unknown => ("\u{f03d7}", [0.65, 0.65, 0.65, 1.0]),
+            };
+
+            let icon_sz = 20.0 * scale;
+
+            if let Some(g) = self.get_glyph(icon_char.chars().next().unwrap()) {
+                let char_scale = 0.8;
+                let actual_w = g.width * char_scale * scale;
+                let actual_h = g.height * char_scale * scale;
+
+                let char_x = cx + (icon_sz - actual_w) / 2.0;
+                let char_y = sel_rect_y + (item_h - actual_h) / 2.0;
+
+                self.push_quad(
+                    char_x.round(),
+                    char_y.round(),
+                    actual_w,
+                    actual_h,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    icon_fg,
+                    0.0,
+                );
+            }
+            cx += icon_sz + 8.0 * scale;
+
+            let cy = sel_rect_y + item_h * 0.72;
+
+            let mut truncated = false;
+            for (j, c) in item.word.chars().enumerate() {
+                if let Some(g) = self.get_glyph(c) {
+                    if cx + g.advance > x + max_w - 30.0 * scale {
+                        truncated = true;
+                        break;
+                    }
+
+                    let color = if matches.contains(&j) {
+                        [1.0, 0.474, 0.776, 1.0]
+                    } else {
+                        self.theme.fg
+                    };
+
+                    self.push_quad(
+                        (cx + g.offset_x).round(),
+                        (cy - g.offset_y).round(),
+                        g.width,
+                        g.height,
+                        g.u,
+                        g.v,
+                        g.uw,
+                        g.vh,
+                        color,
+                        g.is_emoji,
+                    );
+                    cx += g.advance;
+                }
+            }
+
+            if truncated {
+                self.draw_string_scaled("...", cx.round(), cy.round(), [0.5, 0.5, 0.55, 1.0], 1.0);
+            }
+
+            current_y += step;
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        // --- 5. Отрисовка Скроллбара (стиль как в главном окне) ---
+        if total_h > target_h {
+            let max_scroll = (total_h - target_h).max(0.0);
+            let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
+
+            let track_margin = 8.0 * scale;
+            let track_h = current_h - track_margin * 2.0;
+            let thumb_h = (current_h / total_h * track_h).max(20.0 * scale);
+            let thumb_y = y + track_margin + scroll_ratio * (track_h - thumb_h);
+
+            let alpha = (anim_progress * 1.5).clamp(0.0, 0.8);
+
+            self.push_rounded_rect(
+                x + max_w - 10.0 * scale,
+                thumb_y,
+                6.0 * scale,
+                thumb_h,
+                3.0 * scale,
+                [0.40, 0.42, 0.46, alpha],
+            );
+        }
+
+        self.flush();
+
+        (x, y, max_w, current_h)
+    }
+
     pub fn draw_dialog(&mut self, base_title: &str) -> bool {
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));

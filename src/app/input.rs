@@ -48,15 +48,14 @@ impl App {
                 let title_x = content_x + 40.0 * s;
                 let cw = self.window.as_ref().unwrap().inner_size().width as f32 - 80.0 * s;
 
-                // Точно отзеркаливаем математику Y-координат из ui.rs
                 let mut y = content_y + 60.0 * s;
-                y += 40.0 * s; // "Добро пожаловать в RRiter"
-                y += 60.0 * s; // "Молниеносный текстовый редактор..."
+                y += 40.0 * s;
+                y += 60.0 * s;
 
                 let (btn_new, btn_open) = crate::widgets::get_welcome_buttons(
                     cw,
                     title_x,
-                    y, // Y для кнопок, теперь полностью совпадает
+                    y,
                     s,
                     self.renderer.as_mut().unwrap(),
                 );
@@ -82,8 +81,8 @@ impl App {
                 } else if btn_open.is_hovered(last_mouse_x, last_mouse_y) {
                     self.trigger_file_picker();
                 } else {
-                    y += 80.0 * s; // "Недавние файлы"
-                    y += 35.0 * s; // Отступ после заголовка и линии
+                    y += 80.0 * s;
+                    y += 35.0 * s;
 
                     let mut current_y = y;
                     let item_h = 44.0 * s;
@@ -113,6 +112,7 @@ impl App {
             self.is_dragging = false;
             self.is_dragging_minimap = false;
             self.is_dragging_search = false;
+            self.is_dragging_autocomplete = false;
             self.target_scroll_y = self.target_scroll_y.round();
             self.window.as_ref().unwrap().request_redraw();
             return;
@@ -121,9 +121,59 @@ impl App {
         if state == ElementState::Pressed {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+
+            if self.autocomplete_active {
+                if let Some((rx, ry, rw, rh)) = self.autocomplete_rect {
+                    if last_mouse_x >= rx
+                        && last_mouse_x <= rx + rw
+                        && last_mouse_y >= ry
+                        && last_mouse_y <= ry + rh
+                    {
+                        let scroll_x = rx + rw - 14.0 * s;
+                        let step = 36.0 * s;
+                        let total_items = self.autocomplete_options.len() as f32;
+                        let visible_items = total_items.min(7.0);
+                        let total_h = total_items * step + 16.0 * s;
+
+                        if last_mouse_x >= scroll_x && total_h > rh {
+                            self.is_dragging_autocomplete = true;
+                            let max_scroll = ((total_items - visible_items) * step).max(0.0);
+                            let scroll_ratio =
+                                (self.autocomplete_scroll_y / max_scroll.max(1.0)).clamp(0.0, 1.0);
+
+                            let track_h = rh - 8.0 * s;
+                            let thumb_h = (rh / total_h * track_h).max(20.0 * s);
+                            let thumb_start_y = ry + 4.0 * s + scroll_ratio * (track_h - thumb_h);
+
+                            if last_mouse_y >= thumb_start_y
+                                && last_mouse_y <= thumb_start_y + thumb_h
+                            {
+                                self.autocomplete_drag_offset_y = last_mouse_y - thumb_start_y;
+                            } else {
+                                self.autocomplete_drag_offset_y = thumb_h / 2.0;
+                                let new_ratio =
+                                    (last_mouse_y - ry - 4.0 * s - self.autocomplete_drag_offset_y)
+                                        / (track_h - thumb_h).max(1.0);
+                                self.autocomplete_target_scroll_y =
+                                    (new_ratio * max_scroll).clamp(0.0, max_scroll);
+                            }
+                        } else if let Some(idx) = self.autocomplete_hovered_idx {
+                            self.autocomplete_selected_idx = idx;
+                            self.apply_autocomplete();
+                        }
+                        return;
+                    } else {
+                        // СБРОС: Клик мимо окна автодополнения
+                        self.autocomplete_active = false;
+                        self.autocomplete_selected_idx = 0;
+                        self.window.as_ref().unwrap().request_redraw();
+                    }
+                }
+            }
+
             let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
             let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
-            let s = self.renderer.as_ref().unwrap().scale_factor;
 
             if self.show_search && self.search_anim_y > -10.0 {
                 let search_w = 480.0 * s;
@@ -167,23 +217,19 @@ impl App {
                         self.search_editor.cursor = target_idx;
                         self.search_editor.selection_anchor = Some(target_idx);
                     } else {
-                        let mut current_btn_x = input_x + input_w + 10.0 * s;
-                        let btn_case = IconButton {
+                        let mut current_btn_x = search_x + search_w - 10.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_close = IconButton {
                             x: current_btn_x,
                             y: btn_y,
                             size: btn_size,
                             icon: None,
                             is_active: false,
                         };
-                        current_btn_x += btn_size + 4.0 * s;
-                        let btn_up = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                        };
-                        current_btn_x += btn_size + 4.0 * s;
+                        current_btn_x -= 8.0 * s;
+
+                        current_btn_x -= btn_size;
                         let btn_down = IconButton {
                             x: current_btn_x,
                             y: btn_y,
@@ -191,8 +237,20 @@ impl App {
                             icon: None,
                             is_active: false,
                         };
-                        current_btn_x += btn_size + 8.0 * s;
-                        let btn_close = IconButton {
+                        current_btn_x -= 4.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_up = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                        };
+                        current_btn_x -= 4.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_case = IconButton {
                             x: current_btn_x,
                             y: btn_y,
                             size: btn_size,
@@ -330,10 +388,62 @@ impl App {
             return;
         }
 
+        let s = self.renderer.as_ref().unwrap().scale_factor;
+
+        if self.autocomplete_active && self.autocomplete_rect.is_some() {
+            let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
+            let px = position.x as f32;
+            let py = position.y as f32;
+
+            if self.is_dragging_autocomplete {
+                let step = 36.0 * s;
+                let total_items = self.autocomplete_options.len() as f32;
+                let visible_items = total_items.min(7.0);
+
+                let track_h = rh - 8.0 * s;
+                let total_h = total_items * step + 16.0 * s;
+                let thumb_h = (rh / total_h * track_h).max(20.0 * s);
+                let max_scroll = ((total_items - visible_items) * step).max(0.0);
+
+                let ratio = (py - ry - 4.0 * s - self.autocomplete_drag_offset_y)
+                    / (track_h - thumb_h).max(1.0);
+                self.autocomplete_target_scroll_y = (ratio * max_scroll).clamp(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
+            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+                self.window
+                    .as_ref()
+                    .unwrap()
+                    .set_cursor(CursorIcon::Pointer);
+
+                let scroll_x = rx + rw - 14.0 * s;
+                if px < scroll_x {
+                    let item_h = 36.0 * s;
+                    let scroll = self.autocomplete_scroll_y;
+                    let content_y = py - ry + scroll - (4.0 * s); // padding
+                    if content_y >= 0.0 {
+                        let idx = (content_y / item_h) as usize;
+                        if idx < self.autocomplete_options.len() {
+                            self.autocomplete_hovered_idx = Some(idx);
+                        } else {
+                            self.autocomplete_hovered_idx = None;
+                        }
+                    }
+                } else {
+                    self.autocomplete_hovered_idx = None;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            } else {
+                self.autocomplete_hovered_idx = None;
+            }
+        }
+
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
         let window_size = self.window.as_ref().unwrap().inner_size();
-        let s = self.renderer.as_ref().unwrap().scale_factor;
 
         let mut is_text_cursor = false;
         if position.x as f32 > padding
@@ -380,7 +490,7 @@ impl App {
         }
 
         if self.is_dragging_search {
-            let search_w = 426.0 * s;
+            let search_w = 480.0 * s;
             let search_x = window_size.width as f32 - minimap_w - search_w - 20.0 * s;
             let input_x = search_x + 10.0 * s;
 
@@ -593,9 +703,48 @@ impl App {
             return;
         }
 
+        if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+            match key_event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape)
+                | PhysicalKey::Code(KeyCode::ArrowLeft)
+                | PhysicalKey::Code(KeyCode::ArrowRight) => {
+                    self.autocomplete_active = false;
+                    self.autocomplete_selected_idx = 0;
+                    self.window.as_ref().unwrap().request_redraw();
+                    if matches!(key_event.physical_key, PhysicalKey::Code(KeyCode::Escape)) {
+                        return;
+                    }
+                }
+                PhysicalKey::Code(KeyCode::ArrowDown) => {
+                    self.autocomplete_selected_idx =
+                        (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
+                    self.ensure_autocomplete_visible();
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                PhysicalKey::Code(KeyCode::ArrowUp) => {
+                    if self.autocomplete_selected_idx == 0 {
+                        self.autocomplete_selected_idx = self.autocomplete_options.len() - 1;
+                    } else {
+                        self.autocomplete_selected_idx -= 1;
+                    }
+                    self.ensure_autocomplete_visible();
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+                    self.apply_autocomplete();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         let mut cursor_moved = false;
         let mut is_edit = false;
         let mut typed_dot = false;
+        let mut should_trigger_autocomplete = false;
+
         let old_cursor_y = self
             .renderer
             .as_mut()
@@ -738,6 +887,9 @@ impl App {
                 {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
+                    if self.autocomplete_active {
+                        should_trigger_autocomplete = true;
+                    }
                 }
                 cursor_moved = true;
             }
@@ -747,6 +899,9 @@ impl App {
                 {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
+                    if self.autocomplete_active {
+                        should_trigger_autocomplete = true;
+                    }
                 }
                 cursor_moved = true;
             }
@@ -754,6 +909,9 @@ impl App {
                 if let Some((offset, len)) = self.editor.backspace(&self.highlighter.spans) {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
+                    if self.autocomplete_active {
+                        should_trigger_autocomplete = true;
+                    }
                 }
                 cursor_moved = true;
             }
@@ -761,6 +919,9 @@ impl App {
                 if let Some((offset, len)) = self.editor.delete_forward(&self.highlighter.spans) {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
+                    if self.autocomplete_active {
+                        should_trigger_autocomplete = true;
+                    }
                 }
                 cursor_moved = true;
             }
@@ -880,6 +1041,7 @@ impl App {
                         }
                         cursor_moved = true;
                         is_edit = true;
+                        should_trigger_autocomplete = true;
                     }
                 }
             }
@@ -891,7 +1053,19 @@ impl App {
             self.skip_highlight_update = false;
         }
 
+        if cursor_moved && !is_edit {
+            self.autocomplete_active = false;
+            self.autocomplete_selected_idx = 0;
+        }
+
         if is_edit {
+            if should_trigger_autocomplete {
+                self.update_autocomplete();
+            } else {
+                self.autocomplete_active = false;
+                self.autocomplete_selected_idx = 0;
+            }
+
             App::update_window_title(
                 self.window.as_ref().unwrap(),
                 &self.base_title,
@@ -915,6 +1089,9 @@ impl App {
                 while start_wait.elapsed().as_millis() < 20 {
                     if self.highlighter.poll(self.editor.version) {
                         self.is_highlighted_once = true;
+                        if self.autocomplete_active {
+                            self.update_autocomplete();
+                        }
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1));

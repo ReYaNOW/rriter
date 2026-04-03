@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use tree_sitter::StreamingIterator; // <-- Обязательный импорт для новых версий tree-sitter
+use tree_sitter::StreamingIterator; 
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
@@ -10,25 +10,43 @@ pub struct ColorSpan {
     pub color:[f32; 4],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SymbolKind {
+    Variable,
+    Function,
+    Class,
+    Parameter,
+    Keyword,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompletionItem {
+    pub word: String,
+    pub kind: SymbolKind,
+    pub scope_start: usize,
+    pub scope_end: usize,
+}
+
 pub struct Highlighter {
     tx: Sender<(u64, String, String, Vec<ColorSpan>)>,
-    rx: Receiver<(u64, Vec<ColorSpan>)>,
+    rx: Receiver<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>, 
     pub spans: Vec<ColorSpan>,
+    pub completions: Vec<CompletionItem>,
     pub current_version: u64,
 }
 
 const DRACULA_FG: [f32; 4] =[0.972, 0.972, 0.949, 1.0];
 const DRACULA_COMMENT:[f32; 4] =[0.384, 0.447, 0.643, 1.0];
 const DRACULA_CYAN:[f32; 4] =[0.545, 0.913, 0.992, 1.0];
-const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
-const DRACULA_GREEN: [f32; 4] =[0.313, 0.980, 0.482, 1.0];
+const DRACULA_DARK_CYAN:[f32; 4] =[0.45, 0.85, 0.90, 1.0];
+const DRACULA_GREEN:[f32; 4] =[0.313, 0.980, 0.482, 1.0];
 const DRACULA_ORANGE: [f32; 4] =[0.973, 0.584, 0.502, 1.0];
 const DRACULA_PINK:[f32; 4] =[1.0, 0.474, 0.776, 1.0];
 const DRACULA_PURPLE:[f32; 4] =[0.741, 0.576, 0.976, 1.0];
-const DRACULA_YELLOW: [f32; 4] =[0.945, 0.980, 0.549, 1.0];
+const DRACULA_YELLOW:[f32; 4] =[0.945, 0.980, 0.549, 1.0];
 
-// Специальный маркер для захвата интерполяции до этапа плоских спанов
-const MARKER_INTERPOLATION: [f32; 4] =[-1.0, 0.0, 0.0, 1.0];
+const MARKER_INTERPOLATION:[f32; 4] =[-1.0, 0.0, 0.0, 1.0];
 
 #[derive(Debug)]
 struct Scope {
@@ -40,7 +58,7 @@ struct Scope {
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<(u64, String, String, Vec<ColorSpan>)>();
-        let (tx_out, rx_out) = mpsc::channel();
+        let (tx_out, rx_out) = mpsc::channel::<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>();
         
         thread::spawn(move || {
             let mut syntect_assets: Option<(syntect::parsing::SyntaxSet, syntect::highlighting::ThemeSet)> = None;
@@ -79,10 +97,16 @@ impl Highlighter {
                     "rs" => "rs",
                     "py" => "py",
                     "toml" => "toml",
+                    "go" => "go",
+                    "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => "js",
+                    "java" => "java",
+                    "cs" => "cs",
+                    "dart" => "dart",
                     _ => "",
                 };
 
                 let mut spans = Vec::new();
+                let mut completions_map: HashMap<(String, usize, usize), SymbolKind> = HashMap::new();
                 let mut used_ts = false;
                 let mut error_ranges = Vec::new(); 
 
@@ -101,17 +125,17 @@ impl Highlighter {
                             "\"<(\" @operator", "\">(\" @operator", "(process_substitution \")\" @operator)",
                             "(file_descriptor) @number", "(file_redirect destination: (_) @number)",
                             "(expansion \"${\" @subst \"}\" @subst)", "(expansion (variable_name) @variable)",
-                            "(expansion [\":\" \"-\" \"=\" \"+\" \"?\" \":-\"] @fg)", "(expansion (_) @fg)",
+                            "(expansion[\":\" \"-\" \"=\" \"+\" \"?\" \":-\"] @fg)", "(expansion (_) @fg)",
                             "(command_substitution \"$(\" @subst \")\" @subst)", "(command_substitution \"`\" @subst)",
                             "(simple_expansion \"$\" @subst (variable_name) @variable)",
                             "[\"if\" \"then\" \"elif\" \"else\" \"fi\" \"for\" \"while\" \"do\" \"done\" \"case\" \"esac\" \"in\"] @keyword.control",
-                            "[\"export\" \"declare\"] @keyword",
+                            "[\"export\" \"declare\" \"return\" \"function\" \"local\" \"readonly\"] @keyword",
                         ])),
                         "rs" => Some((tree_sitter_rust::LANGUAGE.into(), vec![
                             "(string_literal) @string", "(line_comment) @comment", "(block_comment) @comment",
                             "(function_item name: (identifier) @function)", "(call_expression function: (identifier) @function)",
                             "(type_identifier) @type", "(number_literal) @number",
-                            "[\"true\" \"false\"] @boolean", "[\"fn\" \"let\" \"mut\" \"pub\" \"struct\" \"enum\" \"trait\" \"impl\" \"for\" \"while\" \"loop\" \"match\" \"if\" \"else\" \"return\" \"use\" \"mod\"] @keyword"
+                            "[\"true\" \"false\"] @boolean", "[\"fn\" \"let\" \"mut\" \"pub\" \"struct\" \"enum\" \"trait\" \"impl\" \"for\" \"while\" \"loop\" \"match\" \"if\" \"else\" \"return\" \"use\" \"mod\" \"break\" \"continue\" \"await\" \"async\" \"unsafe\" \"crate\" \"super\"] @keyword"
                         ])),
                         "py" => Some((tree_sitter_python::LANGUAGE.into(), vec![
                             "(identifier) @py_ident", 
@@ -141,7 +165,6 @@ impl Highlighter {
                             "(decorator \"@\" @keyword.control)", 
                             "(decorator (identifier) @py_function)",
                         ])),
-                        // Идеальный нативный импорт из нового пакета!
                         "toml" => Some((tree_sitter_toml_ng::LANGUAGE.into(), vec![
                             "(bare_key) @property",
                             "(string) @string",
@@ -151,24 +174,204 @@ impl Highlighter {
                             "(comment) @comment",
                             "[\"=\" \"[\" \"]\" \"[[\" \"]]\"] @operator",
                         ])),
+                        "go" => Some((tree_sitter_go::LANGUAGE.into(), vec![
+                            "(identifier) @variable",
+                            "(type_identifier) @type",
+                            "(function_declaration name: (identifier) @function)",
+                            "(method_declaration name: (identifier) @function)",
+                            "(call_expression function: (identifier) @function)",
+                            "(string_literal) @string",
+                            "(int_literal) @number",
+                            "(float_literal) @number",
+                            "(comment) @comment",
+                            "[\"func\" \"var\" \"const\" \"type\" \"struct\" \"interface\" \"package\" \"import\" \"return\" \"if\" \"else\" \"for\" \"range\" \"switch\" \"case\" \"default\" \"go\" \"defer\" \"map\" \"chan\"] @keyword.control",
+                            "[\"true\" \"false\" \"nil\"] @boolean",
+                            "[\"=\" \":=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"&&\" \"||\" \"!\" \"<-\"] @operator",
+                        ])),
+                        "js" => Some((tree_sitter_javascript::LANGUAGE.into(), vec![
+                            "(identifier) @variable",
+                            "(string) @string",
+                            "(number) @number",
+                            "(comment) @comment",
+                            "(function_declaration name: (identifier) @function)",
+                            "(method_definition name: (property_identifier) @function)",
+                            "(call_expression function: (identifier) @function)",
+                            "(call_expression function: (member_expression property: (property_identifier) @function))",
+                            "(property_identifier) @property",
+                            "[\"function\" \"const\" \"let\" \"var\" \"return\" \"if\" \"else\" \"for\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"export\" \"from\" \"class\" \"extends\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"async\" \"await\" \"yield\" \"typeof\" \"instanceof\"] @keyword.control",
+                            "[\"true\" \"false\" \"null\" \"undefined\"] @boolean",
+                            "[\"=\" \"==\" \"===\" \"!=\" \"!==\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"**\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"**=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
+                        ])),
+                        "java" => Some((tree_sitter_java::LANGUAGE.into(), vec![
+                            "(identifier) @variable",
+                            "(type_identifier) @type",
+                            "(string_literal) @string",
+                            "(decimal_integer_literal) @number",
+                            "(decimal_floating_point_literal) @number",
+                            "(comment) @comment",
+                            "(method_declaration name: (identifier) @function)",
+                            "(method_invocation name: (identifier) @function)",
+                            "[\"class\" \"interface\" \"enum\" \"public\" \"private\" \"protected\" \"static\" \"final\" \"void\" \"return\" \"if\" \"else\" \"for\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"package\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"throws\" \"extends\" \"implements\" \"this\" \"super\"] @keyword.control",
+                            "[\"true\" \"false\" \"null\"] @boolean",
+                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
+                            "(annotation name: (identifier) @keyword.control)",
+                        ])),
+                        "cs" => Some((tree_sitter_c_sharp::LANGUAGE.into(), vec![
+                            "(identifier) @variable",
+                            "(string_literal) @string",
+                            "(integer_literal) @number",
+                            "(real_literal) @number",
+                            "(comment) @comment",
+                            "(method_declaration name: (identifier) @function)",
+                            "(invocation_expression function: (identifier) @function)",
+                            "(invocation_expression function: (member_access_expression name: (identifier) @function))",
+                            "[\"class\" \"interface\" \"enum\" \"struct\" \"public\" \"private\" \"protected\" \"internal\" \"static\" \"readonly\" \"void\" \"return\" \"if\" \"else\" \"for\" \"foreach\" \"in\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"using\" \"namespace\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"async\" \"await\" \"yield\" \"this\" \"base\" \"var\"] @keyword.control",
+                            "[\"true\" \"false\" \"null\"] @boolean",
+                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
+                        ])),
+                        "dart" => Some((tree_sitter_dart_orchard::LANGUAGE.into(), vec![
+                            "(identifier) @variable",
+                            "(string_literal) @string",
+                            "(decimal_integer_literal) @number",
+                            "(decimal_floating_point_literal) @number",
+                            "(comment) @comment",
+                            "(function_signature name: (identifier) @function)",
+                            "(method_signature name: (identifier) @function)",
+                            "(function_expression_body (identifier) @function)",
+                            "(call_expression function: (identifier) @function)",
+                            "(call_expression function: (selector (identifier) @function))",
+                            "[\"class\" \"enum\" \"mixin\" \"extension\" \"void\" \"return\" \"if\" \"else\" \"for\" \"in\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"export\" \"as\" \"show\" \"hide\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"rethrow\" \"async\" \"await\" \"yield\" \"final\" \"const\" \"var\" \"late\" \"factory\" \"get\" \"set\" \"static\" \"this\" \"super\"] @keyword.control",
+                            "[\"true\" \"false\" \"null\"] @boolean",
+                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"~/=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
+                        ])),
                         _ => None,
                     };
+
+                    if let Some((_, queries)) = &ts_config {
+                        for q_str in queries {
+                            let mut start_idx = None;
+                            for (i, b) in q_str.bytes().enumerate() {
+                                if b == b'"' {
+                                    if let Some(start) = start_idx {
+                                        let word = &q_str[start..i];
+                                        if word.len() > 1 && word.bytes().all(|c| c.is_ascii_alphabetic() || c == b'_') {
+                                            completions_map.insert((word.to_string(), 0, usize::MAX), SymbolKind::Keyword);
+                                        }
+                                        start_idx = None;
+                                    } else {
+                                        start_idx = Some(i + 1);
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     if let Some((lang, queries)) = ts_config {
                         if parser.set_language(&lang).is_ok() {
                             parser.reset();
                             if let Some(tree) = parser.parse(&text, None) {
                                 
-                                let mut cursor = tree.walk();
+                                let is_same_node = |n1: Option<tree_sitter::Node>, n2: tree_sitter::Node| -> bool {
+                                    if let Some(n1) = n1 {
+                                        n1.start_byte() == n2.start_byte() && n1.end_byte() == n2.end_byte()
+                                    } else {
+                                        false
+                                    }
+                                };
+
+                                let mut c_cursor = tree.walk();
                                 let mut visiting = true;
                                 while visiting {
-                                    let node = cursor.node();
+                                    let node = c_cursor.node();
+                                    let kind = node.kind();
+                                    
                                     if node.is_error() {
                                         error_ranges.push((node.start_byte(), node.end_byte()));
                                     }
-                                    if cursor.goto_first_child() { continue; }
-                                    while !cursor.goto_next_sibling() {
-                                        if !cursor.goto_parent() {
+
+                                    if kind.contains("identifier") || kind == "word" || kind == "property_identifier" || kind == "type_identifier" {
+                                        if let Ok(s) = std::str::from_utf8(&text.as_bytes()[node.start_byte()..node.end_byte()]) {
+                                            if s.len() > 2 && !s.contains('\n') && !s.contains(' ') {
+                                                
+                                                let mut sym_kind = SymbolKind::Variable;
+                                                let mut scope_start = 0;
+                                                let mut scope_end = usize::MAX;
+                                                let mut skip = false;
+                                                let mut scope_found = false;
+                                                
+                                                if let Some(p) = node.parent() {
+                                                    let p_kind = p.kind();
+
+                                                    if p_kind == "keyword_argument" && is_same_node(p.child_by_field_name("name"), node) {
+                                                        skip = true; 
+                                                    } else if p_kind == "attribute" && is_same_node(p.child_by_field_name("attribute"), node) {
+                                                        skip = true; 
+                                                    } else if p_kind == "member_expression" && is_same_node(p.child_by_field_name("property"), node) {
+                                                        skip = true; 
+                                                    } else if p_kind == "field_expression" && is_same_node(p.child_by_field_name("field"), node) {
+                                                        skip = true; 
+                                                    } else if kind == "property_identifier" {
+                                                        skip = true; 
+                                                    } else if (p_kind.contains("function") || p_kind.contains("method")) && is_same_node(p.child_by_field_name("name"), node) {
+                                                        sym_kind = SymbolKind::Function;
+                                                    } else if (p_kind.contains("class") || p_kind.contains("struct") || p_kind.contains("enum") || p_kind.contains("trait")) && is_same_node(p.child_by_field_name("name"), node) {
+                                                        sym_kind = SymbolKind::Class;
+                                                    } else if p_kind.contains("parameter") || p_kind.contains("argument") {
+                                                        sym_kind = SymbolKind::Parameter;
+                                                    }
+
+                                                    let mut curr = node;
+                                                    let mut curr_parent = Some(p);
+                                                    while let Some(cp) = curr_parent {
+                                                        let cp_kind = cp.kind();
+                                                        
+                                                        if cp_kind == "import_from_statement" || cp_kind == "import_statement" {
+                                                            if let Some(mod_name) = cp.child_by_field_name("module_name") {
+                                                                if curr.start_byte() >= mod_name.start_byte() && curr.end_byte() <= mod_name.end_byte() {
+                                                                    skip = true;
+                                                                }
+                                                            }
+                                                        }
+                                                        if cp_kind == "aliased_import" {
+                                                            if let Some(name_node) = cp.child_by_field_name("name") {
+                                                                if curr.start_byte() >= name_node.start_byte() && curr.end_byte() <= name_node.end_byte() {
+                                                                    skip = true; 
+                                                                }
+                                                            }
+                                                        }
+
+                                                        if !scope_found && (cp_kind.contains("function") || cp_kind.contains("method") || cp_kind.contains("class") || cp_kind.contains("block") || cp_kind == "module" || cp_kind == "source_file") {
+                                                            scope_start = cp.start_byte();
+                                                            scope_end = cp.end_byte();
+                                                            scope_found = true;
+                                                        }
+                                                        curr = cp;
+                                                        curr_parent = cp.parent();
+                                                    }
+                                                }
+                                                
+                                                if !skip {
+                                                    if let Some(p) = node.parent() {
+                                                        let p_kind = p.kind();
+                                                        if p_kind.contains("import") || p_kind == "dotted_name" || p_kind == "aliased_import" {
+                                                            sym_kind = SymbolKind::Unknown;
+                                                        }
+                                                    }
+
+                                                    let actual_scope_start = match sym_kind {
+                                                        SymbolKind::Variable | SymbolKind::Parameter => node.start_byte(),
+                                                        _ => scope_start,
+                                                    };
+
+                                                    completions_map.insert((s.to_string(), actual_scope_start, scope_end), sym_kind);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if c_cursor.goto_first_child() { continue; }
+                                    while !c_cursor.goto_next_sibling() {
+                                        if !c_cursor.goto_parent() {
                                             visiting = false;
                                             break;
                                         }
@@ -185,7 +388,6 @@ impl Highlighter {
                                             let mut cursor = tree_sitter::QueryCursor::new();
                                             let mut matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
                                             
-                                            // <-- Исправлено: используем while let и .next() вместо for
                                             while let Some(m) = matches.next() {
                                                 let mut p_node = None;
                                                 let mut b_node = None;
@@ -258,7 +460,6 @@ impl Highlighter {
                                             text.as_bytes(),
                                         );
 
-                                        // <-- Исправлено: используем while let и .next() вместо for
                                         while let Some(m) = matches.next() {
                                             for cap in m.captures {
                                                 let name =
@@ -368,7 +569,6 @@ impl Highlighter {
                     }
 
                     if !used_ts {
-                        // Отложенно загружаем syntect
                         if syntect_assets.is_none() {
                             let ps = syntect::parsing::SyntaxSet::load_defaults_newlines();
                             let ts = syntect::highlighting::ThemeSet::load_defaults();
@@ -377,8 +577,6 @@ impl Highlighter {
                         
                         if let Some((ps, ts)) = syntect_assets.as_ref() {
                             let fallback_theme = &ts.themes["base16-ocean.dark"];
-                            
-                            // Фолбэк для TOML если tree-sitter упадет/не загрузится
                             let syntax = ps.find_syntax_by_extension(&actual_ext)
                                 .or_else(|| if actual_ext == "toml" { ps.find_syntax_by_extension("ini") } else { None });
 
@@ -414,13 +612,99 @@ impl Highlighter {
                 let apply_rainbow_brackets = lang_name != "bash";
 
                 let flat_spans = flatten_spans(spans, text.len(), &text, &mut byte_colors_buf, error_ranges, old_spans, apply_rainbow_brackets);
-                let _ = tx_out.send((version, flat_spans));
+                
+                // ВНЕДРЕНИЕ ВСТРОЕННЫХ БИБЛИОТЕК ЯЗЫКОВ
+                let mut inject_builtins = |items: &[(&str, SymbolKind)]| {
+                    for &(word, ref kind) in items {
+                        completions_map.entry((word.to_string(), 0, usize::MAX)).or_insert_with(|| kind.clone());
+                    }
+                };
+
+                match lang_name {
+                    "py" => {
+                        inject_builtins(&[
+                            ("print", SymbolKind::Function), ("len", SymbolKind::Function),
+                            ("int", SymbolKind::Class), ("str", SymbolKind::Class),
+                            ("list", SymbolKind::Class), ("dict", SymbolKind::Class),
+                            ("set", SymbolKind::Class), ("tuple", SymbolKind::Class),
+                            ("bool", SymbolKind::Class), ("float", SymbolKind::Class),
+                            ("sum", SymbolKind::Function), ("min", SymbolKind::Function),
+                            ("max", SymbolKind::Function), ("abs", SymbolKind::Function),
+                            ("isinstance", SymbolKind::Function), ("issubclass", SymbolKind::Function),
+                            ("hasattr", SymbolKind::Function), ("getattr", SymbolKind::Function),
+                            ("setattr", SymbolKind::Function), ("delattr", SymbolKind::Function),
+                            ("dir", SymbolKind::Function), ("type", SymbolKind::Class),
+                            ("enumerate", SymbolKind::Function), ("zip", SymbolKind::Function),
+                            ("map", SymbolKind::Class), ("filter", SymbolKind::Class),
+                            ("range", SymbolKind::Class), ("reversed", SymbolKind::Class),
+                            ("open", SymbolKind::Function), ("super", SymbolKind::Function),
+                            ("Exception", SymbolKind::Class), ("ValueError", SymbolKind::Class),
+                            ("TypeError", SymbolKind::Class), ("KeyError", SymbolKind::Class),
+                            ("IndexError", SymbolKind::Class), ("AttributeError", SymbolKind::Class),
+                            ("RuntimeError", SymbolKind::Class), ("KeyboardInterrupt", SymbolKind::Class),
+                            ("True", SymbolKind::Keyword), ("False", SymbolKind::Keyword), ("None", SymbolKind::Keyword),
+                            ("__name__", SymbolKind::Variable), ("__file__", SymbolKind::Variable),
+                            ("__doc__", SymbolKind::Variable), ("__dict__", SymbolKind::Variable),
+                            ("__init__", SymbolKind::Function), ("__call__", SymbolKind::Function),
+                            ("self", SymbolKind::Variable), ("cls", SymbolKind::Variable),
+                        ]);
+                    },
+                    "rs" => {
+                        inject_builtins(&[
+                            ("println!", SymbolKind::Function), ("print!", SymbolKind::Function),
+                            ("format!", SymbolKind::Function), ("panic!", SymbolKind::Function),
+                            ("vec!", SymbolKind::Function), ("String", SymbolKind::Class),
+                            ("Vec", SymbolKind::Class), ("Option", SymbolKind::Class),
+                            ("Result", SymbolKind::Class), ("Some", SymbolKind::Variable),
+                            ("None", SymbolKind::Variable), ("Ok", SymbolKind::Variable),
+                            ("Err", SymbolKind::Variable), ("Box", SymbolKind::Class),
+                            ("Rc", SymbolKind::Class), ("Arc", SymbolKind::Class),
+                            ("HashMap", SymbolKind::Class), ("HashSet", SymbolKind::Class),
+                            ("std", SymbolKind::Variable), ("iter", SymbolKind::Function),
+                            ("map", SymbolKind::Function), ("collect", SymbolKind::Function),
+                            ("unwrap", SymbolKind::Function), ("expect", SymbolKind::Function),
+                            ("clone", SymbolKind::Function), ("as_ref", SymbolKind::Function),
+                            ("into", SymbolKind::Function), ("from", SymbolKind::Function),
+                            ("mut", SymbolKind::Keyword), ("let", SymbolKind::Keyword),
+                            ("fn", SymbolKind::Keyword), ("impl", SymbolKind::Keyword),
+                            ("pub", SymbolKind::Keyword), ("struct", SymbolKind::Keyword),
+                        ]);
+                    },
+                    "dart" => {
+                        inject_builtins(&[
+                            ("print", SymbolKind::Function), ("String", SymbolKind::Class),
+                            ("int", SymbolKind::Class), ("double", SymbolKind::Class),
+                            ("bool", SymbolKind::Class), ("List", SymbolKind::Class),
+                            ("Map", SymbolKind::Class), ("Set", SymbolKind::Class),
+                            ("Future", SymbolKind::Class), ("Stream", SymbolKind::Class),
+                            ("Widget", SymbolKind::Class), ("StatelessWidget", SymbolKind::Class),
+                            ("StatefulWidget", SymbolKind::Class), ("BuildContext", SymbolKind::Class),
+                            ("Scaffold", SymbolKind::Class), ("AppBar", SymbolKind::Class),
+                            ("Text", SymbolKind::Class), ("Container", SymbolKind::Class),
+                            ("Column", SymbolKind::Class), ("Row", SymbolKind::Class),
+                            ("ListView", SymbolKind::Class), ("Padding", SymbolKind::Class),
+                            ("Center", SymbolKind::Class), ("initState", SymbolKind::Function),
+                            ("build", SymbolKind::Function), ("dispose", SymbolKind::Function),
+                            ("setState", SymbolKind::Function), ("late", SymbolKind::Keyword),
+                            ("final", SymbolKind::Keyword), ("const", SymbolKind::Keyword),
+                        ]);
+                    },
+                    _ => {}
+                }
+
+                let mut completions: Vec<CompletionItem> = completions_map.into_iter().map(|((word, scope_start, scope_end), kind)| {
+                    CompletionItem { word, kind, scope_start, scope_end }
+                }).collect();
+                completions.sort_by(|a, b| a.word.cmp(&b.word));
+                
+                let _ = tx_out.send((version, flat_spans, completions));
             }
         });
         Self {
             tx: tx_in,
             rx: rx_out,
             spans: vec![],
+            completions: vec![],
             current_version: 0,
         }
     }
@@ -431,11 +715,12 @@ impl Highlighter {
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((ver, spans)) = self.rx.try_recv() {
+        while let Ok((ver, spans, completions)) = self.rx.try_recv() {
             if ver >= self.current_version {
                 self.current_version = ver;
                 if ver == current_editor_version {
                     self.spans = spans;
+                    self.completions = completions;
                     updated = true;
                 }
             }
@@ -525,7 +810,7 @@ impl Highlighter {
     }
 }
 
-fn get_bracket_color(depth: usize) -> [f32; 4] {
+fn get_bracket_color(depth: usize) ->[f32; 4] {
     if depth == 0 {
         return DRACULA_FG;
     }
@@ -551,7 +836,6 @@ fn flatten_spans(
     spans.sort_by_key(|s| std::cmp::Reverse(s.end - s.start));
 
     byte_colors.clear();
-    // Базовый цвет для всего файла — всегда яркий DRACULA_FG
     byte_colors.resize(len, DRACULA_FG);
 
     for span in spans {

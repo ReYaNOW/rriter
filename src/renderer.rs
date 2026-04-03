@@ -130,7 +130,6 @@ impl Renderer {
             gl.compile_shader(v_shader);
 
             let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            // ВАЖНО: Добавлен дизеринг (шум) для устранения бандинга (горизонтальных полос) на градиентах
             gl.shader_source(f_shader, "#version 330
                 in vec2 v_uv; in vec4 v_col; in float v_is_emoji;
                 out vec4 out_color;
@@ -208,13 +207,32 @@ impl Renderer {
                 "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
                 "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
                 "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+            ];
+
+            let emoji_paths = [
                 "/usr/share/fonts/noto/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto/NotoColorEmoji.google.ttf",
             ];
 
             let mut fonts = Vec::new();
+
+            // 1. Сначала грузим стандартные системные шрифты (для кода)
             for path in font_paths.iter() {
+                if let Ok(data) = fs::read(path) {
+                    fonts.push(FontData { data, index: 0 });
+                }
+            }
+
+            // 2. Вшиваем Nerd Font как фолбэк для иконок!
+            let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").to_vec();
+            fonts.push(FontData {
+                data: nerd_font_data.clone(),
+                index: 0,
+            });
+
+            // 3. Цветные эмодзи в самом конце
+            for path in emoji_paths.iter() {
                 if let Ok(data) = fs::read(path) {
                     fonts.push(FontData { data, index: 0 });
                 }
@@ -233,6 +251,11 @@ impl Renderer {
                     ui_fonts.push(FontData { data, index: 0 });
                 }
             }
+            // Nerd Font также добавляем для UI элементов
+            ui_fonts.push(FontData {
+                data: nerd_font_data,
+                index: 0,
+            });
 
             if ui_fonts.is_empty() {
                 for f in &fonts {
@@ -368,6 +391,9 @@ impl Renderer {
         let mut rendered_image = None;
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
+
+        // Для эмодзи (и иконок Nerd Font, т.к. они находятся в диапазоне Private Use Area > 0x2400)
+        // мы идем по списку шрифтов с конца. Это значит, что Nerd Font будет проверен первым!
         let indices: Vec<usize> = if is_emoji_char {
             (0..self.fonts.len()).rev().collect()
         } else {

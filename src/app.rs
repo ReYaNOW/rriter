@@ -2,11 +2,11 @@ pub mod events;
 pub mod input;
 
 use crate::editor::Editor;
-use crate::highlighter::Highlighter;
+use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
 use crate::renderer::{Renderer, Theme};
 use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
-use glutin::display::{GetGlDisplay, GlDisplay}; // <-- Добавлен GlDisplay!
+use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{Surface, WindowSurface};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -21,6 +21,24 @@ pub enum PendingAction {
     Quit,
     OpenFile,
     Faq,
+}
+
+fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
+    let mut p_chars = pattern.chars().peekable();
+    let mut indices = Vec::new();
+    for (i, c) in target.chars().enumerate() {
+        if let Some(&pc) = p_chars.peek() {
+            if c.to_ascii_lowercase() == pc.to_ascii_lowercase() {
+                indices.push(i);
+                p_chars.next();
+            }
+        }
+    }
+    if p_chars.peek().is_none() {
+        Some(indices)
+    } else {
+        None
+    }
 }
 
 pub struct App {
@@ -89,6 +107,19 @@ pub struct App {
 
     pub is_ready: bool,
     pub is_highlighted_once: bool,
+
+    // Автодополнение
+    pub autocomplete_active: bool,
+    pub autocomplete_options: Vec<(CompletionItem, Vec<usize>)>,
+    pub autocomplete_selected_idx: usize,
+    pub autocomplete_anim_progress: f32,
+    pub autocomplete_scroll_y: f32,
+    pub autocomplete_target_scroll_y: f32,
+    pub autocomplete_scroll_velocity: f32,
+    pub autocomplete_hovered_idx: Option<usize>,
+    pub autocomplete_rect: Option<(f32, f32, f32, f32)>,
+    pub is_dragging_autocomplete: bool,
+    pub autocomplete_drag_offset_y: f32,
 }
 
 impl App {
@@ -116,11 +147,189 @@ impl App {
         *target_scroll_y = target_scroll_y.clamp(0.0, max_s).round();
     }
 
+    pub fn get_current_word_prefix(&self) -> String {
+        let mut p = self.editor.cursor;
+        while p > 0 {
+            let b = self.editor.byte_at(p - 1);
+            if !(b.is_ascii_alphanumeric() || b == b'_') {
+                break;
+            }
+            p -= 1;
+        }
+        if p == self.editor.cursor {
+            return String::new();
+        }
+        let mut res = Vec::with_capacity(self.editor.cursor - p);
+        for i in p..self.editor.cursor {
+            res.push(self.editor.byte_at(i));
+        }
+        String::from_utf8_lossy(&res).into_owned()
+    }
+
+    pub fn update_autocomplete(&mut self) {
+        let prefix = self.get_current_word_prefix();
+        if prefix.is_empty() {
+            self.autocomplete_active = false;
+            self.autocomplete_options.clear();
+            return;
+        }
+
+        let prefix_lower = prefix.to_lowercase();
+        let cursor = self.editor.cursor;
+
+        let mut best_scopes: std::collections::HashMap<String, CompletionItem> =
+            std::collections::HashMap::new();
+
+        for comp in &self.highlighter.completions {
+            if cursor >= comp.scope_start && cursor <= comp.scope_end {
+                let current_size = comp.scope_end.saturating_sub(comp.scope_start);
+                if let Some(existing) = best_scopes.get(&comp.word) {
+                    let ex_size = existing.scope_end.saturating_sub(existing.scope_start);
+                    if current_size < ex_size {
+                        best_scopes.insert(comp.word.clone(), comp.clone());
+                    }
+                } else {
+                    best_scopes.insert(comp.word.clone(), comp.clone());
+                }
+            }
+        }
+
+        let mut matches = Vec::new();
+
+        for (_, comp) in best_scopes {
+            if comp.word == prefix {
+                continue;
+            }
+
+            let comp_lower = comp.word.to_lowercase();
+            if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
+                let is_prefix = comp_lower.starts_with(&prefix_lower);
+
+                // Рассчитываем скоринг на основе близости области видимости (scope)
+                let mut score = 0i64;
+                let scope_bonus = if comp.kind == SymbolKind::Keyword {
+                    0
+                } else {
+                    let scope_size = comp.scope_end.saturating_sub(comp.scope_start);
+                    let sz = scope_size.min(i64::MAX as usize) as i64;
+                    // Чем меньше область видимости (sz), тем выше бонус (локальные переменные в топе)
+                    10_000_000 / (sz + 1).max(1)
+                };
+                score += scope_bonus;
+
+                // Штраф за длину слова (короткие совпадения выше)
+                score -= (comp.word.len() as i64) * 10;
+
+                matches.push((is_prefix, score, comp, indices));
+            }
+        }
+
+        // --- УМНАЯ СОРТИРОВКА (ПРИОРИТЕТЫ) ---
+        // 0. Переменные и параметры (Prefix Match) -> самые важные
+        // 1. Функции (Prefix Match)
+        // 2. Классы и встроенные типы (bool, int и т.д.) (Prefix Match)
+        // 3. Ключевые слова (Prefix Match)
+        // 4. Все остальное (Fuzzy Match) в том же порядке
+        matches.sort_by_key(|(is_prefix, score, comp, _)| {
+            let type_priority = match comp.kind {
+                SymbolKind::Variable | SymbolKind::Parameter => 0,
+                SymbolKind::Function => 1,
+                SymbolKind::Class => 2,
+                SymbolKind::Keyword => 3,
+                SymbolKind::Unknown => 4,
+            };
+
+            let match_priority = if *is_prefix { 0 } else { 1 };
+
+            // Сначала сравниваем по категории совпадения (префикс/не префикс),
+            // затем по типу символа (переменная/функция/класс),
+            // и в конце по скору (локальность).
+            (match_priority, type_priority, std::cmp::Reverse(*score))
+        });
+
+        self.autocomplete_options = matches.into_iter().take(60).map(|m| (m.2, m.3)).collect();
+
+        if !self.autocomplete_options.is_empty() {
+            if !self.autocomplete_active {
+                self.autocomplete_anim_progress = 0.0;
+                self.autocomplete_scroll_y = 0.0;
+                self.autocomplete_target_scroll_y = 0.0;
+            }
+            self.autocomplete_active = true;
+            self.autocomplete_selected_idx = 0;
+        } else {
+            self.autocomplete_active = false;
+        }
+    }
+
+    pub fn ensure_autocomplete_visible(&mut self) {
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|r| r.scale_factor)
+            .unwrap_or(1.0);
+        let step = 36.0 * scale;
+        let visible_items = 7.0;
+
+        let top = self.autocomplete_target_scroll_y;
+        let bottom = top + (visible_items * step);
+
+        let item_top = self.autocomplete_selected_idx as f32 * step;
+        let item_bottom = item_top + step;
+
+        if item_top < top {
+            self.autocomplete_target_scroll_y = item_top;
+        } else if item_bottom > bottom {
+            self.autocomplete_target_scroll_y = item_bottom - (visible_items * step);
+        }
+
+        let total_items = self.autocomplete_options.len() as f32;
+        let visible_limit = total_items.min(visible_items);
+        let max_scroll = ((total_items - visible_limit) * step).max(0.0);
+
+        self.autocomplete_target_scroll_y =
+            self.autocomplete_target_scroll_y.clamp(0.0, max_scroll);
+    }
+
+    pub fn apply_autocomplete(&mut self) {
+        if !self.autocomplete_active || self.autocomplete_options.is_empty() {
+            return;
+        }
+        let selected = self.autocomplete_options[self.autocomplete_selected_idx]
+            .0
+            .word
+            .clone();
+        let prefix_len = self.get_current_word_prefix().len();
+
+        for _ in 0..prefix_len {
+            if let Some((offset, len)) = self.editor.backspace(&self.highlighter.spans) {
+                self.highlighter.shift_delete(offset, len);
+            }
+        }
+
+        let (del_info, ins_len) = self.editor.insert_str(&selected, &self.highlighter.spans);
+        if let Some((offset, len)) = del_info {
+            self.highlighter.shift_delete(offset, len);
+        }
+        self.highlighter
+            .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected), None);
+
+        self.autocomplete_active = false;
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_scroll_y = 0.0;
+        self.autocomplete_target_scroll_y = 0.0;
+        self.skip_highlight_update = false;
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+            w.request_redraw();
+        }
+    }
+
     pub fn update_search(&mut self) {
         let previous_match_start = self
             .search_current_idx
             .and_then(|idx| self.search_results.get(idx).map(|&(s, _)| s));
-
         self.search_results.clear();
         self.search_current_idx = None;
         let query_text = self.search_editor.get_full_text();
@@ -129,7 +338,6 @@ impl App {
         }
 
         let full_text = self.editor.get_full_text();
-
         let escaped_query = regex::escape(&query_text);
         if let Ok(re) = regex::RegexBuilder::new(&escaped_query)
             .case_insensitive(!self.search_case_sensitive)
@@ -151,11 +359,9 @@ impl App {
                     return;
                 }
             }
-
             let cursor = self.editor.cursor;
             let mut nearest_idx = 0;
             let mut min_dist = usize::MAX;
-
             for (i, &(s_start, s_end)) in self.search_results.iter().enumerate() {
                 let dist = if cursor < s_start {
                     s_start - cursor
@@ -164,7 +370,6 @@ impl App {
                 } else {
                     0
                 };
-
                 if dist < min_dist {
                     min_dist = dist;
                     nearest_idx = i;
@@ -182,7 +387,6 @@ impl App {
             if let Some(&(start, end)) = self.search_results.get(idx) {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
-
                 if let Some(r) = self.renderer.as_mut() {
                     r.update_cache(&self.editor, false);
                     let line_idx = match r.visual_lines.binary_search_by_key(&end, |v| v.byte_idx) {
@@ -197,7 +401,6 @@ impl App {
                     };
                     let cy = r.baseline_offset + (line_idx as f32 * r.line_height);
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-
                     self.target_scroll_y = (cy - wh / 2.0).max(0.0);
                     let max_s = r.get_max_scroll(&self.editor, wh);
                     self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_s).round();
@@ -230,9 +433,9 @@ impl App {
                 .with_resizable(false)
                 .with_enabled_buttons(winit::window::WindowButtons::CLOSE)
                 .with_window_level(winit::window::WindowLevel::AlwaysOnTop);
+
             let dialog_window = event_loop.create_window(attrs).unwrap();
             let raw_window_handle = dialog_window.window_handle().unwrap().as_raw();
-
             let scale = dialog_window.scale_factor();
             let scaled_width = (p_width * scale) as u32;
             let scaled_height = (p_height * scale) as u32;
@@ -243,6 +446,7 @@ impl App {
                     NonZeroU32::new(scaled_width).unwrap(),
                     NonZeroU32::new(scaled_height).unwrap(),
                 );
+
             let dialog_surface = unsafe {
                 self.gl_config
                     .as_ref()
@@ -251,6 +455,7 @@ impl App {
                     .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
                     .unwrap()
             };
+
             self.dialog_window = Some(dialog_window);
             self.dialog_surface = Some(dialog_surface);
             self.show_quit_dialog = true;
@@ -277,7 +482,8 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
         std::thread::spawn(move || {
-            let file = rfd::FileDialog::new().pick_file();
+            // ИСПРАВЛЕНИЕ: Установка человеческого заголовка
+            let file = rfd::FileDialog::new().set_title("Открыть файл").pick_file();
             let _ = tx.send(file);
         });
     }
@@ -286,7 +492,9 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
         std::thread::spawn(move || {
+            // ИСПРАВЛЕНИЕ: Установка человеческого заголовка
             let file = rfd::FileDialog::new()
+                .set_title("Сохранить файл как...")
                 .set_file_name("Безымянный.txt")
                 .save_file();
             let _ = tx.send(file);
@@ -341,44 +549,35 @@ impl App {
         if let Ok(content) = std::fs::read_to_string(&path) {
             self.show_welcome = false;
             self.add_recent_file(path.clone());
-
             let old_version = self.editor.version;
             self.editor = Editor::new(content.len() + 8192);
             self.editor.version = old_version + 1;
-
             if !content.is_empty() {
                 let _ = self.editor.insert_str(&content, &[]);
                 self.editor.cursor = 0;
                 self.editor.clear_history();
             }
             self.editor.set_original_text();
-
             self.file_path = Some(path.clone());
             let file_name = path.file_name().unwrap_or_default().to_string_lossy();
             self.base_title = file_name.into_owned();
-
-            if let Some(e) = path.extension() {
-                self.file_extension = e.to_string_lossy().to_string();
-            } else {
-                self.file_extension = String::new();
-            }
-
+            self.file_extension = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
             self.highlighter.spans.clear();
             self.is_highlighted_once = false;
-
             self.highlighter.request_update(
                 self.editor.version,
                 self.editor.get_full_text(),
                 self.file_extension.clone(),
             );
-
             self.target_scroll_y = 0.0;
             self.scroll_y = 0.0;
             self.last_sent_version = u64::MAX;
-
             self.search_results.clear();
             self.search_current_idx = None;
-
+            self.autocomplete_active = false;
             if let Some(w) = self.window.as_ref() {
                 App::update_window_title(w, &self.base_title, false);
                 w.request_redraw();

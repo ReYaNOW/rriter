@@ -213,7 +213,6 @@ impl App {
                             r.draw_dialog(&self.base_title)
                         };
 
-                        // Изменяем курсор для диалогового окна
                         self.dialog_window
                             .as_ref()
                             .unwrap()
@@ -357,7 +356,37 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(mod_state) => self.modifiers = mod_state.state(),
-            WindowEvent::MouseWheel { delta, .. } => self.handle_main_mouse_wheel(delta),
+            WindowEvent::MouseWheel { delta, .. } => {
+                if self.autocomplete_active && self.autocomplete_rect.is_some() {
+                    let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
+                    let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                    let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                    if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                        let scale = self.renderer.as_ref().unwrap().scale_factor;
+                        let step = 36.0 * scale;
+
+                        match delta {
+                            MouseScrollDelta::LineDelta(_, y) => {
+                                self.autocomplete_target_scroll_y -= y * step * 1.5;
+                            }
+                            MouseScrollDelta::PixelDelta(pos) => {
+                                self.autocomplete_target_scroll_y -= pos.y as f32;
+                            }
+                        }
+
+                        let total_items = self.autocomplete_options.len() as f32;
+                        let visible_items = total_items.min(7.0);
+                        let max_scroll = ((total_items - visible_items) * step).max(0.0);
+
+                        self.autocomplete_target_scroll_y =
+                            self.autocomplete_target_scroll_y.clamp(0.0, max_scroll);
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                }
+
+                self.handle_main_mouse_wheel(delta);
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -398,7 +427,7 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                let wants_pointer = self.renderer.as_mut().unwrap().draw(
+                let mut wants_pointer = self.renderer.as_mut().unwrap().draw(
                     &self.editor,
                     self.scroll_y,
                     blink_alpha,
@@ -416,7 +445,27 @@ impl ApplicationHandler for App {
                     &self.recent_files,
                 );
 
-                // Корректно устанавливаем курсор даже когда мышь не двигается
+                // Отрисовка автодополнения поверх всего интерфейса
+                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
+                    let render_scroll_y = self.scroll_y.round();
+                    let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
+                        cx,
+                        cy - render_scroll_y,
+                        &self.autocomplete_options,
+                        self.autocomplete_selected_idx,
+                        self.autocomplete_anim_progress,
+                        self.autocomplete_scroll_y,
+                        self.autocomplete_hovered_idx,
+                    );
+                    self.autocomplete_rect = Some(rect);
+                    if self.autocomplete_hovered_idx.is_some() {
+                        wants_pointer = true;
+                    }
+                } else {
+                    self.autocomplete_rect = None;
+                }
+
                 let cursor_icon = if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if !self.show_welcome {
@@ -479,6 +528,50 @@ impl ApplicationHandler for App {
         self.last_frame = now;
 
         let mut needs_redraw = false;
+
+        // Физика автодополнения (Анимация + Кинетический скролл)
+        if self.autocomplete_active {
+            if self.autocomplete_anim_progress < 1.0 {
+                self.autocomplete_anim_progress +=
+                    (1.0 - self.autocomplete_anim_progress) * 20.0 * dt;
+                if self.autocomplete_anim_progress > 0.99 {
+                    self.autocomplete_anim_progress = 1.0;
+                }
+                needs_redraw = true;
+            }
+
+            let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
+            let abs_diff = diff.abs();
+            let boundary = 15.0;
+            let anim_speed = 15.0; // Идеальная скорость, как у главного редактора
+
+            let target_v = if abs_diff > boundary {
+                diff * anim_speed
+            } else {
+                let c = boundary.sqrt() * anim_speed;
+                diff.signum() * abs_diff.sqrt() * c
+            };
+
+            let c_stiffness = anim_speed * 4.0;
+            let v_factor = 1.0 - (-c_stiffness * dt).exp();
+            self.autocomplete_scroll_velocity +=
+                (target_v - self.autocomplete_scroll_velocity) * v_factor;
+
+            let step = self.autocomplete_scroll_velocity * dt;
+
+            if abs_diff > 0.0 {
+                if step.abs() >= abs_diff
+                    || diff.signum() != (diff - step).signum()
+                    || abs_diff < 0.01
+                {
+                    self.autocomplete_scroll_y = self.autocomplete_target_scroll_y;
+                    self.autocomplete_scroll_velocity = 0.0;
+                } else {
+                    self.autocomplete_scroll_y += step;
+                }
+                needs_redraw = true;
+            }
+        }
 
         if self.dialog_window.is_some() && self.pending_action == PendingAction::Faq {
             let diff = self.faq_target_scroll_y - self.faq_scroll_y;
@@ -584,6 +677,9 @@ impl ApplicationHandler for App {
 
         if self.highlighter.poll(self.editor.version) {
             self.is_highlighted_once = true;
+            if self.autocomplete_active {
+                self.update_autocomplete();
+            }
             needs_redraw = true;
         }
 
