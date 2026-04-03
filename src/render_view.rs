@@ -17,7 +17,7 @@ pub struct ModInterval {
 impl Renderer {
     pub fn draw(
         &mut self,
-        editor: &Editor,
+        editor: &mut Editor,
         scroll_y: f32,
         blink_alpha: f32,
         show_fps: bool,
@@ -64,6 +64,14 @@ impl Renderer {
                 .clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
+
+        let full_text = editor.get_full_text();
+        let physical_lines: Vec<&str> = full_text.split('\n').collect();
+        let indent_levels = editor.get_indent_guide_levels(&physical_lines);
+
+        let (first, second) = editor.text_parts();
+        let first_len = first.len();
+        let len = first_len + second.len();
 
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
@@ -115,6 +123,40 @@ impl Renderer {
         let visible_lines_count = ((self.height / self.line_height).ceil() as usize) + 4;
         let end_visual_line =
             (skip_visual_lines + visible_lines_count).min(self.visual_lines.len());
+
+        let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
+        let space_adv = self.char_advance(' ');
+
+        for i in skip_visual_lines..end_visual_line {
+            let v_line = self.visual_lines[i];
+            let phys_idx = v_line.physical_line - 1;
+
+            if let Some(Some(active_levels)) = indent_levels.get(phys_idx) {
+                let y_top = (i as f32 * self.line_height) - render_scroll_y;
+                let text_start_x = self.left_padding + v_line.whitespace_px_width;
+                let text_end_x = text_start_x + v_line.text_px_width;
+
+                for &level in active_levels {
+                    if level > 0 {
+                        let guide_x = self.left_padding + (level as f32 * 4.0 * space_adv);
+                        let margin = space_adv * 0.5;
+                        let overlaps = v_line.text_px_width > 0.0
+                            && text_start_x <= guide_x + margin
+                            && text_end_x >= guide_x - margin;
+
+                        if !overlaps {
+                            self.push_rect(
+                                guide_x.round(),
+                                y_top,
+                                1.0,
+                                self.line_height,
+                                guide_color,
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         let mut intervals = Vec::new();
         let mut last_phys_line = None;
@@ -185,9 +227,6 @@ impl Renderer {
             self.push_rounded_rect(self.left_padding - 7.0, draw_top, 7.0, draw_h, 2.0, color);
         }
 
-        let (first, second) = editor.text_parts();
-        let first_len = first.len();
-        let len = first_len + second.len();
         let sel_start = editor
             .selection_anchor
             .map(|a| a.min(editor.cursor))

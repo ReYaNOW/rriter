@@ -14,58 +14,103 @@ impl Renderer {
 
         let needs_update = self.last_editor_version != editor.version || size_changed;
 
-        if needs_update || self.visual_lines.is_empty() {
-            self.visual_lines.clear();
-            self.visual_lines.push(VisualLine {
-                byte_idx: 0,
-                physical_line: 1,
-                is_soft_wrap: false,
-            });
-
-            let (first, second) = editor.text_parts();
-            let minimap_w = self.minimap_width;
-            let max_x = (self.width - minimap_w - 20.0).max(self.left_padding + 100.0);
-            let mut x = self.left_padding;
-            let mut char_idx = 0;
-            let mut physical_line = 1;
-
-            for part in [first, second] {
-                for c in part.chars() {
-                    let is_newline = c == '\n';
-                    let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
-                    let adv = if is_newline || is_hidden {
-                        0.0
-                    } else {
-                        self.char_advance(c)
-                    };
-
-                    if !is_newline && x + adv > max_x && x > self.left_padding {
-                        self.visual_lines.push(VisualLine {
-                            byte_idx: char_idx,
-                            physical_line,
-                            is_soft_wrap: true,
-                        });
-                        x = self.left_padding;
-                    }
-                    if is_newline {
-                        physical_line += 1;
-                        self.visual_lines.push(VisualLine {
-                            byte_idx: char_idx + c.len_utf8(),
-                            physical_line,
-                            is_soft_wrap: false,
-                        });
-                        x = self.left_padding;
-                    } else {
-                        x += adv;
-                    }
-                    char_idx += c.len_utf8();
-                }
-            }
-
-            self.last_editor_version = editor.version;
-            self.last_height = self.height;
-            self.last_width = self.width;
+        if !needs_update && !self.visual_lines.is_empty() {
+            return;
         }
+
+        self.visual_lines.clear();
+
+        let (first, second) = editor.text_parts();
+        let minimap_w = self.minimap_width;
+        let max_x = (self.width - minimap_w - 20.0).max(self.left_padding + 100.0);
+
+        let mut x = self.left_padding;
+        let mut char_idx = 0;
+        let mut physical_line = 1;
+        let mut current_line_whitespace_px = 0.0;
+        let mut current_line_text_px = 0.0;
+        let mut in_whitespace_prefix = true;
+
+        self.visual_lines.push(VisualLine {
+            byte_idx: 0,
+            physical_line: 1,
+            is_soft_wrap: false,
+            whitespace_px_width: 0.0,
+            text_px_width: 0.0,
+        });
+
+        for part in [first, second] {
+            for c in part.chars() {
+                let is_newline = c == '\n';
+                let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
+                let adv = if is_newline || is_hidden {
+                    0.0
+                } else {
+                    self.char_advance(c)
+                };
+
+                if !is_newline {
+                    if in_whitespace_prefix && (c == ' ' || c == '\t') {
+                        current_line_whitespace_px += adv;
+                    } else {
+                        in_whitespace_prefix = false;
+                        if !is_hidden {
+                            current_line_text_px += adv;
+                        }
+                    }
+                }
+
+                if !is_newline && x + adv > max_x && x > self.left_padding {
+                    if let Some(last) = self.visual_lines.last_mut() {
+                        last.whitespace_px_width = current_line_whitespace_px;
+                        last.text_px_width = current_line_text_px;
+                    }
+
+                    self.visual_lines.push(VisualLine {
+                        byte_idx: char_idx,
+                        physical_line,
+                        is_soft_wrap: true,
+                        whitespace_px_width: 0.0,
+                        text_px_width: 0.0,
+                    });
+                    x = self.left_padding;
+                    current_line_whitespace_px = 0.0;
+                    current_line_text_px = 0.0;
+                    in_whitespace_prefix = true;
+                }
+
+                if is_newline {
+                    if let Some(last) = self.visual_lines.last_mut() {
+                        last.whitespace_px_width = current_line_whitespace_px;
+                        last.text_px_width = current_line_text_px;
+                    }
+                    physical_line += 1;
+                    self.visual_lines.push(VisualLine {
+                        byte_idx: char_idx + c.len_utf8(),
+                        physical_line,
+                        is_soft_wrap: false,
+                        whitespace_px_width: 0.0,
+                        text_px_width: 0.0,
+                    });
+                    x = self.left_padding;
+                    current_line_whitespace_px = 0.0;
+                    current_line_text_px = 0.0;
+                    in_whitespace_prefix = true;
+                } else {
+                    x += adv;
+                }
+                char_idx += c.len_utf8();
+            }
+        }
+
+        if let Some(last) = self.visual_lines.last_mut() {
+            last.whitespace_px_width = current_line_whitespace_px;
+            last.text_px_width = current_line_text_px;
+        }
+
+        self.last_editor_version = editor.version;
+        self.last_height = self.height;
+        self.last_width = self.width;
     }
 
     pub fn measure_width(&mut self, first: &str, second: &str, start: usize, end: usize) -> f32 {
@@ -330,7 +375,6 @@ impl Renderer {
             is_emoji: 0.0,
         };
 
-        // ИСПРАВЛЕНИЕ: Увеличиваем число полигонов для идеально круглых и гладких углов (было 16)
         let segments = 32;
         let mut edge = Vec::with_capacity(segments * 4 + 4);
 

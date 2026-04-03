@@ -427,8 +427,9 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
+                // ИЗМЕНЕНИЕ: Передаем &mut self.editor в draw
                 let mut wants_pointer = self.renderer.as_mut().unwrap().draw(
-                    &self.editor,
+                    &mut self.editor,
                     self.scroll_y,
                     blink_alpha,
                     self.show_fps,

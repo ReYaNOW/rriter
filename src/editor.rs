@@ -119,11 +119,11 @@ fn is_delimiter(b: u8) -> bool {
 
 fn char_class(b: u8) -> u8 {
     if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-        0 // Пробельные символы
+        0
     } else if b.is_ascii_punctuation() && b != b'_' {
-        2 // Символы-разделители (пунктуация)
+        2
     } else {
-        1 // Символы слова (буквы, цифры, _, а также кириллица)
+        1
     }
 }
 
@@ -192,6 +192,9 @@ pub struct Editor {
     pub line_states: Vec<Option<LineModState>>,
     pub deleted_gaps: Vec<Option<LineModState>>,
     pub is_dirty: bool,
+
+    indent_cache: Vec<Option<Vec<usize>>>,
+    last_indent_version: u64,
 }
 
 impl Editor {
@@ -212,7 +215,167 @@ impl Editor {
             line_states: vec![],
             deleted_gaps: vec![],
             is_dirty: false,
+            indent_cache: Vec::new(),
+            last_indent_version: u64::MAX,
         }
+    }
+
+    pub fn get_indent_guide_levels(&mut self, lines: &[&str]) -> Vec<Option<Vec<usize>>> {
+        if self.version == self.last_indent_version {
+            return self.indent_cache.clone();
+        }
+
+        let num_lines = lines.len();
+        self.indent_cache.clear();
+        self.indent_cache.resize(num_lines, None);
+
+        if num_lines == 0 {
+            self.last_indent_version = self.version;
+            return self.indent_cache.clone();
+        }
+
+        let get_depth = |line: &str| -> (usize, bool) {
+            let mut count = 0;
+            let mut is_blank = true;
+            for c in line.chars() {
+                if c == ' ' {
+                    count += 1;
+                } else if c == '\t' {
+                    count = (count / 4 + 1) * 4;
+                } else {
+                    is_blank = false;
+                    break;
+                }
+            }
+            (count / 4, is_blank)
+        };
+
+        let raw_depths: Vec<(usize, bool)> = lines.iter().map(|&line| get_depth(line)).collect();
+
+        // Кешируем глубину предыдущей непустой строки (O(N))
+        let mut prev_non_blank = vec![0; num_lines];
+        let mut curr_prev = 0;
+        for i in 0..num_lines {
+            if !raw_depths[i].1 {
+                curr_prev = raw_depths[i].0;
+            }
+            prev_non_blank[i] = curr_prev;
+        }
+
+        // Кешируем глубину следующей непустой строки (O(N))
+        let mut next_non_blank = vec![0; num_lines];
+        let mut curr_next = 0;
+        for i in (0..num_lines).rev() {
+            if !raw_depths[i].1 {
+                curr_next = raw_depths[i].0;
+            }
+            next_non_blank[i] = curr_next;
+        }
+
+        let mut depths = vec![0; num_lines];
+        for i in 0..num_lines {
+            let (raw_d, is_blank) = raw_depths[i];
+            if !is_blank {
+                depths[i] = raw_d;
+            } else {
+                if raw_d > 0 {
+                    depths[i] = raw_d;
+                } else {
+                    // Пустые строки получают min() от контекста, чтобы не "вываливаться" из блока
+                    depths[i] = prev_non_blank[i].min(next_non_blank[i]);
+                }
+            }
+        }
+
+        for i in 0..num_lines {
+            let d = depths[i];
+            if d == 0 {
+                continue;
+            }
+            let mut active_levels = Vec::with_capacity(d);
+            for level in 1..=d {
+                active_levels.push(level);
+            }
+            self.indent_cache[i] = Some(active_levels);
+        }
+
+        self.last_indent_version = self.version;
+        self.indent_cache.clone()
+    }
+
+    pub fn backspace(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
+        if let Some(del_info) = self.delete_selection(current_spans) {
+            self.update_modifications();
+            return Some(del_info);
+        }
+
+        if self.cursor > 0 && self.cursor < self.len() {
+            let char_before = self.byte_at(self.cursor - 1);
+            let char_after = self.byte_at(self.cursor);
+
+            let is_pair = (char_before == b'(' && char_after == b')')
+                || (char_before == b'[' && char_after == b']')
+                || (char_before == b'{' && char_after == b'}');
+
+            if is_pair {
+                self.version += 1;
+                let start = self.cursor - 1;
+                let len = 2;
+                let text_to_save = format!("{}{}", char_before as char, char_after as char);
+                let saved_spans = extract_spans_for_range(current_spans, start, start + len);
+
+                let cursor_before = self.cursor;
+                self.move_gap(start);
+                self.gap_end += len;
+                self.cursor = start;
+                self.selection_anchor = None;
+
+                self.push_history(HistoryStep {
+                    op: EditOp::Delete {
+                        offset: start,
+                        text: text_to_save,
+                        spans: saved_spans,
+                    },
+                    cursor_before,
+                    cursor_after: self.cursor,
+                });
+                self.update_modifications();
+                return Some((start, len));
+            }
+        }
+
+        if self.cursor > 0 {
+            self.version += 1;
+            let cursor_before = self.cursor;
+            let mut prev = self.cursor - 1;
+            while prev > 0 && !self.is_char_boundary(prev) {
+                prev -= 1;
+            }
+            let len = self.cursor - prev;
+            let mut res = Vec::with_capacity(len);
+            for i in prev..self.cursor {
+                res.push(self.byte_at(i));
+            }
+            let text = String::from_utf8_lossy(&res).into_owned();
+            let saved_spans = extract_spans_for_range(current_spans, prev, self.cursor);
+
+            self.move_gap(self.cursor);
+            self.gap_start -= len;
+            self.cursor = prev;
+
+            self.push_history(HistoryStep {
+                op: EditOp::Delete {
+                    offset: prev,
+                    text,
+                    spans: saved_spans,
+                },
+                cursor_before,
+                cursor_after: self.cursor,
+            });
+            self.update_modifications();
+            return Some((prev, len));
+        }
+        None
     }
 
     pub fn set_original_text(&mut self) {
@@ -581,45 +744,6 @@ impl Editor {
         None
     }
 
-    pub fn backspace(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
-        if let Some(del_info) = self.delete_selection(current_spans) {
-            self.update_modifications();
-            return Some(del_info);
-        }
-        if self.cursor > 0 {
-            self.version += 1;
-            let cursor_before = self.cursor;
-            let mut prev = self.cursor - 1;
-            while prev > 0 && !self.is_char_boundary(prev) {
-                prev -= 1;
-            }
-            let len = self.cursor - prev;
-            let mut res = Vec::with_capacity(len);
-            for i in prev..self.cursor {
-                res.push(self.byte_at(i));
-            }
-            let text = String::from_utf8_lossy(&res).into_owned();
-            let saved_spans = extract_spans_for_range(current_spans, prev, self.cursor);
-
-            self.move_gap(self.cursor);
-            self.gap_start -= len;
-            self.cursor = prev;
-
-            self.push_history(HistoryStep {
-                op: EditOp::Delete {
-                    offset: prev,
-                    text,
-                    spans: saved_spans,
-                },
-                cursor_before,
-                cursor_after: self.cursor,
-            });
-            self.update_modifications();
-            return Some((prev, len));
-        }
-        None
-    }
-
     pub fn delete_forward(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
         if let Some(del_info) = self.delete_selection(current_spans) {
             self.update_modifications();
@@ -765,7 +889,6 @@ impl Editor {
 
         let mut candidates = Vec::new();
 
-        // 1. Выделение слова
         let mut word_l = start;
         while word_l > 0 && char_class(self.byte_at(word_l - 1)) == 1 {
             word_l -= 1;
@@ -778,7 +901,6 @@ impl Editor {
             candidates.push((word_l, word_r));
         }
 
-        // 2. Выделение полной строки (без \n)
         let mut line_l = start;
         while line_l > 0 && self.byte_at(line_l - 1) != b'\n' {
             line_l -= 1;
@@ -789,7 +911,6 @@ impl Editor {
         }
         candidates.push((line_l, line_r));
 
-        // Выделение строки, очищенной от пробелов в начале и в конце
         let mut t_line_l = line_l;
         while t_line_l < line_r
             && (self.byte_at(t_line_l) == b' ' || self.byte_at(t_line_l) == b'\t')
@@ -806,7 +927,6 @@ impl Editor {
             candidates.push((t_line_l, t_line_r));
         }
 
-        // 3. Выделение внутри скобок / блоков (окно 50kb для производительности)
         let scan_start = start.saturating_sub(50000);
         let scan_end = (end + 50000).min(self.len());
         let mut round_stack = Vec::new();
@@ -841,7 +961,6 @@ impl Editor {
             }
         }
 
-        // Кавычки на текущей строке
         let mut q_l = line_l;
         let mut last_double = None;
         let mut last_single = None;
@@ -866,14 +985,12 @@ impl Editor {
             q_l += 1;
         }
 
-        // 4. Выделение всего документа
         candidates.push((0, self.len()));
 
         let mut best = None;
         let mut min_len = usize::MAX;
 
         for (l, r) in candidates {
-            // Выбираем только тех кандидатов, которые строго расширяют текущее выделение
             if l <= start && r >= end && (l < start || r > end) {
                 let len = r - l;
                 if len < min_len {
@@ -998,12 +1115,10 @@ impl Editor {
 
         let mut p = self.cursor;
 
-        // 1. Скипаем пробелы
         while p > 0 && char_class(self.byte_at(p - 1)) == 0 {
             p -= 1;
         }
 
-        // 2. Скипаем само слово/разделители до начала
         if p > 0 {
             let cls = char_class(self.byte_at(p - 1));
             while p > 0 && char_class(self.byte_at(p - 1)) == cls {
@@ -1021,12 +1136,10 @@ impl Editor {
 
         let mut p = self.cursor;
 
-        // 1. Скипаем пробелы
         while p < self.len() && char_class(self.byte_at(p)) == 0 {
             p += 1;
         }
 
-        // 2. Скипаем слово, чтобы курсор встал в его конец (как в PyCharm)
         if p < self.len() {
             let cls = char_class(self.byte_at(p));
             while p < self.len() && char_class(self.byte_at(p)) == cls {

@@ -43,11 +43,14 @@ pub struct GlyphInfo {
     pub is_emoji: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct VisualLine {
     pub byte_idx: usize,
     pub physical_line: usize,
     pub is_soft_wrap: bool,
+    // --- ОПТИМИЗАЦИЯ: Кешируем ширину в пикселях ---
+    pub whitespace_px_width: f32,
+    pub text_px_width: f32,
 }
 
 pub const ATLAS_SIZE: i32 = 2048;
@@ -217,21 +220,18 @@ impl Renderer {
 
             let mut fonts = Vec::new();
 
-            // 1. Сначала грузим стандартные системные шрифты (для кода)
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
                     fonts.push(FontData { data, index: 0 });
                 }
             }
 
-            // 2. Вшиваем Nerd Font как фолбэк для иконок!
             let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").to_vec();
             fonts.push(FontData {
                 data: nerd_font_data.clone(),
                 index: 0,
             });
 
-            // 3. Цветные эмодзи в самом конце
             for path in emoji_paths.iter() {
                 if let Ok(data) = fs::read(path) {
                     fonts.push(FontData { data, index: 0 });
@@ -251,7 +251,6 @@ impl Renderer {
                     ui_fonts.push(FontData { data, index: 0 });
                 }
             }
-            // Nerd Font также добавляем для UI элементов
             ui_fonts.push(FontData {
                 data: nerd_font_data,
                 index: 0,
@@ -392,8 +391,6 @@ impl Renderer {
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
 
-        // Для эмодзи (и иконок Nerd Font, т.к. они находятся в диапазоне Private Use Area > 0x2400)
-        // мы идем по списку шрифтов с конца. Это значит, что Nerd Font будет проверен первым!
         let indices: Vec<usize> = if is_emoji_char {
             (0..self.fonts.len()).rev().collect()
         } else {
