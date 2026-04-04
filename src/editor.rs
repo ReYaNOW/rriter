@@ -171,6 +171,7 @@ pub struct Editor {
     pub cursor: usize,
     pub selection_anchor: Option<usize>,
     pub version: u64,
+    pub line_offsets: Vec<usize>,
 
     pub history: VecDeque<HistoryStep>,
     pub redo_stack: VecDeque<HistoryStep>,
@@ -198,6 +199,7 @@ impl Editor {
             cursor: 0,
             selection_anchor: None,
             version: 0,
+            line_offsets: vec![0],
             history: VecDeque::new(),
             redo_stack: VecDeque::new(),
             history_size: 0,
@@ -212,7 +214,28 @@ impl Editor {
             sync_edits: Vec::new(),
         }
     }
+    pub fn rebuild_line_offsets(&mut self) {
+        let mut new_offsets = Vec::with_capacity(1024);
+        new_offsets.push(0);
 
+        let (first, second) = self.text_parts();
+
+        let mut offset = 0;
+        for &b in first.as_bytes() {
+            offset += 1;
+            if b == b'\n' {
+                new_offsets.push(offset);
+            }
+        }
+        for &b in second.as_bytes() {
+            offset += 1;
+            if b == b'\n' {
+                new_offsets.push(offset);
+            }
+        }
+
+        self.line_offsets = new_offsets;
+    }
     fn get_line_hashes(&self) -> Vec<u64> {
         let mut hashes = Vec::with_capacity(1024);
         let mut hasher = FxHasher::default();
@@ -409,6 +432,8 @@ impl Editor {
     }
 
     pub fn update_modifications(&mut self) {
+        self.rebuild_line_offsets();
+
         let curr_hashes = self.get_line_hashes();
 
         let (mod_saved, del_saved) = get_diff_info(&self.saved_hashes, &curr_hashes);

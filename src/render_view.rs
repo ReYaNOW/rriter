@@ -1,3 +1,4 @@
+// --- START OF FILE render_view.rs ---
 pub mod core_text;
 pub mod ui;
 
@@ -18,6 +19,7 @@ impl Renderer {
     pub fn draw(
         &mut self,
         editor: &mut Editor,
+        scroll_x: f32,
         scroll_y: f32,
         blink_alpha: f32,
         show_fps: bool,
@@ -55,9 +57,33 @@ impl Renderer {
             }
         }
         self.last_frame_time = Some(now);
-        self.update_cache(editor, is_resizing);
 
+        let total_lines = editor.line_offsets.len().max(1);
+        let use_minimap = total_lines <= 3000;
+        let s = self.scale_factor;
+
+        let target_minimap_w = if use_minimap { 110.0 } else { 16.0 * s };
+
+        if (self.minimap_width - target_minimap_w).abs() > 0.5 {
+            self.minimap_width = target_minimap_w;
+            self.visual_lines.clear();
+        }
+
+        self.update_cache(editor, scroll_x, scroll_y, is_resizing);
+
+        let render_scroll_x = scroll_x.round();
         let render_scroll_y = scroll_y.round();
+
+        // Считаем max_scroll_x
+        let mut max_line_w = 0.0f32;
+        for v in &self.visual_lines {
+            let w = v.whitespace_px_width + v.text_px_width;
+            if w > max_line_w {
+                max_line_w = w;
+            }
+        }
+        let view_w = self.width - self.minimap_width - self.left_padding;
+        self.max_scroll_x = (max_line_w - view_w + 100.0).max(0.0);
 
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
@@ -69,7 +95,6 @@ impl Renderer {
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        // ИСПРАВЛЕНИЕ: Сначала обновляем кэш, затем получаем данные
         editor.ensure_indent_cache_updated();
         let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
@@ -94,22 +119,12 @@ impl Renderer {
             solid_minimap_bg,
         );
 
-        let cursor_line_idx = match self
-            .visual_lines
-            .binary_search_by_key(&editor.cursor, |v| v.byte_idx)
-        {
-            Ok(i) => i,
-            Err(i) => {
-                if i > 0 {
-                    i - 1
-                } else {
-                    0
-                }
-            }
-        };
-
+        let cursor_phys_line = editor
+            .line_offsets
+            .partition_point(|&o| o <= editor.cursor)
+            .saturating_sub(1);
         let cursor_line_y =
-            self.baseline_offset - render_scroll_y + (cursor_line_idx as f32 * self.line_height);
+            self.baseline_offset - render_scroll_y + (cursor_phys_line as f32 * self.line_height);
 
         if cursor_line_y > -self.line_height * 2.0 && cursor_line_y < self.height + self.line_height
         {
@@ -122,11 +137,8 @@ impl Renderer {
             );
         }
 
-        let skip_visual_lines =
-            ((render_scroll_y / self.line_height).max(0.0) as usize).saturating_sub(2);
-        let visible_lines_count = ((self.height / self.line_height).ceil() as usize) + 4;
-        let end_visual_line =
-            (skip_visual_lines + visible_lines_count).min(self.visual_lines.len());
+        let skip_visual_lines = 0;
+        let end_visual_line = self.visual_lines.len();
 
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -137,11 +149,12 @@ impl Renderer {
 
             if let Some(&depth) = indent_levels.get(phys_idx) {
                 if depth > 0 {
-                    let y_top = (i as f32 * self.line_height) - render_scroll_y;
+                    let y_top = v_line.y_offset - render_scroll_y;
                     let text_start_x = self.left_padding + v_line.whitespace_px_width;
                     let text_end_x = text_start_x + v_line.text_px_width;
 
                     for level in 1..=depth {
+                        // Обратите внимание: линии рисуются с учетом X-скролла
                         let guide_x = self.left_padding + (level as f32 * 4.0 * space_adv);
                         let margin = space_adv * 0.5;
                         let overlaps = v_line.text_px_width > 0.0
@@ -150,7 +163,7 @@ impl Renderer {
 
                         if !overlaps {
                             self.push_rect(
-                                guide_x.round(),
+                                (guide_x - render_scroll_x).round(),
                                 y_top,
                                 1.0,
                                 self.line_height,
@@ -169,7 +182,7 @@ impl Renderer {
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
             let phys_idx = v_line.physical_line - 1;
-            let y_top = (i as f32 * self.line_height) - render_scroll_y;
+            let y_top = v_line.y_offset - render_scroll_y;
             let y_bottom = y_top + self.line_height;
             last_bottom_y = y_bottom;
 
@@ -245,34 +258,37 @@ impl Renderer {
         for i in skip_visual_lines..end_visual_line {
             let v_line_info = self.visual_lines[i];
             let start_byte = v_line_info.byte_idx;
+
             let end_byte = if i + 1 < self.visual_lines.len() {
                 self.visual_lines[i + 1].byte_idx
             } else {
-                len
+                let phys_idx = v_line_info.physical_line - 1;
+                if phys_idx + 1 < editor.line_offsets.len() {
+                    editor.line_offsets[phys_idx + 1]
+                } else {
+                    len
+                }
             };
 
-            let y = self.baseline_offset - render_scroll_y + (i as f32 * self.line_height);
+            let y = self.baseline_offset + v_line_info.y_offset - render_scroll_y;
+            // Абсолютная координата (отступ X от начала документа)
             let mut x = self.left_padding;
 
-            if v_line_info.is_soft_wrap {
-                self.draw_string("↪", self.left_padding * 0.5, y, self.theme.line_num);
+            let mut n = v_line_info.physical_line;
+            let mut buf = [0u8; 20];
+            let mut idx = 20;
+            if n == 0 {
+                idx -= 1;
+                buf[idx] = b'0';
             } else {
-                let mut n = v_line_info.physical_line;
-                let mut buf = [0u8; 20];
-                let mut idx = 20;
-                if n == 0 {
+                while n > 0 {
                     idx -= 1;
-                    buf[idx] = b'0';
-                } else {
-                    while n > 0 {
-                        idx -= 1;
-                        buf[idx] = b'0' + (n % 10) as u8;
-                        n /= 10;
-                    }
+                    buf[idx] = b'0' + (n % 10) as u8;
+                    n /= 10;
                 }
-                if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
-                    self.draw_string(num_str, 10.0, y, self.theme.line_num);
-                }
+            }
+            if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
+                self.draw_string(num_str, 10.0, y, self.theme.line_num);
             }
 
             let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {
@@ -285,7 +301,13 @@ impl Renderer {
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
 
+            let mut out_of_bounds = false;
+
             while current_chunk_offset < end_byte {
+                if self.vertices.len() > crate::renderer::MAX_VERTICES - 2000 {
+                    self.flush();
+                }
+
                 let s = if current_chunk_offset < first_len {
                     let s_end = end_byte.min(first_len);
                     &first[current_chunk_offset..s_end]
@@ -296,8 +318,21 @@ impl Renderer {
                 };
 
                 for c in s.chars() {
-                    if cursor_pos.is_none() && current_offset >= editor.cursor {
-                        cursor_pos = Some((x, y));
+                    // CULLING ПРАВОЙ ЧАСТИ
+                    if x - render_scroll_x > self.width + 150.0 {
+                        out_of_bounds = true;
+                        break;
+                    }
+
+                    let char_len = c.len_utf8();
+
+                    // ФАНТОМНЫЙ КУРСОР: 100% Фикс.
+                    // Проверяем, что курсор находится ВНУТРИ этого конкретного символа.
+                    if cursor_pos.is_none()
+                        && editor.cursor >= current_offset
+                        && editor.cursor < current_offset + char_len
+                    {
+                        cursor_pos = Some((x - render_scroll_x, y));
                     }
 
                     while span_idx < spans.len() && spans[span_idx].end <= current_offset {
@@ -310,7 +345,6 @@ impl Renderer {
                         search_idx += 1;
                     }
 
-                    let char_len = c.len_utf8();
                     let is_newline = c == '\n';
                     let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
                     let adv = if is_newline || is_hidden {
@@ -339,7 +373,7 @@ impl Renderer {
                             [0.6, 0.6, 0.6, 0.35]
                         };
                         self.push_rect(
-                            x,
+                            x - render_scroll_x,
                             y - self.baseline_offset + 2.0,
                             w,
                             self.line_height,
@@ -348,7 +382,7 @@ impl Renderer {
                     } else if current_offset >= sel_start && current_offset < sel_end {
                         let w = if is_newline { 10.0 } else { adv };
                         self.push_rect(
-                            x,
+                            x - render_scroll_x,
                             y - self.baseline_offset + 2.0,
                             w,
                             self.line_height,
@@ -357,28 +391,17 @@ impl Renderer {
                     }
 
                     if !is_newline && !is_hidden && c != ' ' && c != '\t' {
-                        if let Some(g) = self.get_glyph(c) {
-                            let mut current_color = self.theme.fg;
-                            if span_idx < spans.len() && spans[span_idx].start <= current_offset {
-                                current_color = spans[span_idx].color;
-                            }
+                        // CULLING ЛЕВОЙ ЧАСТИ
+                        if x - render_scroll_x + adv > 0.0 {
+                            if let Some(g) = self.get_glyph(c) {
+                                let mut current_color = self.theme.fg;
+                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
+                                {
+                                    current_color = spans[span_idx].color;
+                                }
 
-                            self.push_quad(
-                                x + g.offset_x,
-                                y - g.offset_y,
-                                g.width,
-                                g.height,
-                                g.u,
-                                g.v,
-                                g.uw,
-                                g.vh,
-                                current_color,
-                                g.is_emoji,
-                            );
-
-                            if c == '.' || c == ':' {
                                 self.push_quad(
-                                    x + g.offset_x + 1.0,
+                                    x - render_scroll_x + g.offset_x,
                                     y - g.offset_y,
                                     g.width,
                                     g.height,
@@ -389,12 +412,31 @@ impl Renderer {
                                     current_color,
                                     g.is_emoji,
                                 );
+
+                                if c == '.' || c == ':' {
+                                    self.push_quad(
+                                        x - render_scroll_x + g.offset_x + 1.0,
+                                        y - g.offset_y,
+                                        g.width,
+                                        g.height,
+                                        g.u,
+                                        g.v,
+                                        g.uw,
+                                        g.vh,
+                                        current_color,
+                                        g.is_emoji,
+                                    );
+                                }
                             }
                         }
                     }
 
                     x += adv;
                     current_offset += char_len;
+                }
+
+                if out_of_bounds {
+                    break;
                 }
 
                 if current_chunk_offset < first_len {
@@ -405,26 +447,26 @@ impl Renderer {
             }
         }
 
+        // Если курсор находится в самом конце документа (за последним символом)
         if cursor_pos.is_none() && editor.cursor == len {
-            let last_line_idx = (self.visual_lines.len() - 1).max(0);
-            let y =
-                self.baseline_offset - render_scroll_y + (last_line_idx as f32 * self.line_height);
-            let (first, second) = editor.text_parts();
-            let x = self.left_padding
-                + self.measure_width(
-                    first,
-                    second,
-                    self.visual_lines[last_line_idx].byte_idx,
-                    editor.cursor,
-                );
-            cursor_pos = Some((x, y));
+            if let Some(last_line) = self.visual_lines.last() {
+                let y = self.baseline_offset + last_line.y_offset - render_scroll_y;
+                let (first, second) = editor.text_parts();
+                let x = self.left_padding
+                    + self.measure_width(first, second, last_line.byte_idx, editor.cursor);
+                cursor_pos = Some((x - render_scroll_x, y));
+            }
         }
 
-        if let Some((cx, cy)) = cursor_pos {
+        if let Some((cx_screen, cy)) = cursor_pos {
             if sel_start == sel_end && blink_alpha > 0.5 && !show_quit_dialog && !search_focused {
-                if cy > -self.line_height && cy < self.height + self.line_height {
+                if cy > -self.line_height
+                    && cy < self.height + self.line_height
+                    && cx_screen < minimap_x
+                    && cx_screen >= self.left_padding
+                {
                     self.push_rect(
-                        cx,
+                        cx_screen,
                         cy - self.baseline_offset + 2.0,
                         2.0,
                         self.line_height - 2.0,
@@ -434,10 +476,6 @@ impl Renderer {
             }
         }
 
-        let total_lines_f32 = self.visual_lines.len().max(1) as f32;
-        let minimap_line_h = (self.height / total_lines_f32).min(3.0);
-        let track_h = (total_lines_f32 * minimap_line_h).min(self.height);
-
         self.push_rect(
             minimap_x,
             0.0,
@@ -445,184 +483,247 @@ impl Renderer {
             self.height,
             [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
         );
-        self.push_rect(minimap_x, 0.0, minimap_w, track_h, solid_minimap_bg);
 
-        let current_spans_ver =
-            (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
-
-        if self.last_minimap_editor_version != editor.version
-            || self.last_minimap_spans_version != current_spans_ver
-            || self.minimap_vertices.is_empty()
-            || (self.last_minimap_width - self.width).abs() > 0.5
-        {
-            self.minimap_vertices.clear();
-            let map_bg = self.theme.minimap_bg;
-
-            let push_mini =
-                |verts: &mut Vec<Vertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| {
-                    let x1 = x.round();
-                    let y1 = y.round();
-                    let x2 = (x + w).round();
-                    let y2 = (y + h).round();
-                    let v1 = Vertex {
-                        pos: [x1, y1],
-                        uv: [-1.0, -1.0],
-                        color,
-                        is_emoji: 0.0,
-                    };
-                    let v2 = Vertex {
-                        pos: [x2, y1],
-                        uv: [-1.0, -1.0],
-                        color,
-                        is_emoji: 0.0,
-                    };
-                    let v3 = Vertex {
-                        pos: [x2, y2],
-                        uv: [-1.0, -1.0],
-                        color,
-                        is_emoji: 0.0,
-                    };
-                    let v4 = Vertex {
-                        pos: [x1, y2],
-                        uv: [-1.0, -1.0],
-                        color,
-                        is_emoji: 0.0,
-                    };
-                    verts.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
-                };
-
-            let step = if minimap_line_h < 1.0 {
-                (1.0 / minimap_line_h).ceil() as usize
-            } else {
-                1
-            };
-
-            let draw_h = (minimap_line_h * step as f32).max(1.0);
-
-            for i in (0..self.visual_lines.len()).step_by(step) {
-                let y_pixel = (i as f32) * minimap_line_h;
-                if y_pixel > self.height {
-                    break;
-                }
-
-                let start_byte = self.visual_lines[i].byte_idx;
-                let end_byte = if i + 1 < self.visual_lines.len() {
-                    self.visual_lines[i + 1].byte_idx
-                } else {
-                    editor.len()
-                };
-
-                let mut current_x = minimap_x + 5.0;
-                let mut cur_byte = start_byte;
-
-                let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
-                };
-
-                while cur_byte < end_byte {
-                    let b = editor.byte_at(cur_byte);
-                    if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                        current_x += 1.2;
-                        cur_byte += 1;
-                        continue;
-                    }
-
-                    while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte {
-                        span_idx_mini += 1;
-                    }
-
-                    let (span_end, raw_color) = if span_idx_mini < spans.len() {
-                        let s = &spans[span_idx_mini];
-                        if s.start <= cur_byte {
-                            (s.end.min(end_byte), s.color)
-                        } else {
-                            (s.start.min(end_byte), self.theme.fg)
-                        }
-                    } else {
-                        (end_byte, self.theme.fg)
-                    };
-
-                    let color = [
-                        raw_color[0] * 0.7 + map_bg[0] * 0.3,
-                        raw_color[1] * 0.7 + map_bg[1] * 0.3,
-                        raw_color[2] * 0.7 + map_bg[2] * 0.3,
-                        1.0,
-                    ];
-
-                    let mut chunk_end = cur_byte;
-                    while chunk_end < span_end {
-                        let b_next = editor.byte_at(chunk_end);
-                        if b_next == b' ' || b_next == b'\t' || b_next == b'\n' || b_next == b'\r' {
-                            break;
-                        }
-                        chunk_end += 1;
-                    }
-
-                    let byte_len = chunk_end.saturating_sub(cur_byte);
-                    let w = (byte_len as f32 * 1.2).min(minimap_x + minimap_w - 5.0 - current_x);
-
-                    if w > 0.0 {
-                        push_mini(
-                            &mut self.minimap_vertices,
-                            current_x,
-                            y_pixel,
-                            w,
-                            draw_h,
-                            color,
-                        );
-                        current_x += w;
-                    }
-
-                    cur_byte = chunk_end;
-                    if current_x >= minimap_x + minimap_w - 5.0 {
-                        break;
-                    }
-                }
-            }
-            self.last_minimap_editor_version = editor.version;
-            self.last_minimap_spans_version = current_spans_ver;
-            self.last_minimap_width = self.width;
-        }
-
-        self.vertices.extend_from_slice(&self.minimap_vertices);
-
-        self.push_rect(
-            minimap_x,
-            (cursor_line_idx as f32) * minimap_line_h,
-            minimap_w,
-            2.0,
-            self.theme.minimap_cursor,
-        );
-
-        let visible_lines = self.height / self.line_height;
-        let viewport_h = (visible_lines * minimap_line_h).max(10.0).min(track_h);
         let max_scroll = self.get_max_scroll(editor, self.height);
-        let scroll_ratio = if max_scroll > 0.0 {
+        let scroll_ratio_y = if max_scroll > 0.0 {
             (render_scroll_y / max_scroll).clamp(0.0, 1.0)
         } else {
             0.0
         };
-        let viewport_y = scroll_ratio * (track_h - viewport_h).max(0.0);
 
-        let view_bg = [
-            self.theme.minimap_bg[0] * 0.7 + self.theme.sel[0] * 0.3,
-            self.theme.minimap_bg[1] * 0.7 + self.theme.sel[1] * 0.3,
-            self.theme.minimap_bg[2] * 0.7 + self.theme.sel[2] * 0.3,
-            0.3,
-        ];
-        let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+        if use_minimap {
+            let total_lines_f32 = total_lines as f32;
+            let base_minimap_line_h = 2.5 * s;
+            let minimap_line_h = (self.height / total_lines_f32)
+                .min(base_minimap_line_h)
+                .max(0.1);
 
-        self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
-        self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
-        self.push_rect(
-            minimap_x,
-            viewport_y + viewport_h - 2.0,
-            minimap_w,
-            2.0,
-            view_border,
-        );
-        self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
+            let current_spans_ver =
+                (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
+
+            let needs_minimap_update = self.last_minimap_editor_version != editor.version
+                || self.last_minimap_spans_version != current_spans_ver
+                || self.minimap_vertices.is_empty()
+                || (self.last_minimap_width - self.width).abs() > 0.5;
+
+            if needs_minimap_update {
+                self.minimap_vertices.clear();
+                let map_bg = self.theme.minimap_bg;
+                let mut current_y = 0.0;
+
+                for i in 0..editor.line_offsets.len() {
+                    let y_pixel = current_y;
+                    if y_pixel > self.height {
+                        break;
+                    }
+
+                    let start_byte = editor.line_offsets[i];
+                    let end_byte = if i + 1 < editor.line_offsets.len() {
+                        editor.line_offsets[i + 1]
+                    } else {
+                        editor.len()
+                    };
+
+                    let mut current_x = minimap_x + 5.0;
+                    let mut cur_byte = start_byte;
+
+                    let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start)
+                    {
+                        Ok(idx) => idx,
+                        Err(idx) => idx.saturating_sub(1),
+                    };
+
+                    while cur_byte < end_byte {
+                        let text_chunk = if cur_byte < first_len {
+                            &first[cur_byte..end_byte.min(first_len)]
+                        } else {
+                            &second[cur_byte - first_len..end_byte - first_len]
+                        };
+
+                        let mut spaces_len = 0;
+                        for b in text_chunk.bytes() {
+                            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+                                spaces_len += 1;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if spaces_len > 0 {
+                            current_x += 1.2 * (spaces_len as f32);
+                            cur_byte += spaces_len;
+                            if current_x >= minimap_x + minimap_w - 5.0 {
+                                break;
+                            }
+                            continue;
+                        }
+
+                        while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte {
+                            span_idx_mini += 1;
+                        }
+
+                        let (span_end, raw_color) = if span_idx_mini < spans.len() {
+                            let sp = &spans[span_idx_mini];
+                            if sp.start <= cur_byte {
+                                (sp.end.min(end_byte), sp.color)
+                            } else {
+                                (sp.start.min(end_byte), self.theme.fg)
+                            }
+                        } else {
+                            (end_byte, self.theme.fg)
+                        };
+
+                        let color = [
+                            raw_color[0] * 0.7 + map_bg[0] * 0.3,
+                            raw_color[1] * 0.7 + map_bg[1] * 0.3,
+                            raw_color[2] * 0.7 + map_bg[2] * 0.3,
+                            1.0,
+                        ];
+
+                        let mut word_len = 0;
+                        for b in text_chunk.bytes() {
+                            if cur_byte + word_len >= span_end
+                                || b == b' '
+                                || b == b'\t'
+                                || b == b'\n'
+                                || b == b'\r'
+                            {
+                                break;
+                            }
+                            word_len += 1;
+                        }
+
+                        let w =
+                            (word_len as f32 * 1.2).min(minimap_x + minimap_w - 5.0 - current_x);
+
+                        if w > 0.0 {
+                            let rect_h = minimap_line_h.max(1.0);
+                            let x1 = current_x.round();
+                            let y1 = y_pixel.round();
+                            let x2 = (current_x + w).round();
+                            let y2 = (y_pixel + rect_h).round();
+
+                            let v1 = Vertex {
+                                pos: [x1, y1],
+                                uv: [-1.0, -1.0],
+                                color,
+                                is_emoji: 0.0,
+                            };
+                            let v2 = Vertex {
+                                pos: [x2, y1],
+                                uv: [-1.0, -1.0],
+                                color,
+                                is_emoji: 0.0,
+                            };
+                            let v3 = Vertex {
+                                pos: [x2, y2],
+                                uv: [-1.0, -1.0],
+                                color,
+                                is_emoji: 0.0,
+                            };
+                            let v4 = Vertex {
+                                pos: [x1, y2],
+                                uv: [-1.0, -1.0],
+                                color,
+                                is_emoji: 0.0,
+                            };
+                            self.minimap_vertices
+                                .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                            current_x += w;
+                        }
+
+                        cur_byte += word_len.max(1);
+                        if current_x >= minimap_x + minimap_w - 5.0 {
+                            break;
+                        }
+                    }
+                    current_y += minimap_line_h;
+                }
+                self.last_minimap_editor_version = editor.version;
+                self.last_minimap_spans_version = current_spans_ver;
+                self.last_minimap_width = self.width;
+            }
+
+            self.flush();
+            let mut offset = 0;
+            while offset < self.minimap_vertices.len() {
+                let chunk = (self.minimap_vertices.len() - offset).min(90_000);
+                self.vertices
+                    .extend_from_slice(&self.minimap_vertices[offset..offset + chunk]);
+                self.flush();
+                offset += chunk;
+            }
+
+            if cursor_phys_line < editor.line_offsets.len() {
+                let y_cursor = cursor_phys_line as f32 * minimap_line_h;
+                self.push_rect(
+                    minimap_x,
+                    y_cursor,
+                    minimap_w,
+                    2.0,
+                    self.theme.minimap_cursor,
+                );
+            }
+
+            let visible_lines = self.height / self.line_height;
+            let viewport_h = (visible_lines * minimap_line_h).max(4.0);
+
+            let max_viewport_y = (self.height - viewport_h).max(0.0);
+            let viewport_y = scroll_ratio_y * max_viewport_y;
+
+            let view_bg = [
+                self.theme.minimap_bg[0] * 0.7 + self.theme.sel[0] * 0.3,
+                self.theme.minimap_bg[1] * 0.7 + self.theme.sel[1] * 0.3,
+                self.theme.minimap_bg[2] * 0.7 + self.theme.sel[2] * 0.3,
+                0.3,
+            ];
+            let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+
+            self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
+            self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
+            self.push_rect(
+                minimap_x,
+                viewport_y + viewport_h - 2.0,
+                minimap_w,
+                2.0,
+                view_border,
+            );
+            self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
+        } else {
+            let track_h = self.height - 16.0 * s;
+            let total_content_h = total_lines as f32 * self.line_height;
+            let thumb_h = (self.height / total_content_h * track_h).max(40.0 * s);
+            let thumb_y = 8.0 * s + scroll_ratio_y * (track_h - thumb_h);
+
+            let thumb_w = 6.0 * s;
+            let scroll_x_thumb = minimap_x + (minimap_w - thumb_w) / 2.0;
+
+            self.push_rounded_rect(
+                scroll_x_thumb,
+                thumb_y,
+                thumb_w,
+                thumb_h,
+                3.0 * s,
+                [0.40, 0.42, 0.46, 1.0],
+            );
+        }
+
+        // Горизонтальный скроллбар
+        if self.max_scroll_x > 0.0 {
+            let track_w = self.width - minimap_w - self.left_padding;
+            let thumb_w = (track_w / (self.max_scroll_x + track_w) * track_w).max(40.0 * s);
+            let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
+            let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
+
+            self.push_rounded_rect(
+                thumb_x,
+                self.height - 10.0 * s,
+                thumb_w,
+                6.0 * s,
+                3.0 * s,
+                [0.40, 0.42, 0.46, 1.0],
+            );
+        }
 
         if show_fps {
             let center_x = (self.width - minimap_w) / 2.0;
@@ -634,7 +735,6 @@ impl Renderer {
         }
 
         if search_anim_y > -70.0 {
-            let s = self.scale_factor;
             let search_w = 480.0 * s;
             let search_h = 46.0 * s;
             let search_x = minimap_x - search_w - 20.0 * s;

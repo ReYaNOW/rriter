@@ -120,6 +120,9 @@ fn load_config() -> bool {
 }
 
 fn main() {
+    std::env::set_var("MIMALLOC_PURGE_DELAY", "100");
+    std::env::set_var("MIMALLOC_ARENA_CAPACITY", "4");
+
     let args: Vec<String> = env::args().collect();
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
@@ -226,6 +229,9 @@ Ctrl + Del\tУдалить слово справа от курсора
         target_scroll_y: 0.0,
         scroll_y: 0.0,
         scroll_velocity: 0.0,
+        target_scroll_x: 0.0,
+        scroll_x: 0.0,
+        scroll_x_velocity: 0.0,
         last_frame: Instant::now(),
         last_action: Instant::now(),
         last_blink_state: true,

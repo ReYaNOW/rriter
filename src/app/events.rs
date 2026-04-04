@@ -1,3 +1,4 @@
+// --- START OF FILE events.rs ---
 use crate::app::{App, PendingAction};
 use crate::renderer::Renderer;
 use glutin::config::ConfigTemplateBuilder;
@@ -17,6 +18,7 @@ use winit::window::{Window, WindowId};
 
 impl App {
     pub fn handle_dialog_window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
+        // ВЕСЬ КОД ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ
         match event {
             WindowEvent::CloseRequested => self.close_dialog(),
             WindowEvent::ModifiersChanged(mod_state) => self.modifiers = mod_state.state(),
@@ -436,6 +438,7 @@ impl ApplicationHandler for App {
 
                 let mut wants_pointer = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
+                    self.scroll_x,
                     self.scroll_y,
                     blink_alpha,
                     self.show_fps,
@@ -593,26 +596,54 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Физика главного скролла
-        let diff = self.target_scroll_y - self.scroll_y;
-        let abs_diff = diff.abs();
-        if abs_diff > 0.0 {
+        // Физика главного скролла Y
+        let diff_y = self.target_scroll_y - self.scroll_y;
+        let abs_diff_y = diff_y.abs();
+        if abs_diff_y > 0.0 {
             let anim_speed = self.scroll_anim_speed;
-            let target_v = if abs_diff > 15.0 {
-                diff * anim_speed
+            let target_v = if abs_diff_y > 15.0 {
+                diff_y * anim_speed
             } else {
-                diff.signum() * abs_diff.sqrt() * (15.0_f32.sqrt() * anim_speed)
+                diff_y.signum() * abs_diff_y.sqrt() * (15.0_f32.sqrt() * anim_speed)
             };
             let v_factor = 1.0 - (-anim_speed * 4.0 * dt).exp();
             self.scroll_velocity += (target_v - self.scroll_velocity) * v_factor;
             let step = self.scroll_velocity * dt;
 
-            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01
+            if step.abs() >= abs_diff_y
+                || diff_y.signum() != (diff_y - step).signum()
+                || abs_diff_y < 0.01
             {
                 self.scroll_y = self.target_scroll_y;
                 self.scroll_velocity = 0.0;
             } else {
                 self.scroll_y += step;
+            }
+            needs_redraw = true;
+        }
+
+        // Физика горизонтального скролла X
+        let diff_x = self.target_scroll_x - self.scroll_x;
+        let abs_diff_x = diff_x.abs();
+        if abs_diff_x > 0.0 {
+            let anim_speed = self.scroll_anim_speed;
+            let target_v = if abs_diff_x > 15.0 {
+                diff_x * anim_speed
+            } else {
+                diff_x.signum() * abs_diff_x.sqrt() * (15.0_f32.sqrt() * anim_speed)
+            };
+            let v_factor = 1.0 - (-anim_speed * 4.0 * dt).exp();
+            self.scroll_x_velocity += (target_v - self.scroll_x_velocity) * v_factor;
+            let step = self.scroll_x_velocity * dt;
+
+            if step.abs() >= abs_diff_x
+                || diff_x.signum() != (diff_x - step).signum()
+                || abs_diff_x < 0.01
+            {
+                self.scroll_x = self.target_scroll_x;
+                self.scroll_x_velocity = 0.0;
+            } else {
+                self.scroll_x += step;
             }
             needs_redraw = true;
         }
@@ -662,13 +693,17 @@ impl ApplicationHandler for App {
         }
 
         if let Some(w) = self.window.as_ref() {
-            let max_scroll = self
+            let max_scroll_y = self
                 .renderer
                 .as_mut()
                 .unwrap()
                 .get_max_scroll(&self.editor, w.inner_size().height as f32);
-            self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll);
-            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+            self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll_y);
+            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
+
+            let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
+            self.target_scroll_x = self.target_scroll_x.clamp(0.0, max_scroll_x);
+            self.scroll_x = self.scroll_x.clamp(0.0, max_scroll_x);
         }
 
         if let Some(rx) = &self.open_file_rx {
@@ -737,14 +772,12 @@ impl ApplicationHandler for App {
 
         let is_highlighting = !self.is_highlighted_once;
 
-        // Оптимизация нагрузки на процессор
         if needs_redraw {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();
             }
-            event_loop.set_control_flow(ControlFlow::Wait); // Передача управления winit для немедленной отрисовки
+            event_loop.set_control_flow(ControlFlow::Wait);
         } else if is_highlighting {
-            // Если мы только ждем парсер синтаксиса, не стоит насиловать CPU бесконечным Poll
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 now + std::time::Duration::from_millis(5),
             ));

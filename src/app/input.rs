@@ -1,3 +1,4 @@
+// --- START OF FILE input.rs ---
 use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::widgets::IconButton;
@@ -5,7 +6,6 @@ use std::time::Instant;
 use winit::event::{ElementState, KeyEvent, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::CursorIcon;
 
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
@@ -14,21 +14,38 @@ impl App {
         }
         self.scroll_anim_speed = 7.0;
         let lh = self.renderer.as_ref().unwrap().line_height;
+        let shift = self.modifiers.shift_key();
+
         match delta {
-            MouseScrollDelta::LineDelta(_, y) => {
-                self.target_scroll_y -= y * 4.0 * lh;
+            MouseScrollDelta::LineDelta(x, y) => {
+                if shift {
+                    self.target_scroll_x -= y * 4.0 * lh;
+                } else {
+                    self.target_scroll_y -= y * 4.0 * lh;
+                    self.target_scroll_x -= x * 4.0 * lh;
+                }
             }
             MouseScrollDelta::PixelDelta(pos) => {
-                self.target_scroll_y -= pos.y as f32;
+                if shift {
+                    self.target_scroll_x -= pos.y as f32;
+                } else {
+                    self.target_scroll_y -= pos.y as f32;
+                    self.target_scroll_x -= pos.x as f32;
+                }
             }
         }
+
         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-        let max_scroll = self
+        let max_scroll_y = self
             .renderer
             .as_mut()
             .unwrap()
             .get_max_scroll(&self.editor, wh);
-        self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll).round();
+
+        let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
+
+        self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll_y).round();
+        self.target_scroll_x = self.target_scroll_x.clamp(0.0, max_scroll_x).round();
         self.window.as_ref().unwrap().request_redraw();
     }
 
@@ -112,6 +129,7 @@ impl App {
             self.is_dragging_search = false;
             self.is_dragging_autocomplete = false;
             self.target_scroll_y = self.target_scroll_y.round();
+            self.target_scroll_x = self.target_scroll_x.round();
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -162,7 +180,6 @@ impl App {
                         }
                         return;
                     } else {
-                        // СБРОС: Клик мимо окна автодополнения
                         self.autocomplete_active = false;
                         self.autocomplete_selected_idx = 0;
                         self.window.as_ref().unwrap().request_redraw();
@@ -170,8 +187,8 @@ impl App {
                 }
             }
 
-            let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
             let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+            let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
 
             if self.show_search && self.search_anim_y > -10.0 {
                 let search_w = 480.0 * s;
@@ -293,40 +310,76 @@ impl App {
                 }
             }
 
+            // Быстрая обработка клика по ГОРИЗОНТАЛЬНОМУ скроллбару
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let left_pad = self.renderer.as_ref().unwrap().left_padding;
+            if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 15.0 * s {
+                if last_mouse_x > left_pad && last_mouse_x < window_width - minimap_w {
+                    let track_w = window_width - minimap_w - left_pad;
+                    let ratio = (last_mouse_x - left_pad) / track_w;
+                    let max_x = self.renderer.as_ref().unwrap().max_scroll_x;
+                    self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
+                    self.scroll_x = self.target_scroll_x;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+
+            // Клик по правой панели (Миникарта или Скроллбар)
             if last_mouse_x >= window_width - minimap_w {
-                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let max_scroll = self
                     .renderer
                     .as_mut()
                     .unwrap()
                     .get_max_scroll(&self.editor, wh);
 
-                let total_lines_f32 =
-                    self.renderer.as_ref().unwrap().visual_lines.len().max(1) as f32;
-                let minimap_line_h = (wh / total_lines_f32).min(3.0);
-                let track_h = (total_lines_f32 * minimap_line_h).min(wh);
-                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                let viewport_h = (visible_lines * minimap_line_h).max(10.0).min(track_h);
+                let total_lines = self.editor.line_offsets.len().max(1);
+                let use_minimap = total_lines <= 3000;
 
-                let scroll_ratio = if max_scroll > 0.0 {
-                    (self.scroll_y / max_scroll).clamp(0.0, 1.0)
+                let (thumb_start_y, thumb_h, track_start_y, track_h) = if use_minimap {
+                    let base_minimap_line_h = 2.5 * s;
+                    let minimap_line_h =
+                        (wh / total_lines as f32).min(base_minimap_line_h).max(0.1);
+                    let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
+                    let viewport_h = (visible_lines * minimap_line_h).max(4.0);
+
+                    let scroll_ratio = if max_scroll > 0.0 {
+                        (self.scroll_y / max_scroll).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+
+                    let max_viewport_y = wh - viewport_h;
+                    let current_viewport_y = scroll_ratio * max_viewport_y;
+
+                    (current_viewport_y, viewport_h, 0.0, wh)
                 } else {
-                    0.0
+                    let track_h = wh - 16.0 * s;
+                    let total_content_h =
+                        total_lines as f32 * self.renderer.as_ref().unwrap().line_height;
+                    let thumb_height = (wh / total_content_h * track_h).max(40.0 * s);
+
+                    let scroll_ratio = if max_scroll > 0.0 {
+                        (self.scroll_y / max_scroll).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+
+                    let thumb_y = 8.0 * s + scroll_ratio * (track_h - thumb_height);
+                    (thumb_y, thumb_height, 8.0 * s, track_h)
                 };
-                let current_viewport_y = scroll_ratio * (track_h - viewport_h).max(0.0);
 
                 self.is_dragging_minimap = true;
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
                 self.last_click_time = Instant::now();
 
-                if last_mouse_y >= current_viewport_y
-                    && last_mouse_y <= current_viewport_y + viewport_h
-                {
-                    self.minimap_drag_offset_y = last_mouse_y - current_viewport_y;
+                if last_mouse_y >= thumb_start_y && last_mouse_y <= thumb_start_y + thumb_h {
+                    self.minimap_drag_offset_y = last_mouse_y - thumb_start_y;
                 } else {
-                    self.minimap_drag_offset_y = viewport_h / 2.0;
-                    let new_scroll_ratio = (last_mouse_y - self.minimap_drag_offset_y)
-                        / (track_h - viewport_h).max(0.0001);
+                    self.minimap_drag_offset_y = thumb_h / 2.0;
+                    let new_scroll_ratio =
+                        (last_mouse_y - track_start_y - self.minimap_drag_offset_y)
+                            / (track_h - thumb_h).max(0.0001);
                     self.target_scroll_y = (new_scroll_ratio * max_scroll)
                         .clamp(0.0, max_scroll)
                         .round();
@@ -374,6 +427,8 @@ impl App {
     }
 
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+        // ВЕСЬ КОД ФУНКЦИЙ handle_main_cursor_moved, handle_search_keyboard_input, handle_editor_keyboard_input, handle_main_keyboard_input
+        // ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ, кроме вызова set_cursor_at_pos
         if self.show_quit_dialog {
             return;
         }
@@ -414,13 +469,13 @@ impl App {
                 self.window
                     .as_ref()
                     .unwrap()
-                    .set_cursor(CursorIcon::Pointer);
+                    .set_cursor(winit::window::CursorIcon::Pointer);
 
                 let scroll_x = rx + rw - 14.0 * s;
                 if px < scroll_x {
                     let item_h = 36.0 * s;
                     let scroll = self.autocomplete_scroll_y;
-                    let content_y = py - ry + scroll - (4.0 * s); // padding
+                    let content_y = py - ry + scroll - (4.0 * s);
                     if content_y >= 0.0 {
                         let idx = (content_y / item_h) as usize;
                         if idx < self.autocomplete_options.len() {
@@ -479,12 +534,15 @@ impl App {
         }
 
         if is_text_cursor {
-            self.window.as_ref().unwrap().set_cursor(CursorIcon::Text);
+            self.window
+                .as_ref()
+                .unwrap()
+                .set_cursor(winit::window::CursorIcon::Text);
         } else {
             self.window
                 .as_ref()
                 .unwrap()
-                .set_cursor(CursorIcon::Default);
+                .set_cursor(winit::window::CursorIcon::Default);
         }
 
         if self.is_dragging_search {
@@ -528,17 +586,28 @@ impl App {
                     .unwrap()
                     .get_max_scroll(&self.editor, wh);
 
-                let total_lines_f32 =
-                    self.renderer.as_ref().unwrap().visual_lines.len().max(1) as f32;
-                let minimap_line_h = (wh / total_lines_f32).min(3.0);
-                let track_h = (total_lines_f32 * minimap_line_h).min(wh);
-                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                let viewport_h = (visible_lines * minimap_line_h).max(10.0).min(track_h);
+                let total_lines = self.editor.line_offsets.len().max(1);
+                let use_minimap = total_lines <= 3000;
+
+                let (thumb_h, track_start_y, track_h) = if use_minimap {
+                    let base_minimap_line_h = 2.5 * s;
+                    let minimap_line_h =
+                        (wh / total_lines as f32).min(base_minimap_line_h).max(0.1);
+                    let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
+                    let viewport_h = (visible_lines * minimap_line_h).max(4.0);
+                    (viewport_h, 0.0, wh)
+                } else {
+                    let track_height = wh - 16.0 * s;
+                    let total_content_h =
+                        total_lines as f32 * self.renderer.as_ref().unwrap().line_height;
+                    let thumb_height = (wh / total_content_h * track_height).max(40.0 * s);
+                    (thumb_height, 8.0 * s, track_height)
+                };
 
                 let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                let scroll_ratio = (last_mouse_y - self.minimap_drag_offset_y)
-                    / (track_h - viewport_h).max(0.0001);
+                let scroll_ratio = (last_mouse_y - track_start_y - self.minimap_drag_offset_y)
+                    / (track_h - thumb_h).max(0.0001);
 
                 self.target_scroll_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
@@ -1108,7 +1177,9 @@ impl App {
                 self.scroll_anim_speed = 25.0;
             }
 
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let wh_width = self.window.as_ref().unwrap().inner_size().width as f32;
+            let wh_height = self.window.as_ref().unwrap().inner_size().height as f32;
+
             let is_enter_or_backspace = matches!(
                 key_event.physical_key,
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::Backspace | KeyCode::Delete)
@@ -1128,20 +1199,25 @@ impl App {
                     .renderer
                     .as_mut()
                     .unwrap()
-                    .get_max_scroll(&self.editor, wh);
+                    .get_max_scroll(&self.editor, wh_height);
                 self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll).round();
                 self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
             } else {
-                let old_target = self.target_scroll_y;
+                let old_target_y = self.target_scroll_y;
+                let old_target_x = self.target_scroll_x;
+
                 App::ensure_cursor_visible(
                     &mut self.target_scroll_y,
+                    &mut self.target_scroll_x,
                     &self.editor,
                     self.renderer.as_mut().unwrap(),
-                    wh,
+                    wh_width,
+                    wh_height,
                 );
 
                 if key_event.repeat && !is_arrow && !is_page {
-                    self.scroll_y += self.target_scroll_y - old_target;
+                    self.scroll_y += self.target_scroll_y - old_target_y;
+                    self.scroll_x += self.target_scroll_x - old_target_x;
                 }
             }
         }

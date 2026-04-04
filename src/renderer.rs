@@ -1,10 +1,10 @@
+// --- START OF FILE renderer.rs ---
 use glow::HasContext;
 use std::collections::HashMap;
 use std::fs;
 use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
 
-// Предаллокация вершинного буфера под ~100 000 вершин.
 pub const MAX_VERTICES: usize = 100_000;
 pub const ATLAS_SIZE: i32 = 2048;
 
@@ -54,6 +54,7 @@ pub struct VisualLine {
     pub is_soft_wrap: bool,
     pub whitespace_px_width: f32,
     pub text_px_width: f32,
+    pub y_offset: f32,
 }
 
 #[derive(Clone)]
@@ -69,7 +70,7 @@ pub struct Renderer {
     pub vbo: glow::Buffer,
     pub texture: glow::Texture,
     pub vertices: Vec<Vertex>,
-    pub temp_edge_buffer: Vec<Vertex>, // Буфер для избежания аллокаций в push_rounded_rect
+    pub temp_edge_buffer: Vec<Vertex>,
 
     pub minimap_vertices: Vec<Vertex>,
     pub last_minimap_editor_version: u64,
@@ -105,6 +106,12 @@ pub struct Renderer {
     pub last_editor_version: u64,
     pub last_height: f32,
     pub last_width: f32,
+
+    pub last_scroll_y: f32,
+
+    // Новые поля для горизонтального скролла
+    pub last_scroll_x: f32,
+    pub max_scroll_x: f32,
 
     pub last_frame_time: Option<std::time::Instant>,
     pub fps: f32,
@@ -229,7 +236,6 @@ impl Renderer {
             ];
 
             let mut fonts = Vec::new();
-
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
                     fonts.push(FontData { data, index: 0 });
@@ -325,7 +331,6 @@ impl Renderer {
                 load_icon_from_memory(include_bytes!("icons/dialog-cancel.png"), "dialog-cancel");
             let icon_warning =
                 load_icon_from_memory(include_bytes!("icons/dialog-warning.png"), "dialog-warning");
-
             let icon_case_match = load_icon_from_memory(
                 include_bytes!("icons/format-text-uppercase.png"),
                 "format-text-uppercase",
@@ -373,6 +378,9 @@ impl Renderer {
                 last_editor_version: u64::MAX,
                 last_height: 0.0,
                 last_width: 0.0,
+                last_scroll_y: 0.0,
+                last_scroll_x: 0.0,
+                max_scroll_x: 0.0,
                 last_frame_time: None,
                 fps: 0.0,
                 frame_count: 0,
@@ -395,6 +403,8 @@ impl Renderer {
     }
 
     pub fn get_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+        /* остальное без изменений */
+        // ... (ВЕСЬ КОД ФУНКЦИЙ get_glyph, get_ui_glyph, resize и т.д. ОСТАЕТСЯ КАК БЫЛ)
         if let Some(g) = self.glyphs.get(&c) {
             return Some(*g);
         }

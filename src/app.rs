@@ -1,3 +1,4 @@
+// --- START OF FILE app.rs ---
 pub mod events;
 pub mod input;
 
@@ -63,6 +64,11 @@ pub struct App {
     pub scroll_y: f32,
     pub scroll_velocity: f32,
 
+    // Новые поля для горизонтального скролла
+    pub target_scroll_x: f32,
+    pub scroll_x: f32,
+    pub scroll_x_velocity: f32,
+
     pub last_frame: Instant,
     pub last_action: Instant,
     pub last_blink_state: bool,
@@ -107,7 +113,6 @@ pub struct App {
     pub is_ready: bool,
     pub is_highlighted_once: bool,
 
-    // Автодополнение
     pub autocomplete_active: bool,
     pub autocomplete_options: Vec<(CompletionItem, Vec<usize>)>,
     pub autocomplete_selected_idx: usize,
@@ -124,12 +129,15 @@ pub struct App {
 impl App {
     pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,
+        target_scroll_x: &mut f32,
         editor: &Editor,
         renderer: &mut Renderer,
+        window_width: f32,
         window_height: f32,
     ) {
-        let (_, cy) = renderer.get_cursor_xy(editor);
+        let (cx_screen, cy) = renderer.get_cursor_xy(editor);
 
+        // Вертикаль
         if cy - renderer.baseline_offset < *target_scroll_y {
             *target_scroll_y = (cy - renderer.baseline_offset).max(0.0);
             *target_scroll_y =
@@ -142,8 +150,20 @@ impl App {
                 (*target_scroll_y / renderer.line_height).ceil() * renderer.line_height;
         }
 
-        let max_s = renderer.get_max_scroll(editor, window_height);
-        *target_scroll_y = target_scroll_y.clamp(0.0, max_s).round();
+        let max_s_y = renderer.get_max_scroll(editor, window_height);
+        *target_scroll_y = target_scroll_y.clamp(0.0, max_s_y).round();
+
+        // Горизонталь (cx_screen УЖЕ в экранных координатах, благодаря правильному вычету scroll_x)
+        let visible_left = renderer.left_padding + 30.0;
+        let visible_right = window_width - renderer.minimap_width - 40.0;
+
+        if cx_screen < visible_left {
+            *target_scroll_x -= visible_left - cx_screen;
+        } else if cx_screen > visible_right {
+            *target_scroll_x += cx_screen - visible_right;
+        }
+
+        *target_scroll_x = target_scroll_x.clamp(0.0, renderer.max_scroll_x).round();
     }
 
     pub fn get_current_word_prefix(&self) -> String {
@@ -370,7 +390,7 @@ impl App {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
                 if let Some(r) = self.renderer.as_mut() {
-                    r.update_cache(&self.editor, false);
+                    r.update_cache(&self.editor, self.scroll_x, self.scroll_y, false);
                     let line_idx = match r.visual_lines.binary_search_by_key(&end, |v| v.byte_idx) {
                         Ok(i) => i,
                         Err(i) => {
@@ -553,8 +573,12 @@ impl App {
                 self.editor.get_full_text(),
                 self.file_extension.clone(),
             );
+
             self.target_scroll_y = 0.0;
             self.scroll_y = 0.0;
+            self.target_scroll_x = 0.0;
+            self.scroll_x = 0.0;
+
             self.last_sent_version = u64::MAX;
             self.search_results.clear();
             self.search_current_idx = None;
