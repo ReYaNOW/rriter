@@ -238,6 +238,7 @@ Ctrl + Del\tУдалить слово справа от курсора
         modifiers: ModifiersState::empty(),
         is_dragging: false,
         is_dragging_minimap: false,
+        is_dragging_h_scroll: false,
         minimap_drag_offset_y: 0.0,
         is_focused: true,
         show_fps,

@@ -73,6 +73,7 @@ pub struct App {
     pub modifiers: ModifiersState,
     pub is_dragging: bool,
     pub is_dragging_minimap: bool,
+    pub is_dragging_h_scroll: bool,
     pub minimap_drag_offset_y: f32,
     pub is_focused: bool,
     pub show_fps: bool,
@@ -459,6 +460,7 @@ impl App {
             self.show_quit_dialog = true;
             self.is_dragging = false;
             self.is_dragging_minimap = false;
+            self.is_dragging_h_scroll = false;
             self.pending_action = action;
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();

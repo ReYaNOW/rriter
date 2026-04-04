@@ -74,16 +74,22 @@ impl Renderer {
         let render_scroll_x = scroll_x.round();
         let render_scroll_y = scroll_y.round();
 
-        // Считаем max_scroll_x
-        let mut max_line_w = 0.0f32;
-        for v in &self.visual_lines {
-            let w = v.whitespace_px_width + v.text_px_width;
-            if w > max_line_w {
-                max_line_w = w;
-            }
+        if self.last_editor_version_for_scroll_x != editor.version
+            || (self.last_width - self.width).abs() > 0.5
+        {
+            let longest_idx = editor.longest_line_idx;
+            let start_byte = editor.line_offsets.get(longest_idx).copied().unwrap_or(0);
+            let end_byte = editor
+                .line_offsets
+                .get(longest_idx + 1)
+                .copied()
+                .unwrap_or(editor.len());
+            let (first, second) = editor.text_parts();
+            let longest_width = self.measure_width(first, second, start_byte, end_byte);
+            let view_w = self.width - self.minimap_width - self.left_padding;
+            self.max_scroll_x = (longest_width - view_w + 100.0).max(0.0);
+            self.last_editor_version_for_scroll_x = editor.version;
         }
-        let view_w = self.width - self.minimap_width - self.left_padding;
-        self.max_scroll_x = (max_line_w - view_w + 100.0).max(0.0);
 
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
@@ -154,7 +160,6 @@ impl Renderer {
                     let text_end_x = text_start_x + v_line.text_px_width;
 
                     for level in 1..=depth {
-                        // Обратите внимание: линии рисуются с учетом X-скролла
                         let guide_x = self.left_padding + (level as f32 * 4.0 * space_adv);
                         let margin = space_adv * 0.5;
                         let overlaps = v_line.text_px_width > 0.0
@@ -271,7 +276,6 @@ impl Renderer {
             };
 
             let y = self.baseline_offset + v_line_info.y_offset - render_scroll_y;
-            // Абсолютная координата (отступ X от начала документа)
             let mut x = self.left_padding;
 
             let mut n = v_line_info.physical_line;
@@ -318,7 +322,6 @@ impl Renderer {
                 };
 
                 for c in s.chars() {
-                    // CULLING ПРАВОЙ ЧАСТИ
                     if x - render_scroll_x > self.width + 150.0 {
                         out_of_bounds = true;
                         break;
@@ -326,8 +329,6 @@ impl Renderer {
 
                     let char_len = c.len_utf8();
 
-                    // ФАНТОМНЫЙ КУРСОР: 100% Фикс.
-                    // Проверяем, что курсор находится ВНУТРИ этого конкретного символа.
                     if cursor_pos.is_none()
                         && editor.cursor >= current_offset
                         && editor.cursor < current_offset + char_len
@@ -391,7 +392,6 @@ impl Renderer {
                     }
 
                     if !is_newline && !is_hidden && c != ' ' && c != '\t' {
-                        // CULLING ЛЕВОЙ ЧАСТИ
                         if x - render_scroll_x + adv > 0.0 {
                             if let Some(g) = self.get_glyph(c) {
                                 let mut current_color = self.theme.fg;
@@ -447,7 +447,6 @@ impl Renderer {
             }
         }
 
-        // Если курсор находится в самом конце документа (за последним символом)
         if cursor_pos.is_none() && editor.cursor == len {
             if let Some(last_line) = self.visual_lines.last() {
                 let y = self.baseline_offset + last_line.y_offset - render_scroll_y;
@@ -476,13 +475,15 @@ impl Renderer {
             }
         }
 
-        self.push_rect(
-            minimap_x,
-            0.0,
-            minimap_w,
-            self.height,
-            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
-        );
+        if use_minimap {
+            self.push_rect(
+                minimap_x,
+                0.0,
+                minimap_w,
+                self.height,
+                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+            );
+        }
 
         let max_scroll = self.get_max_scroll(editor, self.height);
         let scroll_ratio_y = if max_scroll > 0.0 {
@@ -708,10 +709,21 @@ impl Renderer {
             );
         }
 
-        // Горизонтальный скроллбар
         if self.max_scroll_x > 0.0 {
             let track_w = self.width - minimap_w - self.left_padding;
-            let thumb_w = (track_w / (self.max_scroll_x + track_w) * track_w).max(40.0 * s);
+            let track_h_bg = 14.0 * s;
+            let track_y_bg = self.height - track_h_bg;
+
+            self.push_rect(
+                self.left_padding,
+                track_y_bg,
+                track_w,
+                track_h_bg,
+                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+            );
+
+            let thumb_w =
+                (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s);
             let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
             let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 

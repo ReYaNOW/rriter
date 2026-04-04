@@ -149,6 +149,7 @@ pub struct Editor {
     pub selection_anchor: Option<usize>,
     pub version: u64,
     pub line_offsets: Vec<usize>,
+    pub longest_line_idx: usize,
 
     pub history: VecDeque<HistoryStep>,
     pub redo_stack: VecDeque<HistoryStep>,
@@ -177,6 +178,7 @@ impl Editor {
             selection_anchor: None,
             version: 0,
             line_offsets: vec![0],
+            longest_line_idx: 0,
             history: VecDeque::new(),
             redo_stack: VecDeque::new(),
             history_size: 0,
@@ -197,22 +199,38 @@ impl Editor {
         new_offsets.push(0);
 
         let (first, second) = self.text_parts();
-
         let mut offset = 0;
-        for &b in first.as_bytes() {
-            offset += 1;
-            if b == b'\n' {
-                new_offsets.push(offset);
+        let mut max_len = 0;
+        let mut current_longest_idx = 0;
+        let mut current_line_start = 0;
+        let mut current_line_idx = 0;
+
+        let mut process = |bytes: &[u8], mut_offset: &mut usize| {
+            for &b in bytes {
+                *mut_offset += 1;
+                if b == b'\n' {
+                    let len = *mut_offset - current_line_start;
+                    if len > max_len {
+                        max_len = len;
+                        current_longest_idx = current_line_idx;
+                    }
+                    new_offsets.push(*mut_offset);
+                    current_line_start = *mut_offset;
+                    current_line_idx += 1;
+                }
             }
-        }
-        for &b in second.as_bytes() {
-            offset += 1;
-            if b == b'\n' {
-                new_offsets.push(offset);
-            }
+        };
+
+        process(first.as_bytes(), &mut offset);
+        process(second.as_bytes(), &mut offset);
+
+        let len = offset - current_line_start;
+        if len > max_len {
+            current_longest_idx = current_line_idx;
         }
 
         self.line_offsets = new_offsets;
+        self.longest_line_idx = current_longest_idx;
     }
 
     fn get_line_hashes(&self) -> Vec<u64> {

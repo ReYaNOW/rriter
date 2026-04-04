@@ -127,6 +127,7 @@ impl App {
             self.is_dragging_minimap = false;
             self.is_dragging_search = false;
             self.is_dragging_autocomplete = false;
+            self.is_dragging_h_scroll = false;
             self.target_scroll_y = self.target_scroll_y.round();
             self.target_scroll_x = self.target_scroll_x.round();
             self.window.as_ref().unwrap().request_redraw();
@@ -311,11 +312,15 @@ impl App {
 
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let left_pad = self.renderer.as_ref().unwrap().left_padding;
-            if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 15.0 * s {
+
+            if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 14.0 * s {
                 if last_mouse_x > left_pad && last_mouse_x < window_width - minimap_w {
+                    self.is_dragging_h_scroll = true;
                     let track_w = window_width - minimap_w - left_pad;
-                    let ratio = (last_mouse_x - left_pad) / track_w;
                     let max_x = self.renderer.as_ref().unwrap().max_scroll_x;
+                    let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
+                    let ratio =
+                        (last_mouse_x - left_pad - thumb_w / 2.0) / (track_w - thumb_w).max(0.0001);
                     self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
                     self.scroll_x = self.target_scroll_x;
                     self.window.as_ref().unwrap().request_redraw();
@@ -528,7 +533,7 @@ impl App {
             }
         }
 
-        if is_text_cursor {
+        if is_text_cursor && !self.is_dragging_h_scroll {
             self.window
                 .as_ref()
                 .unwrap()
@@ -567,6 +572,16 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.search_editor.cursor = target_idx;
+            self.window.as_ref().unwrap().request_redraw();
+        } else if self.is_dragging_h_scroll {
+            let r = self.renderer.as_ref().unwrap();
+            let track_w = window_size.width as f32 - minimap_w - padding;
+            let max_x = r.max_scroll_x;
+            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
+            let ratio =
+                (position.x as f32 - padding - thumb_w / 2.0) / (track_w - thumb_w).max(0.0001);
+            self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
+            self.scroll_x = self.target_scroll_x;
             self.window.as_ref().unwrap().request_redraw();
         } else if self.is_dragging_minimap {
             let now = std::time::Instant::now();
