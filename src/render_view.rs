@@ -1,4 +1,3 @@
-// --- START OF FILE render_view.rs ---
 pub mod core_text;
 pub mod ui;
 
@@ -69,6 +68,13 @@ impl Renderer {
             self.visual_lines.clear();
         }
 
+        let digits = total_lines.to_string().len().max(3);
+        let target_padding = (20.0 * s + digits as f32 * 10.0 * s).round();
+        if (self.left_padding - target_padding).abs() > 0.5 {
+            self.left_padding = target_padding;
+            self.visual_lines.clear();
+        }
+
         self.update_cache(editor, scroll_x, scroll_y, is_resizing);
 
         let render_scroll_x = scroll_x.round();
@@ -116,14 +122,6 @@ impl Renderer {
             self.theme.minimap_bg[2],
             1.0,
         ];
-
-        self.push_rect(
-            0.0,
-            0.0,
-            self.left_padding - 10.0,
-            self.height,
-            solid_minimap_bg,
-        );
 
         let cursor_phys_line = editor
             .line_offsets
@@ -234,21 +232,6 @@ impl Renderer {
             merged.push(int);
         }
 
-        for m in merged {
-            if m.bottom < 0.0 || m.top > self.height {
-                continue;
-            }
-            let color = if m.state == crate::editor::LineModState::ModifiedUnsaved {
-                self.theme.modified_unsaved
-            } else {
-                self.theme.modified_saved
-            };
-            let draw_top = m.top + 2.0;
-            let draw_bottom = m.bottom + 2.0;
-            let draw_h = (draw_bottom - draw_top).max(4.0);
-            self.push_rounded_rect(self.left_padding - 7.0, draw_top, 7.0, draw_h, 2.0, color);
-        }
-
         let sel_start = editor
             .selection_anchor
             .map(|a| a.min(editor.cursor))
@@ -277,23 +260,6 @@ impl Renderer {
 
             let y = self.baseline_offset + v_line_info.y_offset - render_scroll_y;
             let mut x = self.left_padding;
-
-            let mut n = v_line_info.physical_line;
-            let mut buf = [0u8; 20];
-            let mut idx = 20;
-            if n == 0 {
-                idx -= 1;
-                buf[idx] = b'0';
-            } else {
-                while n > 0 {
-                    idx -= 1;
-                    buf[idx] = b'0' + (n % 10) as u8;
-                    n /= 10;
-                }
-            }
-            if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
-                self.draw_string(num_str, 10.0, y, self.theme.line_num);
-            }
 
             let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {
                 Ok(idx) => idx,
@@ -474,6 +440,57 @@ impl Renderer {
                 }
             }
         }
+
+        self.flush();
+
+        self.push_rect(0.0, 0.0, self.left_padding, self.height, solid_minimap_bg);
+
+        for i in skip_visual_lines..end_visual_line {
+            let v_line = self.visual_lines[i];
+            let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
+            let mut n = v_line.physical_line;
+            let mut buf = [0u8; 20];
+            let mut idx = 20;
+            if n == 0 {
+                idx -= 1;
+                buf[idx] = b'0';
+            } else {
+                while n > 0 {
+                    idx -= 1;
+                    buf[idx] = b'0' + (n % 10) as u8;
+                    n /= 10;
+                }
+            }
+            if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
+                let num_w = self.measure_ui_width(num_str, 1.0);
+                let draw_x = self.left_padding - 15.0 * s - num_w;
+                self.draw_string_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
+            }
+        }
+
+        for m in merged {
+            if m.bottom < 0.0 || m.top > self.height {
+                continue;
+            }
+            let color = if m.state == crate::editor::LineModState::ModifiedUnsaved {
+                self.theme.modified_unsaved
+            } else {
+                self.theme.modified_saved
+            };
+            let draw_top = m.top + 2.0;
+            let draw_bottom = m.bottom + 2.0;
+            let draw_h = (draw_bottom - draw_top).max(4.0);
+            self.push_rounded_rect(
+                self.left_padding - 6.0 * s,
+                draw_top,
+                4.0 * s,
+                draw_h,
+                2.0 * s,
+                color,
+            );
+        }
+
+        self.flush();
 
         if use_minimap {
             self.push_rect(
@@ -727,11 +744,14 @@ impl Renderer {
             let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
             let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 
+            let thumb_y = self.height - 10.0 * s;
+            let thumb_h = 6.0 * s;
+
             self.push_rounded_rect(
                 thumb_x,
-                self.height - 10.0 * s,
+                thumb_y,
                 thumb_w,
-                6.0 * s,
+                thumb_h,
                 3.0 * s,
                 [0.40, 0.42, 0.46, 1.0],
             );

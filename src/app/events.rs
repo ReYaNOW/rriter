@@ -1,4 +1,3 @@
-// --- START OF FILE events.rs ---
 use crate::app::{App, PendingAction};
 use crate::renderer::Renderer;
 use glutin::config::ConfigTemplateBuilder;
@@ -488,6 +487,17 @@ impl ApplicationHandler for App {
 
                     let mut is_text = mx > padding && mx < (window_width - minimap_w);
 
+                    if r.max_scroll_x > 0.0 {
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        if my > wh - 14.0 * s {
+                            is_text = false;
+                        }
+                    }
+
+                    if self.is_dragging_h_scroll || self.is_dragging_minimap {
+                        is_text = false;
+                    }
+
                     if self.show_search && self.search_anim_y > -10.0 {
                         let search_w = 480.0 * s;
                         let search_h = 46.0 * s;
@@ -666,21 +676,40 @@ impl ApplicationHandler for App {
         if self.is_dragging && !self.is_dragging_minimap {
             if let Some(w) = self.window.as_ref() {
                 let wh = w.inner_size().height as f32;
+                let ww = w.inner_size().width as f32;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
+                let padding = self.renderer.as_ref().unwrap().left_padding;
 
-                let mut drag_scroll_delta = 0.0;
+                let mut drag_scroll_delta_y = 0.0;
                 if my < 0.0 {
-                    drag_scroll_delta = my;
+                    drag_scroll_delta_y = my;
                 } else if my > wh {
-                    drag_scroll_delta = my - wh;
+                    drag_scroll_delta_y = my - wh;
                 }
 
-                if drag_scroll_delta != 0.0 {
-                    let drag_amount = drag_scroll_delta.abs();
-                    let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
-                    self.target_scroll_y += drag_scroll_delta.signum() * speed * dt;
-                    let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                    let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                let mut drag_scroll_delta_x = 0.0;
+                let view_right_edge = ww - minimap_w;
+                if mx < padding {
+                    drag_scroll_delta_x = mx - padding;
+                } else if mx > view_right_edge {
+                    drag_scroll_delta_x = mx - view_right_edge;
+                }
+
+                if drag_scroll_delta_y != 0.0 || drag_scroll_delta_x != 0.0 {
+                    if drag_scroll_delta_y != 0.0 {
+                        let drag_amount = drag_scroll_delta_y.abs();
+                        let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
+                        self.target_scroll_y += drag_scroll_delta_y.signum() * speed * dt;
+                    }
+
+                    if drag_scroll_delta_x != 0.0 {
+                        let drag_amount = drag_scroll_delta_x.abs();
+                        let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
+                        self.target_scroll_x += drag_scroll_delta_x.signum() * speed * dt;
+                    }
+
                     self.editor.set_cursor_at_pos(
                         mx,
                         my + self.scroll_y,

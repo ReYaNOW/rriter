@@ -75,6 +75,7 @@ pub struct App {
     pub is_dragging_minimap: bool,
     pub is_dragging_h_scroll: bool,
     pub minimap_drag_offset_y: f32,
+    pub h_scroll_drag_offset_x: f32,
     pub is_focused: bool,
     pub show_fps: bool,
     pub scroll_anim_speed: f32,
