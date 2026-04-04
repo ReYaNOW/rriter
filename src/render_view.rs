@@ -69,11 +69,11 @@ impl Renderer {
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        let full_text = editor.get_full_text();
-        let physical_lines: Vec<&str> = full_text.split('\n').collect();
-        let indent_levels = editor.get_indent_guide_levels(&physical_lines);
-
+        // ИСПРАВЛЕНИЕ: Сначала обновляем кэш, затем получаем данные
+        editor.ensure_indent_cache_updated();
+        let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
+
         let first_len = first.len();
         let len = first_len + second.len();
 
@@ -135,13 +135,13 @@ impl Renderer {
             let v_line = self.visual_lines[i];
             let phys_idx = v_line.physical_line - 1;
 
-            if let Some(Some(active_levels)) = indent_levels.get(phys_idx) {
-                let y_top = (i as f32 * self.line_height) - render_scroll_y;
-                let text_start_x = self.left_padding + v_line.whitespace_px_width;
-                let text_end_x = text_start_x + v_line.text_px_width;
+            if let Some(&depth) = indent_levels.get(phys_idx) {
+                if depth > 0 {
+                    let y_top = (i as f32 * self.line_height) - render_scroll_y;
+                    let text_start_x = self.left_padding + v_line.whitespace_px_width;
+                    let text_end_x = text_start_x + v_line.text_px_width;
 
-                for &level in active_levels {
-                    if level > 0 {
+                    for level in 1..=depth {
                         let guide_x = self.left_padding + (level as f32 * 4.0 * space_adv);
                         let margin = space_adv * 0.5;
                         let overlaps = v_line.text_px_width > 0.0
@@ -628,10 +628,9 @@ impl Renderer {
             let center_x = (self.width - minimap_w) / 2.0;
             self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
 
-            // Временно забираем строку, чтобы обойти ошибку заимствования
             let fps_text = std::mem::take(&mut self.fps_string);
             self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
-            self.fps_string = fps_text; // Возвращаем обратно
+            self.fps_string = fps_text;
         }
 
         if search_anim_y > -70.0 {
@@ -865,7 +864,6 @@ impl Renderer {
                 self.last_search_idx = search_current_idx;
             }
 
-            // Временно забираем строку
             let temp_res_text = std::mem::take(&mut self.search_res_string);
 
             let res_text = if search_results.is_empty() {
@@ -883,7 +881,6 @@ impl Renderer {
                 self.draw_string_scaled(res_text, counter_x, text_y, [0.6, 0.6, 0.6, 1.0], 0.9);
             }
 
-            // Возвращаем обратно
             self.search_res_string = temp_res_text;
 
             let mx = self.last_mouse_x;

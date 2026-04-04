@@ -2,17 +2,7 @@ use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
 use rustc_hash::FxHasher;
 use std::collections::VecDeque;
-use std::hash::{Hash, Hasher};
-
-fn hash_lines(s: &str) -> Vec<u64> {
-    s.split('\n')
-        .map(|line| {
-            let mut hasher = FxHasher::default();
-            line.hash(&mut hasher);
-            hasher.finish()
-        })
-        .collect()
-}
+use std::hash::Hasher;
 
 fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>) {
     let n = old.len();
@@ -193,7 +183,7 @@ pub struct Editor {
     pub deleted_gaps: Vec<Option<LineModState>>,
     pub is_dirty: bool,
 
-    indent_cache: Vec<Option<Vec<usize>>>,
+    indent_cache: Vec<u8>,
     last_indent_version: u64,
 }
 
@@ -220,39 +210,68 @@ impl Editor {
         }
     }
 
-    pub fn get_indent_guide_levels(&mut self, lines: &[&str]) -> Vec<Option<Vec<usize>>> {
-        if self.version == self.last_indent_version {
-            return self.indent_cache.clone();
-        }
+    /// Быстрое вычисление хэшей без аллокации String
+    fn get_line_hashes(&self) -> Vec<u64> {
+        let mut hashes = Vec::with_capacity(1024);
+        let mut hasher = FxHasher::default();
+        let (first, second) = self.text_parts();
 
-        let num_lines = lines.len();
-        self.indent_cache.clear();
-        self.indent_cache.resize(num_lines, None);
-
-        if num_lines == 0 {
-            self.last_indent_version = self.version;
-            return self.indent_cache.clone();
-        }
-
-        let get_depth = |line: &str| -> (usize, bool) {
-            let mut count = 0;
-            let mut is_blank = true;
-            for c in line.chars() {
-                if c == ' ' {
-                    count += 1;
-                } else if c == '\t' {
-                    count = (count / 4 + 1) * 4;
+        let mut process_slice = |bytes: &[u8]| {
+            for &b in bytes {
+                if b == b'\n' {
+                    hashes.push(hasher.finish());
+                    hasher = FxHasher::default();
                 } else {
-                    is_blank = false;
-                    break;
+                    hasher.write_u8(b);
                 }
             }
-            (count / 4, is_blank)
         };
 
-        let raw_depths: Vec<(usize, bool)> = lines.iter().map(|&line| get_depth(line)).collect();
+        process_slice(first.as_bytes());
+        process_slice(second.as_bytes());
+        hashes.push(hasher.finish());
 
-        // Кешируем глубину предыдущей непустой строки (O(N))
+        hashes
+    }
+
+    /// Безаллокационное обновление кэша отступов напрямую из буфера
+    pub fn ensure_indent_cache_updated(&mut self) {
+        if self.version == self.last_indent_version {
+            return;
+        }
+
+        self.indent_cache.clear();
+        let mut count = 0;
+        let mut is_blank = true;
+        let mut raw_depths = Vec::with_capacity(1024);
+
+        let (first, second) = self.text_parts();
+
+        let mut process = |bytes: &[u8]| {
+            for &b in bytes {
+                if b == b'\n' {
+                    raw_depths.push((count / 4, is_blank));
+                    count = 0;
+                    is_blank = true;
+                } else if is_blank {
+                    if b == b' ' {
+                        count += 1;
+                    } else if b == b'\t' {
+                        count = (count / 4 + 1) * 4;
+                    } else if b != b'\r' {
+                        is_blank = false;
+                    }
+                }
+            }
+        };
+
+        process(first.as_bytes());
+        process(second.as_bytes());
+        raw_depths.push((count / 4, is_blank));
+
+        let num_lines = raw_depths.len();
+        self.indent_cache.resize(num_lines, 0);
+
         let mut prev_non_blank = vec![0; num_lines];
         let mut curr_prev = 0;
         for i in 0..num_lines {
@@ -262,7 +281,6 @@ impl Editor {
             prev_non_blank[i] = curr_prev;
         }
 
-        // Кешируем глубину следующей непустой строки (O(N))
         let mut next_non_blank = vec![0; num_lines];
         let mut curr_next = 0;
         for i in (0..num_lines).rev() {
@@ -272,35 +290,25 @@ impl Editor {
             next_non_blank[i] = curr_next;
         }
 
-        let mut depths = vec![0; num_lines];
         for i in 0..num_lines {
             let (raw_d, is_blank) = raw_depths[i];
             if !is_blank {
-                depths[i] = raw_d;
+                self.indent_cache[i] = raw_d as u8;
             } else {
                 if raw_d > 0 {
-                    depths[i] = raw_d;
+                    self.indent_cache[i] = raw_d as u8;
                 } else {
-                    // Пустые строки получают min() от контекста, чтобы не "вываливаться" из блока
-                    depths[i] = prev_non_blank[i].min(next_non_blank[i]);
+                    self.indent_cache[i] = prev_non_blank[i].min(next_non_blank[i]) as u8;
                 }
             }
         }
 
-        for i in 0..num_lines {
-            let d = depths[i];
-            if d == 0 {
-                continue;
-            }
-            let mut active_levels = Vec::with_capacity(d);
-            for level in 1..=d {
-                active_levels.push(level);
-            }
-            self.indent_cache[i] = Some(active_levels);
-        }
-
         self.last_indent_version = self.version;
-        self.indent_cache.clone()
+    }
+
+    /// Получение готового кэша отступов
+    pub fn get_cached_indent_levels(&self) -> &[u8] {
+        &self.indent_cache
     }
 
     pub fn backspace(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
@@ -379,15 +387,13 @@ impl Editor {
     }
 
     pub fn set_original_text(&mut self) {
-        let full = self.get_full_text();
-        self.original_hashes = hash_lines(&full);
+        self.original_hashes = self.get_line_hashes();
         self.saved_hashes = self.original_hashes.clone();
         self.update_modifications();
     }
 
     pub fn mark_saved(&mut self) {
-        let full = self.get_full_text();
-        self.saved_hashes = hash_lines(&full);
+        self.saved_hashes = self.get_line_hashes();
         self.update_modifications();
     }
 
@@ -400,8 +406,7 @@ impl Editor {
     }
 
     pub fn update_modifications(&mut self) {
-        let full_text = self.get_full_text();
-        let curr_hashes = hash_lines(&full_text);
+        let curr_hashes = self.get_line_hashes();
 
         let (mod_saved, del_saved) = get_diff_info(&self.saved_hashes, &curr_hashes);
         let (mod_orig, del_orig) = get_diff_info(&self.original_hashes, &curr_hashes);
