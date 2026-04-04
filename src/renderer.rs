@@ -1,4 +1,3 @@
-// --- START OF FILE renderer.rs ---
 use glow::HasContext;
 use std::collections::HashMap;
 use std::fs;
@@ -83,6 +82,8 @@ pub struct Renderer {
     pub glyphs: HashMap<char, GlyphInfo>,
     pub ui_glyphs: HashMap<char, GlyphInfo>,
 
+    pub ascii_advances: [f32; 128],
+
     pub atlas_x: i32,
     pub atlas_y: i32,
     pub max_row_h: i32,
@@ -108,8 +109,6 @@ pub struct Renderer {
     pub last_width: f32,
 
     pub last_scroll_y: f32,
-
-    // Новые поля для горизонтального скролла
     pub last_scroll_x: f32,
     pub max_scroll_x: f32,
 
@@ -236,6 +235,7 @@ impl Renderer {
             ];
 
             let mut fonts = Vec::new();
+
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
                     fonts.push(FontData { data, index: 0 });
@@ -331,6 +331,7 @@ impl Renderer {
                 load_icon_from_memory(include_bytes!("icons/dialog-cancel.png"), "dialog-cancel");
             let icon_warning =
                 load_icon_from_memory(include_bytes!("icons/dialog-warning.png"), "dialog-warning");
+
             let icon_case_match = load_icon_from_memory(
                 include_bytes!("icons/format-text-uppercase.png"),
                 "format-text-uppercase",
@@ -340,7 +341,7 @@ impl Renderer {
             let icon_close =
                 load_icon_from_memory(include_bytes!("icons/window-close.png"), "window-close");
 
-            Self {
+            let mut renderer = Self {
                 gl,
                 program,
                 vao,
@@ -357,6 +358,7 @@ impl Renderer {
                 scale_context: ScaleContext::new(),
                 glyphs: HashMap::new(),
                 ui_glyphs: HashMap::new(),
+                ascii_advances: [0.0; 128],
                 atlas_x: 2,
                 atlas_y: 2,
                 max_row_h: 0,
@@ -378,10 +380,10 @@ impl Renderer {
                 last_editor_version: u64::MAX,
                 last_height: 0.0,
                 last_width: 0.0,
+                last_frame_time: None,
                 last_scroll_y: 0.0,
                 last_scroll_x: 0.0,
                 max_scroll_x: 0.0,
-                last_frame_time: None,
                 fps: 0.0,
                 frame_count: 0,
                 time_acc: 0.0,
@@ -398,13 +400,20 @@ impl Renderer {
                 icon_up,
                 icon_down,
                 icon_close,
+            };
+
+            for i in 32..128u8 {
+                let c = i as char;
+                if let Some(g) = renderer.get_glyph(c) {
+                    renderer.ascii_advances[i as usize] = g.advance;
+                }
             }
+
+            renderer
         }
     }
 
     pub fn get_glyph(&mut self, c: char) -> Option<GlyphInfo> {
-        /* остальное без изменений */
-        // ... (ВЕСЬ КОД ФУНКЦИЙ get_glyph, get_ui_glyph, resize и т.д. ОСТАЕТСЯ КАК БЫЛ)
         if let Some(g) = self.glyphs.get(&c) {
             return Some(*g);
         }
@@ -749,7 +758,14 @@ impl Renderer {
             return 0.0;
         }
         if c == '\t' {
-            return self.char_advance(' ') * 4.0;
+            return self.ascii_advances[b' ' as usize] * 4.0;
+        }
+        let u = c as u32;
+        if u < 128 {
+            let adv = self.ascii_advances[u as usize];
+            if adv > 0.0 {
+                return adv;
+            }
         }
         self.get_glyph(c).map(|g| g.advance).unwrap_or(10.0)
     }

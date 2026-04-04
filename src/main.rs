@@ -157,7 +157,7 @@ fn main() {
 
     let mut editor = Editor::new(initial_text.len() + 8192);
     if !initial_text.is_empty() {
-        let _ = editor.insert_str(&initial_text, &[]);
+        let _ = editor.insert_str(&initial_text);
         editor.cursor = 0;
         editor.clear_history();
     }
@@ -200,7 +200,7 @@ Ctrl + Del\tУдалить слово справа от курсора
 ";
 
     let mut faq_editor = Editor::new(faq_text.len() + 100);
-    let _ = faq_editor.insert_str(faq_text, &[]);
+    let _ = faq_editor.insert_str(faq_text);
     faq_editor.cursor = 0;
     faq_editor.selection_anchor = None;
 
@@ -275,7 +275,6 @@ Ctrl + Del\tУдалить слово справа от курсора
         is_ready: false,
         is_highlighted_once: false,
 
-        // Автодополнение
         autocomplete_active: false,
         autocomplete_options: Vec::new(),
         autocomplete_selected_idx: 0,

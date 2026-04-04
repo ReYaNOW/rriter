@@ -860,6 +860,7 @@ impl Highlighter {
                     error_ranges,
                     old_spans.clone(),
                     apply_rainbow_brackets,
+                    is_log_or_huge,
                 );
 
                 old_spans = flat_spans.clone();
@@ -1051,89 +1052,83 @@ impl Highlighter {
         updated
     }
 
-    pub fn shift_insert(
-        &mut self,
-        offset: usize,
-        len: usize,
-        text_opt: Option<&str>,
-        restored_spans: Option<Vec<ColorSpan>>,
-    ) {
-        let special_color = if restored_spans.is_none() {
-            text_opt.and_then(|t| match t.trim() {
-                "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
-                | "|" | "^" | "~" | ":" => Some(DRACULA_PINK),
-                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => Some(DRACULA_PURPLE),
-                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => Some(DRACULA_FG),
-                _ => None,
-            })
-        } else {
-            None
-        };
+    pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>) {
+        let prev_offset = offset.saturating_sub(1);
+        let mut predicted_color = DRACULA_FG;
 
-        let mut new_spans = Vec::new();
-        for span in &mut self.spans {
-            if span.start > offset {
-                span.start += len;
-                span.end += len;
-            } else if span.start == offset {
-                if offset == 0 {
-                    if let Some(c) = special_color {
-                        new_spans.push(ColorSpan {
-                            start: 0,
-                            end: len,
-                            color: c,
-                        });
-                        span.start += len;
-                        span.end += len;
-                    } else {
-                        span.end += len;
-                    }
-                } else {
-                    span.start += len;
-                    span.end += len;
-                }
-            } else if span.end > offset {
-                if let Some(c) = special_color {
-                    let old_end = span.end;
-                    span.end = offset;
-                    new_spans.push(ColorSpan {
-                        start: offset,
-                        end: offset + len,
-                        color: c,
-                    });
-                    new_spans.push(ColorSpan {
-                        start: offset + len,
-                        end: old_end + len,
-                        color: span.color,
-                    });
-                } else {
-                    span.end += len;
-                }
-            } else if span.end == offset {
-                if let Some(c) = special_color {
-                    new_spans.push(ColorSpan {
-                        start: offset,
-                        end: offset + len,
-                        color: c,
-                    });
-                } else {
-                    span.end += len;
-                }
+        for span in &self.spans {
+            if span.start <= prev_offset && span.end > prev_offset {
+                predicted_color = span.color;
+                break;
             }
         }
 
-        if let Some(mut r_spans) = restored_spans {
-            for s in &mut r_spans {
-                s.start += offset;
-                s.end += offset;
+        if let Some(t) = text_opt {
+            match t.trim() {
+                "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
+                | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
+                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                    predicted_color = DRACULA_PURPLE
+                }
+                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
+                _ => {}
             }
-            new_spans.extend(r_spans);
+        }
+
+        let mut new_spans = Vec::new();
+        for span in &mut self.spans {
+            if span.start >= offset {
+                span.start += len;
+                span.end += len;
+            } else if span.end > offset {
+                let old_end = span.end;
+                span.end = offset;
+
+                new_spans.push(ColorSpan {
+                    start: offset,
+                    end: offset + len,
+                    color: predicted_color,
+                });
+
+                new_spans.push(ColorSpan {
+                    start: offset + len,
+                    end: old_end + len,
+                    color: span.color,
+                });
+            } else if span.end == offset {
+                new_spans.push(ColorSpan {
+                    start: offset,
+                    end: offset + len,
+                    color: predicted_color,
+                });
+            }
         }
 
         if !new_spans.is_empty() {
             self.spans.extend(new_spans);
             self.spans.sort_by_key(|s| s.start);
+            let mut merged = Vec::new();
+            if !self.spans.is_empty() {
+                let mut current = self.spans[0].clone();
+                for i in 1..self.spans.len() {
+                    let next = &self.spans[i];
+                    if next.start <= current.end && next.color == current.color {
+                        current.end = current.end.max(next.end);
+                    } else if next.start >= current.end {
+                        merged.push(current);
+                        current = next.clone();
+                    }
+                }
+                merged.push(current);
+            }
+            self.spans = merged;
             self.spans.retain(|s| s.start < s.end);
+        } else {
+            self.spans.push(ColorSpan {
+                start: offset,
+                end: offset + len,
+                color: predicted_color,
+            });
         }
     }
 
@@ -1177,7 +1172,20 @@ fn flatten_spans(
     error_ranges: Vec<(usize, usize)>,
     old_spans: Vec<ColorSpan>,
     apply_rainbow_brackets: bool,
+    is_log_or_huge: bool,
 ) -> Vec<ColorSpan> {
+    if spans.is_empty()
+        && old_spans.is_empty()
+        && error_ranges.is_empty()
+        && (is_log_or_huge || !apply_rainbow_brackets)
+    {
+        return vec![ColorSpan {
+            start: 0,
+            end: len,
+            color: DRACULA_FG,
+        }];
+    }
+
     spans.sort_by_key(|s| std::cmp::Reverse(s.end - s.start));
 
     byte_colors.clear();

@@ -1,4 +1,3 @@
-// --- START OF FILE app.rs ---
 pub mod events;
 pub mod input;
 
@@ -64,7 +63,6 @@ pub struct App {
     pub scroll_y: f32,
     pub scroll_velocity: f32,
 
-    // Новые поля для горизонтального скролла
     pub target_scroll_x: f32,
     pub scroll_x: f32,
     pub scroll_x_velocity: f32,
@@ -137,7 +135,6 @@ impl App {
     ) {
         let (cx_screen, cy) = renderer.get_cursor_xy(editor);
 
-        // Вертикаль
         if cy - renderer.baseline_offset < *target_scroll_y {
             *target_scroll_y = (cy - renderer.baseline_offset).max(0.0);
             *target_scroll_y =
@@ -153,7 +150,6 @@ impl App {
         let max_s_y = renderer.get_max_scroll(editor, window_height);
         *target_scroll_y = target_scroll_y.clamp(0.0, max_s_y).round();
 
-        // Горизонталь (cx_screen УЖЕ в экранных координатах, благодаря правильному вычету scroll_x)
         let visible_left = renderer.left_padding + 30.0;
         let visible_right = window_width - renderer.minimap_width - 40.0;
 
@@ -305,17 +301,17 @@ impl App {
         let prefix_len = self.get_current_word_prefix().len();
 
         for _ in 0..prefix_len {
-            if let Some((offset, len)) = self.editor.backspace(&self.highlighter.spans) {
+            if let Some((offset, len)) = self.editor.backspace() {
                 self.highlighter.shift_delete(offset, len);
             }
         }
 
-        let (del_info, ins_len) = self.editor.insert_str(&selected, &self.highlighter.spans);
+        let (del_info, ins_len) = self.editor.insert_str(&selected);
         if let Some((offset, len)) = del_info {
             self.highlighter.shift_delete(offset, len);
         }
         self.highlighter
-            .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected), None);
+            .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
 
         self.autocomplete_active = false;
         self.autocomplete_selected_idx = 0;
@@ -553,7 +549,7 @@ impl App {
             self.editor = Editor::new(content.len() + 8192);
             self.editor.version = old_version + 1;
             if !content.is_empty() {
-                let _ = self.editor.insert_str(&content, &[]);
+                let _ = self.editor.insert_str(&content);
                 self.editor.cursor = 0;
                 self.editor.clear_history();
             }

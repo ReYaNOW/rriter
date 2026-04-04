@@ -1,4 +1,4 @@
-use crate::highlighter::{ColorSpan, SyncEdit};
+use crate::highlighter::SyncEdit;
 use crate::renderer::Renderer;
 use rustc_hash::FxHasher;
 use std::collections::VecDeque;
@@ -117,21 +117,6 @@ fn char_class(b: u8) -> u8 {
     }
 }
 
-fn extract_spans_for_range(spans: &[ColorSpan], start: usize, end: usize) -> Vec<ColorSpan> {
-    let mut res = Vec::new();
-    for s in spans {
-        if s.end > start && s.start < end {
-            let mut new_s = s.clone();
-            new_s.start = new_s.start.max(start) - start;
-            new_s.end = new_s.end.min(end) - start;
-            if new_s.start < new_s.end {
-                res.push(new_s);
-            }
-        }
-    }
-    res
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LineModState {
     ModifiedUnsaved,
@@ -140,16 +125,8 @@ pub enum LineModState {
 
 #[derive(Clone)]
 pub enum EditOp {
-    Insert {
-        offset: usize,
-        text: String,
-        spans: Option<Vec<ColorSpan>>,
-    },
-    Delete {
-        offset: usize,
-        text: String,
-        spans: Vec<ColorSpan>,
-    },
+    Insert { offset: usize, text: String },
+    Delete { offset: usize, text: String },
 }
 
 #[derive(Clone)]
@@ -160,7 +137,7 @@ pub struct HistoryStep {
 }
 
 pub enum UndoRedoDelta {
-    Insert(usize, usize, String, Option<Vec<ColorSpan>>),
+    Insert(usize, usize, String),
     Delete(usize, usize),
 }
 
@@ -214,6 +191,7 @@ impl Editor {
             sync_edits: Vec::new(),
         }
     }
+
     pub fn rebuild_line_offsets(&mut self) {
         let mut new_offsets = Vec::with_capacity(1024);
         new_offsets.push(0);
@@ -236,6 +214,7 @@ impl Editor {
 
         self.line_offsets = new_offsets;
     }
+
     fn get_line_hashes(&self) -> Vec<u64> {
         let mut hashes = Vec::with_capacity(1024);
         let mut hasher = FxHasher::default();
@@ -334,8 +313,8 @@ impl Editor {
         &self.indent_cache
     }
 
-    pub fn backspace(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
-        if let Some(del_info) = self.delete_selection(current_spans) {
+    pub fn backspace(&mut self) -> Option<(usize, usize)> {
+        if let Some(del_info) = self.delete_selection() {
             self.update_modifications();
             return Some(del_info);
         }
@@ -353,7 +332,6 @@ impl Editor {
                 let start = self.cursor - 1;
                 let len = 2;
                 let text_to_save = format!("{}{}", char_before as char, char_after as char);
-                let saved_spans = extract_spans_for_range(current_spans, start, start + len);
 
                 let cursor_before = self.cursor;
                 self.move_gap(start);
@@ -367,7 +345,6 @@ impl Editor {
                     op: EditOp::Delete {
                         offset: start,
                         text: text_to_save,
-                        spans: saved_spans,
                     },
                     cursor_before,
                     cursor_after: self.cursor,
@@ -390,7 +367,6 @@ impl Editor {
                 res.push(self.byte_at(i));
             }
             let text = String::from_utf8_lossy(&res).into_owned();
-            let saved_spans = extract_spans_for_range(current_spans, prev, self.cursor);
 
             self.move_gap(self.cursor);
             self.sync_edits.push(SyncEdit::Delete { offset: prev, len });
@@ -398,11 +374,7 @@ impl Editor {
             self.cursor = prev;
 
             self.push_history(HistoryStep {
-                op: EditOp::Delete {
-                    offset: prev,
-                    text,
-                    spans: saved_spans,
-                },
+                op: EditOp::Delete { offset: prev, text },
                 cursor_before,
                 cursor_after: self.cursor,
             });
@@ -485,12 +457,10 @@ impl Editor {
                 EditOp::Insert {
                     offset: last_off,
                     text: last_txt,
-                    ..
                 },
                 EditOp::Insert {
                     offset: new_off,
                     text: new_txt,
-                    ..
                 },
             ) = (&mut last.op, &step.op)
             {
@@ -509,24 +479,14 @@ impl Editor {
                 EditOp::Delete {
                     offset: last_off,
                     text: last_txt,
-                    spans: last_spans,
                 },
                 EditOp::Delete {
                     offset: new_off,
                     text: new_txt,
-                    spans: new_spans,
                 },
             ) = (&mut last.op, &step.op)
             {
                 if *new_off + new_txt.len() == *last_off && new_txt.len() < 100 {
-                    for s in last_spans.iter_mut() {
-                        s.start += new_txt.len();
-                        s.end += new_txt.len();
-                    }
-                    let mut merged_spans = new_spans.clone();
-                    merged_spans.append(last_spans);
-                    *last_spans = merged_spans;
-
                     let mut merged = new_txt.clone();
                     merged.push_str(last_txt);
                     *last_txt = merged;
@@ -535,13 +495,6 @@ impl Editor {
                     self.history_size += new_txt.len();
                     merge = true;
                 } else if *new_off == *last_off && new_txt.len() < 100 {
-                    let mut shifted_new = new_spans.clone();
-                    for s in shifted_new.iter_mut() {
-                        s.start += last_txt.len();
-                        s.end += last_txt.len();
-                    }
-                    last_spans.append(&mut shifted_new);
-
                     last_txt.push_str(new_txt);
                     last.cursor_after = step.cursor_after;
                     self.history_size += new_txt.len();
@@ -570,20 +523,11 @@ impl Editor {
         }
     }
 
-    pub fn undo(&mut self, current_spans: &[ColorSpan]) -> Option<UndoRedoDelta> {
+    pub fn undo(&mut self) -> Option<UndoRedoDelta> {
         if let Some(mut step) = self.history.pop_back() {
             self.is_working_history = true;
             let delta = match &mut step.op {
-                EditOp::Insert {
-                    offset,
-                    text,
-                    spans,
-                } => {
-                    *spans = Some(extract_spans_for_range(
-                        current_spans,
-                        *offset,
-                        *offset + text.len(),
-                    ));
+                EditOp::Insert { offset, text } => {
                     self.selection_anchor = Some(*offset);
                     self.cursor = *offset + text.len();
                     let len = text.len();
@@ -596,15 +540,11 @@ impl Editor {
                     self.selection_anchor = None;
                     UndoRedoDelta::Delete(*offset, text.len())
                 }
-                EditOp::Delete {
-                    offset,
-                    text,
-                    spans,
-                } => {
+                EditOp::Delete { offset, text } => {
                     self.cursor = *offset;
                     self.selection_anchor = None;
                     self.insert_str_internal(text);
-                    UndoRedoDelta::Insert(*offset, text.len(), text.clone(), Some(spans.clone()))
+                    UndoRedoDelta::Insert(*offset, text.len(), text.clone())
                 }
             };
             self.cursor = step.cursor_before;
@@ -623,15 +563,11 @@ impl Editor {
         if let Some(step) = self.redo_stack.pop_back() {
             self.is_working_history = true;
             let delta = match &step.op {
-                EditOp::Insert {
-                    offset,
-                    text,
-                    spans,
-                } => {
+                EditOp::Insert { offset, text } => {
                     self.cursor = *offset;
                     self.selection_anchor = None;
                     self.insert_str_internal(text);
-                    UndoRedoDelta::Insert(*offset, text.len(), text.clone(), spans.clone())
+                    UndoRedoDelta::Insert(*offset, text.len(), text.clone())
                 }
                 EditOp::Delete { offset, text, .. } => {
                     self.selection_anchor = Some(*offset);
@@ -717,13 +653,9 @@ impl Editor {
         len
     }
 
-    pub fn insert_str(
-        &mut self,
-        s: &str,
-        current_spans: &[ColorSpan],
-    ) -> (Option<(usize, usize)>, usize) {
+    pub fn insert_str(&mut self, s: &str) -> (Option<(usize, usize)>, usize) {
         let cursor_before = self.cursor;
-        let del_info = self.delete_selection(current_spans);
+        let del_info = self.delete_selection();
 
         if s.is_empty() {
             self.update_modifications();
@@ -739,7 +671,6 @@ impl Editor {
             op: EditOp::Insert {
                 offset: insert_offset,
                 text: s.to_string(),
-                spans: None,
             },
             cursor_before,
             cursor_after: self.cursor,
@@ -749,7 +680,7 @@ impl Editor {
         (del_info, len)
     }
 
-    pub fn delete_selection(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
+    pub fn delete_selection(&mut self) -> Option<(usize, usize)> {
         if let Some(anchor) = self.selection_anchor {
             if anchor != self.cursor {
                 self.version += 1;
@@ -761,7 +692,6 @@ impl Editor {
                     res.push(self.byte_at(i));
                 }
                 let text = String::from_utf8_lossy(&res).into_owned();
-                let saved_spans = extract_spans_for_range(current_spans, start, end);
 
                 let cursor_before = self.cursor;
                 self.move_gap(start);
@@ -775,7 +705,6 @@ impl Editor {
                     op: EditOp::Delete {
                         offset: start,
                         text,
-                        spans: saved_spans,
                     },
                     cursor_before,
                     cursor_after: self.cursor,
@@ -788,8 +717,8 @@ impl Editor {
         None
     }
 
-    pub fn delete_forward(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
-        if let Some(del_info) = self.delete_selection(current_spans) {
+    pub fn delete_forward(&mut self) -> Option<(usize, usize)> {
+        if let Some(del_info) = self.delete_selection() {
             self.update_modifications();
             return Some(del_info);
         }
@@ -806,7 +735,6 @@ impl Editor {
                 res.push(self.byte_at(i));
             }
             let text = String::from_utf8_lossy(&res).into_owned();
-            let saved_spans = extract_spans_for_range(current_spans, self.cursor, next);
 
             let offset = self.cursor;
             self.move_gap(self.cursor);
@@ -814,11 +742,7 @@ impl Editor {
             self.gap_end += len;
 
             self.push_history(HistoryStep {
-                op: EditOp::Delete {
-                    offset,
-                    text,
-                    spans: saved_spans,
-                },
+                op: EditOp::Delete { offset, text },
                 cursor_before,
                 cursor_after: self.cursor,
             });
@@ -828,9 +752,9 @@ impl Editor {
         None
     }
 
-    pub fn delete_word_backward(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
+    pub fn delete_word_backward(&mut self) -> Option<(usize, usize)> {
         if self.selection_anchor.is_some() && self.selection_anchor != Some(self.cursor) {
-            return self.delete_selection(current_spans);
+            return self.delete_selection();
         }
         if self.cursor == 0 {
             return None;
@@ -858,12 +782,12 @@ impl Editor {
         }
 
         self.selection_anchor = Some(p);
-        self.delete_selection(current_spans)
+        self.delete_selection()
     }
 
-    pub fn delete_word_forward(&mut self, current_spans: &[ColorSpan]) -> Option<(usize, usize)> {
+    pub fn delete_word_forward(&mut self) -> Option<(usize, usize)> {
         if self.selection_anchor.is_some() && self.selection_anchor != Some(self.cursor) {
-            return self.delete_selection(current_spans);
+            return self.delete_selection();
         }
         if self.cursor == self.len() {
             return None;
@@ -892,7 +816,7 @@ impl Editor {
 
         self.selection_anchor = Some(self.cursor);
         self.cursor = p;
-        self.delete_selection(current_spans)
+        self.delete_selection()
     }
 
     pub fn get_auto_indent(&self) -> String {

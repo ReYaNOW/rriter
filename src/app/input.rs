@@ -1,4 +1,3 @@
-// --- START OF FILE input.rs ---
 use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::widgets::IconButton;
@@ -310,7 +309,6 @@ impl App {
                 }
             }
 
-            // Быстрая обработка клика по ГОРИЗОНТАЛЬНОМУ скроллбару
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let left_pad = self.renderer.as_ref().unwrap().left_padding;
             if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 15.0 * s {
@@ -325,7 +323,6 @@ impl App {
                 }
             }
 
-            // Клик по правой панели (Миникарта или Скроллбар)
             if last_mouse_x >= window_width - minimap_w {
                 let max_scroll = self
                     .renderer
@@ -408,7 +405,7 @@ impl App {
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
 
                 self.editor.set_cursor_at_pos(
-                    last_mouse_x,
+                    last_mouse_x + self.scroll_x,
                     last_mouse_y + self.scroll_y,
                     self.renderer.as_mut().unwrap(),
                     true,
@@ -427,8 +424,6 @@ impl App {
     }
 
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        // ВЕСЬ КОД ФУНКЦИЙ handle_main_cursor_moved, handle_search_keyboard_input, handle_editor_keyboard_input, handle_main_keyboard_input
-        // ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ, кроме вызова set_cursor_at_pos
         if self.show_quit_dialog {
             return;
         }
@@ -618,7 +613,7 @@ impl App {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             self.editor.set_cursor_at_pos(
-                last_mouse_x,
+                last_mouse_x + self.scroll_x,
                 last_mouse_y + self.scroll_y,
                 self.renderer.as_mut().unwrap(),
                 false,
@@ -709,23 +704,23 @@ impl App {
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                 if let Some(text) = self.search_editor.get_selection() {
                     let _ = self.clipboard.set_text(text);
-                    self.search_editor.delete_selection(&[]);
+                    self.search_editor.delete_selection();
                     is_edit = true;
                 }
             }
             PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
                 if let Ok(text) = self.clipboard.get_text() {
-                    self.search_editor.insert_str(&text, &[]);
+                    self.search_editor.insert_str(&text);
                     is_edit = true;
                 }
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
-                if self.search_editor.backspace(&[]).is_some() {
+                if self.search_editor.backspace().is_some() {
                     is_edit = true;
                 }
             }
             PhysicalKey::Code(KeyCode::Delete) => {
-                if self.search_editor.delete_forward(&[]).is_some() {
+                if self.search_editor.delete_forward().is_some() {
                     is_edit = true;
                 }
             }
@@ -734,7 +729,7 @@ impl App {
                     if let Some(txt) = key_event.logical_key.to_text() {
                         let clean_txt = txt.replace('\n', "");
                         if !clean_txt.is_empty() {
-                            self.search_editor.insert_str(&clean_txt, &[]);
+                            self.search_editor.insert_str(&clean_txt);
                             is_edit = true;
                         }
                     }
@@ -864,11 +859,10 @@ impl App {
                 }
             }
             PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
-                if let Some(delta) = self.editor.undo(&self.highlighter.spans) {
+                if let Some(delta) = self.editor.undo() {
                     match delta {
-                        crate::editor::UndoRedoDelta::Insert(offset, len, text, restored) => {
-                            self.highlighter
-                                .shift_insert(offset, len, Some(&text), restored);
+                        crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
+                            self.highlighter.shift_insert(offset, len, Some(&text));
                         }
                         crate::editor::UndoRedoDelta::Delete(offset, len) => {
                             self.highlighter.shift_delete(offset, len);
@@ -881,9 +875,8 @@ impl App {
             PhysicalKey::Code(KeyCode::KeyY) if ctrl => {
                 if let Some(delta) = self.editor.redo() {
                     match delta {
-                        crate::editor::UndoRedoDelta::Insert(offset, len, text, restored) => {
-                            self.highlighter
-                                .shift_insert(offset, len, Some(&text), restored);
+                        crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
+                            self.highlighter.shift_insert(offset, len, Some(&text));
                         }
                         crate::editor::UndoRedoDelta::Delete(offset, len) => {
                             self.highlighter.shift_delete(offset, len);
@@ -949,9 +942,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Backspace) if ctrl => {
-                if let Some((offset, len)) =
-                    self.editor.delete_word_backward(&self.highlighter.spans)
-                {
+                if let Some((offset, len)) = self.editor.delete_word_backward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     if self.autocomplete_active {
@@ -961,9 +952,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Delete) if ctrl => {
-                if let Some((offset, len)) =
-                    self.editor.delete_word_forward(&self.highlighter.spans)
-                {
+                if let Some((offset, len)) = self.editor.delete_word_forward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     if self.autocomplete_active {
@@ -973,7 +962,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
-                if let Some((offset, len)) = self.editor.backspace(&self.highlighter.spans) {
+                if let Some((offset, len)) = self.editor.backspace() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     if self.autocomplete_active {
@@ -983,7 +972,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Delete) => {
-                if let Some((offset, len)) = self.editor.delete_forward(&self.highlighter.spans) {
+                if let Some((offset, len)) = self.editor.delete_forward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     if self.autocomplete_active {
@@ -995,9 +984,7 @@ impl App {
             PhysicalKey::Code(KeyCode::Enter) => {
                 let indent = self.editor.get_auto_indent();
                 let insert_text = format!("\n{}", indent);
-                let (del_info, ins_len) = self
-                    .editor
-                    .insert_str(&insert_text, &self.highlighter.spans);
+                let (del_info, ins_len) = self.editor.insert_str(&insert_text);
                 if let Some((offset, len)) = del_info {
                     self.highlighter.shift_delete(offset, len);
                 }
@@ -1005,36 +992,27 @@ impl App {
                     self.editor.cursor - ins_len,
                     ins_len,
                     Some(&insert_text),
-                    None,
                 );
                 cursor_moved = true;
                 is_edit = true;
             }
             PhysicalKey::Code(KeyCode::Tab) => {
-                let (del_info, ins_len) = self.editor.insert_str("    ", &self.highlighter.spans);
+                let (del_info, ins_len) = self.editor.insert_str("    ");
                 if let Some((offset, len)) = del_info {
                     self.highlighter.shift_delete(offset, len);
                 }
-                self.highlighter.shift_insert(
-                    self.editor.cursor - ins_len,
-                    ins_len,
-                    Some("    "),
-                    None,
-                );
+                self.highlighter
+                    .shift_insert(self.editor.cursor - ins_len, ins_len, Some("    "));
                 cursor_moved = true;
                 is_edit = true;
             }
             PhysicalKey::Code(KeyCode::Space) => {
-                let (del_info, ins_len) = self.editor.insert_str(" ", &self.highlighter.spans);
+                let (del_info, ins_len) = self.editor.insert_str(" ");
                 if let Some((offset, len)) = del_info {
                     self.highlighter.shift_delete(offset, len);
                 }
-                self.highlighter.shift_insert(
-                    self.editor.cursor - ins_len,
-                    ins_len,
-                    Some(" "),
-                    None,
-                );
+                self.highlighter
+                    .shift_insert(self.editor.cursor - ins_len, ins_len, Some(" "));
                 cursor_moved = true;
                 is_edit = true;
             }
@@ -1050,9 +1028,7 @@ impl App {
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                 if let Some(text) = self.editor.get_selection() {
                     let _ = self.clipboard.set_text(text);
-                    if let Some((offset, len)) =
-                        self.editor.delete_selection(&self.highlighter.spans)
-                    {
+                    if let Some((offset, len)) = self.editor.delete_selection() {
                         self.highlighter.shift_delete(offset, len);
                         is_edit = true;
                     }
@@ -1061,8 +1037,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
                 if let Ok(text) = self.clipboard.get_text() {
-                    let (del_info, ins_len) =
-                        self.editor.insert_str(&text, &self.highlighter.spans);
+                    let (del_info, ins_len) = self.editor.insert_str(&text);
                     if let Some((offset, len)) = del_info {
                         self.highlighter.shift_delete(offset, len);
                     }
@@ -1070,7 +1045,6 @@ impl App {
                         self.editor.cursor - ins_len,
                         ins_len,
                         Some(&text),
-                        None,
                     );
                     is_edit = true;
                 }
@@ -1089,8 +1063,7 @@ impl App {
                             "{" => "{}",
                             _ => txt,
                         };
-                        let (del_info, ins_len) =
-                            self.editor.insert_str(insert_txt, &self.highlighter.spans);
+                        let (del_info, ins_len) = self.editor.insert_str(insert_txt);
                         if let Some((offset, len)) = del_info {
                             self.highlighter.shift_delete(offset, len);
                         }
@@ -1098,7 +1071,6 @@ impl App {
                             self.editor.cursor - ins_len,
                             ins_len,
                             Some(insert_txt),
-                            None,
                         );
                         if txt == "(" || txt == "[" || txt == "{" {
                             self.editor.move_left(false);
@@ -1142,7 +1114,7 @@ impl App {
             self.last_sent_version = self.editor.version;
 
             let start_wait = std::time::Instant::now();
-            while start_wait.elapsed().as_millis() < 20 {
+            while start_wait.elapsed().as_millis() < 3 {
                 if self.highlighter.poll(self.editor.version) {
                     self.is_highlighted_once = true;
                     if self.autocomplete_active {
@@ -1150,7 +1122,7 @@ impl App {
                     }
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                std::thread::sleep(std::time::Duration::from_micros(500));
             }
         }
 
