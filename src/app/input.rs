@@ -68,11 +68,9 @@ impl App {
                     self.editor = Editor::new(8192);
                     self.editor.version = old_version + 1;
                     self.editor.set_original_text();
-                    self.highlighter.request_update(
-                        self.editor.version,
-                        "".to_string(),
-                        "".to_string(),
-                    );
+                    self.editor.sync_edits.clear();
+                    self.highlighter
+                        .reset(self.editor.version, "".to_string(), "".to_string());
                     App::update_window_title(
                         self.window.as_ref().unwrap(),
                         &self.base_title,
@@ -675,6 +673,7 @@ impl App {
             }
         }
         if is_edit {
+            self.search_editor.sync_edits.clear();
             self.update_search();
             self.jump_to_search_result();
         }
@@ -742,7 +741,6 @@ impl App {
 
         let mut cursor_moved = false;
         let mut is_edit = false;
-        let mut typed_dot = false;
         let mut should_trigger_autocomplete = false;
 
         let old_cursor_y = self
@@ -1016,9 +1014,6 @@ impl App {
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
                     if let Some(txt) = key_event.logical_key.to_text() {
-                        if txt == "." {
-                            typed_dot = true;
-                        }
                         let insert_txt = match txt {
                             "(" => "()",
                             "[" => "[]",
@@ -1047,12 +1042,6 @@ impl App {
             }
         }
 
-        if typed_dot {
-            self.skip_highlight_update = true;
-        } else if is_edit {
-            self.skip_highlight_update = false;
-        }
-
         if cursor_moved && !is_edit {
             self.autocomplete_active = false;
             self.autocomplete_selected_idx = 0;
@@ -1077,25 +1066,22 @@ impl App {
                 self.search_results.clear();
             }
 
-            if !self.skip_highlight_update {
-                self.highlighter.request_update(
-                    self.editor.version,
-                    self.editor.get_full_text(),
-                    self.file_extension.clone(),
-                );
-                self.last_sent_version = self.editor.version;
+            if !self.editor.sync_edits.is_empty() {
+                let edits = std::mem::take(&mut self.editor.sync_edits);
+                self.highlighter.apply_edits(self.editor.version, edits);
+            }
+            self.last_sent_version = self.editor.version;
 
-                let start_wait = std::time::Instant::now();
-                while start_wait.elapsed().as_millis() < 20 {
-                    if self.highlighter.poll(self.editor.version) {
-                        self.is_highlighted_once = true;
-                        if self.autocomplete_active {
-                            self.update_autocomplete();
-                        }
-                        break;
+            let start_wait = std::time::Instant::now();
+            while start_wait.elapsed().as_millis() < 20 {
+                if self.highlighter.poll(self.editor.version) {
+                    self.is_highlighted_once = true;
+                    if self.autocomplete_active {
+                        self.update_autocomplete();
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    break;
                 }
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
         }
 

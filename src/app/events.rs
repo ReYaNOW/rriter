@@ -700,7 +700,7 @@ impl ApplicationHandler for App {
                         if let Some(w) = self.window.as_ref() {
                             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
                         }
-                        self.highlighter.request_update(
+                        self.highlighter.reset(
                             self.editor.version,
                             self.editor.get_full_text(),
                             self.file_extension.clone(),
@@ -716,20 +716,6 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             } else {
                 needs_redraw = true;
-            }
-        }
-
-        if self.editor.version != self.last_sent_version {
-            if self.skip_highlight_update {
-                self.last_sent_version = self.editor.version;
-                self.skip_highlight_update = false;
-            } else {
-                self.highlighter.request_update(
-                    self.editor.version,
-                    self.editor.get_full_text(),
-                    self.file_extension.clone(),
-                );
-                self.last_sent_version = self.editor.version;
             }
         }
 

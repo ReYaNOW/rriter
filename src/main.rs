@@ -159,6 +159,7 @@ fn main() {
         editor.clear_history();
     }
     editor.set_original_text();
+    editor.sync_edits.clear();
 
     let faq_text = "# Особенности RRiter
 Автоматическая подсветка синтаксиса для Rust, Python, Bash.
@@ -236,7 +237,6 @@ Ctrl + Del\tУдалить слово справа от курсора
         show_fps,
         scroll_anim_speed: 15.0,
         show_quit_dialog: false,
-        skip_highlight_update: false,
         last_resize_time: None,
 
         last_click_time: Instant::now(),
@@ -283,7 +283,7 @@ Ctrl + Del\tУдалить слово справа от курсора
         autocomplete_drag_offset_y: 0.0,
     };
 
-    app.highlighter.request_update(
+    app.highlighter.reset(
         app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),

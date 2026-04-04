@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use tree_sitter::StreamingIterator; 
+use tree_sitter::StreamingIterator;
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
     pub start: usize,
     pub end: usize,
-    pub color:[f32; 4],
+    pub color: [f32; 4],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -28,25 +28,43 @@ pub struct CompletionItem {
     pub scope_end: usize,
 }
 
+#[derive(Clone, Debug)]
+pub enum SyncEdit {
+    Insert { offset: usize, text: String },
+    Delete { offset: usize, len: usize },
+}
+
+pub enum HighlighterMessage {
+    Reset {
+        version: u64,
+        text: String,
+        ext: String,
+    },
+    Edits {
+        version: u64,
+        edits: Vec<SyncEdit>,
+    },
+}
+
 pub struct Highlighter {
-    tx: Sender<(u64, String, String, Vec<ColorSpan>)>,
-    rx: Receiver<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>, 
+    tx: Sender<HighlighterMessage>,
+    rx: Receiver<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
     pub current_version: u64,
 }
 
-const DRACULA_FG: [f32; 4] =[0.972, 0.972, 0.949, 1.0];
-const DRACULA_COMMENT:[f32; 4] =[0.384, 0.447, 0.643, 1.0];
-const DRACULA_CYAN:[f32; 4] =[0.545, 0.913, 0.992, 1.0];
-const DRACULA_DARK_CYAN:[f32; 4] =[0.45, 0.85, 0.90, 1.0];
-const DRACULA_GREEN:[f32; 4] =[0.313, 0.980, 0.482, 1.0];
-const DRACULA_ORANGE: [f32; 4] =[0.973, 0.584, 0.502, 1.0];
-const DRACULA_PINK:[f32; 4] =[1.0, 0.474, 0.776, 1.0];
-const DRACULA_PURPLE:[f32; 4] =[0.741, 0.576, 0.976, 1.0];
-const DRACULA_YELLOW:[f32; 4] =[0.945, 0.980, 0.549, 1.0];
+const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
+const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
+const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
+const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
+const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
+const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
+const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
+const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
+const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
 
-const MARKER_INTERPOLATION:[f32; 4] =[-1.0, 0.0, 0.0, 1.0];
+const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 
 #[derive(Debug)]
 struct Scope {
@@ -55,26 +73,139 @@ struct Scope {
     params: HashSet<String>,
 }
 
+fn get_point(text: &str, byte_offset: usize) -> tree_sitter::Point {
+    let byte_offset = byte_offset.min(text.len());
+    let prefix = &text.as_bytes()[..byte_offset];
+    let row = prefix.iter().filter(|&&b| b == b'\n').count();
+    let last_nl = prefix.iter().rposition(|&b| b == b'\n');
+    let column = if let Some(nl) = last_nl {
+        byte_offset - (nl + 1)
+    } else {
+        byte_offset
+    };
+    tree_sitter::Point::new(row, column)
+}
+
 impl Highlighter {
     pub fn new() -> Self {
-        let (tx_in, rx_in) = mpsc::channel::<(u64, String, String, Vec<ColorSpan>)>();
+        let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
         let (tx_out, rx_out) = mpsc::channel::<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>();
-        
+
         thread::spawn(move || {
-            let mut syntect_assets: Option<(syntect::parsing::SyntaxSet, syntect::highlighting::ThemeSet)> = None;
+            let mut syntect_assets: Option<(
+                syntect::parsing::SyntaxSet,
+                syntect::highlighting::ThemeSet,
+            )> = None;
 
             let mut parser = tree_sitter::Parser::new();
             let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
                 HashMap::new();
             let mut byte_colors_buf = Vec::new();
 
-            while let Ok((mut version, mut text, mut ext, mut old_spans)) = rx_in.recv() {
-                while let Ok((v, t, e, o)) = rx_in.try_recv() {
-                    version = v;
-                    text = t;
-                    ext = e;
-                    old_spans = o;
+            let mut replica_text = String::new();
+            let mut current_tree: Option<tree_sitter::Tree> = None;
+            let mut current_ext = String::new();
+            let mut old_spans = Vec::new();
+
+            while let Ok(msg) = rx_in.recv() {
+                let mut msgs = vec![msg];
+                while let Ok(m) = rx_in.try_recv() {
+                    msgs.push(m);
                 }
+
+                let mut final_version = 0;
+                let mut do_highlight = false;
+
+                for m in msgs {
+                    match m {
+                        HighlighterMessage::Reset { version, text, ext } => {
+                            final_version = version;
+                            replica_text = text;
+                            current_ext = ext;
+                            current_tree = None;
+                            do_highlight = true;
+                        }
+                        HighlighterMessage::Edits { version, edits } => {
+                            final_version = version;
+                            for edit in edits {
+                                match edit {
+                                    SyncEdit::Insert { offset, text } => {
+                                        let start_byte = offset;
+                                        let old_end_byte = offset;
+                                        let new_end_byte = offset + text.len();
+
+                                        let start_position = get_point(&replica_text, start_byte);
+                                        let old_end_position = start_position;
+
+                                        if offset <= replica_text.len()
+                                            && replica_text.is_char_boundary(offset)
+                                        {
+                                            replica_text.insert_str(offset, &text);
+                                        } else {
+                                            replica_text.push_str(&text);
+                                            current_tree = None;
+                                        }
+
+                                        let new_end_position =
+                                            get_point(&replica_text, new_end_byte);
+
+                                        let input_edit = tree_sitter::InputEdit {
+                                            start_byte,
+                                            old_end_byte,
+                                            new_end_byte,
+                                            start_position,
+                                            old_end_position,
+                                            new_end_position,
+                                        };
+                                        if let Some(tree) = &mut current_tree {
+                                            tree.edit(&input_edit);
+                                        }
+                                    }
+                                    SyncEdit::Delete { offset, len } => {
+                                        let start_byte = offset;
+                                        let old_end_byte = offset + len;
+                                        let new_end_byte = offset;
+
+                                        let start_position = get_point(&replica_text, start_byte);
+                                        let old_end_position =
+                                            get_point(&replica_text, old_end_byte);
+
+                                        if offset + len <= replica_text.len()
+                                            && replica_text.is_char_boundary(offset)
+                                            && replica_text.is_char_boundary(offset + len)
+                                        {
+                                            replica_text.replace_range(offset..offset + len, "");
+                                        } else {
+                                            current_tree = None;
+                                        }
+
+                                        let new_end_position = start_position;
+
+                                        let input_edit = tree_sitter::InputEdit {
+                                            start_byte,
+                                            old_end_byte,
+                                            new_end_byte,
+                                            start_position,
+                                            old_end_position,
+                                            new_end_position,
+                                        };
+                                        if let Some(tree) = &mut current_tree {
+                                            tree.edit(&input_edit);
+                                        }
+                                    }
+                                }
+                            }
+                            do_highlight = true;
+                        }
+                    }
+                }
+
+                if !do_highlight {
+                    continue;
+                }
+
+                let text = &replica_text;
+                let ext = &current_ext;
 
                 let is_log_or_huge = ext == "log" || text.len() > 500_000;
 
@@ -106,9 +237,10 @@ impl Highlighter {
                 };
 
                 let mut spans = Vec::new();
-                let mut completions_map: HashMap<(String, usize, usize), SymbolKind> = HashMap::new();
+                let mut completions_map: HashMap<(String, usize, usize), SymbolKind> =
+                    HashMap::new();
                 let mut used_ts = false;
-                let mut error_ranges = Vec::new(); 
+                let mut error_ranges = Vec::new();
 
                 if !is_log_or_huge {
                     let ts_config = match lang_name {
@@ -254,8 +386,15 @@ impl Highlighter {
                                 if b == b'"' {
                                     if let Some(start) = start_idx {
                                         let word = &q_str[start..i];
-                                        if word.len() > 1 && word.bytes().all(|c| c.is_ascii_alphabetic() || c == b'_') {
-                                            completions_map.insert((word.to_string(), 0, usize::MAX), SymbolKind::Keyword);
+                                        if word.len() > 1
+                                            && word
+                                                .bytes()
+                                                .all(|c| c.is_ascii_alphabetic() || c == b'_')
+                                        {
+                                            completions_map.insert(
+                                                (word.to_string(), 0, usize::MAX),
+                                                SymbolKind::Keyword,
+                                            );
                                         }
                                         start_idx = None;
                                     } else {
@@ -268,12 +407,16 @@ impl Highlighter {
 
                     if let Some((lang, queries)) = ts_config {
                         if parser.set_language(&lang).is_ok() {
-                            parser.reset();
-                            if let Some(tree) = parser.parse(&text, None) {
-                                
-                                let is_same_node = |n1: Option<tree_sitter::Node>, n2: tree_sitter::Node| -> bool {
+                            let parsed_tree = parser.parse(&replica_text, current_tree.as_ref());
+                            current_tree = parsed_tree.clone();
+
+                            if let Some(tree) = parsed_tree {
+                                let is_same_node = |n1: Option<tree_sitter::Node>,
+                                                    n2: tree_sitter::Node|
+                                 -> bool {
                                     if let Some(n1) = n1 {
-                                        n1.start_byte() == n2.start_byte() && n1.end_byte() == n2.end_byte()
+                                        n1.start_byte() == n2.start_byte()
+                                            && n1.end_byte() == n2.end_byte()
                                     } else {
                                         false
                                     }
@@ -284,39 +427,81 @@ impl Highlighter {
                                 while visiting {
                                     let node = c_cursor.node();
                                     let kind = node.kind();
-                                    
+
                                     if node.is_error() {
                                         error_ranges.push((node.start_byte(), node.end_byte()));
                                     }
 
-                                    if kind.contains("identifier") || kind == "word" || kind == "property_identifier" || kind == "type_identifier" {
-                                        if let Ok(s) = std::str::from_utf8(&text.as_bytes()[node.start_byte()..node.end_byte()]) {
-                                            if s.len() > 2 && !s.contains('\n') && !s.contains(' ') {
-                                                
+                                    if kind.contains("identifier")
+                                        || kind == "word"
+                                        || kind == "property_identifier"
+                                        || kind == "type_identifier"
+                                    {
+                                        if let Ok(s) = std::str::from_utf8(
+                                            &text.as_bytes()[node.start_byte()..node.end_byte()],
+                                        ) {
+                                            if s.len() > 2 && !s.contains('\n') && !s.contains(' ')
+                                            {
                                                 let mut sym_kind = SymbolKind::Variable;
                                                 let mut scope_start = 0;
                                                 let mut scope_end = usize::MAX;
                                                 let mut skip = false;
                                                 let mut scope_found = false;
-                                                
+
                                                 if let Some(p) = node.parent() {
                                                     let p_kind = p.kind();
 
-                                                    if p_kind == "keyword_argument" && is_same_node(p.child_by_field_name("name"), node) {
-                                                        skip = true; 
-                                                    } else if p_kind == "attribute" && is_same_node(p.child_by_field_name("attribute"), node) {
-                                                        skip = true; 
-                                                    } else if p_kind == "member_expression" && is_same_node(p.child_by_field_name("property"), node) {
-                                                        skip = true; 
-                                                    } else if p_kind == "field_expression" && is_same_node(p.child_by_field_name("field"), node) {
-                                                        skip = true; 
+                                                    if p_kind == "keyword_argument"
+                                                        && is_same_node(
+                                                            p.child_by_field_name("name"),
+                                                            node,
+                                                        )
+                                                    {
+                                                        skip = true;
+                                                    } else if p_kind == "attribute"
+                                                        && is_same_node(
+                                                            p.child_by_field_name("attribute"),
+                                                            node,
+                                                        )
+                                                    {
+                                                        skip = true;
+                                                    } else if p_kind == "member_expression"
+                                                        && is_same_node(
+                                                            p.child_by_field_name("property"),
+                                                            node,
+                                                        )
+                                                    {
+                                                        skip = true;
+                                                    } else if p_kind == "field_expression"
+                                                        && is_same_node(
+                                                            p.child_by_field_name("field"),
+                                                            node,
+                                                        )
+                                                    {
+                                                        skip = true;
                                                     } else if kind == "property_identifier" {
-                                                        skip = true; 
-                                                    } else if (p_kind.contains("function") || p_kind.contains("method")) && is_same_node(p.child_by_field_name("name"), node) {
+                                                        skip = true;
+                                                    } else if (p_kind.contains("function")
+                                                        || p_kind.contains("method"))
+                                                        && is_same_node(
+                                                            p.child_by_field_name("name"),
+                                                            node,
+                                                        )
+                                                    {
                                                         sym_kind = SymbolKind::Function;
-                                                    } else if (p_kind.contains("class") || p_kind.contains("struct") || p_kind.contains("enum") || p_kind.contains("trait")) && is_same_node(p.child_by_field_name("name"), node) {
+                                                    } else if (p_kind.contains("class")
+                                                        || p_kind.contains("struct")
+                                                        || p_kind.contains("enum")
+                                                        || p_kind.contains("trait"))
+                                                        && is_same_node(
+                                                            p.child_by_field_name("name"),
+                                                            node,
+                                                        )
+                                                    {
                                                         sym_kind = SymbolKind::Class;
-                                                    } else if p_kind.contains("parameter") || p_kind.contains("argument") {
+                                                    } else if p_kind.contains("parameter")
+                                                        || p_kind.contains("argument")
+                                                    {
                                                         sym_kind = SymbolKind::Parameter;
                                                     }
 
@@ -324,23 +509,44 @@ impl Highlighter {
                                                     let mut curr_parent = Some(p);
                                                     while let Some(cp) = curr_parent {
                                                         let cp_kind = cp.kind();
-                                                        
-                                                        if cp_kind == "import_from_statement" || cp_kind == "import_statement" {
-                                                            if let Some(mod_name) = cp.child_by_field_name("module_name") {
-                                                                if curr.start_byte() >= mod_name.start_byte() && curr.end_byte() <= mod_name.end_byte() {
+
+                                                        if cp_kind == "import_from_statement"
+                                                            || cp_kind == "import_statement"
+                                                        {
+                                                            if let Some(mod_name) = cp
+                                                                .child_by_field_name("module_name")
+                                                            {
+                                                                if curr.start_byte()
+                                                                    >= mod_name.start_byte()
+                                                                    && curr.end_byte()
+                                                                        <= mod_name.end_byte()
+                                                                {
                                                                     skip = true;
                                                                 }
                                                             }
                                                         }
                                                         if cp_kind == "aliased_import" {
-                                                            if let Some(name_node) = cp.child_by_field_name("name") {
-                                                                if curr.start_byte() >= name_node.start_byte() && curr.end_byte() <= name_node.end_byte() {
-                                                                    skip = true; 
+                                                            if let Some(name_node) =
+                                                                cp.child_by_field_name("name")
+                                                            {
+                                                                if curr.start_byte()
+                                                                    >= name_node.start_byte()
+                                                                    && curr.end_byte()
+                                                                        <= name_node.end_byte()
+                                                                {
+                                                                    skip = true;
                                                                 }
                                                             }
                                                         }
 
-                                                        if !scope_found && (cp_kind.contains("function") || cp_kind.contains("method") || cp_kind.contains("class") || cp_kind.contains("block") || cp_kind == "module" || cp_kind == "source_file") {
+                                                        if !scope_found
+                                                            && (cp_kind.contains("function")
+                                                                || cp_kind.contains("method")
+                                                                || cp_kind.contains("class")
+                                                                || cp_kind.contains("block")
+                                                                || cp_kind == "module"
+                                                                || cp_kind == "source_file")
+                                                        {
                                                             scope_start = cp.start_byte();
                                                             scope_end = cp.end_byte();
                                                             scope_found = true;
@@ -349,27 +555,42 @@ impl Highlighter {
                                                         curr_parent = cp.parent();
                                                     }
                                                 }
-                                                
+
                                                 if !skip {
                                                     if let Some(p) = node.parent() {
                                                         let p_kind = p.kind();
-                                                        if p_kind.contains("import") || p_kind == "dotted_name" || p_kind == "aliased_import" {
+                                                        if p_kind.contains("import")
+                                                            || p_kind == "dotted_name"
+                                                            || p_kind == "aliased_import"
+                                                        {
                                                             sym_kind = SymbolKind::Unknown;
                                                         }
                                                     }
 
                                                     let actual_scope_start = match sym_kind {
-                                                        SymbolKind::Variable | SymbolKind::Parameter => node.start_byte(),
+                                                        SymbolKind::Variable
+                                                        | SymbolKind::Parameter => {
+                                                            node.start_byte()
+                                                        }
                                                         _ => scope_start,
                                                     };
 
-                                                    completions_map.insert((s.to_string(), actual_scope_start, scope_end), sym_kind);
+                                                    completions_map.insert(
+                                                        (
+                                                            s.to_string(),
+                                                            actual_scope_start,
+                                                            scope_end,
+                                                        ),
+                                                        sym_kind,
+                                                    );
                                                 }
                                             }
                                         }
                                     }
-                                    
-                                    if c_cursor.goto_first_child() { continue; }
+
+                                    if c_cursor.goto_first_child() {
+                                        continue;
+                                    }
                                     while !c_cursor.goto_next_sibling() {
                                         if !c_cursor.goto_parent() {
                                             visiting = false;
@@ -380,14 +601,14 @@ impl Highlighter {
 
                                 let mut py_scopes = Vec::new();
                                 if lang_name == "py" {
-                                    for q_str in[
+                                    for q_str in [
                                         "(function_definition parameters: (parameters) @params body: (_) @body)",
                                         "(lambda parameters: (lambda_parameters) @params body: (_) @body)"
                                     ] {
                                         if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                             let mut cursor = tree_sitter::QueryCursor::new();
                                             let mut matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
-                                            
+
                                             while let Some(m) = matches.next() {
                                                 let mut p_node = None;
                                                 let mut b_node = None;
@@ -396,14 +617,14 @@ impl Highlighter {
                                                     if cname == "params" { p_node = Some(cap.node); }
                                                     if cname == "body" { b_node = Some(cap.node); }
                                                 }
-                                                
+
                                                 if let (Some(params_node), Some(body_node)) = (p_node, b_node) {
                                                     let mut params_set = HashSet::new();
                                                     let mut t_cursor = params_node.walk();
                                                     for child in params_node.children(&mut t_cursor) {
                                                         let kind = child.kind();
                                                         let mut name_node = None;
-                                                        
+
                                                         if kind == "identifier" {
                                                             name_node = Some(child);
                                                         } else if kind == "typed_parameter" || kind == "default_parameter" || kind == "typed_default_parameter" {
@@ -423,14 +644,14 @@ impl Highlighter {
                                                                 }
                                                             }
                                                         }
-                                                        
+
                                                         if let Some(n) = name_node {
                                                             if let Ok(s) = std::str::from_utf8(&text.as_bytes()[n.start_byte()..n.end_byte()]) {
                                                                 params_set.insert(s.to_string());
                                                             }
                                                         }
                                                     }
-                                                    
+
                                                     py_scopes.push(Scope {
                                                         start: body_node.start_byte(),
                                                         end: body_node.end_byte(),
@@ -510,7 +731,9 @@ impl Highlighter {
                                                         | "Union" | "Callable" | "Type"
                                                         | "Dict" | "List" | "Set" | "Tuple"
                                                         | "id" | "print" | "len" | "range"
-                                                        | "enumerate" | "sum" | "min" | "max" => DRACULA_CYAN,
+                                                        | "enumerate" | "sum" | "min" | "max" => {
+                                                            DRACULA_CYAN
+                                                        }
                                                         "self" | "cls" => DRACULA_PURPLE,
                                                         _ => DRACULA_FG,
                                                     },
@@ -535,12 +758,24 @@ impl Highlighter {
                                                     _ => DRACULA_FG,
                                                 };
 
-                                                if lang_name == "py" && node_text != "self" && node_text != "cls" {
-                                                    if matches!(name, "py_ident" | "py_builtin_or_func" | "py_assign" | "parameter") {
+                                                if lang_name == "py"
+                                                    && node_text != "self"
+                                                    && node_text != "cls"
+                                                {
+                                                    if matches!(
+                                                        name,
+                                                        "py_ident"
+                                                            | "py_builtin_or_func"
+                                                            | "py_assign"
+                                                            | "parameter"
+                                                    ) {
                                                         let mut is_param = false;
                                                         for scope in &py_scopes {
-                                                            if cap.node.start_byte() >= scope.start && cap.node.start_byte() < scope.end {
-                                                                if scope.params.contains(node_text) {
+                                                            if cap.node.start_byte() >= scope.start
+                                                                && cap.node.start_byte() < scope.end
+                                                            {
+                                                                if scope.params.contains(node_text)
+                                                                {
                                                                     is_param = true;
                                                                     break;
                                                                 }
@@ -574,16 +809,22 @@ impl Highlighter {
                             let ts = syntect::highlighting::ThemeSet::load_defaults();
                             syntect_assets = Some((ps, ts));
                         }
-                        
+
                         if let Some((ps, ts)) = syntect_assets.as_ref() {
                             let fallback_theme = &ts.themes["base16-ocean.dark"];
-                            let syntax = ps.find_syntax_by_extension(&actual_ext)
-                                .or_else(|| if actual_ext == "toml" { ps.find_syntax_by_extension("ini") } else { None });
+                            let syntax = ps.find_syntax_by_extension(&actual_ext).or_else(|| {
+                                if actual_ext == "toml" {
+                                    ps.find_syntax_by_extension("ini")
+                                } else {
+                                    None
+                                }
+                            });
 
                             if let Some(syntax) = syntax {
-                                let mut h = syntect::easy::HighlightLines::new(syntax, fallback_theme);
+                                let mut h =
+                                    syntect::easy::HighlightLines::new(syntax, fallback_theme);
                                 let mut byte_offset = 0;
-                                for line in syntect::util::LinesWithEndings::from(&text) {
+                                for line in syntect::util::LinesWithEndings::from(text.as_str()) {
                                     if let Ok(ranges) = h.highlight_line(line, &ps) {
                                         for (style, s) in ranges {
                                             let start = byte_offset;
@@ -591,7 +832,7 @@ impl Highlighter {
                                             spans.push(ColorSpan {
                                                 start,
                                                 end,
-                                                color:[
+                                                color: [
                                                     style.foreground.r as f32 / 255.0,
                                                     style.foreground.g as f32 / 255.0,
                                                     style.foreground.b as f32 / 255.0,
@@ -611,93 +852,167 @@ impl Highlighter {
 
                 let apply_rainbow_brackets = lang_name != "bash";
 
-                let flat_spans = flatten_spans(spans, text.len(), &text, &mut byte_colors_buf, error_ranges, old_spans, apply_rainbow_brackets);
-                
-                // ВНЕДРЕНИЕ ВСТРОЕННЫХ БИБЛИОТЕК ЯЗЫКОВ
+                let flat_spans = flatten_spans(
+                    spans,
+                    text.len(),
+                    text,
+                    &mut byte_colors_buf,
+                    error_ranges,
+                    old_spans.clone(),
+                    apply_rainbow_brackets,
+                );
+
+                old_spans = flat_spans.clone();
+
                 let mut inject_builtins = |items: &[(&str, SymbolKind)]| {
                     for &(word, ref kind) in items {
-                        completions_map.entry((word.to_string(), 0, usize::MAX)).or_insert_with(|| kind.clone());
+                        completions_map
+                            .entry((word.to_string(), 0, usize::MAX))
+                            .or_insert_with(|| kind.clone());
                     }
                 };
 
                 match lang_name {
                     "py" => {
                         inject_builtins(&[
-                            ("print", SymbolKind::Function), ("len", SymbolKind::Function),
-                            ("int", SymbolKind::Class), ("str", SymbolKind::Class),
-                            ("list", SymbolKind::Class), ("dict", SymbolKind::Class),
-                            ("set", SymbolKind::Class), ("tuple", SymbolKind::Class),
-                            ("bool", SymbolKind::Class), ("float", SymbolKind::Class),
-                            ("sum", SymbolKind::Function), ("min", SymbolKind::Function),
-                            ("max", SymbolKind::Function), ("abs", SymbolKind::Function),
-                            ("isinstance", SymbolKind::Function), ("issubclass", SymbolKind::Function),
-                            ("hasattr", SymbolKind::Function), ("getattr", SymbolKind::Function),
-                            ("setattr", SymbolKind::Function), ("delattr", SymbolKind::Function),
-                            ("dir", SymbolKind::Function), ("type", SymbolKind::Class),
-                            ("enumerate", SymbolKind::Function), ("zip", SymbolKind::Function),
-                            ("map", SymbolKind::Class), ("filter", SymbolKind::Class),
-                            ("range", SymbolKind::Class), ("reversed", SymbolKind::Class),
-                            ("open", SymbolKind::Function), ("super", SymbolKind::Function),
-                            ("Exception", SymbolKind::Class), ("ValueError", SymbolKind::Class),
-                            ("TypeError", SymbolKind::Class), ("KeyError", SymbolKind::Class),
-                            ("IndexError", SymbolKind::Class), ("AttributeError", SymbolKind::Class),
-                            ("RuntimeError", SymbolKind::Class), ("KeyboardInterrupt", SymbolKind::Class),
-                            ("True", SymbolKind::Keyword), ("False", SymbolKind::Keyword), ("None", SymbolKind::Keyword),
-                            ("__name__", SymbolKind::Variable), ("__file__", SymbolKind::Variable),
-                            ("__doc__", SymbolKind::Variable), ("__dict__", SymbolKind::Variable),
-                            ("__init__", SymbolKind::Function), ("__call__", SymbolKind::Function),
-                            ("self", SymbolKind::Variable), ("cls", SymbolKind::Variable),
+                            ("print", SymbolKind::Function),
+                            ("len", SymbolKind::Function),
+                            ("int", SymbolKind::Class),
+                            ("str", SymbolKind::Class),
+                            ("list", SymbolKind::Class),
+                            ("dict", SymbolKind::Class),
+                            ("set", SymbolKind::Class),
+                            ("tuple", SymbolKind::Class),
+                            ("bool", SymbolKind::Class),
+                            ("float", SymbolKind::Class),
+                            ("sum", SymbolKind::Function),
+                            ("min", SymbolKind::Function),
+                            ("max", SymbolKind::Function),
+                            ("abs", SymbolKind::Function),
+                            ("isinstance", SymbolKind::Function),
+                            ("issubclass", SymbolKind::Function),
+                            ("hasattr", SymbolKind::Function),
+                            ("getattr", SymbolKind::Function),
+                            ("setattr", SymbolKind::Function),
+                            ("delattr", SymbolKind::Function),
+                            ("dir", SymbolKind::Function),
+                            ("type", SymbolKind::Class),
+                            ("enumerate", SymbolKind::Function),
+                            ("zip", SymbolKind::Function),
+                            ("map", SymbolKind::Class),
+                            ("filter", SymbolKind::Class),
+                            ("range", SymbolKind::Class),
+                            ("reversed", SymbolKind::Class),
+                            ("open", SymbolKind::Function),
+                            ("super", SymbolKind::Function),
+                            ("Exception", SymbolKind::Class),
+                            ("ValueError", SymbolKind::Class),
+                            ("TypeError", SymbolKind::Class),
+                            ("KeyError", SymbolKind::Class),
+                            ("IndexError", SymbolKind::Class),
+                            ("AttributeError", SymbolKind::Class),
+                            ("RuntimeError", SymbolKind::Class),
+                            ("KeyboardInterrupt", SymbolKind::Class),
+                            ("True", SymbolKind::Keyword),
+                            ("False", SymbolKind::Keyword),
+                            ("None", SymbolKind::Keyword),
+                            ("__name__", SymbolKind::Variable),
+                            ("__file__", SymbolKind::Variable),
+                            ("__doc__", SymbolKind::Variable),
+                            ("__dict__", SymbolKind::Variable),
+                            ("__init__", SymbolKind::Function),
+                            ("__call__", SymbolKind::Function),
+                            ("self", SymbolKind::Variable),
+                            ("cls", SymbolKind::Variable),
                         ]);
-                    },
+                    }
                     "rs" => {
                         inject_builtins(&[
-                            ("println!", SymbolKind::Function), ("print!", SymbolKind::Function),
-                            ("format!", SymbolKind::Function), ("panic!", SymbolKind::Function),
-                            ("vec!", SymbolKind::Function), ("String", SymbolKind::Class),
-                            ("Vec", SymbolKind::Class), ("Option", SymbolKind::Class),
-                            ("Result", SymbolKind::Class), ("Some", SymbolKind::Variable),
-                            ("None", SymbolKind::Variable), ("Ok", SymbolKind::Variable),
-                            ("Err", SymbolKind::Variable), ("Box", SymbolKind::Class),
-                            ("Rc", SymbolKind::Class), ("Arc", SymbolKind::Class),
-                            ("HashMap", SymbolKind::Class), ("HashSet", SymbolKind::Class),
-                            ("std", SymbolKind::Variable), ("iter", SymbolKind::Function),
-                            ("map", SymbolKind::Function), ("collect", SymbolKind::Function),
-                            ("unwrap", SymbolKind::Function), ("expect", SymbolKind::Function),
-                            ("clone", SymbolKind::Function), ("as_ref", SymbolKind::Function),
-                            ("into", SymbolKind::Function), ("from", SymbolKind::Function),
-                            ("mut", SymbolKind::Keyword), ("let", SymbolKind::Keyword),
-                            ("fn", SymbolKind::Keyword), ("impl", SymbolKind::Keyword),
-                            ("pub", SymbolKind::Keyword), ("struct", SymbolKind::Keyword),
+                            ("println!", SymbolKind::Function),
+                            ("print!", SymbolKind::Function),
+                            ("format!", SymbolKind::Function),
+                            ("panic!", SymbolKind::Function),
+                            ("vec!", SymbolKind::Function),
+                            ("String", SymbolKind::Class),
+                            ("Vec", SymbolKind::Class),
+                            ("Option", SymbolKind::Class),
+                            ("Result", SymbolKind::Class),
+                            ("Some", SymbolKind::Variable),
+                            ("None", SymbolKind::Variable),
+                            ("Ok", SymbolKind::Variable),
+                            ("Err", SymbolKind::Variable),
+                            ("Box", SymbolKind::Class),
+                            ("Rc", SymbolKind::Class),
+                            ("Arc", SymbolKind::Class),
+                            ("HashMap", SymbolKind::Class),
+                            ("HashSet", SymbolKind::Class),
+                            ("std", SymbolKind::Variable),
+                            ("iter", SymbolKind::Function),
+                            ("map", SymbolKind::Function),
+                            ("collect", SymbolKind::Function),
+                            ("unwrap", SymbolKind::Function),
+                            ("expect", SymbolKind::Function),
+                            ("clone", SymbolKind::Function),
+                            ("as_ref", SymbolKind::Function),
+                            ("into", SymbolKind::Function),
+                            ("from", SymbolKind::Function),
+                            ("mut", SymbolKind::Keyword),
+                            ("let", SymbolKind::Keyword),
+                            ("fn", SymbolKind::Keyword),
+                            ("impl", SymbolKind::Keyword),
+                            ("pub", SymbolKind::Keyword),
+                            ("struct", SymbolKind::Keyword),
                         ]);
-                    },
+                    }
                     "dart" => {
                         inject_builtins(&[
-                            ("print", SymbolKind::Function), ("String", SymbolKind::Class),
-                            ("int", SymbolKind::Class), ("double", SymbolKind::Class),
-                            ("bool", SymbolKind::Class), ("List", SymbolKind::Class),
-                            ("Map", SymbolKind::Class), ("Set", SymbolKind::Class),
-                            ("Future", SymbolKind::Class), ("Stream", SymbolKind::Class),
-                            ("Widget", SymbolKind::Class), ("StatelessWidget", SymbolKind::Class),
-                            ("StatefulWidget", SymbolKind::Class), ("BuildContext", SymbolKind::Class),
-                            ("Scaffold", SymbolKind::Class), ("AppBar", SymbolKind::Class),
-                            ("Text", SymbolKind::Class), ("Container", SymbolKind::Class),
-                            ("Column", SymbolKind::Class), ("Row", SymbolKind::Class),
-                            ("ListView", SymbolKind::Class), ("Padding", SymbolKind::Class),
-                            ("Center", SymbolKind::Class), ("initState", SymbolKind::Function),
-                            ("build", SymbolKind::Function), ("dispose", SymbolKind::Function),
-                            ("setState", SymbolKind::Function), ("late", SymbolKind::Keyword),
-                            ("final", SymbolKind::Keyword), ("const", SymbolKind::Keyword),
+                            ("print", SymbolKind::Function),
+                            ("String", SymbolKind::Class),
+                            ("int", SymbolKind::Class),
+                            ("double", SymbolKind::Class),
+                            ("bool", SymbolKind::Class),
+                            ("List", SymbolKind::Class),
+                            ("Map", SymbolKind::Class),
+                            ("Set", SymbolKind::Class),
+                            ("Future", SymbolKind::Class),
+                            ("Stream", SymbolKind::Class),
+                            ("Widget", SymbolKind::Class),
+                            ("StatelessWidget", SymbolKind::Class),
+                            ("StatefulWidget", SymbolKind::Class),
+                            ("BuildContext", SymbolKind::Class),
+                            ("Scaffold", SymbolKind::Class),
+                            ("AppBar", SymbolKind::Class),
+                            ("Text", SymbolKind::Class),
+                            ("Container", SymbolKind::Class),
+                            ("Column", SymbolKind::Class),
+                            ("Row", SymbolKind::Class),
+                            ("ListView", SymbolKind::Class),
+                            ("Padding", SymbolKind::Class),
+                            ("Center", SymbolKind::Class),
+                            ("initState", SymbolKind::Function),
+                            ("build", SymbolKind::Function),
+                            ("dispose", SymbolKind::Function),
+                            ("setState", SymbolKind::Function),
+                            ("late", SymbolKind::Keyword),
+                            ("final", SymbolKind::Keyword),
+                            ("const", SymbolKind::Keyword),
                         ]);
-                    },
+                    }
                     _ => {}
                 }
 
-                let mut completions: Vec<CompletionItem> = completions_map.into_iter().map(|((word, scope_start, scope_end), kind)| {
-                    CompletionItem { word, kind, scope_start, scope_end }
-                }).collect();
+                let mut completions: Vec<CompletionItem> = completions_map
+                    .into_iter()
+                    .map(|((word, scope_start, scope_end), kind)| CompletionItem {
+                        word,
+                        kind,
+                        scope_start,
+                        scope_end,
+                    })
+                    .collect();
                 completions.sort_by(|a, b| a.word.cmp(&b.word));
-                
-                let _ = tx_out.send((version, flat_spans, completions));
+
+                let _ = tx_out.send((final_version, flat_spans, completions));
             }
         });
         Self {
@@ -709,8 +1024,16 @@ impl Highlighter {
         }
     }
 
-    pub fn request_update(&self, version: u64, text: String, ext: String) {
-        let _ = self.tx.send((version, text, ext, self.spans.clone()));
+    pub fn reset(&self, version: u64, text: String, ext: String) {
+        let _ = self
+            .tx
+            .send(HighlighterMessage::Reset { version, text, ext });
+    }
+
+    pub fn apply_edits(&self, version: u64, edits: Vec<SyncEdit>) {
+        if !edits.is_empty() {
+            let _ = self.tx.send(HighlighterMessage::Edits { version, edits });
+        }
     }
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
@@ -728,7 +1051,13 @@ impl Highlighter {
         updated
     }
 
-    pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>, restored_spans: Option<Vec<ColorSpan>>) {
+    pub fn shift_insert(
+        &mut self,
+        offset: usize,
+        len: usize,
+        text_opt: Option<&str>,
+        restored_spans: Option<Vec<ColorSpan>>,
+    ) {
         let special_color = if restored_spans.is_none() {
             text_opt.and_then(|t| match t.trim() {
                 "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
@@ -749,7 +1078,11 @@ impl Highlighter {
             } else if span.start == offset {
                 if offset == 0 {
                     if let Some(c) = special_color {
-                        new_spans.push(ColorSpan { start: 0, end: len, color: c });
+                        new_spans.push(ColorSpan {
+                            start: 0,
+                            end: len,
+                            color: c,
+                        });
                         span.start += len;
                         span.end += len;
                     } else {
@@ -763,14 +1096,26 @@ impl Highlighter {
                 if let Some(c) = special_color {
                     let old_end = span.end;
                     span.end = offset;
-                    new_spans.push(ColorSpan { start: offset, end: offset + len, color: c });
-                    new_spans.push(ColorSpan { start: offset + len, end: old_end + len, color: span.color });
+                    new_spans.push(ColorSpan {
+                        start: offset,
+                        end: offset + len,
+                        color: c,
+                    });
+                    new_spans.push(ColorSpan {
+                        start: offset + len,
+                        end: old_end + len,
+                        color: span.color,
+                    });
                 } else {
                     span.end += len;
                 }
             } else if span.end == offset {
                 if let Some(c) = special_color {
-                    new_spans.push(ColorSpan { start: offset, end: offset + len, color: c });
+                    new_spans.push(ColorSpan {
+                        start: offset,
+                        end: offset + len,
+                        color: c,
+                    });
                 } else {
                     span.end += len;
                 }
@@ -810,7 +1155,7 @@ impl Highlighter {
     }
 }
 
-fn get_bracket_color(depth: usize) ->[f32; 4] {
+fn get_bracket_color(depth: usize) -> [f32; 4] {
     if depth == 0 {
         return DRACULA_FG;
     }
@@ -852,16 +1197,16 @@ fn flatten_spans(
             if b == b'{' || b == b'}' {
                 byte_colors[i] = DRACULA_ORANGE;
             } else {
-                byte_colors[i] = DRACULA_FG; 
+                byte_colors[i] = DRACULA_FG;
             }
         }
     }
-    
+
     if apply_rainbow_brackets {
         let mut depth_round = 0usize;
         let mut depth_square = 0usize;
         let mut depth_curly = 0usize;
-        
+
         for i in 0..len {
             if byte_colors[i] != DRACULA_COMMENT
                 && (byte_colors[i] == DRACULA_FG

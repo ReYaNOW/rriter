@@ -74,7 +74,6 @@ pub struct App {
     pub show_fps: bool,
     pub scroll_anim_speed: f32,
     pub show_quit_dialog: bool,
-    pub skip_highlight_update: bool,
 
     pub last_resize_time: Option<Instant>,
 
@@ -302,7 +301,6 @@ impl App {
         self.autocomplete_selected_idx = 0;
         self.autocomplete_scroll_y = 0.0;
         self.autocomplete_target_scroll_y = 0.0;
-        self.skip_highlight_update = false;
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
@@ -540,6 +538,7 @@ impl App {
                 self.editor.clear_history();
             }
             self.editor.set_original_text();
+            self.editor.sync_edits.clear();
             self.file_path = Some(path.clone());
             let file_name = path.file_name().unwrap_or_default().to_string_lossy();
             self.base_title = file_name.into_owned();
@@ -549,7 +548,7 @@ impl App {
                 .unwrap_or_default();
             self.highlighter.spans.clear();
             self.is_highlighted_once = false;
-            self.highlighter.request_update(
+            self.highlighter.reset(
                 self.editor.version,
                 self.editor.get_full_text(),
                 self.file_extension.clone(),

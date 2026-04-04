@@ -1,4 +1,4 @@
-use crate::highlighter::ColorSpan;
+use crate::highlighter::{ColorSpan, SyncEdit};
 use crate::renderer::Renderer;
 use rustc_hash::FxHasher;
 use std::collections::VecDeque;
@@ -185,6 +185,8 @@ pub struct Editor {
 
     indent_cache: Vec<u8>,
     last_indent_version: u64,
+
+    pub sync_edits: Vec<SyncEdit>,
 }
 
 impl Editor {
@@ -207,10 +209,10 @@ impl Editor {
             is_dirty: false,
             indent_cache: Vec::new(),
             last_indent_version: u64::MAX,
+            sync_edits: Vec::new(),
         }
     }
 
-    /// Быстрое вычисление хэшей без аллокации String
     fn get_line_hashes(&self) -> Vec<u64> {
         let mut hashes = Vec::with_capacity(1024);
         let mut hasher = FxHasher::default();
@@ -234,7 +236,6 @@ impl Editor {
         hashes
     }
 
-    /// Безаллокационное обновление кэша отступов напрямую из буфера
     pub fn ensure_indent_cache_updated(&mut self) {
         if self.version == self.last_indent_version {
             return;
@@ -306,7 +307,6 @@ impl Editor {
         self.last_indent_version = self.version;
     }
 
-    /// Получение готового кэша отступов
     pub fn get_cached_indent_levels(&self) -> &[u8] {
         &self.indent_cache
     }
@@ -334,6 +334,8 @@ impl Editor {
 
                 let cursor_before = self.cursor;
                 self.move_gap(start);
+                self.sync_edits
+                    .push(SyncEdit::Delete { offset: start, len });
                 self.gap_end += len;
                 self.cursor = start;
                 self.selection_anchor = None;
@@ -368,6 +370,7 @@ impl Editor {
             let saved_spans = extract_spans_for_range(current_spans, prev, self.cursor);
 
             self.move_gap(self.cursor);
+            self.sync_edits.push(SyncEdit::Delete { offset: prev, len });
             self.gap_start -= len;
             self.cursor = prev;
 
@@ -443,6 +446,7 @@ impl Editor {
         self.redo_stack.clear();
         self.history_size = 0;
         self.update_modifications();
+        self.sync_edits.clear();
     }
 
     fn push_history(&mut self, step: HistoryStep) {
@@ -560,6 +564,8 @@ impl Editor {
                     let len = text.len();
                     let start = *offset;
                     self.move_gap(start);
+                    self.sync_edits
+                        .push(SyncEdit::Delete { offset: start, len });
                     self.gap_end += len;
                     self.cursor = start;
                     self.selection_anchor = None;
@@ -608,6 +614,8 @@ impl Editor {
                     let len = text.len();
                     let start = *offset;
                     self.move_gap(start);
+                    self.sync_edits
+                        .push(SyncEdit::Delete { offset: start, len });
                     self.gap_end += len;
                     self.cursor = start;
                     self.selection_anchor = None;
@@ -664,6 +672,10 @@ impl Editor {
     fn insert_str_internal(&mut self, s: &str) -> usize {
         let bytes = s.as_bytes();
         let len = bytes.len();
+        self.sync_edits.push(SyncEdit::Insert {
+            offset: self.cursor,
+            text: s.to_string(),
+        });
         self.move_gap(self.cursor);
         if self.gap_start + len > self.gap_end {
             let mut new_data = vec![0; self.data.len() * 2 + len];
@@ -728,6 +740,8 @@ impl Editor {
 
                 let cursor_before = self.cursor;
                 self.move_gap(start);
+                self.sync_edits
+                    .push(SyncEdit::Delete { offset: start, len });
                 self.gap_end += len;
                 self.cursor = start;
                 self.selection_anchor = None;
@@ -771,6 +785,7 @@ impl Editor {
 
             let offset = self.cursor;
             self.move_gap(self.cursor);
+            self.sync_edits.push(SyncEdit::Delete { offset, len });
             self.gap_end += len;
 
             self.push_history(HistoryStep {
