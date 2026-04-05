@@ -792,12 +792,8 @@ impl ApplicationHandler for App {
                     .saturating_sub(1);
                 if el > sl {
                     self.editor.foldable_lines.insert(sl, el);
-                    if is_autofold
-                        && el - sl >= 2
-                        && !self.editor.auto_folded_seen.contains(&start_b)
-                    {
+                    if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
                         self.editor.folded_lines.insert(sl);
-                        self.editor.auto_folded_seen.insert(start_b);
                     }
                 }
             }

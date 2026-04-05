@@ -216,18 +216,20 @@ impl App {
                     }
 
                     if v_line.is_folded {
-                        let mut fold_text = String::from("...");
+                        let fold_str_width = r.measure_ui_width("...", 1.0);
+                        let button_width = fold_str_width + 10.0 * s;
+                        let mut full_fold_width = button_width;
                         if let Some(c) = v_line.fold_char {
-                            fold_text.push(c);
+                            full_fold_width += r.char_advance(c);
                         }
-                        let dots_adv = r.measure_ui_width(&fold_text, 1.0) + 16.0 * s;
+
                         let dots_x =
                             r.left_padding + v_line.whitespace_px_width + v_line.text_px_width
-                                - dots_adv
+                                - full_fold_width
                                 - self.scroll_x;
 
                         if last_mouse_x >= dots_x
-                            && last_mouse_x <= dots_x + dots_adv
+                            && last_mouse_x <= dots_x + button_width
                             && last_mouse_y >= y - r.line_height
                             && last_mouse_y <= y + 5.0 * s
                         {
@@ -405,7 +407,8 @@ impl App {
                 let mut total_lines = 0;
                 let mut temp_phys = 0;
                 while temp_phys < self.editor.line_offsets.len() {
-                    let is_folded = self.editor.folded_lines.contains(&temp_phys);
+                    let is_folded = self.editor.folded_lines.contains(&temp_phys)
+                        && self.editor.foldable_lines.contains_key(&temp_phys);
                     let fold_end = if is_folded {
                         self.editor.foldable_lines.get(&temp_phys).copied()
                     } else {
@@ -688,7 +691,8 @@ impl App {
                 let mut total_lines = 0;
                 let mut temp_phys = 0;
                 while temp_phys < self.editor.line_offsets.len() {
-                    let is_folded = self.editor.folded_lines.contains(&temp_phys);
+                    let is_folded = self.editor.folded_lines.contains(&temp_phys)
+                        && self.editor.foldable_lines.contains_key(&temp_phys);
                     let fold_end = if is_folded {
                         self.editor.foldable_lines.get(&temp_phys).copied()
                     } else {
@@ -1250,12 +1254,8 @@ impl App {
                             .saturating_sub(1);
                         if el > sl {
                             self.editor.foldable_lines.insert(sl, el);
-                            if is_autofold
-                                && el - sl >= 2
-                                && !self.editor.auto_folded_seen.contains(&start_b)
-                            {
+                            if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
                                 self.editor.folded_lines.insert(sl);
-                                self.editor.auto_folded_seen.insert(start_b);
                             }
                         }
                     }

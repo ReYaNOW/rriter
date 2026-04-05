@@ -69,7 +69,8 @@ impl Renderer {
             if temp_phys == cursor_phys_line {
                 visible_cursor_line = visible_lines_count;
             }
-            let is_folded = editor.folded_lines.contains(&temp_phys);
+            let is_folded = editor.folded_lines.contains(&temp_phys)
+                && editor.foldable_lines.contains_key(&temp_phys);
             let fold_end = if is_folded {
                 editor.foldable_lines.get(&temp_phys).copied()
             } else {
@@ -444,35 +445,81 @@ impl Renderer {
             }
 
             if v_line_info.is_folded {
-                let mut fold_text = String::from("...");
-                if let Some(c) = v_line_info.fold_char {
-                    fold_text.push(c);
-                }
-                let dots_adv = self.measure_ui_width(&fold_text, 1.0);
+                let dots_str = "...";
+                let dots_adv = self.measure_ui_width(dots_str, 1.0);
 
-                let dots_bg = [
-                    self.theme.bg[0] + 0.08,
-                    self.theme.bg[1] + 0.08,
-                    self.theme.bg[2] + 0.12,
-                    1.0,
-                ];
+                let phys_idx = v_line_info.physical_line - 1;
+                let actual_end_byte = if let Some(&fold_end) = editor.foldable_lines.get(&phys_idx)
+                {
+                    if fold_end + 1 < editor.line_offsets.len() {
+                        editor.line_offsets[fold_end + 1].saturating_sub(1)
+                    } else {
+                        len
+                    }
+                } else {
+                    end_byte
+                };
+
+                let is_dots_selected = actual_end_byte > sel_start && end_byte <= sel_end;
+
+                let dots_bg = if is_dots_selected {
+                    self.theme.sel
+                } else {
+                    [
+                        self.theme.bg[0] + 0.08,
+                        self.theme.bg[1] + 0.08,
+                        self.theme.bg[2] + 0.12,
+                        1.0,
+                    ]
+                };
 
                 self.push_rounded_rect(
-                    x - render_scroll_x + 6.0 * s,
+                    x - render_scroll_x + 2.0 * s,
                     y - self.baseline_offset + 4.0 * s,
-                    dots_adv + 10.0 * s,
+                    dots_adv + 6.0 * s,
                     self.line_height - 8.0 * s,
                     4.0 * s,
                     dots_bg,
                 );
 
                 self.draw_string_scaled(
-                    &fold_text,
-                    x - render_scroll_x + 11.0 * s,
+                    dots_str,
+                    x - render_scroll_x + 5.0 * s,
                     y,
                     self.theme.fg,
                     1.0,
                 );
+
+                let next_x = x + dots_adv + 10.0 * s;
+
+                if let Some(c) = v_line_info.fold_char {
+                    let c_adv = self.char_advance(c);
+
+                    if is_dots_selected {
+                        self.push_rect(
+                            next_x - render_scroll_x,
+                            y - self.baseline_offset + 2.0,
+                            c_adv,
+                            self.line_height,
+                            self.theme.sel,
+                        );
+                    }
+
+                    if let Some(g) = self.get_glyph(c) {
+                        self.push_quad(
+                            next_x - render_scroll_x + g.offset_x,
+                            y - g.offset_y,
+                            g.width,
+                            g.height,
+                            g.u,
+                            g.v,
+                            g.uw,
+                            g.vh,
+                            self.theme.fg,
+                            g.is_emoji,
+                        );
+                    }
+                }
             }
         }
 
@@ -615,7 +662,8 @@ impl Renderer {
                     }
 
                     let start_byte = editor.line_offsets[phys_line];
-                    let is_folded = editor.folded_lines.contains(&phys_line);
+                    let is_folded = editor.folded_lines.contains(&phys_line)
+                        && editor.foldable_lines.contains_key(&phys_line);
                     let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
                         editor.line_offsets[phys_line + 1]
                     } else {

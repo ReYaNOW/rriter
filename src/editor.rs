@@ -168,7 +168,6 @@ pub struct Editor {
     pub sync_edits: Vec<SyncEdit>,
     pub foldable_lines: std::collections::HashMap<usize, usize>,
     pub folded_lines: std::collections::HashSet<usize>,
-    pub auto_folded_seen: std::collections::HashSet<usize>,
 }
 
 impl Editor {
@@ -196,7 +195,6 @@ impl Editor {
             sync_edits: Vec::new(),
             foldable_lines: std::collections::HashMap::new(),
             folded_lines: std::collections::HashSet::new(),
-            auto_folded_seen: std::collections::HashSet::new(),
         }
     }
 

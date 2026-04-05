@@ -23,7 +23,8 @@ impl Renderer {
         let mut phys_line = 0;
 
         while phys_line < editor.line_offsets.len() {
-            let is_folded = editor.folded_lines.contains(&phys_line);
+            let is_folded = editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line);
 
             if current_y + self.line_height > scroll_y - self.line_height * 5.0
                 && current_y < scroll_y + self.height + self.line_height * 5.0
@@ -111,11 +112,11 @@ impl Renderer {
                 }
 
                 let dots_width = if is_folded {
-                    let mut text = String::from("...");
+                    let mut w = self.measure_ui_width("...", 1.0) + 10.0 * self.scale_factor;
                     if let Some(c) = fold_char {
-                        text.push(c);
+                        w += self.char_advance(c);
                     }
-                    self.measure_ui_width(&text, 1.0) + 16.0 * self.scale_factor
+                    w
                 } else {
                     0.0
                 };
@@ -159,7 +160,9 @@ impl Renderer {
         let mut phys_line = 0;
         while phys_line < target_phys_line {
             current_y += self.line_height;
-            if editor.folded_lines.contains(&phys_line) {
+            if editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line)
+            {
                 if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
                     phys_line = end_l;
                 }
@@ -187,7 +190,9 @@ impl Renderer {
                 break;
             }
             current_y += self.line_height;
-            if editor.folded_lines.contains(&phys_line) {
+            if editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line)
+            {
                 if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
                     phys_line = end_l;
                 }
@@ -206,7 +211,8 @@ impl Renderer {
             editor.len()
         };
 
-        let is_folded = editor.folded_lines.contains(&target_phys_line);
+        let is_folded = editor.folded_lines.contains(&target_phys_line)
+            && editor.foldable_lines.contains_key(&target_phys_line);
         if is_folded {
             end_byte -= 1;
         }
@@ -251,6 +257,17 @@ impl Renderer {
                 last_valid_byte += c.len_utf8();
             }
         }
+
+        if is_folded {
+            if let Some(&fold_end) = editor.foldable_lines.get(&target_phys_line) {
+                return if fold_end + 1 < editor.line_offsets.len() {
+                    editor.line_offsets[fold_end + 1].saturating_sub(1)
+                } else {
+                    editor.len()
+                };
+            }
+        }
+
         if last_valid_byte > end_byte {
             end_byte
         } else {
@@ -289,7 +306,9 @@ impl Renderer {
         let mut lines_count = 0;
         while phys_line < editor.line_offsets.len() {
             lines_count += 1;
-            if editor.folded_lines.contains(&phys_line) {
+            if editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line)
+            {
                 if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
                     phys_line = end_l;
                 }
