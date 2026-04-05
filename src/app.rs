@@ -24,6 +24,7 @@ pub enum PendingAction {
     Quit,
     OpenFile,
     Faq,
+    CloseFile, // <--- Добавлено действие закрытия файла
 }
 
 #[inline(always)]
@@ -436,9 +437,10 @@ impl App {
     pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         if self.dialog_window.is_none() {
             let (title, p_width, p_height) = match action {
-                PendingAction::Quit => ("Закрытие документа — RRiter", 600.0, 200.0),
+                PendingAction::Quit => ("Выход из программы — RRiter", 600.0, 200.0),
                 PendingAction::OpenFile => ("Открытие документа — RRiter", 600.0, 200.0),
                 PendingAction::Faq => ("Справка — RRiter", 800.0, 680.0),
+                PendingAction::CloseFile => ("Закрытие файла — RRiter", 600.0, 200.0),
             };
 
             let attrs = Window::default_attributes()
@@ -489,6 +491,33 @@ impl App {
         self.show_quit_dialog = false;
         self.is_dragging_faq = false;
         if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
+        }
+    }
+
+    pub fn close_current_file(&mut self) {
+        self.file_path = None;
+        self.base_title = "Добро пожаловать".to_string();
+        let old_version = self.editor.version;
+        self.editor = Editor::new(8192);
+        self.editor.version = old_version + 1;
+        self.editor.set_original_text();
+        self.editor.sync_edits.clear();
+        self.highlighter
+            .reset(self.editor.version, "".to_string(), "".to_string());
+        self.search_results.clear();
+        self.search_current_idx = None;
+        self.show_search = false;
+        self.autocomplete_active = false;
+        self.show_welcome = true;
+
+        self.target_scroll_y = 0.0;
+        self.scroll_y = 0.0;
+        self.target_scroll_x = 0.0;
+        self.scroll_x = 0.0;
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, false);
             w.request_redraw();
         }
     }

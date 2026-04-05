@@ -893,6 +893,14 @@ impl App {
             .1;
 
         match key_event.physical_key {
+            PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                if self.editor.is_dirty() {
+                    self.show_action_dialog(event_loop, PendingAction::CloseFile);
+                } else {
+                    self.close_current_file();
+                }
+                return;
+            }
             PhysicalKey::Code(KeyCode::F1) => {
                 self.faq_scroll_y = 0.0;
                 self.faq_target_scroll_y = 0.0;

@@ -1189,26 +1189,20 @@ impl Editor {
                     self.len()
                 };
 
-                // Если курсор оказался строго ВНУТРИ свернутого невидимого кода
-                if self.cursor > first_line_end && self.cursor < block_end {
-                    if old_cursor > block_end {
-                        // Пришли из-за пределов блока справа (например Ctrl+Left)
-                        self.cursor = block_end;
-                    } else if old_cursor >= block_end {
-                        // Стояли на правом краю (block_end) и движемся влево (Left)
-                        self.cursor = first_line_end;
+                // Если курсор оказался внутри свернутого кода (включая саму невидимую \n)
+                if self.cursor >= first_line_end && self.cursor < block_end {
+                    if old_cursor >= block_end {
+                        // Идем влево (Left) - перепрыгиваем до видимой части первой строки
+                        self.cursor = first_line_end.saturating_sub(1);
                     } else if old_cursor < first_line_end {
-                        // Пришли из-за пределов блока слева (например Ctrl+Right)
-                        self.cursor = first_line_end;
-                    } else if old_cursor <= first_line_end {
-                        // Стояли на левом краю (first_line_end) и движемся вправо (Right)
+                        // Идем вправо (Right) - перепрыгиваем в конец блока
                         self.cursor = block_end;
                     } else {
-                        // Fallback: ориентируемся по направлению
+                        // Fallback
                         if self.cursor > old_cursor {
                             self.cursor = block_end;
                         } else {
-                            self.cursor = first_line_end;
+                            self.cursor = first_line_end.saturating_sub(1);
                         }
                     }
                     return;

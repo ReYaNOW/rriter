@@ -160,6 +160,8 @@ impl App {
                                         event_loop.exit();
                                     } else if action == PendingAction::OpenFile {
                                         self.trigger_file_picker();
+                                    } else if action == PendingAction::CloseFile {
+                                        self.close_current_file();
                                     }
                                 }
                             } else if btn_discard.is_hovered(mx, my) {
@@ -169,6 +171,8 @@ impl App {
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
                                     self.trigger_file_picker();
+                                } else if action == PendingAction::CloseFile {
+                                    self.close_current_file();
                                 }
                             } else if btn_cancel.is_hovered(mx, my) {
                                 self.close_dialog();
