@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use tree_sitter::StreamingIterator;
 
-use crate::queries::{get_params_query, get_ts_config};
+use crate::queries::{get_injection_query, get_params_query, get_ts_config};
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
@@ -88,6 +88,82 @@ fn get_point(text: &str, byte_offset: usize) -> tree_sitter::Point {
         byte_offset
     };
     tree_sitter::Point::new(row, column)
+}
+
+fn resolve_color(
+    name: &str,
+    node_text: &str,
+    start_byte: usize,
+    param_scopes: &[Scope],
+) -> [f32; 4] {
+    let mut color = match name {
+        "fg" | "property" | "py_assign" => DRACULA_FG,
+        "interpolation" => MARKER_INTERPOLATION,
+        "string" => DRACULA_YELLOW,
+        "comment" => DRACULA_COMMENT,
+        "function" | "py_function" => DRACULA_GREEN,
+        "keyword.control" | "operator" | "boolean" => DRACULA_PINK,
+        "keyword" | "subst" | "type" | "function.builtin" => DRACULA_CYAN,
+        "class_name" => DRACULA_DARK_CYAN,
+        "constant" => DRACULA_PURPLE,
+        "parameter" => match node_text {
+            "self" | "cls" => DRACULA_PURPLE,
+            _ => DRACULA_ORANGE,
+        },
+        "py_builtin_or_func" => match node_text {
+            "print" | "input" | "id" | "dict" | "str" | "int" | "float" | "list" | "set"
+            | "tuple" | "bool" | "super" | "len" | "type" | "dir" | "vars" | "hasattr"
+            | "getattr" | "setattr" | "delattr" | "isinstance" | "issubclass" | "enumerate"
+            | "zip" | "map" | "filter" | "sum" | "any" | "all" | "min" | "max" | "abs"
+            | "round" | "open" => DRACULA_CYAN,
+            _ => DRACULA_GREEN,
+        },
+        "py_ident" => match node_text {
+            "Exception" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
+            | "AttributeError" | "RuntimeError" | "KeyboardInterrupt" | "int" | "float" | "str"
+            | "bool" | "list" | "dict" | "set" | "tuple" | "bytes" | "Any" | "Optional"
+            | "Union" | "Callable" | "Type" | "Dict" | "List" | "Set" | "Tuple" | "id"
+            | "print" | "len" | "range" | "enumerate" | "sum" | "min" | "max" => DRACULA_CYAN,
+            "self" | "cls" => DRACULA_PURPLE,
+            _ => DRACULA_FG,
+        },
+        "command_word" => match node_text {
+            "sudo" | "sleep" | "ps" | "date" | "grep" | "awk" | "sed" | "cat" | "renice"
+            | "ionice" | "systemctl" | "tee" | "tr" | "head" | "taskset" => DRACULA_GREEN,
+            _ => DRACULA_CYAN,
+        },
+        "any_word" => {
+            if node_text.starts_with('-') && node_text.len() > 1 {
+                DRACULA_PINK
+            } else {
+                DRACULA_FG
+            }
+        }
+        "variable" => DRACULA_FG,
+        "number" => DRACULA_PURPLE,
+        _ => DRACULA_FG,
+    };
+
+    if node_text != "self" && node_text != "cls" {
+        if matches!(
+            name,
+            "py_ident" | "py_builtin_or_func" | "py_assign" | "parameter" | "variable" | "fg"
+        ) {
+            let mut is_param = false;
+            for scope in param_scopes {
+                if start_byte >= scope.start && start_byte < scope.end {
+                    if scope.params.contains(node_text) {
+                        is_param = true;
+                        break;
+                    }
+                }
+            }
+            if is_param {
+                color = DRACULA_ORANGE;
+            }
+        }
+    }
+    color
 }
 
 impl Highlighter {
@@ -233,12 +309,19 @@ impl Highlighter {
                     "py" => "py",
                     "toml" => "toml",
                     "go" => "go",
-                    "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => "js",
+                    "js" | "jsx" | "mjs" | "cjs" => "js",
+                    "ts" => "ts",
+                    "tsx" => "tsx",
+                    "regex" => "regex",
                     "java" => "java",
                     "cs" => "cs",
                     "dart" => "dart",
                     "html" | "htm" => "html",
                     "css" => "css",
+                    "json" => "json",
+                    "c" | "h" => "c",
+                    "cpp" | "cc" | "cxx" | "hpp" => "cpp",
+                    "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
                     _ => "",
                 };
 
@@ -574,105 +657,12 @@ impl Highlighter {
                                                 )
                                                 .unwrap_or("");
 
-                                                let mut color = match name {
-                                                    "fg" | "property" | "py_assign" => DRACULA_FG,
-                                                    "interpolation" => MARKER_INTERPOLATION,
-                                                    "string" => DRACULA_YELLOW,
-                                                    "comment" => DRACULA_COMMENT,
-                                                    "function" | "py_function" => DRACULA_GREEN,
-                                                    "keyword.control" | "operator" | "boolean" => {
-                                                        DRACULA_PINK
-                                                    }
-                                                    "keyword" | "subst" | "type"
-                                                    | "function.builtin" => DRACULA_CYAN,
-                                                    "class_name" => DRACULA_DARK_CYAN,
-                                                    "constant" => DRACULA_PURPLE,
-                                                    "parameter" => match node_text {
-                                                        "self" | "cls" => DRACULA_PURPLE,
-                                                        _ => DRACULA_ORANGE,
-                                                    },
-                                                    "py_builtin_or_func" => match node_text {
-                                                        "print" | "input" | "id" | "dict"
-                                                        | "str" | "int" | "float" | "list"
-                                                        | "set" | "tuple" | "bool" | "super"
-                                                        | "len" | "type" | "dir" | "vars"
-                                                        | "hasattr" | "getattr" | "setattr"
-                                                        | "delattr" | "isinstance"
-                                                        | "issubclass" | "enumerate" | "zip"
-                                                        | "map" | "filter" | "sum" | "any"
-                                                        | "all" | "min" | "max" | "abs"
-                                                        | "round" | "open" => DRACULA_CYAN,
-                                                        _ => DRACULA_GREEN,
-                                                    },
-                                                    "py_ident" => match node_text {
-                                                        "Exception" | "ValueError"
-                                                        | "TypeError" | "KeyError"
-                                                        | "IndexError" | "AttributeError"
-                                                        | "RuntimeError" | "KeyboardInterrupt"
-                                                        | "int" | "float" | "str" | "bool"
-                                                        | "list" | "dict" | "set" | "tuple"
-                                                        | "bytes" | "Any" | "Optional"
-                                                        | "Union" | "Callable" | "Type"
-                                                        | "Dict" | "List" | "Set" | "Tuple"
-                                                        | "id" | "print" | "len" | "range"
-                                                        | "enumerate" | "sum" | "min" | "max" => {
-                                                            DRACULA_CYAN
-                                                        }
-                                                        "self" | "cls" => DRACULA_PURPLE,
-                                                        _ => DRACULA_FG,
-                                                    },
-                                                    "command_word" => match node_text {
-                                                        "sudo" | "sleep" | "ps" | "date"
-                                                        | "grep" | "awk" | "sed" | "cat"
-                                                        | "renice" | "ionice" | "systemctl"
-                                                        | "tee" | "tr" | "head" | "taskset" => {
-                                                            DRACULA_GREEN
-                                                        }
-                                                        _ => DRACULA_CYAN,
-                                                    },
-                                                    "any_word" => {
-                                                        if node_text.starts_with('-')
-                                                            && node_text.len() > 1
-                                                        {
-                                                            DRACULA_PINK
-                                                        } else {
-                                                            DRACULA_FG
-                                                        }
-                                                    }
-                                                    // Сбрасываем variable обратно на цвет текста
-                                                    "variable" => DRACULA_FG,
-                                                    "number" => DRACULA_PURPLE,
-                                                    _ => DRACULA_FG,
-                                                };
-
-                                                // Универсальная покраска аргументов (внутри тел функций) для всех языков
-                                                if node_text != "self" && node_text != "cls" {
-                                                    if matches!(
-                                                        name,
-                                                        "py_ident"
-                                                            | "py_builtin_or_func"
-                                                            | "py_assign"
-                                                            | "parameter"
-                                                            | "variable"
-                                                            | "fg"
-                                                    ) {
-                                                        let mut is_param = false;
-                                                        for scope in &param_scopes {
-                                                            if cap.node.start_byte() >= scope.start
-                                                                && cap.node.start_byte() < scope.end
-                                                            {
-                                                                if scope.params.contains(node_text)
-                                                                {
-                                                                    is_param = true;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                        if is_param {
-                                                            color = DRACULA_ORANGE;
-                                                        }
-                                                    }
-                                                }
+                                                let color = resolve_color(
+                                                    name,
+                                                    node_text,
+                                                    cap.node.start_byte(),
+                                                    &param_scopes,
+                                                );
 
                                                 if color != DRACULA_FG {
                                                     spans.push(ColorSpan {
@@ -685,6 +675,152 @@ impl Highlighter {
                                         }
                                     }
                                 }
+
+                                // ---------------------------------------------------------
+                                // Обработка языковых инъекций (Language Injections)
+                                // ---------------------------------------------------------
+                                let mut injected_regions: HashMap<String, Vec<tree_sitter::Range>> =
+                                    HashMap::new();
+                                if let Some(inj_query_str) = get_injection_query(lang_name) {
+                                    if let Ok(inj_query) =
+                                        tree_sitter::Query::new(&lang, inj_query_str)
+                                    {
+                                        let mut cursor = tree_sitter::QueryCursor::new();
+                                        let mut matches = cursor.matches(
+                                            &inj_query,
+                                            tree.root_node(),
+                                            text.as_bytes(),
+                                        );
+
+                                        let lang_cap_idx =
+                                            inj_query.capture_index_for_name("injection.language");
+                                        let content_cap_idx =
+                                            inj_query.capture_index_for_name("injection.content");
+
+                                        while let Some(m) = matches.next() {
+                                            let mut inj_lang = String::new();
+                                            let mut content_node = None;
+
+                                            for prop in inj_query.property_settings(m.pattern_index)
+                                            {
+                                                if prop.key.as_ref() == "injection.language" {
+                                                    if let Some(v) = &prop.value {
+                                                        inj_lang = v.to_string();
+                                                    }
+                                                }
+                                            }
+
+                                            for cap in m.captures {
+                                                if Some(cap.index) == lang_cap_idx {
+                                                    if let Ok(s) = std::str::from_utf8(
+                                                        &text.as_bytes()[cap.node.start_byte()
+                                                            ..cap.node.end_byte()],
+                                                    ) {
+                                                        inj_lang = s.to_string();
+                                                    }
+                                                }
+                                                if Some(cap.index) == content_cap_idx {
+                                                    content_node = Some(cap.node);
+                                                }
+                                            }
+
+                                            if !inj_lang.is_empty() {
+                                                if let Some(node) = content_node {
+                                                    let range = tree_sitter::Range {
+                                                        start_byte: node.start_byte(),
+                                                        end_byte: node.end_byte(),
+                                                        start_point: node.start_position(),
+                                                        end_point: node.end_position(),
+                                                    };
+                                                    injected_regions
+                                                        .entry(inj_lang)
+                                                        .or_default()
+                                                        .push(range);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                for (inj_lang_name, ranges) in injected_regions {
+                                    let mapped_lang = match inj_lang_name.as_str() {
+                                        "js" | "javascript" => "js",
+                                        "ts" | "typescript" => "ts",
+                                        "tsx" => "tsx",
+                                        "html" => "html",
+                                        "css" => "css",
+                                        "regex" => "regex",
+                                        "json" => "json",
+                                        "c" => "c",
+                                        "cpp" | "c++" => "cpp",
+                                        "make" | "makefile" => "make",
+                                        _ => continue,
+                                    };
+
+                                    if let Some((inj_lang, inj_queries)) =
+                                        get_ts_config(mapped_lang)
+                                    {
+                                        let mut inj_parser = tree_sitter::Parser::new();
+                                        if inj_parser.set_language(&inj_lang).is_ok() {
+                                            if inj_parser.set_included_ranges(&ranges).is_ok() {
+                                                if let Some(inj_tree) = inj_parser.parse(text, None)
+                                                {
+                                                    for q_str in inj_queries {
+                                                        if let Ok(query) = tree_sitter::Query::new(
+                                                            &inj_lang, q_str,
+                                                        ) {
+                                                            let mut cursor =
+                                                                tree_sitter::QueryCursor::new();
+                                                            let mut matches = cursor.matches(
+                                                                &query,
+                                                                inj_tree.root_node(),
+                                                                text.as_bytes(),
+                                                            );
+
+                                                            while let Some(m) = matches.next() {
+                                                                for cap in m.captures {
+                                                                    let name = query
+                                                                        .capture_names()
+                                                                        [cap.index as usize];
+                                                                    let node_text =
+                                                                        std::str::from_utf8(
+                                                                            &text.as_bytes()[cap
+                                                                                .node
+                                                                                .start_byte()
+                                                                                ..cap
+                                                                                    .node
+                                                                                    .end_byte()],
+                                                                        )
+                                                                        .unwrap_or("");
+
+                                                                    let color = resolve_color(
+                                                                        name,
+                                                                        node_text,
+                                                                        cap.node.start_byte(),
+                                                                        &[],
+                                                                    );
+                                                                    if color != DRACULA_FG {
+                                                                        spans.push(ColorSpan {
+                                                                            start: cap
+                                                                                .node
+                                                                                .start_byte(),
+                                                                            end: cap
+                                                                                .node
+                                                                                .end_byte(),
+                                                                            color,
+                                                                        });
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // ---------------------------------------------------------
+
                                 if success_count > 0 {
                                     used_ts = true;
                                 }
@@ -888,7 +1024,7 @@ impl Highlighter {
                             ("const", SymbolKind::Keyword),
                         ]);
                     }
-                    "js" => {
+                    "js" | "ts" | "tsx" => {
                         inject_builtins(&[
                             ("console", SymbolKind::Variable),
                             ("window", SymbolKind::Variable),
@@ -908,6 +1044,30 @@ impl Highlighter {
                             ("false", SymbolKind::Keyword),
                             ("null", SymbolKind::Keyword),
                             ("undefined", SymbolKind::Keyword),
+                        ]);
+                    }
+                    "c" | "cpp" => {
+                        inject_builtins(&[
+                            ("int", SymbolKind::Class),
+                            ("float", SymbolKind::Class),
+                            ("double", SymbolKind::Class),
+                            ("char", SymbolKind::Class),
+                            ("void", SymbolKind::Class),
+                            ("struct", SymbolKind::Keyword),
+                            ("class", SymbolKind::Keyword),
+                            ("return", SymbolKind::Keyword),
+                            ("if", SymbolKind::Keyword),
+                            ("else", SymbolKind::Keyword),
+                            ("for", SymbolKind::Keyword),
+                            ("while", SymbolKind::Keyword),
+                            ("sizeof", SymbolKind::Function),
+                            ("printf", SymbolKind::Function),
+                            ("malloc", SymbolKind::Function),
+                            ("free", SymbolKind::Function),
+                            ("true", SymbolKind::Keyword),
+                            ("false", SymbolKind::Keyword),
+                            ("nullptr", SymbolKind::Keyword),
+                            ("this", SymbolKind::Keyword),
                         ]);
                     }
                     _ => {}
