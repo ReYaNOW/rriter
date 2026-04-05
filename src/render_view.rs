@@ -142,8 +142,13 @@ impl Renderer {
         let first_len = first.len();
         let len = first_len + second.len();
 
+        let max_scroll = self.get_max_scroll(editor, self.height);
+        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
+        let scrollbar_x = minimap_x - scrollbar_width;
+
         let solid_minimap_bg = [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
@@ -159,7 +164,7 @@ impl Renderer {
             self.push_rect(
                 self.left_padding,
                 cursor_line_y - self.baseline_offset + 2.0,
-                minimap_x - self.left_padding,
+                scrollbar_x - self.left_padding,
                 self.line_height,
                 [0.9, 0.9, 0.9, 0.12],
             );
@@ -551,7 +556,7 @@ impl Renderer {
             if sel_start == sel_end && blink_alpha > 0.5 && !show_quit_dialog && !search_focused {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
-                    && cx_screen < minimap_x
+                    && cx_screen < scrollbar_x
                     && cx_screen >= self.left_padding
                 {
                     self.push_rect(
@@ -625,15 +630,31 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(
-            minimap_x,
-            0.0,
-            minimap_w,
-            self.height,
-            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
-        );
+        self.push_rect(minimap_x, 0.0, minimap_w, self.height, solid_minimap_bg);
 
-        let max_scroll = self.get_max_scroll(editor, self.height);
+        if scrollbar_width > 0.0 {
+            self.push_rect(
+                scrollbar_x,
+                0.0,
+                scrollbar_width,
+                self.height,
+                [0.0, 0.0, 0.0, 0.2],
+            );
+            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
+            let total_content_height = total_lines as f32 * self.line_height;
+            let thumb_h =
+                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
+            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
+            self.push_rounded_rect(
+                scrollbar_x + 1.0 * s,
+                thumb_y,
+                scrollbar_width - 2.0 * s,
+                thumb_h,
+                (scrollbar_width - 2.0 * s) / 2.0,
+                [0.40, 0.42, 0.46, 0.8],
+            );
+        }
+
         let scroll_ratio_y = if max_scroll > 0.0 {
             (render_scroll_y / max_scroll).clamp(0.0, 1.0)
         } else {
@@ -647,31 +668,24 @@ impl Renderer {
         let max_minimap_scroll = (total_lines_f32 * minimap_line_h - self.height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
-        let current_spans_ver =
-            (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
+        let map_bg = self.theme.minimap_bg;
+        let mut current_y: f32 = 0.0;
+        let mut phys_line = 0;
+        let rect_h = minimap_line_h.ceil().max(1.0);
 
-        let mut fold_hash = 0u64;
-        for &f in &editor.folded_lines {
-            fold_hash ^= (f as u64).wrapping_mul(0x517cc1b727220a95);
-        }
+        let view_top = current_minimap_scroll;
+        let view_bottom = current_minimap_scroll + self.height;
 
-        let needs_minimap_update = self.last_minimap_editor_version != editor.version
-            || self.last_minimap_spans_version != current_spans_ver
-            || self.last_minimap_fold_hash != fold_hash
-            || self.minimap_vertices.is_empty()
-            || (self.last_minimap_width - self.width).abs() > 0.5;
+        while phys_line < editor.line_offsets.len() {
+            let start_byte = editor.line_offsets[phys_line];
+            let is_folded = editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line);
 
-        if needs_minimap_update {
-            self.minimap_vertices.clear();
-            let map_bg = self.theme.minimap_bg;
-            let mut current_y: f32 = 0.0;
-            let mut phys_line = 0;
-            let rect_h = minimap_line_h.ceil().max(1.0);
+            if current_y > view_bottom {
+                break;
+            }
 
-            while phys_line < editor.line_offsets.len() {
-                let start_byte = editor.line_offsets[phys_line];
-                let is_folded = editor.folded_lines.contains(&phys_line)
-                    && editor.foldable_lines.contains_key(&phys_line);
+            if current_y + minimap_line_h >= view_top {
                 let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
                     editor.line_offsets[phys_line + 1]
                 } else {
@@ -690,8 +704,8 @@ impl Renderer {
                     Err(idx) => idx.saturating_sub(1),
                 };
 
-                let y1 = current_y.round();
-                let y2 = (current_y + rect_h).round();
+                let y1 = (current_y - current_minimap_scroll).round();
+                let y2 = y1 + rect_h;
 
                 while cur_byte < end_byte {
                     let text_chunk = if cur_byte < first_len {
@@ -710,7 +724,8 @@ impl Renderer {
                     }
 
                     if spaces_len > 0 {
-                        current_x += 1.5 * (spaces_len as f32);
+                        let capped_spaces = spaces_len.min(5);
+                        current_x += 1.5 * (capped_spaces as f32);
                         cur_byte += spaces_len;
                         if current_x >= minimap_x + minimap_w - 5.0 {
                             break;
@@ -784,8 +799,10 @@ impl Renderer {
                             is_emoji: 0.0,
                         };
 
-                        self.minimap_vertices
-                            .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                        if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
+                            self.flush();
+                        }
                         current_x += w;
                     }
 
@@ -794,32 +811,18 @@ impl Renderer {
                         break;
                     }
                 }
-                current_y += minimap_line_h;
+            }
 
-                if is_folded {
-                    if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
-                        phys_line = fold_end;
-                    }
+            current_y += minimap_line_h;
+
+            if is_folded {
+                if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = fold_end;
                 }
-                phys_line += 1;
             }
-            self.last_minimap_editor_version = editor.version;
-            self.last_minimap_spans_version = current_spans_ver;
-            self.last_minimap_fold_hash = fold_hash;
-            self.last_minimap_width = self.width;
+            phys_line += 1;
         }
 
-        self.flush();
-
-        let mm_len = self.minimap_vertices.len();
-        for i in 0..mm_len {
-            let mut v_copy = self.minimap_vertices[i];
-            v_copy.pos[1] -= current_minimap_scroll;
-            self.vertices.push(v_copy);
-            if self.vertices.len() >= crate::renderer::MAX_VERTICES {
-                self.flush();
-            }
-        }
         self.flush();
 
         let y_cursor = visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll;
@@ -857,7 +860,7 @@ impl Renderer {
         self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
 
         if self.max_scroll_x > 0.0 {
-            let track_w = self.width - minimap_w - self.left_padding;
+            let track_w = scrollbar_x - self.left_padding;
             let track_h_bg = 14.0 * s;
             let track_y_bg = self.height - track_h_bg;
 
@@ -899,7 +902,7 @@ impl Renderer {
         if search_anim_y > -70.0 {
             let search_w = 480.0 * s;
             let search_h = 46.0 * s;
-            let search_x = minimap_x - search_w - 20.0 * s;
+            let search_x = scrollbar_x - search_w - 20.0 * s;
 
             self.push_rounded_rect(
                 search_x,

@@ -255,10 +255,19 @@ impl App {
                 }
             }
 
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let max_scroll = self
+                .renderer
+                .as_mut()
+                .unwrap()
+                .get_max_scroll(&self.editor, wh);
+            let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+            let scrollbar_x = window_width - minimap_w - scrollbar_w;
+
             if self.show_search && self.search_anim_y > -10.0 {
                 let search_w = 480.0 * s;
                 let search_h = 46.0 * s;
-                let search_x = window_width - minimap_w - search_w - 20.0 * s;
+                let search_x = scrollbar_x - search_w - 20.0 * s;
 
                 if last_mouse_x >= search_x
                     && last_mouse_x <= search_x + search_w
@@ -375,13 +384,12 @@ impl App {
                 }
             }
 
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let left_pad = self.renderer.as_ref().unwrap().left_padding;
 
             if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 14.0 * s {
-                if last_mouse_x > left_pad && last_mouse_x < window_width - minimap_w {
+                if last_mouse_x > left_pad && last_mouse_x < scrollbar_x {
                     self.is_dragging_h_scroll = true;
-                    let track_w = window_width - minimap_w - left_pad;
+                    let track_w = scrollbar_x - left_pad;
                     let max_x = self.renderer.as_ref().unwrap().max_scroll_x;
                     let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
 
@@ -406,48 +414,10 @@ impl App {
                 }
             }
 
-            if last_mouse_x >= window_width - minimap_w {
-                let max_scroll = self
-                    .renderer
-                    .as_mut()
-                    .unwrap()
-                    .get_max_scroll(&self.editor, wh);
-
-                let mut total_lines = 0;
-                let mut temp_phys = 0;
-                while temp_phys < self.editor.line_offsets.len() {
-                    let is_folded = self.editor.folded_lines.contains(&temp_phys)
-                        && self.editor.foldable_lines.contains_key(&temp_phys);
-                    let fold_end = if is_folded {
-                        self.editor.foldable_lines.get(&temp_phys).copied()
-                    } else {
-                        None
-                    };
-                    total_lines += 1;
-                    if let Some(end) = fold_end {
-                        temp_phys = end;
-                    }
-                    temp_phys += 1;
-                }
-                let total_lines = total_lines.max(1);
-
-                let minimap_line_h = (wh / total_lines as f32).max(wh / 1250.0).max(1.5);
-                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                let thumb_h = (visible_lines * minimap_line_h).max(4.0);
-
-                let scroll_ratio = if max_scroll > 0.0 {
-                    (self.scroll_y / max_scroll).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-
-                let max_minimap_scroll = (total_lines as f32 * minimap_line_h - wh).max(0.0);
-                let current_minimap_scroll = scroll_ratio * max_minimap_scroll;
-
-                let current_visible_top_line =
-                    self.scroll_y / self.renderer.as_ref().unwrap().line_height;
-                let thumb_start_y =
-                    current_visible_top_line * minimap_line_h - current_minimap_scroll;
+            if last_mouse_x >= scrollbar_x {
+                let total_content_height = (self.editor.line_offsets.len() as f32)
+                    * self.renderer.as_ref().unwrap().line_height;
+                let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
 
                 let track_start_y = 0.0;
                 let track_h = wh;
@@ -455,6 +425,13 @@ impl App {
                 self.is_dragging_minimap = true;
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
                 self.last_click_time = Instant::now();
+
+                let scroll_ratio = if max_scroll > 0.0 {
+                    (self.scroll_y / max_scroll).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let thumb_start_y = scroll_ratio * (wh - thumb_h);
 
                 if last_mouse_y >= thumb_start_y && last_mouse_y <= thumb_start_y + thumb_h {
                     self.minimap_drag_offset_y = last_mouse_y - thumb_start_y;
@@ -578,10 +555,19 @@ impl App {
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
         let window_size = self.window.as_ref().unwrap().inner_size();
+        let wh = window_size.height as f32;
+
+        let max_scroll = self
+            .renderer
+            .as_mut()
+            .unwrap()
+            .get_max_scroll(&self.editor, wh);
+        let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+        let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
         if self.is_dragging_search {
             let search_w = 480.0 * s;
-            let search_x = window_size.width as f32 - minimap_w - search_w - 20.0 * s;
+            let search_x = scrollbar_x - search_w - 20.0 * s;
             let input_x = search_x + 10.0 * s;
 
             let text = self.search_editor.get_full_text();
@@ -608,7 +594,7 @@ impl App {
             self.search_editor.cursor = target_idx;
         } else if self.is_dragging_h_scroll {
             let r = self.renderer.as_ref().unwrap();
-            let track_w = window_size.width as f32 - minimap_w - padding;
+            let track_w = scrollbar_x - padding;
             let max_x = r.max_scroll_x;
             let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
             let ratio = (position.x as f32 - padding - self.h_scroll_drag_offset_x)
@@ -621,34 +607,9 @@ impl App {
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
 
             if elapsed > 120 || dy > 10.0 {
-                let wh = window_size.height as f32;
-                let max_scroll = self
-                    .renderer
-                    .as_mut()
-                    .unwrap()
-                    .get_max_scroll(&self.editor, wh);
-
-                let mut total_lines = 0;
-                let mut temp_phys = 0;
-                while temp_phys < self.editor.line_offsets.len() {
-                    let is_folded = self.editor.folded_lines.contains(&temp_phys)
-                        && self.editor.foldable_lines.contains_key(&temp_phys);
-                    let fold_end = if is_folded {
-                        self.editor.foldable_lines.get(&temp_phys).copied()
-                    } else {
-                        None
-                    };
-                    total_lines += 1;
-                    if let Some(end) = fold_end {
-                        temp_phys = end;
-                    }
-                    temp_phys += 1;
-                }
-                let total_lines = total_lines.max(1);
-
-                let minimap_line_h = (wh / total_lines as f32).max(wh / 1250.0).max(1.5);
-                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                let thumb_h = (visible_lines * minimap_line_h).max(4.0);
+                let total_content_height = (self.editor.line_offsets.len() as f32)
+                    * self.renderer.as_ref().unwrap().line_height;
+                let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
                 let track_h = wh;
                 let track_start_y = 0.0;
 
