@@ -1,4 +1,3 @@
-// queries.rs
 use tree_sitter_html;
 
 pub fn get_params_query(lang_name: &str) -> Option<&'static str> {
@@ -157,6 +156,10 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
                 (list)
                 (tuple)
                 (string)
+                (set)
+                (list_comprehension)
+                (dictionary_comprehension)
+                (set_comprehension)
             ] @autofold
             "#,
         ),
@@ -876,7 +879,6 @@ mod tests {
 
         for lang_name in languages {
             if let Some((lang, queries)) = get_ts_config(lang_name) {
-                // 1. Проверяем запросы для подсветки синтаксиса
                 for q_str in queries {
                     if let Err(e) = tree_sitter::Query::new(&lang, q_str) {
                         println!(
@@ -887,7 +889,6 @@ mod tests {
                     }
                 }
 
-                // 2. Проверяем запрос для поиска параметров
                 if let Some(params_q_str) = get_params_query(lang_name) {
                     if let Err(e) = tree_sitter::Query::new(&lang, params_q_str) {
                         println!(
@@ -898,7 +899,6 @@ mod tests {
                     }
                 }
 
-                // 3. Проверяем injection запросы
                 if let Some(inj_q_str) = get_injection_query(lang_name) {
                     if let Err(e) = tree_sitter::Query::new(&lang, inj_q_str) {
                         println!(
@@ -909,7 +909,6 @@ mod tests {
                     }
                 }
 
-                // 4. Проверяем folding запросы
                 if let Some(fold_q_str) = get_folding_query(lang_name) {
                     if let Err(e) = tree_sitter::Query::new(&lang, fold_q_str) {
                         println!(

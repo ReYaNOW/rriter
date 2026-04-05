@@ -55,6 +55,7 @@ pub struct VisualLine {
     pub text_px_width: f32,
     pub y_offset: f32,
     pub is_folded: bool,
+    pub fold_char: Option<char>,
 }
 #[derive(Clone)]
 pub struct FontData {

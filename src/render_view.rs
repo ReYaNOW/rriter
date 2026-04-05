@@ -444,7 +444,11 @@ impl Renderer {
             }
 
             if v_line_info.is_folded {
-                let dots_adv = self.measure_ui_width("...", 1.0);
+                let mut fold_text = String::from("...");
+                if let Some(c) = v_line_info.fold_char {
+                    fold_text.push(c);
+                }
+                let dots_adv = self.measure_ui_width(&fold_text, 1.0);
 
                 let dots_bg = [
                     self.theme.bg[0] + 0.08,
@@ -463,7 +467,7 @@ impl Renderer {
                 );
 
                 self.draw_string_scaled(
-                    "...",
+                    &fold_text,
                     x - render_scroll_x + 11.0 * s,
                     y,
                     self.theme.fg,

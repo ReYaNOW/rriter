@@ -86,8 +86,36 @@ impl Renderer {
                     current += chunk.len();
                 }
 
+                let mut fold_char = None;
+                if is_folded {
+                    if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
+                        let end_line_start = editor.line_offsets[fold_end];
+                        let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
+                            editor.line_offsets[fold_end + 1]
+                        } else {
+                            editor.len()
+                        };
+
+                        let mut p = end_line_end;
+                        while p > end_line_start {
+                            p -= 1;
+                            let b = editor.byte_at(p);
+                            if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                if b == b'}' || b == b']' || b == b')' {
+                                    fold_char = Some(b as char);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 let dots_width = if is_folded {
-                    self.measure_ui_width("...", 1.0) + 16.0 * self.scale_factor
+                    let mut text = String::from("...");
+                    if let Some(c) = fold_char {
+                        text.push(c);
+                    }
+                    self.measure_ui_width(&text, 1.0) + 16.0 * self.scale_factor
                 } else {
                     0.0
                 };
@@ -100,6 +128,7 @@ impl Renderer {
                     text_px_width: text_px_width + dots_width,
                     y_offset: current_y,
                     is_folded,
+                    fold_char,
                 });
             }
 

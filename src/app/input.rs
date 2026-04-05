@@ -216,7 +216,11 @@ impl App {
                     }
 
                     if v_line.is_folded {
-                        let dots_adv = r.measure_ui_width("...", 1.0) + 16.0 * s;
+                        let mut fold_text = String::from("...");
+                        if let Some(c) = v_line.fold_char {
+                            fold_text.push(c);
+                        }
+                        let dots_adv = r.measure_ui_width(&fold_text, 1.0) + 16.0 * s;
                         let dots_x =
                             r.left_padding + v_line.whitespace_px_width + v_line.text_px_width
                                 - dots_adv
