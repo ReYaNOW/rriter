@@ -168,6 +168,8 @@ pub struct Editor {
     pub sync_edits: Vec<SyncEdit>,
     pub foldable_lines: std::collections::HashMap<usize, usize>,
     pub folded_lines: std::collections::HashSet<usize>,
+    pub folded_start_bytes: std::collections::HashSet<usize>,
+    pub foldable_ranges_bytes: Vec<(usize, usize)>,
 }
 
 impl Editor {
@@ -195,6 +197,60 @@ impl Editor {
             sync_edits: Vec::new(),
             foldable_lines: std::collections::HashMap::new(),
             folded_lines: std::collections::HashSet::new(),
+            folded_start_bytes: std::collections::HashSet::new(),
+            foldable_ranges_bytes: Vec::new(),
+        }
+    }
+
+    pub fn shift_folds_insert(&mut self, offset: usize, len: usize) {
+        let mut new_folded = std::collections::HashSet::new();
+        for &b in &self.folded_start_bytes {
+            if b >= offset {
+                new_folded.insert(b + len);
+            } else {
+                new_folded.insert(b);
+            }
+        }
+        self.folded_start_bytes = new_folded;
+
+        for range in &mut self.foldable_ranges_bytes {
+            if range.0 >= offset {
+                range.0 += len;
+            }
+            // ИСПРАВЛЕНИЕ: строго больше (>), а не (>=).
+            // Это гарантирует, что вставка после закрывающей скобки фолда не захватится им.
+            if range.1 > offset {
+                range.1 += len;
+            }
+        }
+    }
+
+    pub fn shift_folds_delete(&mut self, offset: usize, len: usize) {
+        let mut new_folded = std::collections::HashSet::new();
+        let end = offset + len;
+        for &b in &self.folded_start_bytes {
+            if b >= end {
+                new_folded.insert(b - len);
+            } else if b >= offset {
+                // block start was deleted, let it unfold
+            } else {
+                new_folded.insert(b);
+            }
+        }
+        self.folded_start_bytes = new_folded;
+
+        for range in &mut self.foldable_ranges_bytes {
+            if range.0 >= end {
+                range.0 -= len;
+            } else if range.0 >= offset {
+                range.0 = offset;
+            }
+
+            if range.1 >= end {
+                range.1 -= len;
+            } else if range.1 >= offset {
+                range.1 = offset;
+            }
         }
     }
 
@@ -233,23 +289,38 @@ impl Editor {
             current_longest_idx = current_line_idx;
         }
 
-        let mut old_folded_bytes = Vec::new();
-        for &l in &self.folded_lines {
-            if l < self.line_offsets.len() {
-                old_folded_bytes.push(self.line_offsets[l]);
-            }
-        }
-
         self.line_offsets = new_offsets;
         self.longest_line_idx = current_longest_idx;
 
         self.folded_lines.clear();
-        for b in old_folded_bytes {
+        for &b in &self.folded_start_bytes {
             let new_line = self
                 .line_offsets
                 .partition_point(|&o| o <= b)
                 .saturating_sub(1);
             self.folded_lines.insert(new_line);
+        }
+
+        self.folded_start_bytes.clear();
+        for &l in &self.folded_lines {
+            if l < self.line_offsets.len() {
+                self.folded_start_bytes.insert(self.line_offsets[l]);
+            }
+        }
+
+        self.foldable_lines.clear();
+        for &(start_b, end_b) in &self.foldable_ranges_bytes {
+            let sl = self
+                .line_offsets
+                .partition_point(|&o| o <= start_b)
+                .saturating_sub(1);
+            let el = self
+                .line_offsets
+                .partition_point(|&o| o <= end_b)
+                .saturating_sub(1);
+            if el > sl {
+                self.foldable_lines.insert(sl, el);
+            }
         }
     }
 
@@ -372,6 +443,7 @@ impl Editor {
                 let text_to_save = format!("{}{}", char_before as char, char_after as char);
 
                 let cursor_before = self.cursor;
+                self.shift_folds_delete(start, len);
                 self.move_gap(start);
                 self.sync_edits
                     .push(SyncEdit::Delete { offset: start, len });
@@ -406,6 +478,7 @@ impl Editor {
             }
             let text = String::from_utf8_lossy(&res).into_owned();
 
+            self.shift_folds_delete(prev, len);
             self.move_gap(self.cursor);
             self.sync_edits.push(SyncEdit::Delete { offset: prev, len });
             self.gap_start -= len;
@@ -570,6 +643,7 @@ impl Editor {
                     self.cursor = *offset + text.len();
                     let len = text.len();
                     let start = *offset;
+                    self.shift_folds_delete(start, len);
                     self.move_gap(start);
                     self.sync_edits
                         .push(SyncEdit::Delete { offset: start, len });
@@ -612,6 +686,7 @@ impl Editor {
                     self.cursor = step.cursor_before;
                     let len = text.len();
                     let start = *offset;
+                    self.shift_folds_delete(start, len);
                     self.move_gap(start);
                     self.sync_edits
                         .push(SyncEdit::Delete { offset: start, len });
@@ -671,6 +746,7 @@ impl Editor {
     fn insert_str_internal(&mut self, s: &str) -> usize {
         let bytes = s.as_bytes();
         let len = bytes.len();
+        self.shift_folds_insert(self.cursor, len);
         self.sync_edits.push(SyncEdit::Insert {
             offset: self.cursor,
             text: s.to_string(),
@@ -732,6 +808,7 @@ impl Editor {
                 let text = String::from_utf8_lossy(&res).into_owned();
 
                 let cursor_before = self.cursor;
+                self.shift_folds_delete(start, len);
                 self.move_gap(start);
                 self.sync_edits
                     .push(SyncEdit::Delete { offset: start, len });
@@ -775,6 +852,7 @@ impl Editor {
             let text = String::from_utf8_lossy(&res).into_owned();
 
             let offset = self.cursor;
+            self.shift_folds_delete(offset, len);
             self.move_gap(self.cursor);
             self.sync_edits.push(SyncEdit::Delete { offset, len });
             self.gap_end += len;
@@ -1092,29 +1170,46 @@ impl Editor {
         }
     }
 
-    pub fn snap_cursor_out_of_fold(&mut self, moving_forward: bool) {
+    /// ИСПРАВЛЕНИЕ: Новая универсальная логика обработки курсора, попадающего внутрь фолда.
+    pub fn snap_cursor_out_of_fold(&mut self, old_cursor: usize) {
         let mut current_line = 0;
         while current_line < self.line_offsets.len() {
             if self.folded_lines.contains(&current_line)
                 && self.foldable_lines.contains_key(&current_line)
             {
                 let fold_end = self.foldable_lines[&current_line];
-                let start_byte = if current_line + 1 < self.line_offsets.len() {
+                let first_line_end = if current_line + 1 < self.line_offsets.len() {
                     self.line_offsets[current_line + 1].saturating_sub(1)
                 } else {
                     self.len()
                 };
-                let end_byte = if fold_end + 1 < self.line_offsets.len() {
+                let block_end = if fold_end + 1 < self.line_offsets.len() {
                     self.line_offsets[fold_end + 1].saturating_sub(1)
                 } else {
                     self.len()
                 };
 
-                if self.cursor > start_byte && self.cursor < end_byte {
-                    if moving_forward {
-                        self.cursor = end_byte;
+                // Если курсор оказался строго ВНУТРИ свернутого невидимого кода
+                if self.cursor > first_line_end && self.cursor < block_end {
+                    if old_cursor > block_end {
+                        // Пришли из-за пределов блока справа (например Ctrl+Left)
+                        self.cursor = block_end;
+                    } else if old_cursor >= block_end {
+                        // Стояли на правом краю (block_end) и движемся влево (Left)
+                        self.cursor = first_line_end;
+                    } else if old_cursor < first_line_end {
+                        // Пришли из-за пределов блока слева (например Ctrl+Right)
+                        self.cursor = first_line_end;
+                    } else if old_cursor <= first_line_end {
+                        // Стояли на левом краю (first_line_end) и движемся вправо (Right)
+                        self.cursor = block_end;
                     } else {
-                        self.cursor = start_byte;
+                        // Fallback: ориентируемся по направлению
+                        if self.cursor > old_cursor {
+                            self.cursor = block_end;
+                        } else {
+                            self.cursor = first_line_end;
+                        }
                     }
                     return;
                 }
@@ -1127,24 +1222,26 @@ impl Editor {
     pub fn move_left(&mut self, shift: bool) {
         self.handle_selection(shift);
         if self.cursor > 0 {
+            let old_cursor = self.cursor;
             let mut prev = self.cursor - 1;
             while prev > 0 && !self.is_char_boundary(prev) {
                 prev -= 1;
             }
             self.cursor = prev;
-            self.snap_cursor_out_of_fold(false);
+            self.snap_cursor_out_of_fold(old_cursor);
         }
     }
 
     pub fn move_right(&mut self, shift: bool) {
         self.handle_selection(shift);
         if self.cursor < self.len() {
+            let old_cursor = self.cursor;
             let mut next = self.cursor + 1;
             while next < self.len() && !self.is_char_boundary(next) {
                 next += 1;
             }
             self.cursor = next;
-            self.snap_cursor_out_of_fold(true);
+            self.snap_cursor_out_of_fold(old_cursor);
         }
     }
 
@@ -1154,6 +1251,7 @@ impl Editor {
             return;
         }
 
+        let old_cursor = self.cursor;
         let mut p = self.cursor;
 
         while p > 0 && char_class(self.byte_at(p - 1)) == 0 {
@@ -1167,7 +1265,7 @@ impl Editor {
             }
         }
         self.cursor = p;
-        self.snap_cursor_out_of_fold(false);
+        self.snap_cursor_out_of_fold(old_cursor);
     }
 
     pub fn move_word_right(&mut self, shift: bool) {
@@ -1176,6 +1274,7 @@ impl Editor {
             return;
         }
 
+        let old_cursor = self.cursor;
         let mut p = self.cursor;
 
         while p < self.len() && char_class(self.byte_at(p)) == 0 {
@@ -1189,20 +1288,47 @@ impl Editor {
             }
         }
         self.cursor = p;
-        self.snap_cursor_out_of_fold(true);
+        self.snap_cursor_out_of_fold(old_cursor);
     }
 
     pub fn move_home(&mut self, shift: bool) {
         self.handle_selection(shift);
-        let mut curr = self.cursor;
-        while curr > 0 {
-            let b = self.byte_at(curr - 1);
-            if b == b'\n' {
-                break;
+
+        let mut current_line = 0;
+        let mut snapped = false;
+        while current_line < self.line_offsets.len() {
+            if self.folded_lines.contains(&current_line)
+                && self.foldable_lines.contains_key(&current_line)
+            {
+                let fold_end = self.foldable_lines[&current_line];
+                let start_byte = self.line_offsets[current_line];
+                let block_end = if fold_end + 1 < self.line_offsets.len() {
+                    self.line_offsets[fold_end + 1].saturating_sub(1)
+                } else {
+                    self.len()
+                };
+
+                if self.cursor > start_byte && self.cursor <= block_end {
+                    self.cursor = start_byte;
+                    snapped = true;
+                    break;
+                }
+                current_line = fold_end;
             }
-            curr -= 1;
+            current_line += 1;
         }
-        self.cursor = curr;
+
+        if !snapped {
+            let mut curr = self.cursor;
+            while curr > 0 {
+                let b = self.byte_at(curr - 1);
+                if b == b'\n' {
+                    break;
+                }
+                curr -= 1;
+            }
+            self.cursor = curr;
+        }
     }
 
     pub fn move_end(&mut self, shift: bool) {
@@ -1216,6 +1342,33 @@ impl Editor {
             curr += 1;
         }
         self.cursor = curr;
+
+        let mut current_line = 0;
+        while current_line < self.line_offsets.len() {
+            if self.folded_lines.contains(&current_line)
+                && self.foldable_lines.contains_key(&current_line)
+            {
+                let fold_end = self.foldable_lines[&current_line];
+                let first_line_end = if current_line + 1 < self.line_offsets.len() {
+                    self.line_offsets[current_line + 1].saturating_sub(1)
+                } else {
+                    self.len()
+                };
+                let block_end = if fold_end + 1 < self.line_offsets.len() {
+                    self.line_offsets[fold_end + 1].saturating_sub(1)
+                } else {
+                    self.len()
+                };
+
+                // При нажатии End на первой строке фолда — перепрыгиваем в самый конец свернутого блока
+                if self.cursor == first_line_end {
+                    self.cursor = block_end;
+                    break;
+                }
+                current_line = fold_end;
+            }
+            current_line += 1;
+        }
     }
 
     pub fn move_start_of_file(&mut self, shift: bool) {

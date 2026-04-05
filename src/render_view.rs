@@ -477,19 +477,35 @@ impl Renderer {
 
                 let box_x = x - render_scroll_x + 2.0 * s;
                 let box_w = dots_adv + 6.0 * s;
-
-                self.push_rounded_rect(
-                    box_x,
-                    y - self.baseline_offset + 4.0 * s,
-                    box_w,
-                    self.line_height - 8.0 * s,
-                    4.0 * s,
-                    dots_bg,
-                );
-
-                self.draw_string_scaled(dots_str, box_x + 3.0 * s, y, self.theme.fg, 1.0);
+                let box_y_draw = y - self.baseline_offset + 4.0 * s;
+                let box_h_draw = self.line_height - 8.0 * s;
 
                 let next_x = box_x + box_w + 2.0 * s;
+                let mut final_x = next_x;
+                if let Some(c) = v_line_info.fold_char {
+                    final_x += self.char_advance(c);
+                }
+
+                let hit_y_top = y - self.line_height;
+                let hit_y_bottom = y + 5.0 * s;
+                if self.last_mouse_x >= box_x - 2.0 * s
+                    && self.last_mouse_x <= next_x + 10.0 * s
+                    && self.last_mouse_y >= hit_y_top
+                    && self.last_mouse_y <= hit_y_bottom
+                {
+                    wants_pointer = true;
+                }
+
+                if cursor_pos.is_none()
+                    && editor.cursor >= end_byte
+                    && editor.cursor <= actual_end_byte
+                {
+                    cursor_pos = Some((final_x, y));
+                }
+
+                self.push_rounded_rect(box_x, box_y_draw, box_w, box_h_draw, 4.0 * s, dots_bg);
+
+                self.draw_string_scaled(dots_str, box_x + 3.0 * s, y, self.theme.fg, 1.0);
 
                 if let Some(c) = v_line_info.fold_char {
                     let c_adv = self.char_advance(c);

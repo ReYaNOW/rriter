@@ -779,7 +779,9 @@ impl ApplicationHandler for App {
 
         if self.highlighter.poll(self.editor.version) {
             self.editor.foldable_lines.clear();
+            self.editor.foldable_ranges_bytes.clear();
             for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
+                self.editor.foldable_ranges_bytes.push((start_b, end_b));
                 let sl = self
                     .editor
                     .line_offsets
@@ -794,6 +796,9 @@ impl ApplicationHandler for App {
                     self.editor.foldable_lines.insert(sl, el);
                     if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
                         self.editor.folded_lines.insert(sl);
+                        self.editor
+                            .folded_start_bytes
+                            .insert(self.editor.line_offsets[sl]);
                     }
                 }
             }

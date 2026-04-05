@@ -207,8 +207,14 @@ impl App {
                         {
                             if self.editor.folded_lines.contains(&phys_idx) {
                                 self.editor.folded_lines.remove(&phys_idx);
+                                self.editor
+                                    .folded_start_bytes
+                                    .remove(&self.editor.line_offsets[phys_idx]);
                             } else {
                                 self.editor.folded_lines.insert(phys_idx);
+                                self.editor
+                                    .folded_start_bytes
+                                    .insert(self.editor.line_offsets[phys_idx]);
                             }
                             fold_toggled = true;
                             break;
@@ -234,6 +240,9 @@ impl App {
                             && last_mouse_y <= y + 5.0 * s
                         {
                             self.editor.folded_lines.remove(&phys_idx);
+                            self.editor
+                                .folded_start_bytes
+                                .remove(&self.editor.line_offsets[phys_idx]);
                             fold_toggled = true;
                             break;
                         }
@@ -584,59 +593,6 @@ impl App {
         let padding = self.renderer.as_ref().unwrap().left_padding;
         let window_size = self.window.as_ref().unwrap().inner_size();
 
-        let mut is_text_cursor = false;
-        if position.x as f32 > padding
-            && (position.x as f32) < (window_size.width as f32 - minimap_w)
-        {
-            is_text_cursor = true;
-        }
-
-        if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 {
-            if (position.y as f32) > (window_size.height as f32 - 14.0 * s) {
-                is_text_cursor = false;
-            }
-        }
-
-        if self.show_search && self.search_anim_y > -10.0 {
-            let search_w = 480.0 * s;
-            let search_h = 46.0 * s;
-            let search_x = window_size.width as f32 - minimap_w - search_w - 20.0 * s;
-            let input_x = search_x + 10.0 * s;
-            let input_y = self.search_anim_y + 8.0 * s;
-            let input_w = 260.0 * s;
-            let input_h = 30.0 * s;
-
-            if position.x as f32 >= search_x
-                && position.x as f32 <= search_x + search_w
-                && position.y as f32 >= self.search_anim_y
-                && position.y as f32 <= self.search_anim_y + search_h
-            {
-                self.window.as_ref().unwrap().request_redraw();
-
-                if position.x as f32 >= input_x
-                    && position.x as f32 <= input_x + input_w
-                    && position.y as f32 >= input_y
-                    && position.y as f32 <= input_y + input_h
-                {
-                    is_text_cursor = true;
-                } else {
-                    is_text_cursor = false;
-                }
-            }
-        }
-
-        if is_text_cursor && !self.is_dragging_h_scroll && !self.is_dragging_minimap {
-            self.window
-                .as_ref()
-                .unwrap()
-                .set_cursor(winit::window::CursorIcon::Text);
-        } else {
-            self.window
-                .as_ref()
-                .unwrap()
-                .set_cursor(winit::window::CursorIcon::Default);
-        }
-
         if self.is_dragging_search {
             let search_w = 480.0 * s;
             let search_x = window_size.width as f32 - minimap_w - search_w - 20.0 * s;
@@ -664,7 +620,6 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.search_editor.cursor = target_idx;
-            self.window.as_ref().unwrap().request_redraw();
         } else if self.is_dragging_h_scroll {
             let r = self.renderer.as_ref().unwrap();
             let track_w = window_size.width as f32 - minimap_w - padding;
@@ -674,7 +629,6 @@ impl App {
                 / (track_w - thumb_w).max(0.0001);
             self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
             self.scroll_x = self.target_scroll_x;
-            self.window.as_ref().unwrap().request_redraw();
         } else if self.is_dragging_minimap {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_click_time).as_millis();
@@ -731,7 +685,6 @@ impl App {
                 self.target_scroll_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
                 self.scroll_anim_speed = 15.0;
-                self.window.as_ref().unwrap().request_redraw();
             }
         } else if self.is_dragging {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
@@ -742,8 +695,9 @@ impl App {
                 self.renderer.as_mut().unwrap(),
                 false,
             );
-            self.window.as_ref().unwrap().request_redraw();
         }
+
+        self.window.as_ref().unwrap().request_redraw();
     }
 
     pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
@@ -1241,7 +1195,9 @@ impl App {
             while start_wait.elapsed().as_millis() < 3 {
                 if self.highlighter.poll(self.editor.version) {
                     self.editor.foldable_lines.clear();
+                    self.editor.foldable_ranges_bytes.clear();
                     for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
+                        self.editor.foldable_ranges_bytes.push((start_b, end_b));
                         let sl = self
                             .editor
                             .line_offsets
@@ -1256,6 +1212,9 @@ impl App {
                             self.editor.foldable_lines.insert(sl, el);
                             if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
                                 self.editor.folded_lines.insert(sl);
+                                self.editor
+                                    .folded_start_bytes
+                                    .insert(self.editor.line_offsets[sl]);
                             }
                         }
                     }
