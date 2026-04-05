@@ -157,6 +157,18 @@ impl App {
                                     let action = self.pending_action;
                                     self.close_dialog();
                                     if action == PendingAction::Quit {
+                                        let scale = self.window.as_ref().unwrap().scale_factor();
+                                        let size = self
+                                            .window
+                                            .as_ref()
+                                            .unwrap()
+                                            .inner_size()
+                                            .to_logical::<f64>(scale);
+                                        crate::save_config(&crate::Config {
+                                            show_fps: self.show_fps,
+                                            window_width: size.width,
+                                            window_height: size.height,
+                                        });
                                         event_loop.exit();
                                     } else if action == PendingAction::OpenFile {
                                         self.trigger_file_picker();
@@ -168,6 +180,18 @@ impl App {
                                 let action = self.pending_action;
                                 self.close_dialog();
                                 if action == PendingAction::Quit {
+                                    let scale = self.window.as_ref().unwrap().scale_factor();
+                                    let size = self
+                                        .window
+                                        .as_ref()
+                                        .unwrap()
+                                        .inner_size()
+                                        .to_logical::<f64>(scale);
+                                    crate::save_config(&crate::Config {
+                                        show_fps: self.show_fps,
+                                        window_width: size.width,
+                                        window_height: size.height,
+                                    });
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
                                     self.trigger_file_picker();
@@ -256,7 +280,10 @@ impl ApplicationHandler for App {
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(
             Window::default_attributes()
                 .with_title(format!("{} — RRiter", self.base_title))
-                .with_inner_size(winit::dpi::LogicalSize::new(1000.0, 800.0))
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    self.window_width,
+                    self.window_height,
+                ))
                 .with_transparent(false),
         ));
 
@@ -333,6 +360,18 @@ impl ApplicationHandler for App {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
+                    let scale = self.window.as_ref().unwrap().scale_factor();
+                    let size = self
+                        .window
+                        .as_ref()
+                        .unwrap()
+                        .inner_size()
+                        .to_logical::<f64>(scale);
+                    crate::save_config(&crate::Config {
+                        show_fps: self.show_fps,
+                        window_width: size.width,
+                        window_height: size.height,
+                    });
                     event_loop.exit();
                 }
             }

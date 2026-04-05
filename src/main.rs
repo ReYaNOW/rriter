@@ -21,6 +21,22 @@ use winit::keyboard::ModifiersState;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+pub struct Config {
+    pub show_fps: bool,
+    pub window_width: f64,
+    pub window_height: f64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            show_fps: true,
+            window_width: 1000.0,
+            window_height: 800.0,
+        }
+    }
+}
+
 pub fn load_recent_files() -> Vec<PathBuf> {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -49,6 +65,61 @@ pub fn save_recent_files(files: &[PathBuf]) {
         .collect::<Vec<_>>()
         .join("\n");
     let _ = std::fs::write(&path, content);
+}
+
+pub fn save_config(config: &Config) {
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+    let _ = std::fs::create_dir_all(&path);
+    path.push("config.json");
+    let content = format!(
+        "{{\n  \"show_fps\": {},\n  \"window_width\": {:.1},\n  \"window_height\": {:.1}\n}}\n",
+        config.show_fps, config.window_width, config.window_height
+    );
+    let _ = std::fs::write(&path, content);
+}
+
+fn load_config() -> Config {
+    let mut config = Config::default();
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(&path);
+    }
+
+    path.push("config.json");
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("\"show_fps\": false")
+                || content.replace(" ", "").contains("\"show_fps\":false")
+            {
+                config.show_fps = false;
+            }
+            for line in content.lines() {
+                if line.contains("\"window_width\"") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
+                            config.window_width = v;
+                        }
+                    }
+                }
+                if line.contains("\"window_height\"") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
+                            config.window_height = v;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        save_config(&config);
+    }
+
+    config
 }
 
 fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
@@ -92,32 +163,6 @@ fn load_dracula() -> Theme {
         modified_saved: [0.313, 0.980, 0.482, 1.0],
         titlebar_bg,
     }
-}
-
-fn load_config() -> bool {
-    let mut show_fps = true;
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-
-    if !path.exists() {
-        let _ = std::fs::create_dir_all(&path);
-    }
-
-    path.push("config.json");
-    if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if content.contains("\"show_fps\": false")
-                || content.replace(" ", "").contains("\"show_fps\":false")
-            {
-                show_fps = false;
-            }
-        }
-    } else {
-        let _ = std::fs::write(&path, "{\n  \"show_fps\": true\n}\n");
-    }
-
-    show_fps
 }
 
 fn main() {
@@ -172,13 +217,15 @@ fn main() {
 # Работа с файлами
 Ctrl + S\tСохранить текущий документ
 Ctrl + O\tОткрыть файл
-Ctrl + Q\tВыйти из редактирования / приложения
+Ctrl + Q\tВыйти из редактора (закрыть документ)
 
 # Навигация и поиск
 Ctrl + F\tПоиск по тексту (Нажмите Esc для выхода)
 Ctrl + ← / →\tБыстрый переход по словам
 PgUp / PgDn\tПостраничная прокрутка документа
 Home / End\tПереход в начало / конец текущей строки
+Ctrl + Home\tПереход в самое начало документа
+Ctrl + End\tПереход в самый конец документа
 
 # Редактирование
 Ctrl + W\tУмное выделение (Expand Selection)
@@ -206,7 +253,7 @@ Ctrl + Del\tУдалить слово справа от курсора
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
 
-    let show_fps = load_config();
+    let config = load_config();
     let highlighter = Highlighter::new();
 
     let mut app = App {
@@ -239,9 +286,13 @@ Ctrl + Del\tУдалить слово справа от курсора
         is_dragging_minimap: false,
         is_dragging_h_scroll: false,
         minimap_drag_offset_y: 0.0,
-        h_scroll_drag_offset_x: 0.0, // <-- ДОБАВЛЕНО ЗДЕСЬ
+        h_scroll_drag_offset_x: 0.0,
         is_focused: true,
-        show_fps,
+
+        show_fps: config.show_fps,
+        window_width: config.window_width,
+        window_height: config.window_height,
+
         scroll_anim_speed: 15.0,
         show_quit_dialog: false,
         last_resize_time: None,

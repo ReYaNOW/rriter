@@ -1,5 +1,3 @@
-// app.rs
-
 pub mod events;
 pub mod input;
 
@@ -10,7 +8,7 @@ use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{Surface, WindowSurface};
-use rustc_hash::FxHashMap; // ОПТИМИЗАЦИЯ: Ультрабыстрая хэш-таблица
+use rustc_hash::FxHashMap;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -24,13 +22,12 @@ pub enum PendingAction {
     Quit,
     OpenFile,
     Faq,
-    CloseFile, // <--- Добавлено действие закрытия файла
+    CloseFile,
 }
 
 #[inline(always)]
 fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
     let mut p_chars = pattern.chars().peekable();
-    // ОПТИМИЗАЦИЯ: Мы заранее знаем максимальный размер совпадений
     let mut indices = Vec::with_capacity(pattern.len());
     for (i, c) in target.chars().enumerate() {
         if let Some(&pc) = p_chars.peek() {
@@ -39,7 +36,6 @@ fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
                 p_chars.next();
             }
         } else {
-            // ОПТИМИЗАЦИЯ: Ранний выход, если паттерн уже найден (не проверяем хвост target)
             break;
         }
     }
@@ -86,7 +82,11 @@ pub struct App {
     pub minimap_drag_offset_y: f32,
     pub h_scroll_drag_offset_x: f32,
     pub is_focused: bool,
+
     pub show_fps: bool,
+    pub window_width: f64,
+    pub window_height: f64,
+
     pub scroll_anim_speed: f32,
     pub show_quit_dialog: bool,
 
@@ -190,11 +190,6 @@ impl App {
         for i in p..self.editor.cursor {
             res.push(self.editor.byte_at(i));
         }
-
-        // ПОЛНОСТЬЮ БЕЗОПАСНЫЙ КОД:
-        // Поскольку выше мы отфильтровали только ASCII символы,
-        // это гарантированно валидный UTF-8.
-        // unwrap_or_default() спасает нас от паник без использования unsafe.
         String::from_utf8(res).unwrap_or_default()
     }
 
@@ -209,8 +204,6 @@ impl App {
         let prefix_lower = prefix.to_lowercase();
         let cursor = self.editor.cursor;
 
-        // ОПТИМИЗАЦИЯ: FxHashMap (компиляторный хэшер) значительно быстрее для таких коротких ключей.
-        // ЯВНО УКАЗЫВАЕМ ТИПЫ <String, CompletionItem>, чтобы избежать ошибки компиляции E0282.
         let mut best_scopes: FxHashMap<String, CompletionItem> = FxHashMap::default();
 
         for comp in &self.highlighter.completions {
@@ -404,8 +397,6 @@ impl App {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
                 if let Some(r) = self.renderer.as_mut() {
-                    // ИСПРАВЛЕНИЕ: Используем физическую строку вместо кешированной визуальной,
-                    // чтобы корректно прокручивать к результатам за пределами экрана.
                     let phys_line = self
                         .editor
                         .line_offsets
@@ -581,13 +572,9 @@ impl App {
     }
 
     pub fn add_recent_file(&mut self, path: PathBuf) {
-        // Убираем дубликат, если он есть
         self.recent_files.retain(|p| p != &path);
-        // Вставляем файл на первое место
         self.recent_files.insert(0, path);
-        // ГАРАНТИЯ: Оставляем ровно 10 файлов!
         self.recent_files.truncate(10);
-
         crate::save_recent_files(&self.recent_files);
     }
 
@@ -598,7 +585,6 @@ impl App {
                 self.add_recent_file(path.clone());
 
                 let old_version = self.editor.version;
-                // ОПТИМИЗАЦИЯ: Преаллокация буфера памяти (избегаем лишних реаллокаций)
                 self.editor = Editor::new(content.len() + 8192);
                 self.editor.version = old_version + 1;
 
@@ -639,8 +625,6 @@ impl App {
                 }
             }
             Err(_) => {
-                // ИСПРАВЛЕНИЕ: Если файл был удален, перемещен или недоступен -
-                // мгновенно убираем его из списка недавних и перерисовываем Welcome Screen.
                 self.recent_files.retain(|p| p != &path);
                 crate::save_recent_files(&self.recent_files);
                 if let Some(w) = self.window.as_ref() {

@@ -87,10 +87,9 @@ impl Renderer {
         }
 
         let total_lines = visible_lines_count.max(1);
-        let use_minimap = total_lines <= 3000;
         let s = self.scale_factor;
 
-        let target_minimap_w = if use_minimap { 110.0 } else { 16.0 * s };
+        let target_minimap_w = 119.0 * s;
 
         if (self.minimap_width - target_minimap_w).abs() > 0.5 {
             self.minimap_width = target_minimap_w;
@@ -626,15 +625,13 @@ impl Renderer {
 
         self.flush();
 
-        if use_minimap {
-            self.push_rect(
-                minimap_x,
-                0.0,
-                minimap_w,
-                self.height,
-                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
-            );
-        }
+        self.push_rect(
+            minimap_x,
+            0.0,
+            minimap_w,
+            self.height,
+            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+        );
 
         let max_scroll = self.get_max_scroll(editor, self.height);
         let scroll_ratio_y = if max_scroll > 0.0 {
@@ -643,241 +640,221 @@ impl Renderer {
             0.0
         };
 
-        if use_minimap {
-            let total_lines_f32 = total_lines as f32;
-            let base_minimap_line_h = 2.5 * s;
-            let minimap_line_h = (self.height / total_lines_f32)
-                .min(base_minimap_line_h)
-                .max(0.1);
+        let total_lines_f32 = total_lines as f32;
+        let minimap_line_h = (self.height / total_lines_f32)
+            .max(self.height / 1250.0)
+            .max(1.5);
+        let max_minimap_scroll = (total_lines_f32 * minimap_line_h - self.height).max(0.0);
+        let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
-            let current_spans_ver =
-                (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
+        let current_spans_ver =
+            (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
 
-            let mut fold_hash = 0u64;
-            for &f in &editor.folded_lines {
-                fold_hash ^= (f as u64).wrapping_mul(0x517cc1b727220a95);
-            }
+        let mut fold_hash = 0u64;
+        for &f in &editor.folded_lines {
+            fold_hash ^= (f as u64).wrapping_mul(0x517cc1b727220a95);
+        }
 
-            let needs_minimap_update = self.last_minimap_editor_version != editor.version
-                || self.last_minimap_spans_version != current_spans_ver
-                || self.last_minimap_fold_hash != fold_hash
-                || self.minimap_vertices.is_empty()
-                || (self.last_minimap_width - self.width).abs() > 0.5;
+        let needs_minimap_update = self.last_minimap_editor_version != editor.version
+            || self.last_minimap_spans_version != current_spans_ver
+            || self.last_minimap_fold_hash != fold_hash
+            || self.minimap_vertices.is_empty()
+            || (self.last_minimap_width - self.width).abs() > 0.5;
 
-            if needs_minimap_update {
-                self.minimap_vertices.clear();
-                let map_bg = self.theme.minimap_bg;
-                let mut current_y = 0.0;
-                let mut phys_line = 0;
+        if needs_minimap_update {
+            self.minimap_vertices.clear();
+            let map_bg = self.theme.minimap_bg;
+            let mut current_y: f32 = 0.0;
+            let mut phys_line = 0;
+            let rect_h = minimap_line_h.ceil().max(1.0);
 
-                while phys_line < editor.line_offsets.len() {
-                    let y_pixel = current_y;
-                    if y_pixel > self.height {
-                        break;
-                    }
+            while phys_line < editor.line_offsets.len() {
+                let start_byte = editor.line_offsets[phys_line];
+                let is_folded = editor.folded_lines.contains(&phys_line)
+                    && editor.foldable_lines.contains_key(&phys_line);
+                let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
+                    editor.line_offsets[phys_line + 1]
+                } else {
+                    editor.len()
+                };
 
-                    let start_byte = editor.line_offsets[phys_line];
-                    let is_folded = editor.folded_lines.contains(&phys_line)
-                        && editor.foldable_lines.contains_key(&phys_line);
-                    let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
-                        editor.line_offsets[phys_line + 1]
+                if is_folded {
+                    end_byte -= 1;
+                }
+
+                let mut current_x = minimap_x + 5.0;
+                let mut cur_byte = start_byte;
+
+                let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx.saturating_sub(1),
+                };
+
+                let y1 = current_y.round();
+                let y2 = (current_y + rect_h).round();
+
+                while cur_byte < end_byte {
+                    let text_chunk = if cur_byte < first_len {
+                        &first[cur_byte..end_byte.min(first_len)]
                     } else {
-                        editor.len()
+                        &second[cur_byte - first_len..end_byte - first_len]
                     };
 
-                    if is_folded {
-                        end_byte -= 1;
-                    }
-
-                    let mut current_x = minimap_x + 5.0;
-                    let mut cur_byte = start_byte;
-
-                    let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start)
-                    {
-                        Ok(idx) => idx,
-                        Err(idx) => idx.saturating_sub(1),
-                    };
-
-                    while cur_byte < end_byte {
-                        let text_chunk = if cur_byte < first_len {
-                            &first[cur_byte..end_byte.min(first_len)]
+                    let mut spaces_len = 0;
+                    for b in text_chunk.bytes() {
+                        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+                            spaces_len += 1;
                         } else {
-                            &second[cur_byte - first_len..end_byte - first_len]
-                        };
-
-                        let mut spaces_len = 0;
-                        for b in text_chunk.bytes() {
-                            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                                spaces_len += 1;
-                            } else {
-                                break;
-                            }
-                        }
-
-                        if spaces_len > 0 {
-                            current_x += 1.2 * (spaces_len as f32);
-                            cur_byte += spaces_len;
-                            if current_x >= minimap_x + minimap_w - 5.0 {
-                                break;
-                            }
-                            continue;
-                        }
-
-                        while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte {
-                            span_idx_mini += 1;
-                        }
-
-                        let (span_end, raw_color) = if span_idx_mini < spans.len() {
-                            let sp = &spans[span_idx_mini];
-                            if sp.start <= cur_byte {
-                                (sp.end.min(end_byte), sp.color)
-                            } else {
-                                (sp.start.min(end_byte), self.theme.fg)
-                            }
-                        } else {
-                            (end_byte, self.theme.fg)
-                        };
-
-                        let color = [
-                            raw_color[0] * 0.7 + map_bg[0] * 0.3,
-                            raw_color[1] * 0.7 + map_bg[1] * 0.3,
-                            raw_color[2] * 0.7 + map_bg[2] * 0.3,
-                            1.0,
-                        ];
-
-                        let mut word_len = 0;
-                        for b in text_chunk.bytes() {
-                            if cur_byte + word_len >= span_end
-                                || b == b' '
-                                || b == b'\t'
-                                || b == b'\n'
-                                || b == b'\r'
-                            {
-                                break;
-                            }
-                            word_len += 1;
-                        }
-
-                        let w =
-                            (word_len as f32 * 1.2).min(minimap_x + minimap_w - 5.0 - current_x);
-
-                        if w > 0.0 {
-                            let rect_h = minimap_line_h.max(1.0);
-                            let x1 = current_x.round();
-                            let y1 = y_pixel.round();
-                            let x2 = (current_x + w).round();
-                            let y2 = (y_pixel + rect_h).round();
-
-                            let v1 = Vertex {
-                                pos: [x1, y1],
-                                uv: [-1.0, -1.0],
-                                color,
-                                is_emoji: 0.0,
-                            };
-                            let v2 = Vertex {
-                                pos: [x2, y1],
-                                uv: [-1.0, -1.0],
-                                color,
-                                is_emoji: 0.0,
-                            };
-                            let v3 = Vertex {
-                                pos: [x2, y2],
-                                uv: [-1.0, -1.0],
-                                color,
-                                is_emoji: 0.0,
-                            };
-                            let v4 = Vertex {
-                                pos: [x1, y2],
-                                uv: [-1.0, -1.0],
-                                color,
-                                is_emoji: 0.0,
-                            };
-                            self.minimap_vertices
-                                .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
-                            current_x += w;
-                        }
-
-                        cur_byte += word_len.max(1);
-                        if current_x >= minimap_x + minimap_w - 5.0 {
                             break;
                         }
                     }
-                    current_y += minimap_line_h;
 
-                    if is_folded {
-                        if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
-                            phys_line = fold_end;
+                    if spaces_len > 0 {
+                        current_x += 1.5 * (spaces_len as f32);
+                        cur_byte += spaces_len;
+                        if current_x >= minimap_x + minimap_w - 5.0 {
+                            break;
                         }
+                        continue;
                     }
-                    phys_line += 1;
+
+                    while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte {
+                        span_idx_mini += 1;
+                    }
+
+                    let (span_end, raw_color) = if span_idx_mini < spans.len() {
+                        let sp = &spans[span_idx_mini];
+                        if sp.start <= cur_byte {
+                            (sp.end.min(end_byte), sp.color)
+                        } else {
+                            (sp.start.min(end_byte), self.theme.fg)
+                        }
+                    } else {
+                        (end_byte, self.theme.fg)
+                    };
+
+                    let color = [
+                        raw_color[0] * 0.8 + map_bg[0] * 0.2,
+                        raw_color[1] * 0.8 + map_bg[1] * 0.2,
+                        raw_color[2] * 0.8 + map_bg[2] * 0.2,
+                        1.0,
+                    ];
+
+                    let mut word_len = 0;
+                    for b in text_chunk.bytes() {
+                        if cur_byte + word_len >= span_end
+                            || b == b' '
+                            || b == b'\t'
+                            || b == b'\n'
+                            || b == b'\r'
+                        {
+                            break;
+                        }
+                        word_len += 1;
+                    }
+
+                    let w = (word_len as f32 * 1.5).min(minimap_x + minimap_w - 5.0 - current_x);
+
+                    if w > 0.0 {
+                        let x1 = current_x.round();
+                        let x2 = (current_x + w).round();
+
+                        let v1 = Vertex {
+                            pos: [x1, y1],
+                            uv: [-1.0, -1.0],
+                            color,
+                            is_emoji: 0.0,
+                        };
+                        let v2 = Vertex {
+                            pos: [x2, y1],
+                            uv: [-1.0, -1.0],
+                            color,
+                            is_emoji: 0.0,
+                        };
+                        let v3 = Vertex {
+                            pos: [x2, y2],
+                            uv: [-1.0, -1.0],
+                            color,
+                            is_emoji: 0.0,
+                        };
+                        let v4 = Vertex {
+                            pos: [x1, y2],
+                            uv: [-1.0, -1.0],
+                            color,
+                            is_emoji: 0.0,
+                        };
+
+                        self.minimap_vertices
+                            .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                        current_x += w;
+                    }
+
+                    cur_byte += word_len.max(1);
+                    if current_x >= minimap_x + minimap_w - 5.0 {
+                        break;
+                    }
                 }
-                self.last_minimap_editor_version = editor.version;
-                self.last_minimap_spans_version = current_spans_ver;
-                self.last_minimap_fold_hash = fold_hash;
-                self.last_minimap_width = self.width;
+                current_y += minimap_line_h;
+
+                if is_folded {
+                    if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
+                        phys_line = fold_end;
+                    }
+                }
+                phys_line += 1;
             }
-
-            self.flush();
-            let mut offset = 0;
-            while offset < self.minimap_vertices.len() {
-                let chunk = (self.minimap_vertices.len() - offset).min(90_000);
-                self.vertices
-                    .extend_from_slice(&self.minimap_vertices[offset..offset + chunk]);
-                self.flush();
-                offset += chunk;
-            }
-
-            let y_cursor = visible_cursor_line as f32 * minimap_line_h;
-            self.push_rect(
-                minimap_x,
-                y_cursor,
-                minimap_w,
-                2.0,
-                self.theme.minimap_cursor,
-            );
-
-            let visible_lines = self.height / self.line_height;
-            let viewport_h = (visible_lines * minimap_line_h).max(4.0);
-
-            let max_viewport_y = (self.height - viewport_h).max(0.0);
-            let viewport_y = scroll_ratio_y * max_viewport_y;
-
-            let view_bg = [
-                self.theme.minimap_bg[0] * 0.7 + self.theme.sel[0] * 0.3,
-                self.theme.minimap_bg[1] * 0.7 + self.theme.sel[1] * 0.3,
-                self.theme.minimap_bg[2] * 0.7 + self.theme.sel[2] * 0.3,
-                0.3,
-            ];
-            let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
-
-            self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
-            self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
-            self.push_rect(
-                minimap_x,
-                viewport_y + viewport_h - 2.0,
-                minimap_w,
-                2.0,
-                view_border,
-            );
-            self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
-        } else {
-            let track_h = self.height - 16.0 * s;
-            let total_content_h = total_lines as f32 * self.line_height;
-            let thumb_h = (self.height / total_content_h * track_h).max(40.0 * s);
-            let thumb_y = 8.0 * s + scroll_ratio_y * (track_h - thumb_h);
-
-            let thumb_w = 6.0 * s;
-            let scroll_x_thumb = minimap_x + (minimap_w - thumb_w) / 2.0;
-
-            self.push_rounded_rect(
-                scroll_x_thumb,
-                thumb_y,
-                thumb_w,
-                thumb_h,
-                3.0 * s,
-                [0.40, 0.42, 0.46, 1.0],
-            );
+            self.last_minimap_editor_version = editor.version;
+            self.last_minimap_spans_version = current_spans_ver;
+            self.last_minimap_fold_hash = fold_hash;
+            self.last_minimap_width = self.width;
         }
+
+        self.flush();
+
+        let mm_len = self.minimap_vertices.len();
+        for i in 0..mm_len {
+            let mut v_copy = self.minimap_vertices[i];
+            v_copy.pos[1] -= current_minimap_scroll;
+            self.vertices.push(v_copy);
+            if self.vertices.len() >= crate::renderer::MAX_VERTICES {
+                self.flush();
+            }
+        }
+        self.flush();
+
+        let y_cursor = visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll;
+        self.push_rect(
+            minimap_x,
+            y_cursor,
+            minimap_w,
+            2.0,
+            self.theme.minimap_cursor,
+        );
+
+        let current_visible_top_line = render_scroll_y / self.line_height;
+        let viewport_y =
+            (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
+        let visible_lines = self.height / self.line_height;
+        let viewport_h = (visible_lines * minimap_line_h).max(4.0);
+
+        let view_bg = [
+            self.theme.minimap_bg[0] * 0.7 + self.theme.sel[0] * 0.3,
+            self.theme.minimap_bg[1] * 0.7 + self.theme.sel[1] * 0.3,
+            self.theme.minimap_bg[2] * 0.7 + self.theme.sel[2] * 0.3,
+            0.3,
+        ];
+        let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+
+        self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
+        self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
+        self.push_rect(
+            minimap_x,
+            viewport_y + viewport_h - 2.0,
+            minimap_w,
+            2.0,
+            view_border,
+        );
+        self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
 
         if self.max_scroll_x > 0.0 {
             let track_w = self.width - minimap_w - self.left_padding;

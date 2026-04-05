@@ -431,40 +431,26 @@ impl App {
                 }
                 let total_lines = total_lines.max(1);
 
-                let use_minimap = total_lines <= 3000;
+                let minimap_line_h = (wh / total_lines as f32).max(wh / 1250.0).max(1.5);
+                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
+                let thumb_h = (visible_lines * minimap_line_h).max(4.0);
 
-                let (thumb_start_y, thumb_h, track_start_y, track_h) = if use_minimap {
-                    let base_minimap_line_h = 2.5 * s;
-                    let minimap_line_h =
-                        (wh / total_lines as f32).min(base_minimap_line_h).max(0.1);
-                    let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                    let viewport_h = (visible_lines * minimap_line_h).max(4.0);
-
-                    let scroll_ratio = if max_scroll > 0.0 {
-                        (self.scroll_y / max_scroll).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-
-                    let max_viewport_y = wh - viewport_h;
-                    let current_viewport_y = scroll_ratio * max_viewport_y;
-
-                    (current_viewport_y, viewport_h, 0.0, wh)
+                let scroll_ratio = if max_scroll > 0.0 {
+                    (self.scroll_y / max_scroll).clamp(0.0, 1.0)
                 } else {
-                    let track_h = wh - 16.0 * s;
-                    let total_content_h =
-                        total_lines as f32 * self.renderer.as_ref().unwrap().line_height;
-                    let thumb_height = (wh / total_content_h * track_h).max(40.0 * s);
-
-                    let scroll_ratio = if max_scroll > 0.0 {
-                        (self.scroll_y / max_scroll).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-
-                    let thumb_y = 8.0 * s + scroll_ratio * (track_h - thumb_height);
-                    (thumb_y, thumb_height, 8.0 * s, track_h)
+                    0.0
                 };
+
+                let max_minimap_scroll = (total_lines as f32 * minimap_line_h - wh).max(0.0);
+                let current_minimap_scroll = scroll_ratio * max_minimap_scroll;
+
+                let current_visible_top_line =
+                    self.scroll_y / self.renderer.as_ref().unwrap().line_height;
+                let thumb_start_y =
+                    current_visible_top_line * minimap_line_h - current_minimap_scroll;
+
+                let track_start_y = 0.0;
+                let track_h = wh;
 
                 self.is_dragging_minimap = true;
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
@@ -660,22 +646,11 @@ impl App {
                 }
                 let total_lines = total_lines.max(1);
 
-                let use_minimap = total_lines <= 3000;
-
-                let (thumb_h, track_start_y, track_h) = if use_minimap {
-                    let base_minimap_line_h = 2.5 * s;
-                    let minimap_line_h =
-                        (wh / total_lines as f32).min(base_minimap_line_h).max(0.1);
-                    let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
-                    let viewport_h = (visible_lines * minimap_line_h).max(4.0);
-                    (viewport_h, 0.0, wh)
-                } else {
-                    let track_height = wh - 16.0 * s;
-                    let total_content_h =
-                        total_lines as f32 * self.renderer.as_ref().unwrap().line_height;
-                    let thumb_height = (wh / total_content_h * track_height).max(40.0 * s);
-                    (thumb_height, 8.0 * s, track_height)
-                };
+                let minimap_line_h = (wh / total_lines as f32).max(wh / 1250.0).max(1.5);
+                let visible_lines = wh / self.renderer.as_ref().unwrap().line_height;
+                let thumb_h = (visible_lines * minimap_line_h).max(4.0);
+                let track_h = wh;
+                let track_start_y = 0.0;
 
                 let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
 
@@ -837,6 +812,18 @@ impl App {
                     self.trigger_file_picker();
                 }
                 PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                    let scale = self.window.as_ref().unwrap().scale_factor();
+                    let size = self
+                        .window
+                        .as_ref()
+                        .unwrap()
+                        .inner_size()
+                        .to_logical::<f64>(scale);
+                    crate::save_config(&crate::Config {
+                        show_fps: self.show_fps,
+                        window_width: size.width,
+                        window_height: size.height,
+                    });
                     event_loop.exit();
                 }
                 _ => {}
