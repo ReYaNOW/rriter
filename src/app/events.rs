@@ -779,7 +779,6 @@ impl ApplicationHandler for App {
 
         if self.highlighter.poll(self.editor.version) {
             self.editor.foldable_lines.clear();
-            // ИСПРАВЛЕНО: Снизили порог до 2 строк, чтобы словари корректно сворачивались
             for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
                 let sl = self
                     .editor

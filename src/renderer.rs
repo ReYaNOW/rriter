@@ -74,6 +74,7 @@ pub struct Renderer {
     pub minimap_vertices: Vec<Vertex>,
     pub last_minimap_editor_version: u64,
     pub last_minimap_spans_version: u64,
+    pub last_minimap_fold_hash: u64,
     pub last_minimap_width: f32,
 
     pub fonts: Vec<FontData>,
@@ -353,6 +354,7 @@ impl Renderer {
                 minimap_vertices: Vec::with_capacity(40000),
                 last_minimap_editor_version: u64::MAX,
                 last_minimap_spans_version: u64::MAX,
+                last_minimap_fold_hash: 0,
                 last_minimap_width: 0.0,
                 fonts,
                 ui_fonts,

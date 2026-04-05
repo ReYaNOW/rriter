@@ -57,7 +57,35 @@ impl Renderer {
         }
         self.last_frame_time = Some(now);
 
-        let total_lines = editor.line_offsets.len().max(1);
+        let cursor_phys_line = editor
+            .line_offsets
+            .partition_point(|&o| o <= editor.cursor)
+            .saturating_sub(1);
+
+        let mut visible_lines_count = 0;
+        let mut visible_cursor_line = 0;
+        let mut temp_phys = 0;
+        while temp_phys < editor.line_offsets.len() {
+            if temp_phys == cursor_phys_line {
+                visible_cursor_line = visible_lines_count;
+            }
+            let is_folded = editor.folded_lines.contains(&temp_phys);
+            let fold_end = if is_folded {
+                editor.foldable_lines.get(&temp_phys).copied()
+            } else {
+                None
+            };
+            visible_lines_count += 1;
+            if let Some(end) = fold_end {
+                if cursor_phys_line > temp_phys && cursor_phys_line <= end {
+                    visible_cursor_line = visible_lines_count - 1;
+                }
+                temp_phys = end;
+            }
+            temp_phys += 1;
+        }
+
+        let total_lines = visible_lines_count.max(1);
         let use_minimap = total_lines <= 3000;
         let s = self.scale_factor;
 
@@ -68,8 +96,7 @@ impl Renderer {
             self.visual_lines.clear();
         }
 
-        // ИСПРАВЛЕНО: Увеличиваем базовый отступ для стрелочек
-        let digits = total_lines.to_string().len().max(3);
+        let digits = editor.line_offsets.len().to_string().len().max(3);
         let target_padding = (35.0 * s + digits as f32 * 10.0 * s).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
@@ -124,12 +151,8 @@ impl Renderer {
             1.0,
         ];
 
-        let cursor_phys_line = editor
-            .line_offsets
-            .partition_point(|&o| o <= editor.cursor)
-            .saturating_sub(1);
-        let cursor_line_y =
-            self.baseline_offset - render_scroll_y + (cursor_phys_line as f32 * self.line_height);
+        let cursor_line_y = self.baseline_offset - render_scroll_y
+            + (visible_cursor_line as f32 * self.line_height);
 
         if cursor_line_y > -self.line_height * 2.0 && cursor_line_y < self.height + self.line_height
         {
@@ -248,12 +271,10 @@ impl Renderer {
             let v_line_info = self.visual_lines[i];
             let start_byte = v_line_info.byte_idx;
 
-            // ИСПРАВЛЕНО: Главная причина "каши". Если строка свернута, мы рендерим ТОЛЬКО её (до следующего переноса),
-            // а не весь гигантский скрытый блок до конца файла.
             let end_byte = if v_line_info.is_folded {
                 let phys_idx = v_line_info.physical_line - 1;
                 if phys_idx + 1 < editor.line_offsets.len() {
-                    editor.line_offsets[phys_idx + 1].saturating_sub(1) // Опускаем \n
+                    editor.line_offsets[phys_idx + 1].saturating_sub(1)
                 } else {
                     len
                 }
@@ -425,7 +446,6 @@ impl Renderer {
             if v_line_info.is_folded {
                 let dots_adv = self.measure_ui_width("...", 1.0);
 
-                // ИСПРАВЛЕНО: Теперь фон кнопки "..." рисуется идеально ровно (PyCharm style)
                 let dots_bg = [
                     self.theme.bg[0] + 0.08,
                     self.theme.bg[1] + 0.08,
@@ -490,7 +510,6 @@ impl Renderer {
             let phys_idx = v_line.physical_line - 1;
 
             if editor.foldable_lines.contains_key(&phys_idx) {
-                // ИСПРАВЛЕНО: Стрелочки рисуются ПРАВЕЕ номеров строк (ближе к тексту)
                 let arrow_x = self.left_padding - 22.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
@@ -512,7 +531,6 @@ impl Renderer {
             }
             if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                 let num_w = self.measure_ui_width(num_str, 1.0);
-                // ИСПРАВЛЕНО: Номера строк смещены ЛЕВЕЕ, чтобы не пересекаться со стрелками
                 let draw_x = self.left_padding - 30.0 * s - num_w;
                 self.draw_string_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
             }
@@ -569,8 +587,14 @@ impl Renderer {
             let current_spans_ver =
                 (spans.len() as u64) ^ (spans.last().map(|s| s.end).unwrap_or(0) as u64);
 
+            let mut fold_hash = 0u64;
+            for &f in &editor.folded_lines {
+                fold_hash ^= (f as u64).wrapping_mul(0x517cc1b727220a95);
+            }
+
             let needs_minimap_update = self.last_minimap_editor_version != editor.version
                 || self.last_minimap_spans_version != current_spans_ver
+                || self.last_minimap_fold_hash != fold_hash
                 || self.minimap_vertices.is_empty()
                 || (self.last_minimap_width - self.width).abs() > 0.5;
 
@@ -578,19 +602,25 @@ impl Renderer {
                 self.minimap_vertices.clear();
                 let map_bg = self.theme.minimap_bg;
                 let mut current_y = 0.0;
+                let mut phys_line = 0;
 
-                for i in 0..editor.line_offsets.len() {
+                while phys_line < editor.line_offsets.len() {
                     let y_pixel = current_y;
                     if y_pixel > self.height {
                         break;
                     }
 
-                    let start_byte = editor.line_offsets[i];
-                    let end_byte = if i + 1 < editor.line_offsets.len() {
-                        editor.line_offsets[i + 1]
+                    let start_byte = editor.line_offsets[phys_line];
+                    let is_folded = editor.folded_lines.contains(&phys_line);
+                    let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
+                        editor.line_offsets[phys_line + 1]
                     } else {
                         editor.len()
                     };
+
+                    if is_folded {
+                        end_byte -= 1;
+                    }
 
                     let mut current_x = minimap_x + 5.0;
                     let mut cur_byte = start_byte;
@@ -706,9 +736,17 @@ impl Renderer {
                         }
                     }
                     current_y += minimap_line_h;
+
+                    if is_folded {
+                        if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
+                            phys_line = fold_end;
+                        }
+                    }
+                    phys_line += 1;
                 }
                 self.last_minimap_editor_version = editor.version;
                 self.last_minimap_spans_version = current_spans_ver;
+                self.last_minimap_fold_hash = fold_hash;
                 self.last_minimap_width = self.width;
             }
 
@@ -722,16 +760,14 @@ impl Renderer {
                 offset += chunk;
             }
 
-            if cursor_phys_line < editor.line_offsets.len() {
-                let y_cursor = cursor_phys_line as f32 * minimap_line_h;
-                self.push_rect(
-                    minimap_x,
-                    y_cursor,
-                    minimap_w,
-                    2.0,
-                    self.theme.minimap_cursor,
-                );
-            }
+            let y_cursor = visible_cursor_line as f32 * minimap_line_h;
+            self.push_rect(
+                minimap_x,
+                y_cursor,
+                minimap_w,
+                2.0,
+                self.theme.minimap_cursor,
+            );
 
             let visible_lines = self.height / self.line_height;
             let viewport_h = (visible_lines * minimap_line_h).max(4.0);

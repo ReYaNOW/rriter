@@ -198,7 +198,6 @@ impl App {
                     let y = r.baseline_offset + v_line.y_offset - self.scroll_y;
                     let phys_idx = v_line.physical_line - 1;
 
-                    // Клик по стрелочке в gutter панели
                     if self.editor.foldable_lines.contains_key(&phys_idx) {
                         let arrow_x = r.left_padding - 22.0 * s;
                         if last_mouse_x >= arrow_x - 5.0 * s
@@ -216,7 +215,6 @@ impl App {
                         }
                     }
 
-                    // Клик по "..." в конце свернутой строки
                     if v_line.is_folded {
                         let dots_adv = r.measure_ui_width("...", 1.0) + 16.0 * s;
                         let dots_x =
@@ -400,7 +398,23 @@ impl App {
                     .unwrap()
                     .get_max_scroll(&self.editor, wh);
 
-                let total_lines = self.editor.line_offsets.len().max(1);
+                let mut total_lines = 0;
+                let mut temp_phys = 0;
+                while temp_phys < self.editor.line_offsets.len() {
+                    let is_folded = self.editor.folded_lines.contains(&temp_phys);
+                    let fold_end = if is_folded {
+                        self.editor.foldable_lines.get(&temp_phys).copied()
+                    } else {
+                        None
+                    };
+                    total_lines += 1;
+                    if let Some(end) = fold_end {
+                        temp_phys = end;
+                    }
+                    temp_phys += 1;
+                }
+                let total_lines = total_lines.max(1);
+
                 let use_minimap = total_lines <= 3000;
 
                 let (thumb_start_y, thumb_h, track_start_y, track_h) = if use_minimap {
@@ -667,7 +681,23 @@ impl App {
                     .unwrap()
                     .get_max_scroll(&self.editor, wh);
 
-                let total_lines = self.editor.line_offsets.len().max(1);
+                let mut total_lines = 0;
+                let mut temp_phys = 0;
+                while temp_phys < self.editor.line_offsets.len() {
+                    let is_folded = self.editor.folded_lines.contains(&temp_phys);
+                    let fold_end = if is_folded {
+                        self.editor.foldable_lines.get(&temp_phys).copied()
+                    } else {
+                        None
+                    };
+                    total_lines += 1;
+                    if let Some(end) = fold_end {
+                        temp_phys = end;
+                    }
+                    temp_phys += 1;
+                }
+                let total_lines = total_lines.max(1);
+
                 let use_minimap = total_lines <= 3000;
 
                 let (thumb_h, track_start_y, track_h) = if use_minimap {
@@ -1203,7 +1233,6 @@ impl App {
             while start_wait.elapsed().as_millis() < 3 {
                 if self.highlighter.poll(self.editor.version) {
                     self.editor.foldable_lines.clear();
-                    // ИСПРАВЛЕНО: Снизили порог до 2 строк, чтобы словари корректно сворачивались
                     for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
                         let sl = self
                             .editor
