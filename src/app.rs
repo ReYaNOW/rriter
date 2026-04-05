@@ -403,20 +403,19 @@ impl App {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
                 if let Some(r) = self.renderer.as_mut() {
-                    r.update_cache(&self.editor, self.scroll_x, self.scroll_y, false);
-                    let line_idx = match r.visual_lines.binary_search_by_key(&end, |v| v.byte_idx) {
-                        Ok(i) => i,
-                        Err(i) => {
-                            if i > 0 {
-                                i - 1
-                            } else {
-                                0
-                            }
-                        }
-                    };
-                    let cy = r.baseline_offset + (line_idx as f32 * r.line_height);
+                    // ИСПРАВЛЕНИЕ: Используем физическую строку вместо кешированной визуальной,
+                    // чтобы корректно прокручивать к результатам за пределами экрана.
+                    let phys_line = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&o| o <= end)
+                        .saturating_sub(1);
+
+                    let line_top_y = phys_line as f32 * r.line_height;
+
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    self.target_scroll_y = (cy - wh / 2.0).max(0.0);
+                    self.target_scroll_y = (line_top_y - wh / 2.0).max(0.0);
+
                     let max_s = r.get_max_scroll(&self.editor, wh);
                     self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_s).round();
                     self.scroll_anim_speed = 10.0;

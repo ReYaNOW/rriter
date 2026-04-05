@@ -122,8 +122,8 @@ fn resolve_color(
             "Exception" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
             | "AttributeError" | "RuntimeError" | "KeyboardInterrupt" | "int" | "float" | "str"
             | "bool" | "list" | "dict" | "set" | "tuple" | "bytes" | "Any" | "Optional"
-            | "Union" | "Callable" | "Type" | "Dict" | "List" | "Set" | "Tuple" | "id"
-            | "print" | "len" | "range" | "enumerate" | "sum" | "min" | "max" => DRACULA_CYAN,
+            | "Union" | "Callable" | "Type" | "Dict" | "List" | "Set" | "Tuple" | "print"
+            | "len" | "range" | "enumerate" | "sum" | "min" | "max" => DRACULA_CYAN,
             "self" | "cls" => DRACULA_PURPLE,
             _ => DRACULA_FG,
         },
