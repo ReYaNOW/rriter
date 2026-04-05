@@ -129,9 +129,142 @@ pub fn get_injection_query(lang_name: &str) -> Option<&'static str> {
     }
 }
 
-// Новая функция для сворачивания кода (folds)
 pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
     match lang_name {
+        "rs" => Some(
+            r#"
+            [
+                (block)
+                (declaration_list)
+                (enum_variant_list)
+                (match_block)
+            ] @fold
+            [
+                (array_expression)
+                (macro_invocation)
+            ] @autofold
+            "#,
+        ),
+        "py" => Some(
+            r#"
+            [
+                (function_definition)
+                (class_definition)
+                (block)
+            ] @fold
+            [
+                (dictionary)
+                (list)
+                (tuple)
+                (string)
+            ] @autofold
+            "#,
+        ),
+        "go" => Some(
+            r#"
+            [
+                (block)
+            ] @fold
+            [
+                (literal_value)
+                (composite_literal)
+            ] @autofold
+            "#,
+        ),
+        "js" | "ts" | "tsx" => Some(
+            r#"
+            [
+                (statement_block)
+                (class_body)
+                (switch_body)
+            ] @fold
+            [
+                (object)
+                (array)
+            ] @autofold
+            "#,
+        ),
+        "java" => Some(
+            r#"
+            [
+                (block)
+                (class_body)
+                (interface_body)
+                (enum_body)
+            ] @fold
+            [
+                (array_initializer)
+            ] @autofold
+            "#,
+        ),
+        "cs" => Some(
+            r#"
+            [
+                (block)
+                (switch_body)
+            ] @fold
+            [
+                (initializer_expression)
+            ] @autofold
+            "#,
+        ),
+        "dart" => Some(
+            r#"
+            [
+                (block)
+                (class_body)
+            ] @fold
+            [
+                (list_literal)
+                (set_or_map_literal)
+            ] @autofold
+            "#,
+        ),
+        "c" => Some(
+            r#"
+            [
+                (compound_statement)
+                (field_declaration_list)
+                (enumerator_list)
+            ] @fold
+            [
+                (initializer_list)
+            ] @autofold
+            "#,
+        ),
+        "cpp" => Some(
+            r#"
+            [
+                (compound_statement)
+                (declaration_list)
+                (field_declaration_list)
+                (enumerator_list)
+            ] @fold
+            [
+                (initializer_list)
+            ] @autofold
+            "#,
+        ),
+        "css" => Some(
+            r#"
+            [
+                (block)
+            ] @fold
+            "#,
+        ),
+        "json" => Some(
+            r#"
+            [
+                (object)
+                (array)
+            ] @autofold
+            "#,
+        ),
+        "html" => Some(
+            r#"
+            (element) @fold
+            "#,
+        ),
         "make" => Some(
             r#"
             [
@@ -139,7 +272,7 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
               (rule)
               (define_directive)
             ] @fold
-        "#,
+            "#,
         ),
         _ => None,
     }
@@ -703,7 +836,6 @@ pub fn get_ts_config(lang_name: &str) -> Option<(tree_sitter::Language, Vec<&'st
             tree_sitter_make::LANGUAGE.into(),
             vec![
                 "(comment) @comment",
-                // ИСПРАВЛЕНО: Предикат вынесен в отдельное выражение и применяется к дочернему узлу
                 "((conditional (_) @keyword.control) (#any-of? @keyword.control \"ifeq\" \"else\" \"ifneq\" \"ifdef\" \"ifndef\"))",
                 "(conditional \"endif\" @keyword.control)",
                 "(rule (targets (word) @function))",

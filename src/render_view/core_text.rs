@@ -1,4 +1,3 @@
-// --- START OF FILE core_text.rs ---
 use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine};
 use glow::HasContext;
@@ -9,103 +8,109 @@ impl Renderer {
         editor: &Editor,
         scroll_x: f32,
         scroll_y: f32,
-        is_resizing: bool,
+        _is_resizing: bool,
     ) {
         if self.width < 10.0 {
             return;
         }
 
-        let size_changed = !is_resizing
-            && ((self.last_height - self.height).abs() > 0.5
-                || (self.last_width - self.width).abs() > 0.5);
-
-        let needs_update = self.last_editor_version != editor.version
-            || size_changed
-            || (self.last_scroll_y - scroll_y).abs() > 0.5
-            || (self.last_scroll_x - scroll_x).abs() > 0.5;
-
-        if !needs_update && !self.visual_lines.is_empty() {
-            return;
-        }
-
         self.visual_lines.clear();
-
-        let start_line = (scroll_y / self.line_height).floor().max(0.0) as usize;
-        let start_line = start_line.min(editor.line_offsets.len().saturating_sub(1));
-
-        let visible_lines = (self.height / self.line_height).ceil() as usize + 15;
-        let end_line = (start_line + visible_lines).min(editor.line_offsets.len());
 
         let (first, second) = editor.text_parts();
         let first_len = first.len();
 
-        for phys_line in start_line..end_line {
-            let start_byte = editor.line_offsets[phys_line];
-            let end_byte = if phys_line + 1 < editor.line_offsets.len() {
-                editor.line_offsets[phys_line + 1]
-            } else {
-                editor.len()
-            };
+        let mut current_y = 0.0;
+        let mut phys_line = 0;
 
-            let mut whitespace_px_width = 0.0;
-            let mut text_px_width = 0.0;
-            let mut in_whitespace = true;
-            let mut current = start_byte;
+        while phys_line < editor.line_offsets.len() {
+            let is_folded = editor.folded_lines.contains(&phys_line);
 
-            while current < end_byte {
-                let chunk = if current < first_len {
-                    let end_chunk = end_byte.min(first_len);
-                    &first[current..end_chunk]
+            if current_y + self.line_height > scroll_y - self.line_height * 5.0
+                && current_y < scroll_y + self.height + self.line_height * 5.0
+            {
+                let start_byte = editor.line_offsets[phys_line];
+                let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
+                    editor.line_offsets[phys_line + 1]
                 } else {
-                    let c_start = current - first_len;
-                    let c_end = end_byte - first_len;
-                    &second[c_start..c_end]
+                    editor.len()
                 };
 
-                let mut out_of_bounds = false;
+                if is_folded {
+                    end_byte -= 1; // Убираем newline, чтобы '...' были на той же строке
+                }
 
-                for c in chunk.chars() {
-                    let is_newline = c == '\n';
-                    let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
-                    let adv = if is_newline || is_hidden {
-                        0.0
+                let mut whitespace_px_width = 0.0;
+                let mut text_px_width = 0.0;
+                let mut in_whitespace = true;
+                let mut current = start_byte;
+
+                while current < end_byte {
+                    let chunk = if current < first_len {
+                        let end_chunk = end_byte.min(first_len);
+                        &first[current..end_chunk]
                     } else {
-                        self.char_advance(c)
+                        let c_start = current - first_len;
+                        let c_end = end_byte - first_len;
+                        &second[c_start..c_end]
                     };
 
-                    if in_whitespace && (c == ' ' || c == '\t') {
-                        whitespace_px_width += adv;
-                    } else {
-                        in_whitespace = false;
-                        if !is_hidden && !is_newline {
-                            text_px_width += adv;
+                    let mut out_of_bounds = false;
+
+                    for c in chunk.chars() {
+                        let is_newline = c == '\n';
+                        let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
+                        let adv = if is_newline || is_hidden {
+                            0.0
+                        } else {
+                            self.char_advance(c)
+                        };
+
+                        if in_whitespace && (c == ' ' || c == '\t') {
+                            whitespace_px_width += adv;
+                        } else {
+                            in_whitespace = false;
+                            if !is_hidden && !is_newline {
+                                text_px_width += adv;
+                            }
+                        }
+
+                        if self.left_padding + whitespace_px_width + text_px_width > 50000.0 {
+                            out_of_bounds = true;
+                            break;
                         }
                     }
 
-                    // Даем запас в 50000 пикселей (чтобы горизонтальный скроллбар был адекватным),
-                    // но прерываемся на безумно длинных минифицированных строках
-                    if self.left_padding + whitespace_px_width + text_px_width > 50000.0 {
-                        out_of_bounds = true;
+                    if out_of_bounds {
                         break;
                     }
+                    current += chunk.len();
                 }
 
-                if out_of_bounds {
-                    break;
-                }
-                current += chunk.len();
+                let dots_width = if is_folded {
+                    self.measure_ui_width("...", 1.0) + 16.0 * self.scale_factor
+                } else {
+                    0.0
+                };
+
+                self.visual_lines.push(VisualLine {
+                    byte_idx: start_byte,
+                    physical_line: phys_line + 1,
+                    is_soft_wrap: false,
+                    whitespace_px_width,
+                    text_px_width: text_px_width + dots_width,
+                    y_offset: current_y,
+                    is_folded,
+                });
             }
 
-            let y_offset = (phys_line as f32) * self.line_height;
+            current_y += self.line_height;
 
-            self.visual_lines.push(VisualLine {
-                byte_idx: start_byte,
-                physical_line: phys_line + 1,
-                is_soft_wrap: false,
-                whitespace_px_width,
-                text_px_width,
-                y_offset,
-            });
+            if is_folded {
+                if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = fold_end;
+                }
+            }
+            phys_line += 1;
         }
 
         self.last_editor_version = editor.version;
@@ -115,14 +120,26 @@ impl Renderer {
         self.last_scroll_x = scroll_x;
     }
 
-    // Возвращает координаты в ЭКРАННОМ ПРОСТРАНСТВЕ (с учетом scroll_x)
     pub fn get_cursor_xy(&mut self, editor: &Editor) -> (f32, f32) {
-        let phys_line = editor
+        let target_phys_line = editor
             .line_offsets
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
-        let y = self.baseline_offset + (phys_line as f32) * self.line_height;
-        let line_start = editor.line_offsets[phys_line];
+
+        let mut current_y = self.baseline_offset;
+        let mut phys_line = 0;
+        while phys_line < target_phys_line {
+            current_y += self.line_height;
+            if editor.folded_lines.contains(&phys_line) {
+                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = end_l;
+                }
+            }
+            phys_line += 1;
+        }
+
+        let y = current_y;
+        let line_start = editor.line_offsets[target_phys_line];
         let (first, second) = editor.text_parts();
 
         let x_absolute =
@@ -130,23 +147,41 @@ impl Renderer {
         (x_absolute - self.last_scroll_x, y)
     }
 
-    // target_x подается в ЭКРАННЫХ КООРДИНАТАХ
     pub fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize {
-        let phys_line = (target_y / self.line_height).floor() as isize;
-        let phys_line = phys_line.max(0) as usize;
+        let mut current_y = 0.0;
+        let mut phys_line = 0;
+        let mut target_phys_line = 0;
 
-        if phys_line >= editor.line_offsets.len() {
-            return editor.len();
+        while phys_line < editor.line_offsets.len() {
+            if target_y >= current_y && target_y < current_y + self.line_height {
+                target_phys_line = phys_line;
+                break;
+            }
+            current_y += self.line_height;
+            if editor.folded_lines.contains(&phys_line) {
+                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = end_l;
+                }
+            }
+            phys_line += 1;
         }
 
-        let start_byte = editor.line_offsets[phys_line];
-        let end_byte = if phys_line + 1 < editor.line_offsets.len() {
-            editor.line_offsets[phys_line + 1]
+        if target_phys_line == 0 && phys_line >= editor.line_offsets.len() {
+            target_phys_line = editor.line_offsets.len().saturating_sub(1);
+        }
+
+        let start_byte = editor.line_offsets[target_phys_line];
+        let mut end_byte = if target_phys_line + 1 < editor.line_offsets.len() {
+            editor.line_offsets[target_phys_line + 1]
         } else {
             editor.len()
         };
 
-        // Стартуем не от края экрана, а от отступа с учетом прокрутки
+        let is_folded = editor.folded_lines.contains(&target_phys_line);
+        if is_folded {
+            end_byte -= 1;
+        }
+
         let mut current_x = self.left_padding - self.last_scroll_x;
         let mut last_valid_byte = start_byte;
         let mut current = start_byte;
@@ -221,7 +256,18 @@ impl Renderer {
     }
 
     pub fn get_max_scroll(&mut self, editor: &Editor, window_height: f32) -> f32 {
-        let total_height = editor.line_offsets.len() as f32 * self.line_height;
+        let mut phys_line = 0;
+        let mut lines_count = 0;
+        while phys_line < editor.line_offsets.len() {
+            lines_count += 1;
+            if editor.folded_lines.contains(&phys_line) {
+                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = end_l;
+                }
+            }
+            phys_line += 1;
+        }
+        let total_height = lines_count as f32 * self.line_height;
         let raw_max = (total_height - window_height + self.line_height * 2.0).max(0.0);
         (raw_max / self.line_height).ceil() * self.line_height
     }

@@ -68,8 +68,9 @@ impl Renderer {
             self.visual_lines.clear();
         }
 
+        // ИСПРАВЛЕНО: Увеличиваем базовый отступ для стрелочек
         let digits = total_lines.to_string().len().max(3);
-        let target_padding = (20.0 * s + digits as f32 * 10.0 * s).round();
+        let target_padding = (35.0 * s + digits as f32 * 10.0 * s).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -247,7 +248,16 @@ impl Renderer {
             let v_line_info = self.visual_lines[i];
             let start_byte = v_line_info.byte_idx;
 
-            let end_byte = if i + 1 < self.visual_lines.len() {
+            // ИСПРАВЛЕНО: Главная причина "каши". Если строка свернута, мы рендерим ТОЛЬКО её (до следующего переноса),
+            // а не весь гигантский скрытый блок до конца файла.
+            let end_byte = if v_line_info.is_folded {
+                let phys_idx = v_line_info.physical_line - 1;
+                if phys_idx + 1 < editor.line_offsets.len() {
+                    editor.line_offsets[phys_idx + 1].saturating_sub(1) // Опускаем \n
+                } else {
+                    len
+                }
+            } else if i + 1 < self.visual_lines.len() {
                 self.visual_lines[i + 1].byte_idx
             } else {
                 let phys_idx = v_line_info.physical_line - 1;
@@ -411,6 +421,35 @@ impl Renderer {
                     current_chunk_offset = end_byte;
                 }
             }
+
+            if v_line_info.is_folded {
+                let dots_adv = self.measure_ui_width("...", 1.0);
+
+                // ИСПРАВЛЕНО: Теперь фон кнопки "..." рисуется идеально ровно (PyCharm style)
+                let dots_bg = [
+                    self.theme.bg[0] + 0.08,
+                    self.theme.bg[1] + 0.08,
+                    self.theme.bg[2] + 0.12,
+                    1.0,
+                ];
+
+                self.push_rounded_rect(
+                    x - render_scroll_x + 6.0 * s,
+                    y - self.baseline_offset + 4.0 * s,
+                    dots_adv + 10.0 * s,
+                    self.line_height - 8.0 * s,
+                    4.0 * s,
+                    dots_bg,
+                );
+
+                self.draw_string_scaled(
+                    "...",
+                    x - render_scroll_x + 11.0 * s,
+                    y,
+                    self.theme.fg,
+                    1.0,
+                );
+            }
         }
 
         if cursor_pos.is_none() && editor.cursor == len {
@@ -448,6 +487,16 @@ impl Renderer {
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
+            let phys_idx = v_line.physical_line - 1;
+
+            if editor.foldable_lines.contains_key(&phys_idx) {
+                // ИСПРАВЛЕНО: Стрелочки рисуются ПРАВЕЕ номеров строк (ближе к тексту)
+                let arrow_x = self.left_padding - 22.0 * s;
+                let is_folded = editor.folded_lines.contains(&phys_idx);
+                let arrow_str = if is_folded { "▶" } else { "▼" };
+                self.draw_string_scaled(arrow_str, arrow_x, y - 2.0 * s, self.theme.line_num, 0.9);
+            }
+
             let mut n = v_line.physical_line;
             let mut buf = [0u8; 20];
             let mut idx = 20;
@@ -463,7 +512,8 @@ impl Renderer {
             }
             if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                 let num_w = self.measure_ui_width(num_str, 1.0);
-                let draw_x = self.left_padding - 15.0 * s - num_w;
+                // ИСПРАВЛЕНО: Номера строк смещены ЛЕВЕЕ, чтобы не пересекаться со стрелками
+                let draw_x = self.left_padding - 30.0 * s - num_w;
                 self.draw_string_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
             }
         }

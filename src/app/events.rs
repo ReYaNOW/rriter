@@ -17,7 +17,6 @@ use winit::window::{Window, WindowId};
 
 impl App {
     pub fn handle_dialog_window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
-        // ВЕСЬ КОД ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ
         match event {
             WindowEvent::CloseRequested => self.close_dialog(),
             WindowEvent::ModifiersChanged(mod_state) => self.modifiers = mod_state.state(),
@@ -548,7 +547,6 @@ impl ApplicationHandler for App {
 
         let mut needs_redraw = false;
 
-        // Физика автодополнения
         if self.autocomplete_active {
             let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
             let abs_diff = diff.abs();
@@ -577,7 +575,6 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Физика FAQ скролла
         if self.dialog_window.is_some() && self.pending_action == PendingAction::Faq {
             let diff = self.faq_target_scroll_y - self.faq_scroll_y;
             let abs_diff = diff.abs();
@@ -606,7 +603,6 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Физика главного скролла Y
         let diff_y = self.target_scroll_y - self.scroll_y;
         let abs_diff_y = diff_y.abs();
         if abs_diff_y > 0.0 {
@@ -632,7 +628,6 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        // Физика горизонтального скролла X
         let diff_x = self.target_scroll_x - self.scroll_x;
         let abs_diff_x = diff_x.abs();
         if abs_diff_x > 0.0 {
@@ -658,7 +653,6 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        // --- ЛИНЕЙНЫЕ АНИМАЦИИ ---
         if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {
             self.autocomplete_anim_progress += (1.0 - self.autocomplete_anim_progress) * 20.0 * dt;
             if self.autocomplete_anim_progress > 0.99 {
@@ -784,6 +778,31 @@ impl ApplicationHandler for App {
         }
 
         if self.highlighter.poll(self.editor.version) {
+            self.editor.foldable_lines.clear();
+            // ИСПРАВЛЕНО: Снизили порог до 2 строк, чтобы словари корректно сворачивались
+            for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
+                let sl = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&x| x <= start_b)
+                    .saturating_sub(1);
+                let el = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&x| x <= end_b)
+                    .saturating_sub(1);
+                if el > sl {
+                    self.editor.foldable_lines.insert(sl, el);
+                    if is_autofold
+                        && el - sl >= 2
+                        && !self.editor.auto_folded_seen.contains(&start_b)
+                    {
+                        self.editor.folded_lines.insert(sl);
+                        self.editor.auto_folded_seen.insert(start_b);
+                    }
+                }
+            }
+
             self.is_highlighted_once = true;
             if self.autocomplete_active {
                 self.update_autocomplete();

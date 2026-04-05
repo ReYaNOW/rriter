@@ -54,8 +54,8 @@ pub struct VisualLine {
     pub whitespace_px_width: f32,
     pub text_px_width: f32,
     pub y_offset: f32,
+    pub is_folded: bool,
 }
-
 #[derive(Clone)]
 pub struct FontData {
     pub data: Vec<u8>,

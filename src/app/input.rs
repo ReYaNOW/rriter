@@ -190,6 +190,58 @@ impl App {
             let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
             let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
 
+            if let Some(r) = self.renderer.as_mut() {
+                let mut fold_toggled = false;
+                let visual_lines = r.visual_lines.clone();
+
+                for v_line in &visual_lines {
+                    let y = r.baseline_offset + v_line.y_offset - self.scroll_y;
+                    let phys_idx = v_line.physical_line - 1;
+
+                    // Клик по стрелочке в gutter панели
+                    if self.editor.foldable_lines.contains_key(&phys_idx) {
+                        let arrow_x = r.left_padding - 22.0 * s;
+                        if last_mouse_x >= arrow_x - 5.0 * s
+                            && last_mouse_x <= arrow_x + 15.0 * s
+                            && last_mouse_y >= y - r.line_height
+                            && last_mouse_y <= y + 5.0 * s
+                        {
+                            if self.editor.folded_lines.contains(&phys_idx) {
+                                self.editor.folded_lines.remove(&phys_idx);
+                            } else {
+                                self.editor.folded_lines.insert(phys_idx);
+                            }
+                            fold_toggled = true;
+                            break;
+                        }
+                    }
+
+                    // Клик по "..." в конце свернутой строки
+                    if v_line.is_folded {
+                        let dots_adv = r.measure_ui_width("...", 1.0) + 16.0 * s;
+                        let dots_x =
+                            r.left_padding + v_line.whitespace_px_width + v_line.text_px_width
+                                - dots_adv
+                                - self.scroll_x;
+
+                        if last_mouse_x >= dots_x
+                            && last_mouse_x <= dots_x + dots_adv
+                            && last_mouse_y >= y - r.line_height
+                            && last_mouse_y <= y + 5.0 * s
+                        {
+                            self.editor.folded_lines.remove(&phys_idx);
+                            fold_toggled = true;
+                            break;
+                        }
+                    }
+                }
+
+                if fold_toggled {
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+
             if self.show_search && self.search_anim_y > -10.0 {
                 let search_w = 480.0 * s;
                 let search_h = 46.0 * s;
@@ -1150,6 +1202,31 @@ impl App {
             let start_wait = std::time::Instant::now();
             while start_wait.elapsed().as_millis() < 3 {
                 if self.highlighter.poll(self.editor.version) {
+                    self.editor.foldable_lines.clear();
+                    // ИСПРАВЛЕНО: Снизили порог до 2 строк, чтобы словари корректно сворачивались
+                    for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
+                        let sl = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= start_b)
+                            .saturating_sub(1);
+                        let el = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= end_b)
+                            .saturating_sub(1);
+                        if el > sl {
+                            self.editor.foldable_lines.insert(sl, el);
+                            if is_autofold
+                                && el - sl >= 2
+                                && !self.editor.auto_folded_seen.contains(&start_b)
+                            {
+                                self.editor.folded_lines.insert(sl);
+                                self.editor.auto_folded_seen.insert(start_b);
+                            }
+                        }
+                    }
+
                     self.is_highlighted_once = true;
                     if self.autocomplete_active {
                         self.update_autocomplete();

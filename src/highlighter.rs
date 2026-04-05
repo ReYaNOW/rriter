@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use tree_sitter::StreamingIterator;
 
-use crate::queries::{get_injection_query, get_params_query, get_ts_config};
+use crate::queries::{get_folding_query, get_injection_query, get_params_query, get_ts_config};
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
@@ -52,9 +52,15 @@ pub enum HighlighterMessage {
 
 pub struct Highlighter {
     tx: Sender<HighlighterMessage>,
-    rx: Receiver<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>,
+    pub rx: Receiver<(
+        u64,
+        Vec<ColorSpan>,
+        Vec<CompletionItem>,
+        Vec<(usize, usize, bool)>, // (start, end, is_autofold)
+    )>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
+    pub foldable_ranges: Vec<(usize, usize, bool)>,
     pub current_version: u64,
 }
 
@@ -144,6 +150,10 @@ fn resolve_color(
         _ => DRACULA_FG,
     };
 
+    if node_text == "None" {
+        color = DRACULA_PINK;
+    }
+
     if node_text != "self" && node_text != "cls" {
         if matches!(
             name,
@@ -169,7 +179,12 @@ fn resolve_color(
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
-        let (tx_out, rx_out) = mpsc::channel::<(u64, Vec<ColorSpan>, Vec<CompletionItem>)>();
+        let (tx_out, rx_out) = mpsc::channel::<(
+            u64,
+            Vec<ColorSpan>,
+            Vec<CompletionItem>,
+            Vec<(usize, usize, bool)>,
+        )>();
 
         thread::spawn(move || {
             let mut syntect_assets: Option<(
@@ -328,6 +343,7 @@ impl Highlighter {
                 let mut spans = Vec::new();
                 let mut completions_map: HashMap<(String, usize, usize), SymbolKind> =
                     HashMap::new();
+                let mut foldable_ranges = Vec::new();
                 let mut used_ts = false;
                 let mut error_ranges = Vec::new();
 
@@ -366,6 +382,38 @@ impl Highlighter {
                             current_tree = parsed_tree.clone();
 
                             if let Some(tree) = parsed_tree {
+                                if let Some(fold_query_str) = get_folding_query(lang_name) {
+                                    if let Ok(fold_query) =
+                                        tree_sitter::Query::new(&lang, fold_query_str)
+                                    {
+                                        let mut cursor = tree_sitter::QueryCursor::new();
+                                        let mut matches = cursor.matches(
+                                            &fold_query,
+                                            tree.root_node(),
+                                            text.as_bytes(),
+                                        );
+                                        while let Some(m) = matches.next() {
+                                            for cap in m.captures {
+                                                let name =
+                                                    fold_query.capture_names()[cap.index as usize];
+                                                let is_autofold = name == "autofold";
+                                                let node = cap.node;
+
+                                                if node.end_byte() > node.start_byte()
+                                                    && node.end_position().row
+                                                        > node.start_position().row
+                                                {
+                                                    foldable_ranges.push((
+                                                        node.start_byte(),
+                                                        node.end_byte(),
+                                                        is_autofold,
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 let is_same_node = |n1: Option<tree_sitter::Node>,
                                                     n2: tree_sitter::Node|
                                  -> bool {
@@ -1084,7 +1132,7 @@ impl Highlighter {
                     .collect();
                 completions.sort_by(|a, b| a.word.cmp(&b.word));
 
-                let _ = tx_out.send((final_version, flat_spans, completions));
+                let _ = tx_out.send((final_version, flat_spans, completions, foldable_ranges));
             }
         });
         Self {
@@ -1092,6 +1140,7 @@ impl Highlighter {
             rx: rx_out,
             spans: vec![],
             completions: vec![],
+            foldable_ranges: vec![],
             current_version: 0,
         }
     }
@@ -1110,12 +1159,13 @@ impl Highlighter {
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((ver, spans, completions)) = self.rx.try_recv() {
+        while let Ok((ver, spans, completions, foldable_ranges)) = self.rx.try_recv() {
             if ver >= self.current_version {
                 self.current_version = ver;
                 if ver == current_editor_version {
                     self.spans = spans;
                     self.completions = completions;
+                    self.foldable_ranges = foldable_ranges;
                     updated = true;
                 }
             }

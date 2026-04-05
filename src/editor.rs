@@ -166,6 +166,9 @@ pub struct Editor {
     last_indent_version: u64,
 
     pub sync_edits: Vec<SyncEdit>,
+    pub foldable_lines: std::collections::HashMap<usize, usize>,
+    pub folded_lines: std::collections::HashSet<usize>,
+    pub auto_folded_seen: std::collections::HashSet<usize>,
 }
 
 impl Editor {
@@ -191,6 +194,9 @@ impl Editor {
             indent_cache: Vec::new(),
             last_indent_version: u64::MAX,
             sync_edits: Vec::new(),
+            foldable_lines: std::collections::HashMap::new(),
+            folded_lines: std::collections::HashSet::new(),
+            auto_folded_seen: std::collections::HashSet::new(),
         }
     }
 
