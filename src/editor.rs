@@ -233,8 +233,24 @@ impl Editor {
             current_longest_idx = current_line_idx;
         }
 
+        let mut old_folded_bytes = Vec::new();
+        for &l in &self.folded_lines {
+            if l < self.line_offsets.len() {
+                old_folded_bytes.push(self.line_offsets[l]);
+            }
+        }
+
         self.line_offsets = new_offsets;
         self.longest_line_idx = current_longest_idx;
+
+        self.folded_lines.clear();
+        for b in old_folded_bytes {
+            let new_line = self
+                .line_offsets
+                .partition_point(|&o| o <= b)
+                .saturating_sub(1);
+            self.folded_lines.insert(new_line);
+        }
     }
 
     fn get_line_hashes(&self) -> Vec<u64> {
@@ -1076,6 +1092,38 @@ impl Editor {
         }
     }
 
+    pub fn snap_cursor_out_of_fold(&mut self, moving_forward: bool) {
+        let mut current_line = 0;
+        while current_line < self.line_offsets.len() {
+            if self.folded_lines.contains(&current_line)
+                && self.foldable_lines.contains_key(&current_line)
+            {
+                let fold_end = self.foldable_lines[&current_line];
+                let start_byte = if current_line + 1 < self.line_offsets.len() {
+                    self.line_offsets[current_line + 1].saturating_sub(1)
+                } else {
+                    self.len()
+                };
+                let end_byte = if fold_end + 1 < self.line_offsets.len() {
+                    self.line_offsets[fold_end + 1].saturating_sub(1)
+                } else {
+                    self.len()
+                };
+
+                if self.cursor > start_byte && self.cursor < end_byte {
+                    if moving_forward {
+                        self.cursor = end_byte;
+                    } else {
+                        self.cursor = start_byte;
+                    }
+                    return;
+                }
+                current_line = fold_end;
+            }
+            current_line += 1;
+        }
+    }
+
     pub fn move_left(&mut self, shift: bool) {
         self.handle_selection(shift);
         if self.cursor > 0 {
@@ -1084,6 +1132,7 @@ impl Editor {
                 prev -= 1;
             }
             self.cursor = prev;
+            self.snap_cursor_out_of_fold(false);
         }
     }
 
@@ -1095,6 +1144,7 @@ impl Editor {
                 next += 1;
             }
             self.cursor = next;
+            self.snap_cursor_out_of_fold(true);
         }
     }
 
@@ -1117,6 +1167,7 @@ impl Editor {
             }
         }
         self.cursor = p;
+        self.snap_cursor_out_of_fold(false);
     }
 
     pub fn move_word_right(&mut self, shift: bool) {
@@ -1138,6 +1189,7 @@ impl Editor {
             }
         }
         self.cursor = p;
+        self.snap_cursor_out_of_fold(true);
     }
 
     pub fn move_home(&mut self, shift: bool) {

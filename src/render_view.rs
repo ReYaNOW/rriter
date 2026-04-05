@@ -460,7 +460,9 @@ impl Renderer {
                     end_byte
                 };
 
-                let is_dots_selected = actual_end_byte > sel_start && end_byte <= sel_end;
+                let is_dots_selected = sel_start != sel_end
+                    && sel_start <= actual_end_byte.saturating_sub(1)
+                    && sel_end >= actual_end_byte.saturating_sub(1);
 
                 let dots_bg = if is_dots_selected {
                     self.theme.sel
@@ -473,31 +475,28 @@ impl Renderer {
                     ]
                 };
 
+                let box_x = x - render_scroll_x + 2.0 * s;
+                let box_w = dots_adv + 6.0 * s;
+
                 self.push_rounded_rect(
-                    x - render_scroll_x + 2.0 * s,
+                    box_x,
                     y - self.baseline_offset + 4.0 * s,
-                    dots_adv + 6.0 * s,
+                    box_w,
                     self.line_height - 8.0 * s,
                     4.0 * s,
                     dots_bg,
                 );
 
-                self.draw_string_scaled(
-                    dots_str,
-                    x - render_scroll_x + 5.0 * s,
-                    y,
-                    self.theme.fg,
-                    1.0,
-                );
+                self.draw_string_scaled(dots_str, box_x + 3.0 * s, y, self.theme.fg, 1.0);
 
-                let next_x = x + dots_adv + 10.0 * s;
+                let next_x = box_x + box_w + 2.0 * s;
 
                 if let Some(c) = v_line_info.fold_char {
                     let c_adv = self.char_advance(c);
 
                     if is_dots_selected {
                         self.push_rect(
-                            next_x - render_scroll_x,
+                            next_x,
                             y - self.baseline_offset + 2.0,
                             c_adv,
                             self.line_height,
@@ -507,7 +506,7 @@ impl Renderer {
 
                     if let Some(g) = self.get_glyph(c) {
                         self.push_quad(
-                            next_x - render_scroll_x + g.offset_x,
+                            next_x + g.offset_x,
                             y - g.offset_y,
                             g.width,
                             g.height,

@@ -151,32 +151,82 @@ impl Renderer {
     }
 
     pub fn get_cursor_xy(&mut self, editor: &Editor) -> (f32, f32) {
-        let target_phys_line = editor
-            .line_offsets
-            .partition_point(|&o| o <= editor.cursor)
-            .saturating_sub(1);
-
         let mut current_y = self.baseline_offset;
         let mut phys_line = 0;
-        while phys_line < target_phys_line {
-            current_y += self.line_height;
-            if editor.folded_lines.contains(&phys_line)
-                && editor.foldable_lines.contains_key(&phys_line)
+
+        while phys_line < editor.line_offsets.len() {
+            let is_folded = editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line);
+            let fold_end_line = if is_folded {
+                editor.foldable_lines.get(&phys_line).copied().unwrap()
+            } else {
+                phys_line
+            };
+
+            let line_start = editor.line_offsets[phys_line];
+            let next_line_start = if fold_end_line + 1 < editor.line_offsets.len() {
+                editor.line_offsets[fold_end_line + 1]
+            } else {
+                editor.len() + 1
+            };
+
+            if editor.cursor >= line_start && editor.cursor < next_line_start
+                || (editor.cursor == editor.len() && next_line_start > editor.len())
             {
-                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
-                    phys_line = end_l;
+                let (first, second) = editor.text_parts();
+                let mut x = self.left_padding;
+
+                if is_folded {
+                    let first_line_end = if phys_line + 1 < editor.line_offsets.len() {
+                        editor.line_offsets[phys_line + 1].saturating_sub(1)
+                    } else {
+                        editor.len()
+                    };
+
+                    if editor.cursor >= first_line_end {
+                        x += self.measure_width(first, second, line_start, first_line_end);
+
+                        let mut dots_w =
+                            self.measure_ui_width("...", 1.0) + 10.0 * self.scale_factor;
+
+                        let end_line_start = editor.line_offsets[fold_end_line];
+                        let end_line_end = if fold_end_line + 1 < editor.line_offsets.len() {
+                            editor.line_offsets[fold_end_line + 1]
+                        } else {
+                            editor.len()
+                        };
+                        let mut p = end_line_end;
+                        let mut fold_char = None;
+                        while p > end_line_start {
+                            p -= 1;
+                            let b = editor.byte_at(p);
+                            if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                if b == b'}' || b == b']' || b == b')' {
+                                    fold_char = Some(b as char);
+                                }
+                                break;
+                            }
+                        }
+                        if let Some(c) = fold_char {
+                            dots_w += self.char_advance(c);
+                        }
+
+                        x += dots_w;
+                    } else {
+                        x += self.measure_width(first, second, line_start, editor.cursor);
+                    }
+                } else {
+                    x += self.measure_width(first, second, line_start, editor.cursor);
                 }
+
+                return (x - self.last_scroll_x, current_y);
             }
-            phys_line += 1;
+
+            current_y += self.line_height;
+            phys_line = fold_end_line + 1;
         }
 
-        let y = current_y;
-        let line_start = editor.line_offsets[target_phys_line];
-        let (first, second) = editor.text_parts();
-
-        let x_absolute =
-            self.left_padding + self.measure_width(first, second, line_start, editor.cursor);
-        (x_absolute - self.last_scroll_x, y)
+        (self.left_padding - self.last_scroll_x, current_y)
     }
 
     pub fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize {
