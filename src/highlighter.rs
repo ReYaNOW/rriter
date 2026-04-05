@@ -1,7 +1,11 @@
+// highlighter.rs
+
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use tree_sitter::StreamingIterator;
+
+use crate::queries::{get_params_query, get_ts_config};
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
@@ -233,6 +237,8 @@ impl Highlighter {
                     "java" => "java",
                     "cs" => "cs",
                     "dart" => "dart",
+                    "html" | "htm" => "html",
+                    "css" => "css",
                     _ => "",
                 };
 
@@ -243,141 +249,7 @@ impl Highlighter {
                 let mut error_ranges = Vec::new();
 
                 if !is_log_or_huge {
-                    let ts_config = match lang_name {
-                        "bash" => Some((tree_sitter_bash::LANGUAGE.into(), vec![
-                            "(word) @any_word",
-                            "(function_definition name: (word) @function)",
-                            "(function_definition \"()\" @function)",      
-                            "[\"(\" \")\" \"{\" \"}\"] @operator",
-                            "[\"[\" \"]\"] @keyword",
-                            "(string) @string", "(raw_string) @string", "(comment) @comment",
-                            "(command_name (word) @command_word)", "(variable_assignment name: (variable_name) @variable)",
-                            "\"|\" @operator", "\"||\" @operator", "\"&&\" @operator", "\"&\" @operator",
-                            "\">\" @operator", "\">>\" @operator", "\"<\" @operator", "\">&\" @operator", "\"&>\" @operator", "\"&>>\" @operator",
-                            "\"<(\" @operator", "\">(\" @operator", "(process_substitution \")\" @operator)",
-                            "(file_descriptor) @number", "(file_redirect destination: (_) @number)",
-                            "(expansion \"${\" @subst \"}\" @subst)", "(expansion (variable_name) @variable)",
-                            "(expansion[\":\" \"-\" \"=\" \"+\" \"?\" \":-\"] @fg)", "(expansion (_) @fg)",
-                            "(command_substitution \"$(\" @subst \")\" @subst)", "(command_substitution \"`\" @subst)",
-                            "(simple_expansion \"$\" @subst (variable_name) @variable)",
-                            "[\"if\" \"then\" \"elif\" \"else\" \"fi\" \"for\" \"while\" \"do\" \"done\" \"case\" \"esac\" \"in\"] @keyword.control",
-                            "[\"export\" \"declare\" \"return\" \"function\" \"local\" \"readonly\"] @keyword",
-                        ])),
-                        "rs" => Some((tree_sitter_rust::LANGUAGE.into(), vec![
-                            "(string_literal) @string", "(line_comment) @comment", "(block_comment) @comment",
-                            "(function_item name: (identifier) @function)", "(call_expression function: (identifier) @function)",
-                            "(type_identifier) @type", "(number_literal) @number",
-                            "[\"true\" \"false\"] @boolean", "[\"fn\" \"let\" \"mut\" \"pub\" \"struct\" \"enum\" \"trait\" \"impl\" \"for\" \"while\" \"loop\" \"match\" \"if\" \"else\" \"return\" \"use\" \"mod\" \"break\" \"continue\" \"await\" \"async\" \"unsafe\" \"crate\" \"super\"] @keyword"
-                        ])),
-                        "py" => Some((tree_sitter_python::LANGUAGE.into(), vec![
-                            "(identifier) @py_ident", 
-                            "(attribute attribute: (identifier) @property)",
-                            "(string) @string", 
-                            "(interpolation) @interpolation", 
-                            "(comment) @comment", "(integer) @number", "(float) @number",
-                            "(true) @boolean", "(false) @boolean", "(none) @keyword.control",
-                            "[\"def\" \"class\" \"return\" \"pass\" \"continue\" \"break\" \"if\" \"elif\" \"else\" \"for\" \"while\" \"import\" \"from\" \"as\" \"async\" \"await\" \"match\" \"case\" \"try\" \"except\" \"finally\" \"raise\" \"with\" \"global\" \"nonlocal\" \"assert\" \"yield\" \"del\" \"and\" \"or\" \"not\" \"is\" \"in\" \"lambda\"] @keyword.control",
-                            "[\":\" \"=\"] @keyword.control",
-                            "\"->\" @fg",
-                            "[\"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"//\" \"%\" \"**\" \"+=\" \"-=\" \"*=\" \"/=\" \"//=\" \"%=\" \"**=\" \"&\" \"|\" \"^\" \"~\" \"<<\" \">>\"] @operator",
-                            "(function_definition name: (identifier) @py_function)", 
-                            "(call function: (identifier) @py_builtin_or_func)",
-                            "(call function: (attribute attribute: (identifier) @py_function))", 
-                            "(class_definition name: (identifier) @class_name)",
-                            "(parameters (identifier) @parameter)", 
-                            "(parameters (typed_parameter (identifier) @parameter))",
-                            "(parameters (default_parameter name: (identifier) @parameter))", 
-                            "(parameters (typed_default_parameter name: (identifier) @parameter))",
-                            "(lambda_parameters (identifier) @parameter)", 
-                            "(keyword_argument name: (identifier) @parameter)",
-                            "(assignment left: (identifier) @py_assign)",
-                            "(assignment left: (pattern_list (identifier) @py_assign))",
-                            "(assignment left: (tuple (identifier) @py_assign))",
-                            "(for_statement left: (identifier) @py_assign)",
-                            "(decorator \"@\" @keyword.control)", 
-                            "(decorator (identifier) @py_function)",
-                        ])),
-                        "toml" => Some((tree_sitter_toml_ng::LANGUAGE.into(), vec![
-                            "(bare_key) @property",
-                            "(string) @string",
-                            "(integer) @number",
-                            "(float) @number",
-                            "(boolean) @boolean",
-                            "(comment) @comment",
-                            "[\"=\" \"[\" \"]\" \"[[\" \"]]\"] @operator",
-                        ])),
-                        "go" => Some((tree_sitter_go::LANGUAGE.into(), vec![
-                            "(identifier) @variable",
-                            "(type_identifier) @type",
-                            "(function_declaration name: (identifier) @function)",
-                            "(method_declaration name: (identifier) @function)",
-                            "(call_expression function: (identifier) @function)",
-                            "(string_literal) @string",
-                            "(int_literal) @number",
-                            "(float_literal) @number",
-                            "(comment) @comment",
-                            "[\"func\" \"var\" \"const\" \"type\" \"struct\" \"interface\" \"package\" \"import\" \"return\" \"if\" \"else\" \"for\" \"range\" \"switch\" \"case\" \"default\" \"go\" \"defer\" \"map\" \"chan\"] @keyword.control",
-                            "[\"true\" \"false\" \"nil\"] @boolean",
-                            "[\"=\" \":=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"&&\" \"||\" \"!\" \"<-\"] @operator",
-                        ])),
-                        "js" => Some((tree_sitter_javascript::LANGUAGE.into(), vec![
-                            "(identifier) @variable",
-                            "(string) @string",
-                            "(number) @number",
-                            "(comment) @comment",
-                            "(function_declaration name: (identifier) @function)",
-                            "(method_definition name: (property_identifier) @function)",
-                            "(call_expression function: (identifier) @function)",
-                            "(call_expression function: (member_expression property: (property_identifier) @function))",
-                            "(property_identifier) @property",
-                            "[\"function\" \"const\" \"let\" \"var\" \"return\" \"if\" \"else\" \"for\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"export\" \"from\" \"class\" \"extends\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"async\" \"await\" \"yield\" \"typeof\" \"instanceof\"] @keyword.control",
-                            "[\"true\" \"false\" \"null\" \"undefined\"] @boolean",
-                            "[\"=\" \"==\" \"===\" \"!=\" \"!==\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"**\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"**=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
-                        ])),
-                        "java" => Some((tree_sitter_java::LANGUAGE.into(), vec![
-                            "(identifier) @variable",
-                            "(type_identifier) @type",
-                            "(string_literal) @string",
-                            "(decimal_integer_literal) @number",
-                            "(decimal_floating_point_literal) @number",
-                            "(comment) @comment",
-                            "(method_declaration name: (identifier) @function)",
-                            "(method_invocation name: (identifier) @function)",
-                            "[\"class\" \"interface\" \"enum\" \"public\" \"private\" \"protected\" \"static\" \"final\" \"void\" \"return\" \"if\" \"else\" \"for\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"package\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"throws\" \"extends\" \"implements\" \"this\" \"super\"] @keyword.control",
-                            "[\"true\" \"false\" \"null\"] @boolean",
-                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
-                            "(annotation name: (identifier) @keyword.control)",
-                        ])),
-                        "cs" => Some((tree_sitter_c_sharp::LANGUAGE.into(), vec![
-                            "(identifier) @variable",
-                            "(string_literal) @string",
-                            "(integer_literal) @number",
-                            "(real_literal) @number",
-                            "(comment) @comment",
-                            "(method_declaration name: (identifier) @function)",
-                            "(invocation_expression function: (identifier) @function)",
-                            "(invocation_expression function: (member_access_expression name: (identifier) @function))",
-                            "[\"class\" \"interface\" \"enum\" \"struct\" \"public\" \"private\" \"protected\" \"internal\" \"static\" \"readonly\" \"void\" \"return\" \"if\" \"else\" \"for\" \"foreach\" \"in\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"using\" \"namespace\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"async\" \"await\" \"yield\" \"this\" \"base\" \"var\"] @keyword.control",
-                            "[\"true\" \"false\" \"null\"] @boolean",
-                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
-                        ])),
-                        "dart" => Some((tree_sitter_dart_orchard::LANGUAGE.into(), vec![
-                            "(identifier) @variable",
-                            "(string_literal) @string",
-                            "(decimal_integer_literal) @number",
-                            "(decimal_floating_point_literal) @number",
-                            "(comment) @comment",
-                            "(function_signature name: (identifier) @function)",
-                            "(method_signature name: (identifier) @function)",
-                            "(function_expression_body (identifier) @function)",
-                            "(call_expression function: (identifier) @function)",
-                            "(call_expression function: (selector (identifier) @function))",
-                            "[\"class\" \"enum\" \"mixin\" \"extension\" \"void\" \"return\" \"if\" \"else\" \"for\" \"in\" \"while\" \"do\" \"switch\" \"case\" \"default\" \"break\" \"continue\" \"import\" \"export\" \"as\" \"show\" \"hide\" \"new\" \"try\" \"catch\" \"finally\" \"throw\" \"rethrow\" \"async\" \"await\" \"yield\" \"final\" \"const\" \"var\" \"late\" \"factory\" \"get\" \"set\" \"static\" \"this\" \"super\"] @keyword.control",
-                            "[\"true\" \"false\" \"null\"] @boolean",
-                            "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"~/=\" \"&&\" \"||\" \"!\" \"?\" \":\"] @operator",
-                        ])),
-                        _ => None,
-                    };
+                    let ts_config = get_ts_config(lang_name);
 
                     if let Some((_, queries)) = &ts_config {
                         for q_str in queries {
@@ -599,62 +471,73 @@ impl Highlighter {
                                     }
                                 }
 
-                                let mut py_scopes = Vec::new();
-                                if lang_name == "py" {
-                                    for q_str in [
-                                        "(function_definition parameters: (parameters) @params body: (_) @body)",
-                                        "(lambda parameters: (lambda_parameters) @params body: (_) @body)"
-                                    ] {
-                                        if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
-                                            let mut cursor = tree_sitter::QueryCursor::new();
-                                            let mut matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
+                                let mut param_scopes = Vec::new();
+                                if let Some(q_str) = get_params_query(lang_name) {
+                                    if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
+                                        let mut cursor = tree_sitter::QueryCursor::new();
+                                        let mut matches = cursor.matches(
+                                            &func_query,
+                                            tree.root_node(),
+                                            text.as_bytes(),
+                                        );
 
-                                            while let Some(m) = matches.next() {
-                                                let mut p_node = None;
-                                                let mut b_node = None;
-                                                for cap in m.captures {
-                                                    let cname = func_query.capture_names()[cap.index as usize];
-                                                    if cname == "params" { p_node = Some(cap.node); }
-                                                    if cname == "body" { b_node = Some(cap.node); }
+                                        while let Some(m) = matches.next() {
+                                            let mut p_node = None;
+                                            let mut b_node = None;
+                                            for cap in m.captures {
+                                                let cname =
+                                                    func_query.capture_names()[cap.index as usize];
+                                                if cname == "params" {
+                                                    p_node = Some(cap.node);
                                                 }
+                                                if cname == "body" {
+                                                    b_node = Some(cap.node);
+                                                }
+                                            }
 
-                                                if let (Some(params_node), Some(body_node)) = (p_node, b_node) {
-                                                    let mut params_set = HashSet::new();
-                                                    let mut t_cursor = params_node.walk();
-                                                    for child in params_node.children(&mut t_cursor) {
-                                                        let kind = child.kind();
-                                                        let mut name_node = None;
+                                            if let Some(params_node) = p_node {
+                                                let scope_start = b_node
+                                                    .map(|n| n.start_byte())
+                                                    .unwrap_or(params_node.end_byte());
+                                                let scope_end =
+                                                    b_node.map(|n| n.end_byte()).unwrap_or(
+                                                        params_node
+                                                            .parent()
+                                                            .map(|p| p.end_byte())
+                                                            .unwrap_or(usize::MAX),
+                                                    );
 
-                                                        if kind == "identifier" {
-                                                            name_node = Some(child);
-                                                        } else if kind == "typed_parameter" || kind == "default_parameter" || kind == "typed_default_parameter" {
-                                                            let mut inner_cursor = child.walk();
-                                                            for inner in child.children(&mut inner_cursor) {
-                                                                if inner.kind() == "identifier" {
-                                                                    name_node = Some(inner);
-                                                                    break;
-                                                                }
-                                                            }
-                                                        } else if kind == "list_splat_pattern" || kind == "dictionary_splat_pattern" {
-                                                            let mut inner_cursor = child.walk();
-                                                            for inner in child.children(&mut inner_cursor) {
-                                                                if inner.kind() == "identifier" {
-                                                                    name_node = Some(inner);
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
+                                                let mut params_set = HashSet::new();
+                                                let mut t_cursor = params_node.walk();
+                                                let mut exploring = true;
 
-                                                        if let Some(n) = name_node {
-                                                            if let Ok(s) = std::str::from_utf8(&text.as_bytes()[n.start_byte()..n.end_byte()]) {
-                                                                params_set.insert(s.to_string());
-                                                            }
+                                                while exploring {
+                                                    let c_node = t_cursor.node();
+                                                    if c_node.kind() == "identifier" {
+                                                        if let Ok(s) = std::str::from_utf8(
+                                                            &text.as_bytes()[c_node.start_byte()
+                                                                ..c_node.end_byte()],
+                                                        ) {
+                                                            params_set.insert(s.to_string());
                                                         }
                                                     }
+                                                    if t_cursor.goto_first_child() {
+                                                        continue;
+                                                    }
+                                                    while !t_cursor.goto_next_sibling() {
+                                                        if !t_cursor.goto_parent()
+                                                            || t_cursor.node() == params_node
+                                                        {
+                                                            exploring = false;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
 
-                                                    py_scopes.push(Scope {
-                                                        start: body_node.start_byte(),
-                                                        end: body_node.end_byte(),
+                                                if !params_set.is_empty() {
+                                                    param_scopes.push(Scope {
+                                                        start: scope_start,
+                                                        end: scope_end,
                                                         params: params_set,
                                                     });
                                                 }
@@ -700,9 +583,10 @@ impl Highlighter {
                                                     "keyword.control" | "operator" | "boolean" => {
                                                         DRACULA_PINK
                                                     }
-                                                    "keyword" | "subst" | "type" => DRACULA_CYAN,
-                                                    "variable" | "number" => DRACULA_PURPLE,
+                                                    "keyword" | "subst" | "type"
+                                                    | "function.builtin" => DRACULA_CYAN,
                                                     "class_name" => DRACULA_DARK_CYAN,
+                                                    "constant" => DRACULA_PURPLE,
                                                     "parameter" => match node_text {
                                                         "self" | "cls" => DRACULA_PURPLE,
                                                         _ => DRACULA_ORANGE,
@@ -755,22 +639,25 @@ impl Highlighter {
                                                             DRACULA_FG
                                                         }
                                                     }
+                                                    // Сбрасываем variable обратно на цвет текста
+                                                    "variable" => DRACULA_FG,
+                                                    "number" => DRACULA_PURPLE,
                                                     _ => DRACULA_FG,
                                                 };
 
-                                                if lang_name == "py"
-                                                    && node_text != "self"
-                                                    && node_text != "cls"
-                                                {
+                                                // Универсальная покраска аргументов (внутри тел функций) для всех языков
+                                                if node_text != "self" && node_text != "cls" {
                                                     if matches!(
                                                         name,
                                                         "py_ident"
                                                             | "py_builtin_or_func"
                                                             | "py_assign"
                                                             | "parameter"
+                                                            | "variable"
+                                                            | "fg"
                                                     ) {
                                                         let mut is_param = false;
-                                                        for scope in &py_scopes {
+                                                        for scope in &param_scopes {
                                                             if cap.node.start_byte() >= scope.start
                                                                 && cap.node.start_byte() < scope.end
                                                             {
@@ -787,11 +674,13 @@ impl Highlighter {
                                                     }
                                                 }
 
-                                                spans.push(ColorSpan {
-                                                    start: cap.node.start_byte(),
-                                                    end: cap.node.end_byte(),
-                                                    color,
-                                                });
+                                                if color != DRACULA_FG {
+                                                    spans.push(ColorSpan {
+                                                        start: cap.node.start_byte(),
+                                                        end: cap.node.end_byte(),
+                                                        color,
+                                                    });
+                                                }
                                             }
                                         }
                                     }
@@ -997,6 +886,28 @@ impl Highlighter {
                             ("late", SymbolKind::Keyword),
                             ("final", SymbolKind::Keyword),
                             ("const", SymbolKind::Keyword),
+                        ]);
+                    }
+                    "js" => {
+                        inject_builtins(&[
+                            ("console", SymbolKind::Variable),
+                            ("window", SymbolKind::Variable),
+                            ("document", SymbolKind::Variable),
+                            ("require", SymbolKind::Function),
+                            ("setTimeout", SymbolKind::Function),
+                            ("setInterval", SymbolKind::Function),
+                            ("Promise", SymbolKind::Class),
+                            ("Math", SymbolKind::Class),
+                            ("Object", SymbolKind::Class),
+                            ("Array", SymbolKind::Class),
+                            ("String", SymbolKind::Class),
+                            ("Number", SymbolKind::Class),
+                            ("Boolean", SymbolKind::Class),
+                            ("Error", SymbolKind::Class),
+                            ("true", SymbolKind::Keyword),
+                            ("false", SymbolKind::Keyword),
+                            ("null", SymbolKind::Keyword),
+                            ("undefined", SymbolKind::Keyword),
                         ]);
                     }
                     _ => {}

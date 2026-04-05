@@ -1,6 +1,7 @@
 mod app;
 mod editor;
 mod highlighter;
+mod queries;
 mod render_view;
 mod renderer;
 mod widgets;

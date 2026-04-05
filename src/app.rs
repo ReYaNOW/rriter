@@ -1,3 +1,5 @@
+// app.rs
+
 pub mod events;
 pub mod input;
 
@@ -8,6 +10,7 @@ use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{Surface, WindowSurface};
+use rustc_hash::FxHashMap; // ОПТИМИЗАЦИЯ: Ультрабыстрая хэш-таблица
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -23,15 +26,20 @@ pub enum PendingAction {
     Faq,
 }
 
+#[inline(always)]
 fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
     let mut p_chars = pattern.chars().peekable();
-    let mut indices = Vec::new();
+    // ОПТИМИЗАЦИЯ: Мы заранее знаем максимальный размер совпадений
+    let mut indices = Vec::with_capacity(pattern.len());
     for (i, c) in target.chars().enumerate() {
         if let Some(&pc) = p_chars.peek() {
             if c.to_ascii_lowercase() == pc.to_ascii_lowercase() {
                 indices.push(i);
                 p_chars.next();
             }
+        } else {
+            // ОПТИМИЗАЦИЯ: Ранний выход, если паттерн уже найден (не проверяем хвост target)
+            break;
         }
     }
     if p_chars.peek().is_none() {
@@ -176,11 +184,17 @@ impl App {
         if p == self.editor.cursor {
             return String::new();
         }
-        let mut res = Vec::with_capacity(self.editor.cursor - p);
+        let len = self.editor.cursor - p;
+        let mut res = Vec::with_capacity(len);
         for i in p..self.editor.cursor {
             res.push(self.editor.byte_at(i));
         }
-        String::from_utf8_lossy(&res).into_owned()
+
+        // ПОЛНОСТЬЮ БЕЗОПАСНЫЙ КОД:
+        // Поскольку выше мы отфильтровали только ASCII символы,
+        // это гарантированно валидный UTF-8.
+        // unwrap_or_default() спасает нас от паник без использования unsafe.
+        String::from_utf8(res).unwrap_or_default()
     }
 
     pub fn update_autocomplete(&mut self) {
@@ -194,8 +208,9 @@ impl App {
         let prefix_lower = prefix.to_lowercase();
         let cursor = self.editor.cursor;
 
-        let mut best_scopes: std::collections::HashMap<String, CompletionItem> =
-            std::collections::HashMap::new();
+        // ОПТИМИЗАЦИЯ: FxHashMap (компиляторный хэшер) значительно быстрее для таких коротких ключей.
+        // ЯВНО УКАЗЫВАЕМ ТИПЫ <String, CompletionItem>, чтобы избежать ошибки компиляции E0282.
+        let mut best_scopes: FxHashMap<String, CompletionItem> = FxHashMap::default();
 
         for comp in &self.highlighter.completions {
             if cursor >= comp.scope_start && cursor <= comp.scope_end {
@@ -211,7 +226,7 @@ impl App {
             }
         }
 
-        let mut matches = Vec::new();
+        let mut matches = Vec::with_capacity(best_scopes.len());
 
         for (_, comp) in best_scopes {
             if comp.word == prefix {
@@ -235,7 +250,7 @@ impl App {
             }
         }
 
-        matches.sort_by_key(|(is_prefix, score, comp, _)| {
+        matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
             let type_priority = match comp.kind {
                 SymbolKind::Variable | SymbolKind::Parameter => 0,
                 SymbolKind::Function => 1,
@@ -538,53 +553,71 @@ impl App {
     }
 
     pub fn add_recent_file(&mut self, path: PathBuf) {
+        // Убираем дубликат, если он есть
         self.recent_files.retain(|p| p != &path);
+        // Вставляем файл на первое место
         self.recent_files.insert(0, path);
+        // ГАРАНТИЯ: Оставляем ровно 10 файлов!
         self.recent_files.truncate(10);
+
         crate::save_recent_files(&self.recent_files);
     }
 
     pub fn load_file(&mut self, path: PathBuf) {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            self.show_welcome = false;
-            self.add_recent_file(path.clone());
-            let old_version = self.editor.version;
-            self.editor = Editor::new(content.len() + 8192);
-            self.editor.version = old_version + 1;
-            if !content.is_empty() {
-                let _ = self.editor.insert_str(&content);
-                self.editor.cursor = 0;
-                self.editor.clear_history();
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                self.show_welcome = false;
+                self.add_recent_file(path.clone());
+
+                let old_version = self.editor.version;
+                // ОПТИМИЗАЦИЯ: Преаллокация буфера памяти (избегаем лишних реаллокаций)
+                self.editor = Editor::new(content.len() + 8192);
+                self.editor.version = old_version + 1;
+
+                if !content.is_empty() {
+                    let _ = self.editor.insert_str(&content);
+                    self.editor.cursor = 0;
+                    self.editor.clear_history();
+                }
+                self.editor.set_original_text();
+                self.editor.sync_edits.clear();
+                self.file_path = Some(path.clone());
+                let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+                self.base_title = file_name.into_owned();
+                self.file_extension = path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.highlighter.spans.clear();
+                self.is_highlighted_once = false;
+                self.highlighter.reset(
+                    self.editor.version,
+                    self.editor.get_full_text(),
+                    self.file_extension.clone(),
+                );
+
+                self.target_scroll_y = 0.0;
+                self.scroll_y = 0.0;
+                self.target_scroll_x = 0.0;
+                self.scroll_x = 0.0;
+
+                self.last_sent_version = u64::MAX;
+                self.search_results.clear();
+                self.search_current_idx = None;
+                self.autocomplete_active = false;
+                if let Some(w) = self.window.as_ref() {
+                    App::update_window_title(w, &self.base_title, false);
+                    w.request_redraw();
+                }
             }
-            self.editor.set_original_text();
-            self.editor.sync_edits.clear();
-            self.file_path = Some(path.clone());
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-            self.base_title = file_name.into_owned();
-            self.file_extension = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            self.highlighter.spans.clear();
-            self.is_highlighted_once = false;
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-            );
-
-            self.target_scroll_y = 0.0;
-            self.scroll_y = 0.0;
-            self.target_scroll_x = 0.0;
-            self.scroll_x = 0.0;
-
-            self.last_sent_version = u64::MAX;
-            self.search_results.clear();
-            self.search_current_idx = None;
-            self.autocomplete_active = false;
-            if let Some(w) = self.window.as_ref() {
-                App::update_window_title(w, &self.base_title, false);
-                w.request_redraw();
+            Err(_) => {
+                // ИСПРАВЛЕНИЕ: Если файл был удален, перемещен или недоступен -
+                // мгновенно убираем его из списка недавних и перерисовываем Welcome Screen.
+                self.recent_files.retain(|p| p != &path);
+                crate::save_recent_files(&self.recent_files);
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
             }
         }
     }
