@@ -398,13 +398,24 @@ impl Highlighter {
                                                     fold_query.capture_names()[cap.index as usize];
                                                 let is_autofold = name == "autofold";
                                                 let node = cap.node;
+                                                let mut start_byte = node.start_byte();
+                                                
+                                                if node.kind() == "block" {
+                                                    while start_byte > 0 {
+                                                        start_byte -= 1;
+                                                        let b = text.as_bytes()[start_byte];
+                                                        if b != b' ' && b != b'\t' && b != b'\n' && b != b'\r' {
+                                                            break;
+                                                        }
+                                                    }
+                                                }
 
-                                                if node.end_byte() > node.start_byte()
+                                                if node.end_byte() > start_byte
                                                     && node.end_position().row
                                                         > node.start_position().row
                                                 {
                                                     foldable_ranges.push((
-                                                        node.start_byte(),
+                                                        start_byte,
                                                         node.end_byte(),
                                                         is_autofold,
                                                     ));

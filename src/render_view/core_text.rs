@@ -93,22 +93,49 @@ impl Renderer {
                 let mut fold_char = None;
                 if is_folded {
                     if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
-                        let end_line_start = editor.line_offsets[fold_end];
-                        let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
-                            editor.line_offsets[fold_end + 1]
+                        let start_line_start = editor.line_offsets[phys_line];
+                        let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
+                            editor.line_offsets[phys_line + 1]
                         } else {
                             editor.len()
                         };
-
-                        let mut p = end_line_end;
-                        while p > end_line_start {
-                            p -= 1;
-                            let b = editor.byte_at(p);
+                        
+                        let mut p_start = start_line_end;
+                        let mut last_start_char = 0;
+                        while p_start > start_line_start {
+                            p_start -= 1;
+                            let b = editor.byte_at(p_start);
                             if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                if b == b'}' || b == b']' || b == b')' {
-                                    fold_char = Some(b as char);
-                                }
+                                last_start_char = b;
                                 break;
+                            }
+                        }
+
+                        if last_start_char == b'{' || last_start_char == b'[' || last_start_char == b'(' {
+                            let expected_close = match last_start_char {
+                                b'{' => b'}',
+                                b'[' => b']',
+                                b'(' => b')',
+                                _ => 0,
+                            };
+                            
+                            let end_line_start = editor.line_offsets[fold_end];
+                            let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
+                                editor.line_offsets[fold_end + 1]
+                            } else {
+                                editor.len()
+                            };
+
+                            let mut p = end_line_end;
+                            while p > end_line_start {
+                                p -= 1;
+                                let b = editor.byte_at(p);
+                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                    if b == expected_close {
+                                        fold_char = Some(b as char);
+                                    }
+                                    break;
+                                }
                             }
                         }
                     }
@@ -198,16 +225,43 @@ impl Renderer {
                         } else {
                             editor.len()
                         };
-                        let mut p = end_line_end;
                         let mut fold_char = None;
-                        while p > end_line_start {
-                            p -= 1;
-                            let b = editor.byte_at(p);
+                        let start_line_start = editor.line_offsets[phys_line];
+                        let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
+                            editor.line_offsets[phys_line + 1]
+                        } else {
+                            editor.len()
+                        };
+                        
+                        let mut p_start = start_line_end;
+                        let mut last_start_char = 0;
+                        while p_start > start_line_start {
+                            p_start -= 1;
+                            let b = editor.byte_at(p_start);
                             if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                if b == b'}' || b == b']' || b == b')' {
-                                    fold_char = Some(b as char);
-                                }
+                                last_start_char = b;
                                 break;
+                            }
+                        }
+
+                        if last_start_char == b'{' || last_start_char == b'[' || last_start_char == b'(' {
+                            let expected_close = match last_start_char {
+                                b'{' => b'}',
+                                b'[' => b']',
+                                b'(' => b')',
+                                _ => 0,
+                            };
+
+                            let mut p = end_line_end;
+                            while p > end_line_start {
+                                p -= 1;
+                                let b = editor.byte_at(p);
+                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                    if b == expected_close {
+                                        fold_char = Some(b as char);
+                                    }
+                                    break;
+                                }
                             }
                         }
                         if let Some(c) = fold_char {

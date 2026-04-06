@@ -147,19 +147,13 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "py" => Some(
             r#"
             [
-                (function_definition)
-                (class_definition)
                 (block)
             ] @fold
             [
                 (dictionary)
                 (list)
                 (tuple)
-                (string)
                 (set)
-                (list_comprehension)
-                (dictionary_comprehension)
-                (set_comprehension)
             ] @autofold
             "#,
         ),
