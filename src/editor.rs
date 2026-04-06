@@ -77,26 +77,6 @@ fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>) {
         }
     }
 
-    for i in 1..m {
-        let mut curr = i;
-        while curr > 0 && modified[curr] && !modified[curr - 1] && new[curr] == new[curr - 1] {
-            modified.swap(curr, curr - 1);
-            curr -= 1;
-        }
-    }
-
-    for i in 1..=m {
-        let mut curr = i;
-        while curr > 1
-            && deleted_gaps[curr]
-            && !deleted_gaps[curr - 1]
-            && new[curr - 1] == new[curr - 2]
-        {
-            deleted_gaps.swap(curr, curr - 1);
-            curr -= 1;
-        }
-    }
-
     (modified, deleted_gaps)
 }
 
