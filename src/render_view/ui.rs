@@ -235,7 +235,7 @@ impl Renderer {
                 6.0 * scale,
                 thumb_h,
                 3.0 * scale,
-                [0.40, 0.42, 0.46, alpha],
+                [0.7, 0.33, 0.54, alpha],
             );
         }
 
@@ -457,7 +457,7 @@ impl Renderer {
                 6.0 * scale,
                 thumb_h,
                 3.0 * scale,
-                [0.40, 0.42, 0.46, 1.0],
+                [0.7, 0.33, 0.54, 1.0],
             );
         }
 

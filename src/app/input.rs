@@ -415,7 +415,7 @@ impl App {
             }
 
             if last_mouse_x >= scrollbar_x {
-                let total_content_height = (self.editor.line_offsets.len() as f32)
+                let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
                     * self.renderer.as_ref().unwrap().line_height;
                 let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
 
@@ -607,7 +607,7 @@ impl App {
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
 
             if elapsed > 120 || dy > 10.0 {
-                let total_content_height = (self.editor.line_offsets.len() as f32)
+                let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
                     * self.renderer.as_ref().unwrap().line_height;
                 let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
                 let track_h = wh;

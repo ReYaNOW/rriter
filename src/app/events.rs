@@ -519,15 +519,19 @@ impl ApplicationHandler for App {
                 let cursor_icon = if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if !self.show_welcome {
+                    let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+                    let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, window_height);
+
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     let padding = r.left_padding;
                     let minimap_w = r.minimap_width;
                     let s = r.scale_factor;
-                    let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+                    let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-                    let mut is_text = mx > padding && mx < (window_width - minimap_w);
+                    let mut is_text = mx > padding && mx < (window_width - minimap_w - scrollbar_w);
 
                     if r.max_scroll_x > 0.0 {
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;

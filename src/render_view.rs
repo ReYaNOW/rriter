@@ -641,7 +641,7 @@ impl Renderer {
                 [0.0, 0.0, 0.0, 0.2],
             );
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
-            let total_content_height = total_lines as f32 * self.line_height;
+            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h =
                 (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
             let thumb_y = scroll_ratio_y * (self.height - thumb_h);
@@ -651,7 +651,7 @@ impl Renderer {
                 scrollbar_width - 2.0 * s,
                 thumb_h,
                 (scrollbar_width - 2.0 * s) / 2.0,
-                [0.40, 0.42, 0.46, 0.8],
+                [0.7, 0.33, 0.54, 0.8],
             );
         }
 
@@ -662,10 +662,10 @@ impl Renderer {
         };
 
         let total_lines_f32 = total_lines as f32;
-        let minimap_line_h = (self.height / total_lines_f32)
+        let minimap_line_h = (self.height / (total_lines_f32 + 2.0))
             .max(self.height / 1250.0)
             .max(1.5);
-        let max_minimap_scroll = (total_lines_f32 * minimap_line_h - self.height).max(0.0);
+        let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - self.height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
         let map_bg = self.theme.minimap_bg;
@@ -841,10 +841,10 @@ impl Renderer {
         let viewport_h = (visible_lines * minimap_line_h).max(4.0);
 
         let view_bg = [
-            self.theme.minimap_bg[0] * 0.7 + self.theme.sel[0] * 0.3,
-            self.theme.minimap_bg[1] * 0.7 + self.theme.sel[1] * 0.3,
-            self.theme.minimap_bg[2] * 0.7 + self.theme.sel[2] * 0.3,
-            0.3,
+            self.theme.sel[0],
+            self.theme.sel[1],
+            self.theme.sel[2],
+            0.15,
         ];
         let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
 
@@ -886,7 +886,7 @@ impl Renderer {
                 thumb_w,
                 thumb_h,
                 3.0 * s,
-                [0.40, 0.42, 0.46, 1.0],
+                [0.7, 0.33, 0.54, 1.0],
             );
         }
 
