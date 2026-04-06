@@ -97,7 +97,7 @@ impl Renderer {
         }
 
         let digits = editor.line_offsets.len().to_string().len().max(3);
-        let target_padding = (35.0 * s + digits as f32 * 10.0 * s).round();
+        let target_padding = (30.0 * s + digits as f32 * 10.0 * s).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -580,7 +580,7 @@ impl Renderer {
             let phys_idx = v_line.physical_line - 1;
 
             if editor.foldable_lines.contains_key(&phys_idx) {
-                let arrow_x = self.left_padding - 22.0 * s;
+                let arrow_x = self.left_padding - 18.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
                 self.draw_string_scaled(arrow_str, arrow_x, y - 2.0 * s, self.theme.line_num, 0.9);
@@ -601,7 +601,7 @@ impl Renderer {
             }
             if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                 let num_w = self.measure_ui_width(num_str, 1.0);
-                let draw_x = self.left_padding - 30.0 * s - num_w;
+                let draw_x = self.left_padding - 24.0 * s - num_w;
                 self.draw_string_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
             }
         }
@@ -619,7 +619,7 @@ impl Renderer {
             let draw_bottom = m.bottom + 2.0;
             let draw_h = (draw_bottom - draw_top).max(4.0);
             self.push_rounded_rect(
-                self.left_padding - 6.0 * s,
+                self.left_padding - 4.0 * s,
                 draw_top,
                 4.0 * s,
                 draw_h,
@@ -715,9 +715,9 @@ impl Renderer {
                     };
 
                     let mut spaces_len = 0;
-                    for b in text_chunk.bytes() {
-                        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                            spaces_len += 1;
+                    for c in text_chunk.chars() {
+                        if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+                            spaces_len += c.len_utf8();
                         } else {
                             break;
                         }
@@ -756,16 +756,22 @@ impl Renderer {
                     ];
 
                     let mut word_len = 0;
-                    for b in text_chunk.bytes() {
+                    for c in text_chunk.chars() {
                         if cur_byte + word_len >= span_end
-                            || b == b' '
-                            || b == b'\t'
-                            || b == b'\n'
-                            || b == b'\r'
+                            || c == ' '
+                            || c == '\t'
+                            || c == '\n'
+                            || c == '\r'
                         {
                             break;
                         }
-                        word_len += 1;
+                        word_len += c.len_utf8();
+                    }
+
+                    if word_len == 0 {
+                        if let Some(c) = text_chunk.chars().next() {
+                            word_len = c.len_utf8();
+                        }
                     }
 
                     let w = (word_len as f32 * 1.5).min(minimap_x + minimap_w - 5.0 - current_x);
@@ -806,7 +812,7 @@ impl Renderer {
                         current_x += w;
                     }
 
-                    cur_byte += word_len.max(1);
+                    cur_byte += word_len;
                     if current_x >= minimap_x + minimap_w - 5.0 {
                         break;
                     }

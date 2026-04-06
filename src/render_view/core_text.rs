@@ -36,8 +36,11 @@ impl Renderer {
                     editor.len()
                 };
 
-                if is_folded {
-                    end_byte -= 1; // Убираем newline, чтобы '...' были на той же строке
+                if is_folded && end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\n' {
+                    end_byte -= 1;
+                    if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
+                        end_byte -= 1;
+                    }
                 }
 
                 let mut whitespace_px_width = 0.0;
@@ -263,8 +266,11 @@ impl Renderer {
 
         let is_folded = editor.folded_lines.contains(&target_phys_line)
             && editor.foldable_lines.contains_key(&target_phys_line);
-        if is_folded {
+        if is_folded && end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\n' {
             end_byte -= 1;
+            if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
+                end_byte -= 1;
+            }
         }
 
         let mut current_x = self.left_padding - self.last_scroll_x;

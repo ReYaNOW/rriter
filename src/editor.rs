@@ -519,8 +519,19 @@ impl Editor {
 
         let curr_hashes = self.get_line_hashes();
 
-        let (mod_saved, del_saved) = get_diff_info(&self.saved_hashes, &curr_hashes);
-        let (mod_orig, del_orig) = get_diff_info(&self.original_hashes, &curr_hashes);
+        let (mod_saved, mut del_saved) = get_diff_info(&self.saved_hashes, &curr_hashes);
+        let (mod_orig, mut del_orig) = get_diff_info(&self.original_hashes, &curr_hashes);
+
+        // Treat a line replacement (delete + insert) as just a modification.
+        // This prevents showing a deletion gap marker above a modified line.
+        for i in 0..curr_hashes.len() {
+            if mod_saved[i] && i < del_saved.len() {
+                del_saved[i] = false;
+            }
+            if mod_orig[i] && i < del_orig.len() {
+                del_orig[i] = false;
+            }
+        }
 
         let mut states = vec![None; curr_hashes.len()];
         let mut gaps = vec![None; curr_hashes.len() + 1];

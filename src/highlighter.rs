@@ -1382,20 +1382,9 @@ fn flatten_spans(
         }
     }
 
-    if !error_ranges.is_empty() && !old_spans.is_empty() {
-        let mut old_byte_colors = vec![DRACULA_FG; len];
-        for span in old_spans {
-            for i in span.start..span.end.min(len) {
-                old_byte_colors[i] = span.color;
-            }
-        }
-
-        for (e_start, e_end) in error_ranges {
-            for i in e_start..e_end.min(len) {
-                byte_colors[i] = old_byte_colors[i];
-            }
-        }
-    }
+    // The logic to restore colors for ranges with syntax errors was removed.
+    // It was using stale byte offsets from before the edit, causing highlighting to shift.
+    // Now, text with syntax errors will just use the default color until the syntax is valid again.
 
     let mut flat = Vec::new();
     if len == 0 {

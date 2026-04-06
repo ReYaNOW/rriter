@@ -199,7 +199,7 @@ impl App {
                     let phys_idx = v_line.physical_line - 1;
 
                     if self.editor.foldable_lines.contains_key(&phys_idx) {
-                        let arrow_x = r.left_padding - 22.0 * s;
+                        let arrow_x = r.left_padding - 18.0 * s;
                         if last_mouse_x >= arrow_x - 5.0 * s
                             && last_mouse_x <= arrow_x + 15.0 * s
                             && last_mouse_y >= y - r.line_height
