@@ -139,17 +139,40 @@ impl App {
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
 
-            for &(rx, ry, rw, rh, target_byte) in &self.renderer.as_ref().unwrap().sticky_scroll_rects {
-                if last_mouse_x >= rx && last_mouse_x <= rx + rw && last_mouse_y >= ry && last_mouse_y <= ry + rh {
+            for &(rx, ry, rw, rh, target_byte) in
+                &self.renderer.as_ref().unwrap().sticky_scroll_rects
+            {
+                if last_mouse_x >= rx
+                    && last_mouse_x <= rx + rw
+                    && last_mouse_y >= ry
+                    && last_mouse_y <= ry + rh
+                {
                     self.editor.cursor = target_byte;
                     self.editor.selection_anchor = None;
-                    
-                    let phys_line = self.editor.line_offsets.partition_point(|&o| o <= target_byte).saturating_sub(1);
-                    let line_y = phys_line as f32 * self.renderer.as_ref().unwrap().line_height;
+
+                    let phys_line = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&o| o <= target_byte)
+                        .saturating_sub(1);
+                    let visual_line = self
+                        .renderer
+                        .as_ref()
+                        .unwrap()
+                        .phys_to_visual
+                        .get(phys_line)
+                        .copied()
+                        .unwrap_or(phys_line);
+                    let line_y = visual_line as f32 * self.renderer.as_ref().unwrap().line_height;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
-                    
-                    self.target_scroll_y = (line_y - wh / 3.0).clamp(0.0, max_scroll).round();
+                    let max_scroll = self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .get_max_scroll(&self.editor, wh);
+
+                    let padding = self.renderer.as_ref().unwrap().line_height * 1.5;
+                    self.target_scroll_y = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
                     self.scroll_anim_speed = 15.0;
                     self.window.as_ref().unwrap().request_redraw();
                     return;
@@ -1169,8 +1192,12 @@ impl App {
                 if self.highlighter.poll(self.editor.version) {
                     self.editor.foldable_lines.clear();
                     self.editor.foldable_ranges_bytes.clear();
-                    for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
-                        self.editor.foldable_ranges_bytes.push((start_b, end_b, is_sticky));
+                    for &(start_b, end_b, is_autofold, is_sticky) in
+                        &self.highlighter.foldable_ranges
+                    {
+                        self.editor
+                            .foldable_ranges_bytes
+                            .push((start_b, end_b, is_sticky));
                         let sl = self
                             .editor
                             .line_offsets

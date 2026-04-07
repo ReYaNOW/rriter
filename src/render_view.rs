@@ -1042,51 +1042,69 @@ impl Renderer {
         for &(start_b, end_b, is_sticky) in &editor.foldable_ranges_bytes {
             if !is_sticky { continue; }
             let sl = editor.line_offsets.partition_point(|&o| o <= start_b).saturating_sub(1);
-            let orig_el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
-            if sl < orig_el {
-                let mut el = orig_el;
-                while el + 1 < editor.line_offsets.len() {
-                    let next_start = editor.line_offsets[el + 1];
-                    let next_end = editor.line_offsets.get(el + 2).copied().unwrap_or(editor.len());
-                    let mut is_blank = true;
-                    for i in next_start..next_end {
-                        let b = editor.byte_at(i);
-                        if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                            is_blank = false;
-                            break;
-                        }
-                    }
-                    if is_blank {
-                        el += 1;
-                    } else {
-                        break;
-                    }
+            let mut el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
+            
+            // Расширяем el до реального конца блока (тела функции/класса)
+            for line in sl..=el {
+                if let Some(&fold_end) = editor.foldable_lines.get(&line) {
+                    el = el.max(fold_end);
                 }
-                active_ranges.push((sl, orig_el, el));
+            }
+
+            // Исключаем однострочные блоки (например, геттеры `get theme => ...;`)
+            if el > sl {
+                active_ranges.push((sl, el));
             }
         }
-        active_ranges.sort_unstable_by_key(|&(sl, _, _)| sl);
+        active_ranges.sort_unstable_by_key(|&(sl, _)| sl);
+        active_ranges.dedup_by_key(|&mut (sl, _)| sl);
 
         let mut depth_stack: Vec<usize> = Vec::new();
         let mut ranges_with_depth = Vec::new();
 
-        for &(sl, orig_el, expanded_el) in &active_ranges {
-            while let Some(&last_orig_el) = depth_stack.last() {
-                if sl > last_orig_el {
+        for &(sl, el) in &active_ranges {
+            while let Some(&last_el) = depth_stack.last() {
+                if sl >= last_el {
                     depth_stack.pop();
                 } else {
                     break;
                 }
             }
             let depth = depth_stack.len();
-            depth_stack.push(orig_el);
-            ranges_with_depth.push((sl, expanded_el, depth));
+            depth_stack.push(el);
+            ranges_with_depth.push((sl, el, depth));
+        }
+
+        // Умное мгновенное переключение (Bridging)
+        // Если до следующего блока того же уровня не более 3 строк (gap <= 4),
+        // продлеваем текущий блок, чтобы старый заголовок висел до начала нового.
+        // Если отступ больше или дальше конец файла - старый заголовок исчезнет.
+        for i in 0..ranges_with_depth.len() {
+            let (_, el1, d1) = ranges_with_depth[i];
+            
+            let mut next_sl = None;
+            for j in (i + 1)..ranges_with_depth.len() {
+                let (sl2, _, d2) = ranges_with_depth[j];
+                if d2 < d1 {
+                    break; // Вышли из родительского блока, дальше искать нет смысла
+                }
+                if d2 == d1 {
+                    next_sl = Some(sl2);
+                    break;
+                }
+            }
+            
+            if let Some(n_sl) = next_sl {
+                if n_sl > el1 && n_sl - el1 <= 4 {
+                    ranges_with_depth[i].1 = n_sl - 1;
+                }
+            }
         }
 
         let mut target_sticky_lines = Vec::new();
         let mut current_depth = 0;
 
-        for &(sl, expanded_el, depth) in &ranges_with_depth {
+        for &(sl, el, depth) in &ranges_with_depth {
             // Если уровень вложенности не совпадает с тем, который мы сейчас ищем - пропускаем.
             // Это гарантирует, что на один уровень (например, уровень методов) попадет ровно один метод.
             if depth != current_depth {
@@ -1094,7 +1112,7 @@ impl Renderer {
             }
 
             let v_sl = self.phys_to_visual.get(sl).copied().unwrap_or(0);
-            let v_el = self.phys_to_visual.get(expanded_el).copied().unwrap_or(0);
+            let v_el = self.phys_to_visual.get(el).copied().unwrap_or(0);
             
             let slot_y = depth as f32 * self.line_height;
             let line_y = v_sl as f32 * self.line_height - render_scroll_y;
@@ -1102,7 +1120,7 @@ impl Renderer {
 
             if line_y <= slot_y + 0.1 && push_y > slot_y + 0.1 {
                 if !target_sticky_lines.iter().any(|&(s, _)| s == sl) {
-                    target_sticky_lines.push((sl, expanded_el));
+                    target_sticky_lines.push((sl, el));
                     // Метод занял свой слот, переходим к поиску вложенных в него блоков (циклов, if-ов)
                     current_depth += 1;
                 }
@@ -1116,7 +1134,8 @@ impl Renderer {
 
         if !current_sticky_lines.is_empty() {
             let mut y_positions = vec![0.0; current_sticky_lines.len()];
-            for i in (0..current_sticky_lines.len()).rev() {
+            
+            for i in 0..current_sticky_lines.len() {
                 y_positions[i] = i as f32 * self.line_height;
             }
 

@@ -176,11 +176,27 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
             ] @autofold
             "#,
         ),
-        "js" | "ts" | "tsx" => Some(
+        "js" => Some(
             r#"
             [
-                (function_declaration) (method_definition) (class_declaration) (arrow_function)
-                (function_expression)
+                (function_declaration) (method_definition) (class_declaration)
+                (arrow_function) (function_expression)
+            ] @sticky
+            [
+                (if_statement) (for_statement) (while_statement) (switch_statement)
+                (try_statement) (statement_block)
+            ] @fold
+            [
+                (object)
+                (array)
+            ] @autofold
+            "#,
+        ),
+        "ts" | "tsx" => Some(
+            r#"
+            [
+                (function_declaration) (method_definition) (class_declaration) (interface_declaration)
+                (arrow_function) (function_expression)
             ] @sticky
             [
                 (if_statement) (for_statement) (while_statement) (switch_statement)
@@ -195,7 +211,8 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "java" => Some(
             r#"
             [
-                (class_declaration) (method_declaration) (interface_declaration) (enum_declaration)
+                (class_declaration) (method_declaration) (constructor_declaration) 
+                (interface_declaration) (enum_declaration)
             ] @sticky
             [
                 (block)
@@ -226,6 +243,7 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
             r#"
             [
                 (class_declaration) (mixin_declaration) (extension_declaration) (enum_declaration)
+                (function_signature) (method_signature) (constructor_signature)
             ] @sticky
             [
                 (block)
@@ -256,6 +274,7 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
             r#"
             [
                 (function_definition) (struct_specifier) (class_specifier) (enum_specifier)
+                (namespace_definition)
             ] @sticky
             [
                 (compound_statement)
@@ -270,6 +289,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         ),
         "css" => Some(
             r#"
+            [
+                (rule_set)
+            ] @sticky
             [
                 (block)
             ] @fold
@@ -294,6 +316,16 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
               (conditional)
               (rule)
               (define_directive)
+            ] @fold
+            "#,
+        ),
+        "bash" => Some(
+            r#"
+            [
+                (function_definition)
+            ] @sticky
+            [
+                (if_statement) (for_statement) (while_statement) (case_statement)
             ] @fold
             "#,
         ),

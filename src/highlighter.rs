@@ -411,16 +411,15 @@ impl Highlighter {
                                                 }
 
                                                 let is_sticky = name == "sticky";
-                                                if node.end_byte() > start_byte
-                                                    && node.end_position().row
-                                                        > node.start_position().row
-                                                {
-                                                    foldable_ranges.push((
-                                                        start_byte,
-                                                        node.end_byte(),
-                                                        is_autofold,
-                                                        is_sticky,
-                                                    ));
+                                                if node.end_byte() > start_byte {
+                                                    if is_sticky || node.end_position().row > node.start_position().row {
+                                                        foldable_ranges.push((
+                                                            start_byte,
+                                                            node.end_byte(),
+                                                            is_autofold,
+                                                            is_sticky,
+                                                        ));
+                                                    }
                                                 }
                                             }
                                         }
