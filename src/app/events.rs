@@ -498,7 +498,7 @@ impl ApplicationHandler for App {
                 );
 
                 let r = self.renderer.as_ref().unwrap();
-                if r.sticky_scroll_rects.is_empty() {
+                if r.sticky_scroll_rects.is_empty() || self.scroll_velocity.abs() > 1000.0 || self.is_dragging_minimap {
                     self.target_sticky_scroll_alpha = 0.0;
                 } else {
                     self.target_sticky_scroll_alpha = 1.0;

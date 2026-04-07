@@ -1044,7 +1044,7 @@ impl Renderer {
             let line_y = sl as f32 * self.line_height - render_scroll_y;
             let end_line_y = el as f32 * self.line_height - render_scroll_y;
 
-            if line_y < sticky_stack_height && end_line_y > sticky_stack_height {
+            if line_y <= sticky_stack_height + 1.0 && end_line_y > sticky_stack_height {
                 if !sticky_lines.iter().any(|&(s, _)| s == sl) {
                     sticky_lines.push((sl, el));
                     sticky_stack_height += self.line_height;
@@ -1058,25 +1058,39 @@ impl Renderer {
         }
 
         if !sticky_lines.is_empty() {
-            let mut current_draw_y = 0.0;
-            let sticky_bg = [self.theme.bg[0] + 0.04, self.theme.bg[1] + 0.04, self.theme.bg[2] + 0.05, sticky_scroll_alpha];
-            let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.5 * sticky_scroll_alpha];
-
-            for &(s_line, el) in &sticky_lines {
+            let mut y_positions = vec![0.0; sticky_lines.len()];
+            let mut current_bottom = f32::MAX;
+            for i in (0..sticky_lines.len()).rev() {
+                let (_, el) = sticky_lines[i];
                 let end_y = el as f32 * self.line_height - render_scroll_y;
-                let mut push_up = 0.0;
-                if end_y < current_draw_y + self.line_height {
-                    push_up = current_draw_y + self.line_height - end_y;
-                }
+                let normal_y = i as f32 * self.line_height;
+                let mut actual_y = normal_y;
 
-                let rect_y = current_draw_y - push_up;
+                if end_y < actual_y + self.line_height {
+                    actual_y = end_y - self.line_height;
+                }
+                if actual_y + self.line_height > current_bottom {
+                    actual_y = current_bottom - self.line_height;
+                }
+                y_positions[i] = actual_y;
+                current_bottom = actual_y;
+            }
+
+            let rect_w = self.width - minimap_w;
+            let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], sticky_scroll_alpha];
+            let shadow_color = [0.0, 0.0, 0.0, 0.5 * sticky_scroll_alpha];
+
+            for (i, &(s_line, _)) in sticky_lines.iter().enumerate() {
+                let rect_y = y_positions[i];
+                
                 if rect_y + self.line_height < 0.0 {
                     continue;
                 }
 
-                let rect_w = self.width - minimap_w;
                 self.push_rect(0.0, rect_y, rect_w, self.line_height, sticky_bg);
-                self.push_rect(0.0, rect_y + self.line_height - 1.0, rect_w, 1.0, border_color);
+                if i == sticky_lines.len() - 1 {
+                    self.push_rect(0.0, rect_y + self.line_height, rect_w, 2.0, shadow_color);
+                }
 
                 let mut n = s_line + 1;
                 let mut buf = [0u8; 20];
@@ -1145,7 +1159,6 @@ impl Renderer {
                 }
 
                 self.sticky_scroll_rects.push((0.0, rect_y, rect_w, self.line_height, start_byte));
-                current_draw_y += self.line_height;
             }
             self.flush();
         }
