@@ -170,10 +170,13 @@ impl Renderer {
             let mut curr = pos as isize + dir;
             while curr >= 0 && curr < len as isize {
                 let cb = editor.byte_at(curr as usize);
-                if cb == open { depth += 1; }
-                else if cb == close {
+                if cb == open {
+                    depth += 1;
+                } else if cb == close {
                     depth -= 1;
-                    if depth == 0 { return Some(curr as usize); }
+                    if depth == 0 {
+                        return Some(curr as usize);
+                    }
                 }
                 curr += dir;
             }
@@ -193,14 +196,24 @@ impl Renderer {
             }
         }
 
-        let sel_start = editor.selection_anchor.map(|a| a.min(editor.cursor)).unwrap_or(editor.cursor);
-        let sel_end = editor.selection_anchor.map(|a| a.max(editor.cursor)).unwrap_or(editor.cursor);
+        let sel_start = editor
+            .selection_anchor
+            .map(|a| a.min(editor.cursor))
+            .unwrap_or(editor.cursor);
+        let sel_end = editor
+            .selection_anchor
+            .map(|a| a.max(editor.cursor))
+            .unwrap_or(editor.cursor);
 
         // --- Одинаковые слова (Word Highlighting) ---
         let mut identical_words = Vec::new();
         let mut target_word = None;
         let is_valid_word = |s: &str| -> bool {
-            !s.is_empty() && s.as_bytes().iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_') && !s.chars().next().unwrap().is_ascii_digit()
+            !s.is_empty()
+                && s.as_bytes()
+                    .iter()
+                    .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+                && !s.chars().next().unwrap().is_ascii_digit()
         };
 
         if sel_start != sel_end {
@@ -216,19 +229,25 @@ impl Renderer {
             let mut p_start = editor.cursor;
             while p_start > 0 {
                 let b = editor.byte_at(p_start - 1);
-                if !(b.is_ascii_alphanumeric() || b == b'_') { break; }
+                if !(b.is_ascii_alphanumeric() || b == b'_') {
+                    break;
+                }
                 p_start -= 1;
             }
             let mut p_end = editor.cursor;
             while p_end < len {
                 let b = editor.byte_at(p_end);
-                if !(b.is_ascii_alphanumeric() || b == b'_') { break; }
+                if !(b.is_ascii_alphanumeric() || b == b'_') {
+                    break;
+                }
                 p_end += 1;
             }
             if p_end > p_start {
                 let slen = p_end - p_start;
                 let mut res = Vec::with_capacity(slen);
-                for i in p_start..p_end { res.push(editor.byte_at(i)); }
+                for i in p_start..p_end {
+                    res.push(editor.byte_at(i));
+                }
                 let w = String::from_utf8_lossy(&res).into_owned();
                 if is_valid_word(&w) {
                     target_word = Some(w);
@@ -242,11 +261,15 @@ impl Renderer {
             let w_len = word.len();
             while let Some(idx) = full_text[start..].find(&word) {
                 let abs_idx = start + idx;
-                let left_ok = if abs_idx == 0 { true } else {
+                let left_ok = if abs_idx == 0 {
+                    true
+                } else {
                     let b = full_text.as_bytes()[abs_idx - 1];
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
-                let right_ok = if abs_idx + w_len == len { true } else {
+                let right_ok = if abs_idx + w_len == len {
+                    true
+                } else {
                     let b = full_text.as_bytes()[abs_idx + w_len];
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
@@ -480,7 +503,8 @@ impl Renderer {
                         }
                     }
 
-                    let is_identical = identical_idx < identical_words.len() && current_offset >= identical_words[identical_idx].0;
+                    let is_identical = identical_idx < identical_words.len()
+                        && current_offset >= identical_words[identical_idx].0;
 
                     let is_bracket = if let Some((b1, b2)) = bracket_pairs {
                         current_offset == b1 || current_offset == b2
@@ -775,12 +799,117 @@ impl Renderer {
 
         self.push_rect(minimap_x, 0.0, minimap_w, self.height, solid_minimap_bg);
 
+        self.draw_minimap(
+            editor,
+            spans,
+            render_scroll_y,
+            max_scroll,
+            total_lines,
+            visible_cursor_line,
+        );
+
+        if self.max_scroll_x > 0.0 {
+            let track_w = scrollbar_x - self.left_padding;
+            let track_h_bg = 14.0 * s;
+            let track_y_bg = self.height - track_h_bg;
+
+            self.push_rect(
+                self.left_padding,
+                track_y_bg,
+                track_w,
+                track_h_bg,
+                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+            );
+
+            let thumb_w =
+                (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s);
+            let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
+            let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
+
+            let thumb_y = self.height - 10.0 * s;
+            let thumb_h = 6.0 * s;
+
+            self.push_rounded_rect(
+                thumb_x,
+                thumb_y,
+                thumb_w,
+                thumb_h,
+                3.0 * s,
+                [0.7, 0.33, 0.54, 1.0],
+            );
+        }
+
+        let target_sticky_lines = self.draw_sticky_lines(
+            editor,
+            spans,
+            current_sticky_lines,
+            render_scroll_y,
+            render_scroll_x,
+        );
+
+        if scrollbar_width > 0.0 {
+            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
+            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
+            let thumb_h =
+                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
+            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
+            self.push_rounded_rect(
+                scrollbar_x + 1.0 * s,
+                thumb_y,
+                scrollbar_width - 2.0 * s,
+                thumb_h,
+                (scrollbar_width - 2.0 * s) / 2.0,
+                [0.7, 0.33, 0.54, 0.8],
+            );
+        }
+
+        if show_fps {
+            let center_x = (self.width - minimap_w) / 2.0;
+            self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
+
+            let fps_text = std::mem::take(&mut self.fps_string);
+            self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
+            self.fps_string = fps_text;
+        }
+
+        if search_anim_y > -70.0 {
+            wants_pointer |= self.draw_search_panel(
+                search_anim_y,
+                search_editor,
+                search_focused,
+                search_case_sensitive,
+                search_results,
+                search_current_idx,
+                blink_alpha,
+                scrollbar_width,
+            );
+        }
+
+        if show_quit_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
+        }
+        self.flush();
+
+        (wants_pointer, target_sticky_lines)
+    }
+
+    fn draw_minimap(
+        &mut self,
+        editor: &Editor,
+        spans: &[ColorSpan],
+        render_scroll_y: f32,
+        max_scroll: f32,
+        total_lines: usize,
+        visible_cursor_line: usize,
+    ) {
         let scroll_ratio_y = if max_scroll > 0.0 {
             (render_scroll_y / max_scroll).clamp(0.0, 1.0)
         } else {
             0.0
         };
 
+        let minimap_w = self.minimap_width;
+        let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
         let minimap_line_h = (self.height / (total_lines_f32 + 2.0))
             .max(self.height / 1250.0)
@@ -795,6 +924,9 @@ impl Renderer {
 
         let view_top = current_minimap_scroll;
         let view_bottom = current_minimap_scroll + self.height;
+
+        let (first, second) = editor.text_parts();
+        let first_len = first.len();
 
         while phys_line < editor.line_offsets.len() {
             let start_byte = editor.line_offsets[phys_line];
@@ -901,10 +1033,34 @@ impl Renderer {
                         let x2 = (current_x + w).round();
 
                         let sdf = [0.0, 0.0, 0.0];
-                        let v1 = Vertex { pos: [x1, y1], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
-                        let v2 = Vertex { pos: [x2, y1], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
-                        let v3 = Vertex { pos: [x2, y2], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
-                        let v4 = Vertex { pos: [x1, y2], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
+                        let v1 = Vertex {
+                            pos: [x1, y1],
+                            uv: [-1.0, -1.0],
+                            color,
+                            mode: 2.0,
+                            sdf_params: sdf,
+                        };
+                        let v2 = Vertex {
+                            pos: [x2, y1],
+                            uv: [-1.0, -1.0],
+                            color,
+                            mode: 2.0,
+                            sdf_params: sdf,
+                        };
+                        let v3 = Vertex {
+                            pos: [x2, y2],
+                            uv: [-1.0, -1.0],
+                            color,
+                            mode: 2.0,
+                            sdf_params: sdf,
+                        };
+                        let v4 = Vertex {
+                            pos: [x1, y2],
+                            uv: [-1.0, -1.0],
+                            color,
+                            mode: 2.0,
+                            sdf_params: sdf,
+                        };
 
                         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
                         if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
@@ -965,54 +1121,38 @@ impl Renderer {
             view_border,
         );
         self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
+    }
 
-        if self.max_scroll_x > 0.0 {
-            let track_w = scrollbar_x - self.left_padding;
-            let track_h_bg = 14.0 * s;
-            let track_y_bg = self.height - track_h_bg;
-
-            self.push_rect(
-                self.left_padding,
-                track_y_bg,
-                track_w,
-                track_h_bg,
-                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
-            );
-
-            let thumb_w =
-                (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s);
-            let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
-            let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
-
-            let thumb_y = self.height - 10.0 * s;
-            let thumb_h = 6.0 * s;
-
-            self.push_rounded_rect(
-                thumb_x,
-                thumb_y,
-                thumb_w,
-                thumb_h,
-                3.0 * s,
-                [0.7, 0.33, 0.54, 1.0],
-            );
-        }
-
+    fn draw_sticky_lines(
+        &mut self,
+        editor: &Editor,
+        spans: &[ColorSpan],
+        current_sticky_lines: &[(usize, usize)],
+        render_scroll_y: f32,
+        render_scroll_x: f32,
+    ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
         let mut active_ranges = Vec::new();
 
         for &(start_b, end_b, is_sticky) in &editor.foldable_ranges_bytes {
-            if !is_sticky { continue; }
-            let sl = editor.line_offsets.partition_point(|&o| o <= start_b).saturating_sub(1);
-            let mut el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
-            
-            // Расширяем el до реального конца блока (тела функции/класса)
+            if !is_sticky {
+                continue;
+            }
+            let sl = editor
+                .line_offsets
+                .partition_point(|&o| o <= start_b)
+                .saturating_sub(1);
+            let mut el = editor
+                .line_offsets
+                .partition_point(|&o| o <= end_b)
+                .saturating_sub(1);
+
             for line in sl..=el {
                 if let Some(&fold_end) = editor.foldable_lines.get(&line) {
                     el = el.max(fold_end);
                 }
             }
 
-            // Исключаем однострочные блоки (например, геттеры `get theme => ...;`)
             if el > sl {
                 active_ranges.push((sl, el));
             }
@@ -1036,25 +1176,21 @@ impl Renderer {
             ranges_with_depth.push((sl, el, depth));
         }
 
-        // Умное мгновенное переключение (Bridging)
-        // Если до следующего блока того же уровня не более 3 строк (gap <= 4),
-        // продлеваем текущий блок, чтобы старый заголовок висел до начала нового.
-        // Если отступ больше или дальше конец файла - старый заголовок исчезнет.
         for i in 0..ranges_with_depth.len() {
             let (_, el1, d1) = ranges_with_depth[i];
-            
+
             let mut next_sl = None;
             for j in (i + 1)..ranges_with_depth.len() {
                 let (sl2, _, d2) = ranges_with_depth[j];
                 if d2 < d1 {
-                    break; // Вышли из родительского блока, дальше искать нет смысла
+                    break;
                 }
                 if d2 == d1 {
                     next_sl = Some(sl2);
                     break;
                 }
             }
-            
+
             if let Some(n_sl) = next_sl {
                 if n_sl > el1 && n_sl - el1 <= 4 {
                     ranges_with_depth[i].1 = n_sl - 1;
@@ -1066,15 +1202,13 @@ impl Renderer {
         let mut current_depth = 0;
 
         for &(sl, el, depth) in &ranges_with_depth {
-            // Если уровень вложенности не совпадает с тем, который мы сейчас ищем - пропускаем.
-            // Это гарантирует, что на один уровень (например, уровень методов) попадет ровно один метод.
             if depth != current_depth {
                 continue;
             }
 
             let v_sl = self.phys_to_visual.get(sl).copied().unwrap_or(0);
             let v_el = self.phys_to_visual.get(el).copied().unwrap_or(0);
-            
+
             let slot_y = depth as f32 * self.line_height;
             let line_y = v_sl as f32 * self.line_height - render_scroll_y;
             let push_y = (v_el + 1) as f32 * self.line_height - render_scroll_y;
@@ -1082,7 +1216,6 @@ impl Renderer {
             if line_y <= slot_y + 0.1 && push_y > slot_y + 0.1 {
                 if !target_sticky_lines.iter().any(|&(s, _)| s == sl) {
                     target_sticky_lines.push((sl, el));
-                    // Метод занял свой слот, переходим к поиску вложенных в него блоков (циклов, if-ов)
                     current_depth += 1;
                 }
             }
@@ -1095,20 +1228,30 @@ impl Renderer {
 
         if !current_sticky_lines.is_empty() {
             let mut y_positions = vec![0.0; current_sticky_lines.len()];
-            
+
             for i in 0..current_sticky_lines.len() {
                 y_positions[i] = i as f32 * self.line_height;
             }
 
+            let s = self.scale_factor;
+            let minimap_w = self.minimap_width;
             let rect_w = self.width - minimap_w;
-            let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0];
+            let sticky_bg = [
+                self.theme.minimap_bg[0],
+                self.theme.minimap_bg[1],
+                self.theme.minimap_bg[2],
+                1.0,
+            ];
             let shadow_top = [0.0, 0.0, 0.0, 0.4];
             let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
+
+            let (first, second) = editor.text_parts();
+            let first_len = first.len();
 
             for i in (0..current_sticky_lines.len()).rev() {
                 let (s_line, _) = current_sticky_lines[i];
                 let rect_y = y_positions[i];
-                
+
                 if rect_y + self.line_height < 0.0 {
                     continue;
                 }
@@ -1137,7 +1280,13 @@ impl Renderer {
                     let num_w = self.measure_ui_width(num_str, 1.0);
                     let draw_x = self.left_padding - 24.0 * s - num_w;
                     let num_color = self.theme.line_num;
-                    self.draw_string_scaled(num_str, draw_x, rect_y + self.baseline_offset, num_color, 1.0);
+                    self.draw_string_scaled(
+                        num_str,
+                        draw_x,
+                        rect_y + self.baseline_offset,
+                        num_color,
+                        1.0,
+                    );
                 }
 
                 let start_byte = editor.line_offsets[s_line];
@@ -1164,12 +1313,18 @@ impl Renderer {
                         while span_idx < spans.len() && spans[span_idx].end <= current_offset {
                             span_idx += 1;
                         }
-                        let adv = if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' { 0.0 } else { self.char_advance(c) };
+                        let adv = if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                            0.0
+                        } else {
+                            self.char_advance(c)
+                        };
                         if adv > 0.0 && c != ' ' && c != '\t' {
                             if x + adv > 0.0 && x < self.width - minimap_w - 20.0 {
                                 if let Some(g) = self.get_glyph(c) {
                                     let mut color = self.theme.fg;
-                                    if span_idx < spans.len() && spans[span_idx].start <= current_offset {
+                                    if span_idx < spans.len()
+                                        && spans[span_idx].start <= current_offset
+                                    {
                                         color = spans[span_idx].color;
                                     }
                                     self.push_quad(
@@ -1177,8 +1332,12 @@ impl Renderer {
                                         rect_y + self.baseline_offset - g.offset_y,
                                         g.width,
                                         g.height,
-                                        g.u, g.v, g.uw, g.vh,
-                                        color, g.is_emoji
+                                        g.u,
+                                        g.v,
+                                        g.uw,
+                                        g.vh,
+                                        color,
+                                        g.is_emoji,
                                     );
                                 }
                             }
@@ -1186,302 +1345,291 @@ impl Renderer {
                         x += adv;
                         current_offset += char_len;
                     }
-                    if x > self.width - minimap_w - 20.0 { break; }
+                    if x > self.width - minimap_w - 20.0 {
+                        break;
+                    }
                 }
 
-                self.sticky_scroll_rects.push((0.0, rect_y, rect_w, self.line_height, start_byte));
+                self.sticky_scroll_rects
+                    .push((0.0, rect_y, rect_w, self.line_height, start_byte));
             }
             self.flush();
         }
 
-        if scrollbar_width > 0.0 {
-            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
-            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
-            let thumb_h =
-                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
-            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
-            self.push_rounded_rect(
-                scrollbar_x + 1.0 * s,
-                thumb_y,
-                scrollbar_width - 2.0 * s,
-                thumb_h,
-                (scrollbar_width - 2.0 * s) / 2.0,
-                [0.7, 0.33, 0.54, 0.8],
-            );
-        }
+        target_sticky_lines
+    }
 
-        if show_fps {
-            let center_x = (self.width - minimap_w) / 2.0;
-            self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
+    #[allow(clippy::too_many_arguments)]
+    fn draw_search_panel(
+        &mut self,
+        search_anim_y: f32,
+        search_editor: &Editor,
+        search_focused: bool,
+        search_case_sensitive: bool,
+        search_results: &[(usize, usize)],
+        search_current_idx: Option<usize>,
+        blink_alpha: f32,
+        scrollbar_width: f32,
+    ) -> bool {
+        let mut wants_pointer = false;
+        let s = self.scale_factor;
+        let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
+        let search_w = 480.0 * s;
+        let search_h = 46.0 * s;
+        let search_x = scrollbar_x - search_w - 20.0 * s;
 
-            let fps_text = std::mem::take(&mut self.fps_string);
-            self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
-            self.fps_string = fps_text;
-        }
+        self.push_rounded_rect(
+            search_x,
+            search_anim_y,
+            search_w,
+            search_h,
+            6.0 * s,
+            [0.18, 0.20, 0.22, 1.0],
+        );
+        self.push_rounded_rect(
+            search_x - 1.0,
+            search_anim_y - 1.0,
+            search_w + 2.0,
+            search_h + 2.0,
+            6.0 * s,
+            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
+        );
 
-        if search_anim_y > -70.0 {
-            let search_w = 480.0 * s;
-            let search_h = 46.0 * s;
-            let search_x = scrollbar_x - search_w - 20.0 * s;
+        self.push_rounded_rect(
+            search_x,
+            search_anim_y,
+            search_w,
+            search_h,
+            6.0 * s,
+            [
+                self.theme.minimap_bg[0],
+                self.theme.minimap_bg[1],
+                self.theme.minimap_bg[2],
+                1.0,
+            ],
+        );
 
-            self.push_rounded_rect(
-                search_x,
-                search_anim_y,
-                search_w,
-                search_h,
-                6.0 * s,
-                [0.18, 0.20, 0.22, 1.0],
-            );
-            self.push_rounded_rect(
-                search_x - 1.0,
-                search_anim_y - 1.0,
-                search_w + 2.0,
-                search_h + 2.0,
-                6.0 * s,
-                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
-            );
+        let input_x = search_x + 10.0 * s;
+        let input_y = search_anim_y + 8.0 * s;
+        let input_w = 260.0 * s;
+        let input_h = 30.0 * s;
 
-            self.push_rounded_rect(
-                search_x,
-                search_anim_y,
-                search_w,
-                search_h,
-                6.0 * s,
-                [
-                    self.theme.minimap_bg[0],
-                    self.theme.minimap_bg[1],
-                    self.theme.minimap_bg[2],
-                    1.0,
-                ],
-            );
+        let input_bg = self.theme.bg;
+        let input_border = if search_focused {
+            self.theme.sel
+        } else {
+            [0.3, 0.3, 0.3, 1.0]
+        };
+        self.push_rounded_rect(
+            input_x - 1.0,
+            input_y - 1.0,
+            input_w + 2.0,
+            input_h + 2.0,
+            4.0 * s,
+            input_border,
+        );
+        self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
 
-            let input_x = search_x + 10.0 * s;
-            let input_y = search_anim_y + 8.0 * s;
-            let input_w = 260.0 * s;
-            let input_h = 30.0 * s;
+        self.flush();
+        unsafe {
+            let text = search_editor.get_full_text();
+            let text_y = input_y + input_h / 2.0 + 6.0 * s;
+            let text_start_x = input_x + 5.0 * s;
+            let visible_width = input_w - 10.0 * s;
 
-            let input_bg = self.theme.bg;
-            let input_border = if search_focused {
-                self.theme.sel
-            } else {
-                [0.3, 0.3, 0.3, 1.0]
-            };
-            self.push_rounded_rect(
-                input_x - 1.0,
-                input_y - 1.0,
-                input_w + 2.0,
-                input_h + 2.0,
-                4.0 * s,
-                input_border,
-            );
-            self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
-
-            self.flush();
-            unsafe {
-                let text = search_editor.get_full_text();
-                let text_y = input_y + input_h / 2.0 + 6.0 * s;
-                let text_start_x = input_x + 5.0 * s;
-                let visible_width = input_w - 10.0 * s;
-
-                let mut cursor_total_x = 0.0;
-                let mut total_text_width = 0.0;
-                for (byte_idx, c) in text.char_indices() {
-                    let char_to_measure = if c == '\n' { '↵' } else { c };
-                    let adv = self
-                        .get_ui_glyph(char_to_measure)
-                        .map(|g| g.advance)
-                        .unwrap_or(10.0);
-                    if byte_idx < search_editor.cursor {
-                        cursor_total_x += adv;
-                    }
-                    total_text_width += adv;
+            let mut cursor_total_x = 0.0;
+            let mut total_text_width = 0.0;
+            for (byte_idx, c) in text.char_indices() {
+                let char_to_measure = if c == '\n' { '↵' } else { c };
+                let adv = self
+                    .get_ui_glyph(char_to_measure)
+                    .map(|g| g.advance)
+                    .unwrap_or(10.0);
+                if byte_idx < search_editor.cursor {
+                    cursor_total_x += adv;
                 }
+                total_text_width += adv;
+            }
 
-                if cursor_total_x - self.search_scroll_x > visible_width {
-                    self.search_scroll_x = cursor_total_x - visible_width;
-                }
-                if cursor_total_x - self.search_scroll_x < 0.0 {
-                    self.search_scroll_x = cursor_total_x;
-                }
-                self.search_scroll_x = self
-                    .search_scroll_x
-                    .min(total_text_width - visible_width)
-                    .max(0.0);
+            if cursor_total_x - self.search_scroll_x > visible_width {
+                self.search_scroll_x = cursor_total_x - visible_width;
+            }
+            if cursor_total_x - self.search_scroll_x < 0.0 {
+                self.search_scroll_x = cursor_total_x;
+            }
+            self.search_scroll_x = self
+                .search_scroll_x
+                .min(total_text_width - visible_width)
+                .max(0.0);
 
-                self.gl.enable(glow::SCISSOR_TEST);
-                let scissor_y = self.height - (input_y + input_h);
-                self.gl.scissor(
-                    input_x as i32,
-                    scissor_y as i32,
-                    input_w as i32,
-                    input_h as i32,
-                );
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (input_y + input_h);
+            self.gl.scissor(
+                input_x as i32,
+                scissor_y as i32,
+                input_w as i32,
+                input_h as i32,
+            );
 
-                let sel_start = search_editor
-                    .selection_anchor
-                    .unwrap_or(search_editor.cursor)
-                    .min(search_editor.cursor);
-                let sel_end = search_editor
-                    .selection_anchor
-                    .unwrap_or(search_editor.cursor)
-                    .max(search_editor.cursor);
+            let sel_start = search_editor
+                .selection_anchor
+                .unwrap_or(search_editor.cursor)
+                .min(search_editor.cursor);
+            let sel_end = search_editor
+                .selection_anchor
+                .unwrap_or(search_editor.cursor)
+                .max(search_editor.cursor);
 
-                let mut current_x = text_start_x - self.search_scroll_x;
-                let mut byte_idx = 0;
-                let mut cursor_draw_x = current_x;
+            let mut current_x = text_start_x - self.search_scroll_x;
+            let mut byte_idx = 0;
+            let mut cursor_draw_x = current_x;
 
-                for c in text.chars() {
-                    if byte_idx == search_editor.cursor {
-                        cursor_draw_x = current_x;
-                    }
-
-                    let char_to_render = if c == '\n' { '↵' } else { c };
-                    let adv = self
-                        .get_ui_glyph(char_to_render)
-                        .map(|g| g.advance)
-                        .unwrap_or(10.0);
-
-                    if byte_idx >= sel_start && byte_idx < sel_end {
-                        self.push_rect(
-                            current_x,
-                            input_y + 4.0 * s,
-                            adv,
-                            input_h - 8.0 * s,
-                            self.theme.sel,
-                        );
-                    }
-
-                    if let Some(g) = self.get_ui_glyph(char_to_render) {
-                        self.push_quad(
-                            current_x + g.offset_x,
-                            text_y - g.offset_y,
-                            g.width,
-                            g.height,
-                            g.u,
-                            g.v,
-                            g.uw,
-                            g.vh,
-                            self.theme.fg,
-                            g.is_emoji,
-                        );
-                    }
-
-                    current_x += adv;
-                    byte_idx += c.len_utf8();
-                }
+            for c in text.chars() {
                 if byte_idx == search_editor.cursor {
                     cursor_draw_x = current_x;
                 }
 
-                if search_focused && sel_start == sel_end && blink_alpha > 0.5 {
+                let char_to_render = if c == '\n' { '↵' } else { c };
+                let adv = self
+                    .get_ui_glyph(char_to_render)
+                    .map(|g| g.advance)
+                    .unwrap_or(10.0);
+
+                if byte_idx >= sel_start && byte_idx < sel_end {
                     self.push_rect(
-                        cursor_draw_x,
+                        current_x,
                         input_y + 4.0 * s,
-                        2.0 * s,
+                        adv,
                         input_h - 8.0 * s,
+                        self.theme.sel,
+                    );
+                }
+
+                if let Some(g) = self.get_ui_glyph(char_to_render) {
+                    self.push_quad(
+                        current_x + g.offset_x,
+                        text_y - g.offset_y,
+                        g.width,
+                        g.height,
+                        g.u,
+                        g.v,
+                        g.uw,
+                        g.vh,
                         self.theme.fg,
+                        g.is_emoji,
                     );
                 }
 
-                self.flush();
-                self.gl.disable(glow::SCISSOR_TEST);
+                current_x += adv;
+                byte_idx += c.len_utf8();
+            }
+            if byte_idx == search_editor.cursor {
+                cursor_draw_x = current_x;
             }
 
-            let text_y = input_y + input_h / 2.0 + 6.0 * s;
-            let btn_y = input_y;
-            let btn_size = 30.0 * s;
-
-            let mut current_x = search_x + search_w - 10.0 * s;
-
-            current_x -= btn_size;
-            let btn_close = IconButton {
-                x: current_x,
-                y: btn_y,
-                size: btn_size,
-                icon: self.icon_close,
-                is_active: false,
-            };
-            current_x -= 8.0 * s;
-
-            current_x -= btn_size;
-            let btn_down = IconButton {
-                x: current_x,
-                y: btn_y,
-                size: btn_size,
-                icon: self.icon_down,
-                is_active: false,
-            };
-            current_x -= 4.0 * s;
-
-            current_x -= btn_size;
-            let btn_up = IconButton {
-                x: current_x,
-                y: btn_y,
-                size: btn_size,
-                icon: self.icon_up,
-                is_active: false,
-            };
-            current_x -= 4.0 * s;
-
-            current_x -= btn_size;
-            let btn_case = IconButton {
-                x: current_x,
-                y: btn_y,
-                size: btn_size,
-                icon: self.icon_case_match,
-                is_active: search_case_sensitive,
-            };
-
-            if search_results.len() != self.last_search_len
-                || search_current_idx != self.last_search_idx
-            {
-                self.search_res_string.clear();
-                if !search_results.is_empty() {
-                    use std::fmt::Write;
-                    let _ = write!(
-                        &mut self.search_res_string,
-                        "{}/{}",
-                        search_current_idx.unwrap_or(0) + 1,
-                        search_results.len()
-                    );
-                }
-                self.last_search_len = search_results.len();
-                self.last_search_idx = search_current_idx;
+            if search_focused && sel_start == sel_end && blink_alpha > 0.5 {
+                self.push_rect(
+                    cursor_draw_x,
+                    input_y + 4.0 * s,
+                    2.0 * s,
+                    input_h - 8.0 * s,
+                    self.theme.fg,
+                );
             }
 
-            let temp_res_text = std::mem::take(&mut self.search_res_string);
+            self.flush();
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
 
-            let (res_text, text_color) = if search_results.is_empty() {
-                if search_editor.get_full_text().is_empty() {
-                    ("", [0.6, 0.6, 0.6, 1.0])
-                } else {
-                    ("Нет", [0.95, 0.35, 0.45, 1.0])
-                }
+        let text_y = input_y + input_h / 2.0 + 6.0 * s;
+        let btn_y = input_y;
+        let btn_size = 30.0 * s;
+
+        let mut current_x = search_x + search_w - 10.0 * s;
+
+        current_x -= btn_size;
+        let btn_close = IconButton {
+            x: current_x,
+            y: btn_y,
+            size: btn_size,
+            icon: self.icon_close,
+            is_active: false,
+        };
+        current_x -= 8.0 * s;
+
+        current_x -= btn_size;
+        let btn_down = IconButton {
+            x: current_x,
+            y: btn_y,
+            size: btn_size,
+            icon: self.icon_down,
+            is_active: false,
+        };
+        current_x -= 4.0 * s;
+
+        current_x -= btn_size;
+        let btn_up = IconButton {
+            x: current_x,
+            y: btn_y,
+            size: btn_size,
+            icon: self.icon_up,
+            is_active: false,
+        };
+        current_x -= 4.0 * s;
+
+        current_x -= btn_size;
+        let btn_case = IconButton {
+            x: current_x,
+            y: btn_y,
+            size: btn_size,
+            icon: self.icon_case_match,
+            is_active: search_case_sensitive,
+        };
+
+        if search_results.len() != self.last_search_len
+            || search_current_idx != self.last_search_idx
+        {
+            self.search_res_string.clear();
+            if !search_results.is_empty() {
+                use std::fmt::Write;
+                let _ = write!(
+                    &mut self.search_res_string,
+                    "{}/{}",
+                    search_current_idx.unwrap_or(0) + 1,
+                    search_results.len()
+                );
+            }
+            self.last_search_len = search_results.len();
+            self.last_search_idx = search_current_idx;
+        }
+
+        let temp_res_text = std::mem::take(&mut self.search_res_string);
+
+        let (res_text, text_color) = if search_results.is_empty() {
+            if search_editor.get_full_text().is_empty() {
+                ("", [0.6, 0.6, 0.6, 1.0])
             } else {
-                (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
-            };
-
-            if !res_text.is_empty() {
-                let counter_x = input_x + input_w + 10.0 * s;
-                self.draw_string_scaled(res_text, counter_x, text_y, text_color, 0.9);
+                ("Нет", [0.95, 0.35, 0.45, 1.0])
             }
+        } else {
+            (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
+        };
 
-            self.search_res_string = temp_res_text;
-
-            let mx = self.last_mouse_x;
-            let my = self.last_mouse_y;
-
-            wants_pointer |= btn_case.render(self, mx, my, s, false);
-            wants_pointer |= btn_up.render(self, mx, my, s, false);
-            wants_pointer |= btn_down.render(self, mx, my, s, false);
-            wants_pointer |= btn_close.render(self, mx, my, s, false);
+        if !res_text.is_empty() {
+            let counter_x = input_x + input_w + 10.0 * s;
+            self.draw_string_scaled(res_text, counter_x, text_y, text_color, 0.9);
         }
 
-        if show_quit_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
-        }
-        self.flush();
+        self.search_res_string = temp_res_text;
 
-        (wants_pointer, target_sticky_lines)
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
+
+        wants_pointer |= btn_case.render(self, mx, my, s, false);
+        wants_pointer |= btn_up.render(self, mx, my, s, false);
+        wants_pointer |= btn_down.render(self, mx, my, s, false);
+        wants_pointer |= btn_close.render(self, mx, my, s, false);
+
+        wants_pointer
     }
 }
