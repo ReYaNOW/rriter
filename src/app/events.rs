@@ -477,7 +477,7 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                let mut wants_pointer = self.renderer.as_mut().unwrap().draw(
+                let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     self.scroll_x,
                     self.scroll_y,
@@ -494,15 +494,14 @@ impl ApplicationHandler for App {
                     self.search_case_sensitive,
                     self.show_welcome,
                     &self.recent_files,
-                    self.sticky_scroll_alpha,
+                    &self.current_sticky_lines,
+                    self.sticky_anim_progress,
+                    self.sticky_anim_is_adding,
                 );
 
+                self.target_sticky_lines = target_sticky;
+
                 let r = self.renderer.as_ref().unwrap();
-                if r.sticky_scroll_rects.is_empty() || self.scroll_velocity.abs() > 1000.0 || self.is_dragging_minimap {
-                    self.target_sticky_scroll_alpha = 0.0;
-                } else {
-                    self.target_sticky_scroll_alpha = 1.0;
-                }
                 let mx = r.last_mouse_x;
                 let my = r.last_mouse_y;
                 for &(rx, ry, rw, rh, _) in &r.sticky_scroll_rects {
@@ -610,12 +609,8 @@ impl ApplicationHandler for App {
 
         let mut needs_redraw = false;
 
-        let diff_alpha = self.target_sticky_scroll_alpha - self.sticky_scroll_alpha;
-        if diff_alpha.abs() > 0.01 {
-            self.sticky_scroll_alpha += diff_alpha * 20.0 * dt;
-            needs_redraw = true;
-        } else if self.sticky_scroll_alpha != self.target_sticky_scroll_alpha {
-            self.sticky_scroll_alpha = self.target_sticky_scroll_alpha;
+        if self.current_sticky_lines != self.target_sticky_lines {
+            self.current_sticky_lines = self.target_sticky_lines.clone();
             needs_redraw = true;
         }
 

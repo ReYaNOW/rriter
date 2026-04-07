@@ -339,8 +339,10 @@ Ctrl + Del\tУдалить слово справа от курсора
         is_dragging_autocomplete: false,
         autocomplete_drag_offset_y: 0.0,
 
-        sticky_scroll_alpha: 0.0,
-        target_sticky_scroll_alpha: 0.0,
+        current_sticky_lines: Vec::new(),
+        target_sticky_lines: Vec::new(),
+        sticky_anim_progress: 1.0,
+        sticky_anim_is_adding: false,
     };
 
     app.highlighter.reset(

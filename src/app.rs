@@ -134,8 +134,10 @@ pub struct App {
     pub is_dragging_autocomplete: bool,
     pub autocomplete_drag_offset_y: f32,
 
-    pub sticky_scroll_alpha: f32,
-    pub target_sticky_scroll_alpha: f32,
+    pub current_sticky_lines: Vec<(usize, usize)>,
+    pub target_sticky_lines: Vec<(usize, usize)>,
+    pub sticky_anim_progress: f32,
+    pub sticky_anim_is_adding: bool,
 }
 
 impl App {

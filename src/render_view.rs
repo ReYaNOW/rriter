@@ -33,10 +33,12 @@ impl Renderer {
         search_case_sensitive: bool,
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
-        sticky_scroll_alpha: f32,
-    ) -> bool {
+        current_sticky_lines: &[(usize, usize)],
+        _sticky_anim_progress: f32,
+        _sticky_anim_is_adding: bool,
+    ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
-            return self.draw_welcome(recent_files);
+            return (self.draw_welcome(recent_files), Vec::new());
         }
 
         let mut wants_pointer = false;
@@ -63,10 +65,14 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
+        self.phys_to_visual.clear();
+        self.phys_to_visual.resize(editor.line_offsets.len(), 0);
+
         let mut visible_lines_count = 0;
         let mut visible_cursor_line = 0;
         let mut temp_phys = 0;
         while temp_phys < editor.line_offsets.len() {
+            self.phys_to_visual[temp_phys] = visible_lines_count;
             if temp_phys == cursor_phys_line {
                 visible_cursor_line = visible_lines_count;
             }
@@ -82,7 +88,12 @@ impl Renderer {
                 if cursor_phys_line > temp_phys && cursor_phys_line <= end {
                     visible_cursor_line = visible_lines_count - 1;
                 }
-                temp_phys = end;
+                while temp_phys < end {
+                    temp_phys += 1;
+                    if temp_phys < editor.line_offsets.len() {
+                        self.phys_to_visual[temp_phys] = visible_lines_count - 1;
+                    }
+                }
             }
             temp_phys += 1;
         }
@@ -1031,56 +1042,91 @@ impl Renderer {
         for &(start_b, end_b, is_sticky) in &editor.foldable_ranges_bytes {
             if !is_sticky { continue; }
             let sl = editor.line_offsets.partition_point(|&o| o <= start_b).saturating_sub(1);
-            let el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
-            if sl < el {
-                active_ranges.push((sl, el));
+            let orig_el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
+            if sl < orig_el {
+                let mut el = orig_el;
+                while el + 1 < editor.line_offsets.len() {
+                    let next_start = editor.line_offsets[el + 1];
+                    let next_end = editor.line_offsets.get(el + 2).copied().unwrap_or(editor.len());
+                    let mut is_blank = true;
+                    for i in next_start..next_end {
+                        let b = editor.byte_at(i);
+                        if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                            is_blank = false;
+                            break;
+                        }
+                    }
+                    if is_blank {
+                        el += 1;
+                    } else {
+                        break;
+                    }
+                }
+                active_ranges.push((sl, orig_el, el));
             }
         }
-        active_ranges.sort_unstable_by_key(|&(sl, _)| sl);
+        active_ranges.sort_unstable_by_key(|&(sl, _, _)| sl);
 
-        let mut sticky_lines = Vec::new();
-        let mut sticky_stack_height = 0.0;
-        for &(sl, el) in &active_ranges {
-            let line_y = sl as f32 * self.line_height - render_scroll_y;
-            let end_line_y = el as f32 * self.line_height - render_scroll_y;
+        let mut depth_stack: Vec<usize> = Vec::new();
+        let mut ranges_with_depth = Vec::new();
 
-            if line_y <= sticky_stack_height + 1.0 && end_line_y > sticky_stack_height {
-                if !sticky_lines.iter().any(|&(s, _)| s == sl) {
-                    sticky_lines.push((sl, el));
-                    sticky_stack_height += self.line_height;
+        for &(sl, orig_el, expanded_el) in &active_ranges {
+            while let Some(&last_orig_el) = depth_stack.last() {
+                if sl > last_orig_el {
+                    depth_stack.pop();
+                } else {
+                    break;
+                }
+            }
+            let depth = depth_stack.len();
+            depth_stack.push(orig_el);
+            ranges_with_depth.push((sl, expanded_el, depth));
+        }
+
+        let mut target_sticky_lines = Vec::new();
+        let mut current_depth = 0;
+
+        for &(sl, expanded_el, depth) in &ranges_with_depth {
+            // Если уровень вложенности не совпадает с тем, который мы сейчас ищем - пропускаем.
+            // Это гарантирует, что на один уровень (например, уровень методов) попадет ровно один метод.
+            if depth != current_depth {
+                continue;
+            }
+
+            let v_sl = self.phys_to_visual.get(sl).copied().unwrap_or(0);
+            let v_el = self.phys_to_visual.get(expanded_el).copied().unwrap_or(0);
+            
+            let slot_y = depth as f32 * self.line_height;
+            let line_y = v_sl as f32 * self.line_height - render_scroll_y;
+            let push_y = (v_el + 1) as f32 * self.line_height - render_scroll_y;
+
+            if line_y <= slot_y + 0.1 && push_y > slot_y + 0.1 {
+                if !target_sticky_lines.iter().any(|&(s, _)| s == sl) {
+                    target_sticky_lines.push((sl, expanded_el));
+                    // Метод занял свой слот, переходим к поиску вложенных в него блоков (циклов, if-ов)
+                    current_depth += 1;
                 }
             }
         }
 
-        if sticky_lines.len() > 5 {
-            let skip = sticky_lines.len() - 5;
-            sticky_lines.drain(0..skip);
+        if target_sticky_lines.len() > 5 {
+            let skip = target_sticky_lines.len() - 5;
+            target_sticky_lines.drain(0..skip);
         }
 
-        if !sticky_lines.is_empty() {
-            let mut y_positions = vec![0.0; sticky_lines.len()];
-            let mut current_bottom = f32::MAX;
-            for i in (0..sticky_lines.len()).rev() {
-                let (_, el) = sticky_lines[i];
-                let end_y = el as f32 * self.line_height - render_scroll_y;
-                let normal_y = i as f32 * self.line_height;
-                let mut actual_y = normal_y;
-
-                if end_y < actual_y + self.line_height {
-                    actual_y = end_y - self.line_height;
-                }
-                if actual_y + self.line_height > current_bottom {
-                    actual_y = current_bottom - self.line_height;
-                }
-                y_positions[i] = actual_y;
-                current_bottom = actual_y;
+        if !current_sticky_lines.is_empty() {
+            let mut y_positions = vec![0.0; current_sticky_lines.len()];
+            for i in (0..current_sticky_lines.len()).rev() {
+                y_positions[i] = i as f32 * self.line_height;
             }
 
             let rect_w = self.width - minimap_w;
-            let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], sticky_scroll_alpha];
-            let shadow_color = [0.0, 0.0, 0.0, 0.5 * sticky_scroll_alpha];
+            let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0];
+            let shadow_top = [0.0, 0.0, 0.0, 0.4];
+            let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
 
-            for (i, &(s_line, _)) in sticky_lines.iter().enumerate() {
+            for i in (0..current_sticky_lines.len()).rev() {
+                let (s_line, _) = current_sticky_lines[i];
                 let rect_y = y_positions[i];
                 
                 if rect_y + self.line_height < 0.0 {
@@ -1088,8 +1134,15 @@ impl Renderer {
                 }
 
                 self.push_rect(0.0, rect_y, rect_w, self.line_height, sticky_bg);
-                if i == sticky_lines.len() - 1 {
-                    self.push_rect(0.0, rect_y + self.line_height, rect_w, 2.0, shadow_color);
+                if i == current_sticky_lines.len() - 1 {
+                    self.push_vertical_gradient(
+                        0.0,
+                        rect_y + self.line_height,
+                        rect_w,
+                        8.0 * s,
+                        shadow_top,
+                        shadow_bottom,
+                    );
                 }
 
                 let mut n = s_line + 1;
@@ -1103,8 +1156,7 @@ impl Renderer {
                 if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                     let num_w = self.measure_ui_width(num_str, 1.0);
                     let draw_x = self.left_padding - 24.0 * s - num_w;
-                    let mut num_color = self.theme.line_num;
-                    num_color[3] *= sticky_scroll_alpha;
+                    let num_color = self.theme.line_num;
                     self.draw_string_scaled(num_str, draw_x, rect_y + self.baseline_offset, num_color, 1.0);
                 }
 
@@ -1140,7 +1192,6 @@ impl Renderer {
                                     if span_idx < spans.len() && spans[span_idx].start <= current_offset {
                                         color = spans[span_idx].color;
                                     }
-                                    color[3] *= sticky_scroll_alpha;
                                     self.push_quad(
                                         x + g.offset_x,
                                         rect_y + self.baseline_offset - g.offset_y,
@@ -1435,6 +1486,6 @@ impl Renderer {
         }
         self.flush();
 
-        wants_pointer
+        (wants_pointer, target_sticky_lines)
     }
 }
