@@ -152,7 +152,7 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
             ] @sticky
             [
                 (if_statement) (for_statement) (while_statement)
-                (with_statement) (try_statement)
+                (with_statement) (try_statement) (match_statement) (case_clause)
             ] @fold
             [
                 (dictionary)

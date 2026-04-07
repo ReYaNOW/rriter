@@ -143,6 +143,109 @@ impl Renderer {
         let first_len = first.len();
         let len = first_len + second.len();
 
+        // --- Подсветка скобок ---
+        let mut bracket_pairs = None;
+        let find_matching_bracket = |pos: usize, b: u8| -> Option<usize> {
+            let (open, close, dir) = match b {
+                b'(' => (b'(', b')', 1isize),
+                b'[' => (b'[', b']', 1isize),
+                b'{' => (b'{', b'}', 1isize),
+                b')' => (b')', b'(', -1isize),
+                b']' => (b']', b'[', -1isize),
+                b'}' => (b'}', b'{', -1isize),
+                _ => return None,
+            };
+            let mut depth = 1;
+            let mut curr = pos as isize + dir;
+            while curr >= 0 && curr < len as isize {
+                let cb = editor.byte_at(curr as usize);
+                if cb == open { depth += 1; }
+                else if cb == close {
+                    depth -= 1;
+                    if depth == 0 { return Some(curr as usize); }
+                }
+                curr += dir;
+            }
+            None
+        };
+
+        if editor.cursor < len {
+            let b = editor.byte_at(editor.cursor);
+            if let Some(matching) = find_matching_bracket(editor.cursor, b) {
+                bracket_pairs = Some((editor.cursor, matching));
+            }
+        }
+        if bracket_pairs.is_none() && editor.cursor > 0 {
+            let b = editor.byte_at(editor.cursor - 1);
+            if let Some(matching) = find_matching_bracket(editor.cursor - 1, b) {
+                bracket_pairs = Some((editor.cursor - 1, matching));
+            }
+        }
+
+        let sel_start = editor.selection_anchor.map(|a| a.min(editor.cursor)).unwrap_or(editor.cursor);
+        let sel_end = editor.selection_anchor.map(|a| a.max(editor.cursor)).unwrap_or(editor.cursor);
+
+        // --- Одинаковые слова (Word Highlighting) ---
+        let mut identical_words = Vec::new();
+        let mut target_word = None;
+        let is_valid_word = |s: &str| -> bool {
+            !s.is_empty() && s.as_bytes().iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_') && !s.chars().next().unwrap().is_ascii_digit()
+        };
+
+        if sel_start != sel_end {
+            let slen = sel_end - sel_start;
+            if slen < 100 {
+                if let Some(text) = editor.get_selection() {
+                    if is_valid_word(&text) {
+                        target_word = Some(text);
+                    }
+                }
+            }
+        } else {
+            let mut p_start = editor.cursor;
+            while p_start > 0 {
+                let b = editor.byte_at(p_start - 1);
+                if !(b.is_ascii_alphanumeric() || b == b'_') { break; }
+                p_start -= 1;
+            }
+            let mut p_end = editor.cursor;
+            while p_end < len {
+                let b = editor.byte_at(p_end);
+                if !(b.is_ascii_alphanumeric() || b == b'_') { break; }
+                p_end += 1;
+            }
+            if p_end > p_start {
+                let slen = p_end - p_start;
+                let mut res = Vec::with_capacity(slen);
+                for i in p_start..p_end { res.push(editor.byte_at(i)); }
+                let w = String::from_utf8_lossy(&res).into_owned();
+                if is_valid_word(&w) {
+                    target_word = Some(w);
+                }
+            }
+        }
+
+        if let Some(word) = target_word {
+            let full_text = editor.get_full_text();
+            let mut start = 0;
+            let w_len = word.len();
+            while let Some(idx) = full_text[start..].find(&word) {
+                let abs_idx = start + idx;
+                let left_ok = if abs_idx == 0 { true } else {
+                    let b = full_text.as_bytes()[abs_idx - 1];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                };
+                let right_ok = if abs_idx + w_len == len { true } else {
+                    let b = full_text.as_bytes()[abs_idx + w_len];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                };
+                if left_ok && right_ok {
+                    identical_words.push((abs_idx, abs_idx + w_len));
+                }
+                start = abs_idx + w_len;
+            }
+        }
+
         let max_scroll = self.get_max_scroll(editor, self.height);
         let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
@@ -262,15 +365,6 @@ impl Renderer {
             merged.push(int);
         }
 
-        let sel_start = editor
-            .selection_anchor
-            .map(|a| a.min(editor.cursor))
-            .unwrap_or(editor.cursor);
-        let sel_end = editor
-            .selection_anchor
-            .map(|a| a.max(editor.cursor))
-            .unwrap_or(editor.cursor);
-
         let mut cursor_pos = None;
 
         for i in skip_visual_lines..end_visual_line {
@@ -304,6 +398,7 @@ impl Renderer {
             };
 
             let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
+            let mut identical_idx = identical_words.partition_point(|&(_, e)| e <= start_byte);
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -348,6 +443,11 @@ impl Renderer {
                     {
                         search_idx += 1;
                     }
+                    while identical_idx < identical_words.len()
+                        && identical_words[identical_idx].1 <= current_offset
+                    {
+                        identical_idx += 1;
+                    }
 
                     let is_newline = c == '\n';
                     let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
@@ -369,7 +469,25 @@ impl Renderer {
                         }
                     }
 
-                    if is_search_res {
+                    let is_identical = identical_idx < identical_words.len() && current_offset >= identical_words[identical_idx].0;
+
+                    let is_bracket = if let Some((b1, b2)) = bracket_pairs {
+                        current_offset == b1 || current_offset == b2
+                    } else {
+                        false
+                    };
+
+                    // Приоритеты фонов: 1. Выделение, 2. Поиск, 3. Одинаковые слова
+                    if current_offset >= sel_start && current_offset < sel_end {
+                        let w = if is_newline { 10.0 } else { adv };
+                        self.push_rect(
+                            x - render_scroll_x,
+                            y - self.baseline_offset + 2.0,
+                            w,
+                            self.line_height,
+                            self.theme.sel,
+                        );
+                    } else if is_search_res {
                         let w = if is_newline { 10.0 } else { adv };
                         let color = if is_active_search {
                             [1.0, 0.6, 0.0, 0.5]
@@ -383,14 +501,24 @@ impl Renderer {
                             self.line_height,
                             color,
                         );
-                    } else if current_offset >= sel_start && current_offset < sel_end {
+                    } else if is_identical {
                         let w = if is_newline { 10.0 } else { adv };
                         self.push_rect(
                             x - render_scroll_x,
                             y - self.baseline_offset + 2.0,
                             w,
                             self.line_height,
-                            self.theme.sel,
+                            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.3],
+                        );
+                    }
+
+                    if is_bracket && !is_newline && !is_hidden {
+                        self.push_rect(
+                            x - render_scroll_x,
+                            y - self.baseline_offset + 2.0,
+                            adv,
+                            self.line_height,
+                            [0.6, 0.6, 0.6, 0.3],
                         );
                     }
 
