@@ -26,7 +26,8 @@ pub struct Vertex {
     pub pos: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
-    pub is_emoji: f32,
+    pub mode: f32,
+    pub sdf_params: [f32; 3],
 }
 
 unsafe impl bytemuck::Zeroable for Vertex {}
@@ -71,7 +72,6 @@ pub struct Renderer {
     pub vbo: glow::Buffer,
     pub texture: glow::Texture,
     pub vertices: Vec<Vertex>,
-    pub temp_edge_buffer: Vec<Vertex>,
 
     pub fonts: Vec<FontData>,
     pub ui_fonts: Vec<FontData>,
@@ -140,25 +140,37 @@ impl Renderer {
         unsafe {
             let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
             gl.shader_source(v_shader, "#version 330
-                in vec2 pos; in vec2 uv; in vec4 color; in float is_emoji;
-                out vec2 v_uv; out vec4 v_col; out float v_is_emoji;
+                in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;
+                out vec2 v_uv; out vec4 v_col; out float v_mode; out vec3 v_sdf_params;
                 uniform mat4 proj;
-                void main() { gl_Position = proj * vec4(pos, 0.0, 1.0); v_uv = uv; v_col = color; v_is_emoji = is_emoji; }");
+                void main() { 
+                    gl_Position = proj * vec4(pos, 0.0, 1.0); 
+                    v_uv = uv; v_col = color; v_mode = mode; v_sdf_params = sdf_params; 
+                }");
             gl.compile_shader(v_shader);
 
             let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
             gl.shader_source(f_shader, "#version 330
-                in vec2 v_uv; in vec4 v_col; in float v_is_emoji;
+                in vec2 v_uv; in vec4 v_col; in float v_mode; in vec3 v_sdf_params;
                 out vec4 out_color;
                 uniform sampler2D tex;
+                
+                float roundedBoxSDF(vec2 CenterPosition, vec2 Size, float Radius) {
+                    return length(max(abs(CenterPosition) - Size + Radius, 0.0)) - Radius;
+                }
+                
                 void main() {
-                    if(v_uv.x < -0.5) { 
+                    if(v_mode == 2.0) { 
                         float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
                         out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a); 
-                    }
-                    else {
+                    } else if(v_mode == 3.0) {
+                        float d = roundedBoxSDF(v_uv, vec2(v_sdf_params.x, v_sdf_params.y), v_sdf_params.z);
+                        float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
+                        if (alpha <= 0.0) discard;
+                        out_color = vec4(v_col.rgb, v_col.a * alpha);
+                    } else {
                         vec4 tex_color = texture(tex, v_uv);
-                        if (v_is_emoji > 0.5) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
+                        if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
                         else { out_color = vec4(v_col.rgb, tex_color.a * v_col.a); }
                     }
                 }");
@@ -187,9 +199,12 @@ impl Renderer {
             let color_loc = gl.get_attrib_location(program, "color").unwrap();
             gl.vertex_attrib_pointer_f32(color_loc, 4, glow::FLOAT, false, stride, 16);
             gl.enable_vertex_attrib_array(color_loc);
-            let is_emoji_loc = gl.get_attrib_location(program, "is_emoji").unwrap();
-            gl.vertex_attrib_pointer_f32(is_emoji_loc, 1, glow::FLOAT, false, stride, 32);
-            gl.enable_vertex_attrib_array(is_emoji_loc);
+            let mode_loc = gl.get_attrib_location(program, "mode").unwrap();
+            gl.vertex_attrib_pointer_f32(mode_loc, 1, glow::FLOAT, false, stride, 32);
+            gl.enable_vertex_attrib_array(mode_loc);
+            let sdf_loc = gl.get_attrib_location(program, "sdf_params").unwrap();
+            gl.vertex_attrib_pointer_f32(sdf_loc, 3, glow::FLOAT, false, stride, 36);
+            gl.enable_vertex_attrib_array(sdf_loc);
 
             let texture = gl.create_texture().unwrap();
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -351,7 +366,6 @@ impl Renderer {
                 vbo,
                 texture,
                 vertices: Vec::with_capacity(MAX_VERTICES),
-                temp_edge_buffer: Vec::with_capacity(256),
                 fonts,
                 ui_fonts,
                 scale_context: ScaleContext::new(),
@@ -784,41 +798,24 @@ impl Renderer {
         uw: f32,
         vh: f32,
         color: [f32; 4],
-        is_emoji: f32,
+        mode: f32,
     ) {
         let x1 = x.round();
         let y1 = y.round();
         let x2 = (x + w).round();
         let y2 = (y + h).round();
 
-        let v1 = Vertex {
-            pos: [x1, y1],
-            uv: [u, v],
-            color,
-            is_emoji,
-        };
-        let v2 = Vertex {
-            pos: [x2, y1],
-            uv: [u + uw, v],
-            color,
-            is_emoji,
-        };
-        let v3 = Vertex {
-            pos: [x2, y2],
-            uv: [u + uw, v + vh],
-            color,
-            is_emoji,
-        };
-        let v4 = Vertex {
-            pos: [x1, y2],
-            uv: [u, v + vh],
-            color,
-            is_emoji,
-        };
+        let sdf_params = [0.0, 0.0, 0.0];
+
+        let v1 = Vertex { pos: [x1, y1], uv: [u, v], color, mode, sdf_params };
+        let v2 = Vertex { pos: [x2, y1], uv: [u + uw, v], color, mode, sdf_params };
+        let v3 = Vertex { pos: [x2, y2], uv: [u + uw, v + vh], color, mode, sdf_params };
+        let v4 = Vertex { pos: [x1, y2], uv: [u, v + vh], color, mode, sdf_params };
+
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
     pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
-        self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 0.0);
+        self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
     }
 }

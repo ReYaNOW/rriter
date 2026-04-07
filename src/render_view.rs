@@ -775,22 +775,6 @@ impl Renderer {
 
         self.push_rect(minimap_x, 0.0, minimap_w, self.height, solid_minimap_bg);
 
-        if scrollbar_width > 0.0 {
-            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
-            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
-            let thumb_h =
-                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
-            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
-            self.push_rounded_rect(
-                scrollbar_x + 1.0 * s,
-                thumb_y,
-                scrollbar_width - 2.0 * s,
-                thumb_h,
-                (scrollbar_width - 2.0 * s) / 2.0,
-                [0.7, 0.33, 0.54, 0.8],
-            );
-        }
-
         let scroll_ratio_y = if max_scroll > 0.0 {
             (render_scroll_y / max_scroll).clamp(0.0, 1.0)
         } else {
@@ -916,30 +900,11 @@ impl Renderer {
                         let x1 = current_x.round();
                         let x2 = (current_x + w).round();
 
-                        let v1 = Vertex {
-                            pos: [x1, y1],
-                            uv: [-1.0, -1.0],
-                            color,
-                            is_emoji: 0.0,
-                        };
-                        let v2 = Vertex {
-                            pos: [x2, y1],
-                            uv: [-1.0, -1.0],
-                            color,
-                            is_emoji: 0.0,
-                        };
-                        let v3 = Vertex {
-                            pos: [x2, y2],
-                            uv: [-1.0, -1.0],
-                            color,
-                            is_emoji: 0.0,
-                        };
-                        let v4 = Vertex {
-                            pos: [x1, y2],
-                            uv: [-1.0, -1.0],
-                            color,
-                            is_emoji: 0.0,
-                        };
+                        let sdf = [0.0, 0.0, 0.0];
+                        let v1 = Vertex { pos: [x1, y1], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
+                        let v2 = Vertex { pos: [x2, y1], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
+                        let v3 = Vertex { pos: [x2, y2], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
+                        let v4 = Vertex { pos: [x1, y2], uv: [-1.0, -1.0], color, mode: 2.0, sdf_params: sdf };
 
                         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
                         if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
@@ -1135,7 +1100,7 @@ impl Renderer {
                 y_positions[i] = i as f32 * self.line_height;
             }
 
-            let rect_w = self.width - minimap_w - scrollbar_width;
+            let rect_w = self.width - minimap_w;
             let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0];
             let shadow_top = [0.0, 0.0, 0.0, 0.4];
             let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
@@ -1227,6 +1192,22 @@ impl Renderer {
                 self.sticky_scroll_rects.push((0.0, rect_y, rect_w, self.line_height, start_byte));
             }
             self.flush();
+        }
+
+        if scrollbar_width > 0.0 {
+            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
+            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
+            let thumb_h =
+                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
+            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
+            self.push_rounded_rect(
+                scrollbar_x + 1.0 * s,
+                thumb_y,
+                scrollbar_width - 2.0 * s,
+                thumb_h,
+                (scrollbar_width - 2.0 * s) / 2.0,
+                [0.7, 0.33, 0.54, 0.8],
+            );
         }
 
         if show_fps {
@@ -1470,19 +1451,19 @@ impl Renderer {
 
             let temp_res_text = std::mem::take(&mut self.search_res_string);
 
-            let res_text = if search_results.is_empty() {
+            let (res_text, text_color) = if search_results.is_empty() {
                 if search_editor.get_full_text().is_empty() {
-                    ""
+                    ("", [0.6, 0.6, 0.6, 1.0])
                 } else {
-                    "Нет"
+                    ("Нет", [0.95, 0.35, 0.45, 1.0])
                 }
             } else {
-                &temp_res_text
+                (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
             };
 
             if !res_text.is_empty() {
                 let counter_x = input_x + input_w + 10.0 * s;
-                self.draw_string_scaled(res_text, counter_x, text_y, [0.6, 0.6, 0.6, 1.0], 0.9);
+                self.draw_string_scaled(res_text, counter_x, text_y, text_color, 0.9);
             }
 
             self.search_res_string = temp_res_text;

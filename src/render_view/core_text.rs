@@ -527,30 +527,13 @@ impl Renderer {
         let x2 = (x + w).round();
         let y2 = (y + h).round();
 
-        let v1 = Vertex {
-            pos: [x1, y1],
-            uv: [-1.0, -1.0],
-            color: top,
-            is_emoji: 0.0,
-        };
-        let v2 = Vertex {
-            pos: [x2, y1],
-            uv: [-1.0, -1.0],
-            color: top,
-            is_emoji: 0.0,
-        };
-        let v3 = Vertex {
-            pos: [x2, y2],
-            uv: [-1.0, -1.0],
-            color: bottom,
-            is_emoji: 0.0,
-        };
-        let v4 = Vertex {
-            pos: [x1, y2],
-            uv: [-1.0, -1.0],
-            color: bottom,
-            is_emoji: 0.0,
-        };
+        let sdf_params = [0.0, 0.0, 0.0];
+
+        let v1 = Vertex { pos: [x1, y1], uv: [0.0, 0.0], color: top, mode: 2.0, sdf_params };
+        let v2 = Vertex { pos: [x2, y1], uv: [0.0, 0.0], color: top, mode: 2.0, sdf_params };
+        let v3 = Vertex { pos: [x2, y2], uv: [0.0, 0.0], color: bottom, mode: 2.0, sdf_params };
+        let v4 = Vertex { pos: [x1, y2], uv: [0.0, 0.0], color: bottom, mode: 2.0, sdf_params };
+
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
@@ -608,40 +591,20 @@ impl Renderer {
     }
 
     pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) {
-        let cx = x + w / 2.0;
-        let cy = y + h / 2.0;
-        let center = Vertex {
-            pos: [cx, cy],
-            uv: [-1.0, -1.0],
-            color,
-            is_emoji: 0.0,
-        };
+        let x1 = x.round();
+        let y1 = y.round();
+        let x2 = (x + w).round();
+        let y2 = (y + h).round();
 
-        let segments = 32;
-        self.temp_edge_buffer.clear();
+        let half_w = w / 2.0;
+        let half_h = h / 2.0;
+        let sdf_params = [half_w, half_h, r];
 
-        let mut add_arc = |corner_cx: f32, corner_cy: f32, start_angle: f32| {
-            for i in 0..=segments {
-                let a = start_angle + (i as f32 * std::f32::consts::PI / 2.0 / segments as f32);
-                self.temp_edge_buffer.push(Vertex {
-                    pos: [corner_cx + a.cos() * r, corner_cy + a.sin() * r],
-                    uv: [-1.0, -1.0],
-                    color,
-                    is_emoji: 0.0,
-                });
-            }
-        };
+        let v1 = Vertex { pos: [x1, y1], uv: [-half_w, -half_h], color, mode: 3.0, sdf_params };
+        let v2 = Vertex { pos: [x2, y1], uv: [half_w, -half_h], color, mode: 3.0, sdf_params };
+        let v3 = Vertex { pos: [x2, y2], uv: [half_w, half_h], color, mode: 3.0, sdf_params };
+        let v4 = Vertex { pos: [x1, y2], uv: [-half_w, half_h], color, mode: 3.0, sdf_params };
 
-        add_arc(x + w - r, y + h - r, 0.0);
-        add_arc(x + r, y + h - r, std::f32::consts::PI / 2.0);
-        add_arc(x + r, y + r, std::f32::consts::PI);
-        add_arc(x + w - r, y + r, 3.0 * std::f32::consts::PI / 2.0);
-
-        for i in 0..self.temp_edge_buffer.len() {
-            let next_i = (i + 1) % self.temp_edge_buffer.len();
-            self.vertices.push(center);
-            self.vertices.push(self.temp_edge_buffer[i]);
-            self.vertices.push(self.temp_edge_buffer[next_i]);
-        }
+        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 }
