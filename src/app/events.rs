@@ -494,7 +494,23 @@ impl ApplicationHandler for App {
                     self.search_case_sensitive,
                     self.show_welcome,
                     &self.recent_files,
+                    self.sticky_scroll_alpha,
                 );
+
+                let r = self.renderer.as_ref().unwrap();
+                if r.sticky_scroll_rects.is_empty() {
+                    self.target_sticky_scroll_alpha = 0.0;
+                } else {
+                    self.target_sticky_scroll_alpha = 1.0;
+                }
+                let mx = r.last_mouse_x;
+                let my = r.last_mouse_y;
+                for &(rx, ry, rw, rh, _) in &r.sticky_scroll_rects {
+                    if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                        wants_pointer = true;
+                        break;
+                    }
+                }
 
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
@@ -593,6 +609,15 @@ impl ApplicationHandler for App {
         self.last_frame = now;
 
         let mut needs_redraw = false;
+
+        let diff_alpha = self.target_sticky_scroll_alpha - self.sticky_scroll_alpha;
+        if diff_alpha.abs() > 0.01 {
+            self.sticky_scroll_alpha += diff_alpha * 20.0 * dt;
+            needs_redraw = true;
+        } else if self.sticky_scroll_alpha != self.target_sticky_scroll_alpha {
+            self.sticky_scroll_alpha = self.target_sticky_scroll_alpha;
+            needs_redraw = true;
+        }
 
         if self.autocomplete_active {
             let diff = self.autocomplete_target_scroll_y - self.autocomplete_scroll_y;
@@ -827,8 +852,8 @@ impl ApplicationHandler for App {
         if self.highlighter.poll(self.editor.version) {
             self.editor.foldable_lines.clear();
             self.editor.foldable_ranges_bytes.clear();
-            for &(start_b, end_b, is_autofold) in &self.highlighter.foldable_ranges {
-                self.editor.foldable_ranges_bytes.push((start_b, end_b));
+            for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
+                self.editor.foldable_ranges_bytes.push((start_b, end_b, is_sticky));
                 let sl = self
                     .editor
                     .line_offsets

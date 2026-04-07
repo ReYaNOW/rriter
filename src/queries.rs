@@ -133,10 +133,11 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "rs" => Some(
             r#"
             [
-                (block)
-                (declaration_list)
-                (enum_variant_list)
-                (match_block)
+                (function_item) (struct_item) (enum_item) (impl_item) (trait_item) (mod_item)
+            ] @sticky
+            [
+                (macro_definition) (for_expression) (while_expression) (if_expression) (match_expression)
+                (loop_expression) (block)
             ] @fold
             [
                 (array_expression)
@@ -147,7 +148,11 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "py" => Some(
             r#"
             [
-                (block)
+                (function_definition) (class_definition)
+            ] @sticky
+            [
+                (if_statement) (for_statement) (while_statement)
+                (with_statement) (try_statement)
             ] @fold
             [
                 (dictionary)
@@ -160,7 +165,10 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "go" => Some(
             r#"
             [
-                (block)
+                (function_declaration) (method_declaration) (type_declaration)
+            ] @sticky
+            [
+                (if_statement) (for_statement) (expression_switch_statement) (type_switch_statement)
             ] @fold
             [
                 (literal_value)
@@ -171,9 +179,12 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "js" | "ts" | "tsx" => Some(
             r#"
             [
-                (statement_block)
-                (class_body)
-                (switch_body)
+                (function_declaration) (method_definition) (class_declaration) (arrow_function)
+                (function_expression)
+            ] @sticky
+            [
+                (if_statement) (for_statement) (while_statement) (switch_statement)
+                (try_statement) (statement_block)
             ] @fold
             [
                 (object)
@@ -183,6 +194,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         ),
         "java" => Some(
             r#"
+            [
+                (class_declaration) (method_declaration) (interface_declaration) (enum_declaration)
+            ] @sticky
             [
                 (block)
                 (class_body)
@@ -197,6 +211,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "cs" => Some(
             r#"
             [
+                (class_declaration) (method_declaration) (struct_declaration) (enum_declaration) (interface_declaration) (record_declaration) (namespace_declaration) (constructor_declaration)
+            ] @sticky
+            [
                 (block)
                 (switch_body)
             ] @fold
@@ -207,6 +224,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         ),
         "dart" => Some(
             r#"
+            [
+                (class_declaration) (mixin_declaration) (extension_declaration) (enum_declaration)
+            ] @sticky
             [
                 (block)
                 (class_body)
@@ -220,6 +240,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         "c" => Some(
             r#"
             [
+                (function_definition) (struct_specifier) (enum_specifier)
+            ] @sticky
+            [
                 (compound_statement)
                 (field_declaration_list)
                 (enumerator_list)
@@ -231,6 +254,9 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
         ),
         "cpp" => Some(
             r#"
+            [
+                (function_definition) (struct_specifier) (class_specifier) (enum_specifier)
+            ] @sticky
             [
                 (compound_statement)
                 (declaration_list)

@@ -133,6 +133,9 @@ pub struct App {
     pub autocomplete_rect: Option<(f32, f32, f32, f32)>,
     pub is_dragging_autocomplete: bool,
     pub autocomplete_drag_offset_y: f32,
+
+    pub sticky_scroll_alpha: f32,
+    pub target_sticky_scroll_alpha: f32,
 }
 
 impl App {

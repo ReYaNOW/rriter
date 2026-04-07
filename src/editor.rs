@@ -149,7 +149,7 @@ pub struct Editor {
     pub foldable_lines: std::collections::HashMap<usize, usize>,
     pub folded_lines: std::collections::HashSet<usize>,
     pub folded_start_bytes: std::collections::HashSet<usize>,
-    pub foldable_ranges_bytes: Vec<(usize, usize)>,
+    pub foldable_ranges_bytes: Vec<(usize, usize, bool)>,
 }
 
 impl Editor {
@@ -289,7 +289,7 @@ impl Editor {
         }
 
         self.foldable_lines.clear();
-        for &(start_b, end_b) in &self.foldable_ranges_bytes {
+        for &(start_b, end_b, _) in &self.foldable_ranges_bytes {
             let sl = self
                 .line_offsets
                 .partition_point(|&o| o <= start_b)

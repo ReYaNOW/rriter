@@ -56,11 +56,11 @@ pub struct Highlighter {
         u64,
         Vec<ColorSpan>,
         Vec<CompletionItem>,
-        Vec<(usize, usize, bool)>, // (start, end, is_autofold)
+        Vec<(usize, usize, bool, bool)>, // (start, end, is_autofold, is_sticky)
     )>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
-    pub foldable_ranges: Vec<(usize, usize, bool)>,
+    pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
     pub current_version: u64,
 }
 
@@ -183,7 +183,7 @@ impl Highlighter {
             u64,
             Vec<ColorSpan>,
             Vec<CompletionItem>,
-            Vec<(usize, usize, bool)>,
+            Vec<(usize, usize, bool, bool)>,
         )>();
 
         thread::spawn(move || {
@@ -410,6 +410,7 @@ impl Highlighter {
                                                     }
                                                 }
 
+                                                let is_sticky = name == "sticky";
                                                 if node.end_byte() > start_byte
                                                     && node.end_position().row
                                                         > node.start_position().row
@@ -418,6 +419,7 @@ impl Highlighter {
                                                         start_byte,
                                                         node.end_byte(),
                                                         is_autofold,
+                                                        is_sticky,
                                                     ));
                                                 }
                                             }

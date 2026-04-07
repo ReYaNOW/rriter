@@ -129,6 +129,7 @@ pub struct Renderer {
     pub icon_up: Option<glow::Texture>,
     pub icon_down: Option<glow::Texture>,
     pub icon_close: Option<glow::Texture>,
+    pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
 }
 
 impl Renderer {
@@ -394,6 +395,7 @@ impl Renderer {
                 icon_up,
                 icon_down,
                 icon_close,
+                sticky_scroll_rects: Vec::new(),
             };
 
             for i in 32..128u8 {

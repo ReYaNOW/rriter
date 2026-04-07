@@ -33,6 +33,7 @@ impl Renderer {
         search_case_sensitive: bool,
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
+        sticky_scroll_alpha: f32,
     ) -> bool {
         if show_welcome {
             return self.draw_welcome(recent_files);
@@ -894,6 +895,131 @@ impl Renderer {
                 3.0 * s,
                 [0.7, 0.33, 0.54, 1.0],
             );
+        }
+
+        self.sticky_scroll_rects.clear();
+        let mut active_ranges = Vec::new();
+
+        for &(start_b, end_b, is_sticky) in &editor.foldable_ranges_bytes {
+            if !is_sticky { continue; }
+            let sl = editor.line_offsets.partition_point(|&o| o <= start_b).saturating_sub(1);
+            let el = editor.line_offsets.partition_point(|&o| o <= end_b).saturating_sub(1);
+            if sl < el {
+                active_ranges.push((sl, el));
+            }
+        }
+        active_ranges.sort_unstable_by_key(|&(sl, _)| sl);
+
+        let mut sticky_lines = Vec::new();
+        let mut sticky_stack_height = 0.0;
+        for &(sl, el) in &active_ranges {
+            let line_y = sl as f32 * self.line_height - render_scroll_y;
+            let end_line_y = el as f32 * self.line_height - render_scroll_y;
+
+            if line_y < sticky_stack_height && end_line_y > sticky_stack_height {
+                if !sticky_lines.iter().any(|&(s, _)| s == sl) {
+                    sticky_lines.push((sl, el));
+                    sticky_stack_height += self.line_height;
+                }
+            }
+        }
+
+        if sticky_lines.len() > 5 {
+            let skip = sticky_lines.len() - 5;
+            sticky_lines.drain(0..skip);
+        }
+
+        if !sticky_lines.is_empty() {
+            let mut current_draw_y = 0.0;
+            let sticky_bg = [self.theme.bg[0] + 0.04, self.theme.bg[1] + 0.04, self.theme.bg[2] + 0.05, sticky_scroll_alpha];
+            let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.5 * sticky_scroll_alpha];
+
+            for &(s_line, el) in &sticky_lines {
+                let end_y = el as f32 * self.line_height - render_scroll_y;
+                let mut push_up = 0.0;
+                if end_y < current_draw_y + self.line_height {
+                    push_up = current_draw_y + self.line_height - end_y;
+                }
+
+                let rect_y = current_draw_y - push_up;
+                if rect_y + self.line_height < 0.0 {
+                    continue;
+                }
+
+                let rect_w = self.width - minimap_w;
+                self.push_rect(0.0, rect_y, rect_w, self.line_height, sticky_bg);
+                self.push_rect(0.0, rect_y + self.line_height - 1.0, rect_w, 1.0, border_color);
+
+                let mut n = s_line + 1;
+                let mut buf = [0u8; 20];
+                let mut idx = 20;
+                while n > 0 {
+                    idx -= 1;
+                    buf[idx] = b'0' + (n % 10) as u8;
+                    n /= 10;
+                }
+                if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
+                    let num_w = self.measure_ui_width(num_str, 1.0);
+                    let draw_x = self.left_padding - 24.0 * s - num_w;
+                    let mut num_color = self.theme.line_num;
+                    num_color[3] *= sticky_scroll_alpha;
+                    self.draw_string_scaled(num_str, draw_x, rect_y + self.baseline_offset, num_color, 1.0);
+                }
+
+                let start_byte = editor.line_offsets[s_line];
+                let end_byte = *editor.line_offsets.get(s_line + 1).unwrap_or(&editor.len());
+                let mut x = self.left_padding - render_scroll_x;
+
+                let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx.saturating_sub(1),
+                };
+
+                let mut current_offset = start_byte;
+                while current_offset < end_byte {
+                    let chunk = if current_offset < first_len {
+                        let e = end_byte.min(first_len);
+                        &first[current_offset..e]
+                    } else {
+                        let st = current_offset - first_len;
+                        let e = end_byte - first_len;
+                        &second[st..e]
+                    };
+                    for c in chunk.chars() {
+                        let char_len = c.len_utf8();
+                        while span_idx < spans.len() && spans[span_idx].end <= current_offset {
+                            span_idx += 1;
+                        }
+                        let adv = if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' { 0.0 } else { self.char_advance(c) };
+                        if adv > 0.0 && c != ' ' && c != '\t' {
+                            if x + adv > 0.0 && x < self.width - minimap_w - 20.0 {
+                                if let Some(g) = self.get_glyph(c) {
+                                    let mut color = self.theme.fg;
+                                    if span_idx < spans.len() && spans[span_idx].start <= current_offset {
+                                        color = spans[span_idx].color;
+                                    }
+                                    color[3] *= sticky_scroll_alpha;
+                                    self.push_quad(
+                                        x + g.offset_x,
+                                        rect_y + self.baseline_offset - g.offset_y,
+                                        g.width,
+                                        g.height,
+                                        g.u, g.v, g.uw, g.vh,
+                                        color, g.is_emoji
+                                    );
+                                }
+                            }
+                        }
+                        x += adv;
+                        current_offset += char_len;
+                    }
+                    if x > self.width - minimap_w - 20.0 { break; }
+                }
+
+                self.sticky_scroll_rects.push((0.0, rect_y, rect_w, self.line_height, start_byte));
+                current_draw_y += self.line_height;
+            }
+            self.flush();
         }
 
         if show_fps {

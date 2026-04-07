@@ -338,6 +338,9 @@ Ctrl + Del\tУдалить слово справа от курсора
         autocomplete_rect: None,
         is_dragging_autocomplete: false,
         autocomplete_drag_offset_y: 0.0,
+
+        sticky_scroll_alpha: 0.0,
+        target_sticky_scroll_alpha: 0.0,
     };
 
     app.highlighter.reset(
