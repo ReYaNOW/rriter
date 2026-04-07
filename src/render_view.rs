@@ -626,8 +626,8 @@ impl Renderer {
 
                 let next_x = box_x + box_w + 2.0 * s;
                 let mut final_x = next_x;
-                if let Some(c) = v_line_info.fold_char {
-                    final_x += self.char_advance(c);
+                for i in 0..v_line_info.fold_suffix_len {
+                    final_x += self.char_advance(v_line_info.fold_suffix[i as usize]);
                 }
 
                 let hit_y_top = y - self.line_height;
@@ -651,12 +651,14 @@ impl Renderer {
 
                 self.draw_string_scaled(dots_str, box_x + 3.0 * s, y, self.theme.fg, 1.0);
 
-                if let Some(c) = v_line_info.fold_char {
+                let mut suffix_draw_x = next_x;
+                for i in 0..v_line_info.fold_suffix_len {
+                    let c = v_line_info.fold_suffix[i as usize];
                     let c_adv = self.char_advance(c);
 
                     if is_dots_selected {
                         self.push_rect(
-                            next_x,
+                            suffix_draw_x,
                             y - self.baseline_offset + 2.0,
                             c_adv,
                             self.line_height,
@@ -666,7 +668,7 @@ impl Renderer {
 
                     if let Some(g) = self.get_glyph(c) {
                         self.push_quad(
-                            next_x + g.offset_x,
+                            suffix_draw_x + g.offset_x,
                             y - g.offset_y,
                             g.width,
                             g.height,
@@ -678,6 +680,7 @@ impl Renderer {
                             g.is_emoji,
                         );
                     }
+                    suffix_draw_x += c_adv;
                 }
             }
         }
@@ -773,13 +776,6 @@ impl Renderer {
         self.push_rect(minimap_x, 0.0, minimap_w, self.height, solid_minimap_bg);
 
         if scrollbar_width > 0.0 {
-            self.push_rect(
-                scrollbar_x,
-                0.0,
-                scrollbar_width,
-                self.height,
-                [0.0, 0.0, 0.0, 0.2],
-            );
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h =
@@ -1139,7 +1135,7 @@ impl Renderer {
                 y_positions[i] = i as f32 * self.line_height;
             }
 
-            let rect_w = self.width - minimap_w;
+            let rect_w = self.width - minimap_w - scrollbar_width;
             let sticky_bg = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0];
             let shadow_top = [0.0, 0.0, 0.0, 0.4];
             let shadow_bottom = [0.0, 0.0, 0.0, 0.0];

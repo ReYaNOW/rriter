@@ -55,7 +55,8 @@ pub struct VisualLine {
     pub text_px_width: f32,
     pub y_offset: f32,
     pub is_folded: bool,
-    pub fold_char: Option<char>,
+    pub fold_suffix: [char; 4],
+    pub fold_suffix_len: u8,
 }
 #[derive(Clone)]
 pub struct FontData {
@@ -129,6 +130,7 @@ pub struct Renderer {
     pub icon_up: Option<glow::Texture>,
     pub icon_down: Option<glow::Texture>,
     pub icon_close: Option<glow::Texture>,
+    pub icon_logo: Option<glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
 }
@@ -339,6 +341,8 @@ impl Renderer {
             let icon_down = load_icon_from_memory(include_bytes!("icons/go-down.png"), "go-down");
             let icon_close =
                 load_icon_from_memory(include_bytes!("icons/window-close.png"), "window-close");
+            let icon_logo =
+                load_icon_from_memory(include_bytes!("icons/icon.png"), "icon");
 
             let mut renderer = Self {
                 gl,
@@ -396,6 +400,7 @@ impl Renderer {
                 icon_up,
                 icon_down,
                 icon_close,
+                icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
             };

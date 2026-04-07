@@ -265,8 +265,8 @@ impl App {
                         let fold_str_width = r.measure_ui_width("...", 1.0);
                         let button_width = fold_str_width + 10.0 * s;
                         let mut full_fold_width = button_width;
-                        if let Some(c) = v_line.fold_char {
-                            full_fold_width += r.char_advance(c);
+                        for i in 0..v_line.fold_suffix_len {
+                            full_fold_width += r.char_advance(v_line.fold_suffix[i as usize]);
                         }
 
                         let dots_x =

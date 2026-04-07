@@ -588,9 +588,14 @@ impl Renderer {
         let title_x = content_x + 40.0 * scale;
         let mut y = content_y + 60.0 * scale;
 
+        if let Some(tex) = self.icon_logo {
+            let icon_y = y - 40.0 * scale;
+            self.draw_icon(&tex, title_x, icon_y, 110.0 * scale, 110.0 * scale);
+        }
+
         self.draw_string_scaled(
             "Добро пожаловать в RRiter",
-            title_x,
+            title_x + 130.0 * scale,
             y,
             [0.741, 0.576, 0.976, 1.0],
             1.0,
@@ -598,7 +603,7 @@ impl Renderer {
         y += 40.0 * scale;
         self.draw_string_scaled(
             "Молниеносный текстовый редактор с GPU-рендерингом",
-            title_x,
+            title_x + 130.0 * scale,
             y,
             [0.7, 0.7, 0.75, 1.0],
             1.0,

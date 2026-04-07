@@ -277,6 +277,11 @@ impl ApplicationHandler for App {
 
         let template = ConfigTemplateBuilder::new().with_transparency(false);
 
+        let icon_bytes = include_bytes!("../icons/icon.png");
+        let icon_image = image::load_from_memory(icon_bytes).unwrap().into_rgba8();
+        let (icon_w, icon_h) = icon_image.dimensions();
+        let window_icon = winit::window::Icon::from_rgba(icon_image.into_raw(), icon_w, icon_h).ok();
+
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(
             Window::default_attributes()
                 .with_title(format!("{} — RRiter", self.base_title))
@@ -284,6 +289,7 @@ impl ApplicationHandler for App {
                     self.window_width,
                     self.window_height,
                 ))
+                .with_window_icon(window_icon)
                 .with_transparent(false),
         ));
 

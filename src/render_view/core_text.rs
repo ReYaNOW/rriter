@@ -90,7 +90,8 @@ impl Renderer {
                     current += chunk.len();
                 }
 
-                let mut fold_char = None;
+                let mut fold_suffix = ['\0'; 4];
+                let mut fold_suffix_len = 0;
                 if is_folded {
                     if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
                         let start_line_start = editor.line_offsets[phys_line];
@@ -131,10 +132,29 @@ impl Renderer {
                                 p -= 1;
                                 let b = editor.byte_at(p);
                                 if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                    if b == expected_close {
-                                        fold_char = Some(b as char);
-                                    }
+                                    p += 1;
                                     break;
+                                }
+                            }
+                            let mut suffix_bytes = Vec::new();
+                            let mut p_scan = p;
+                            while p_scan > end_line_start && suffix_bytes.len() < 4 {
+                                p_scan -= 1;
+                                let b = editor.byte_at(p_scan);
+                                if b == b' ' || b == b'\t' {
+                                    break;
+                                }
+                                suffix_bytes.push(b);
+                            }
+                            suffix_bytes.reverse();
+                            if suffix_bytes.contains(&expected_close) {
+                                if let Some(pos) = suffix_bytes.iter().position(|&x| x == expected_close) {
+                                    for &b in &suffix_bytes[pos..] {
+                                        if fold_suffix_len < 4 {
+                                            fold_suffix[fold_suffix_len as usize] = b as char;
+                                            fold_suffix_len += 1;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -143,8 +163,8 @@ impl Renderer {
 
                 let dots_width = if is_folded {
                     let mut w = self.measure_ui_width("...", 1.0) + 10.0 * self.scale_factor;
-                    if let Some(c) = fold_char {
-                        w += self.char_advance(c);
+                    for i in 0..fold_suffix_len {
+                        w += self.char_advance(fold_suffix[i as usize]);
                     }
                     w
                 } else {
@@ -159,7 +179,8 @@ impl Renderer {
                     text_px_width: text_px_width + dots_width,
                     y_offset: current_y,
                     is_folded,
-                    fold_char,
+                    fold_suffix,
+                    fold_suffix_len,
                 });
             }
 
@@ -225,7 +246,8 @@ impl Renderer {
                         } else {
                             editor.len()
                         };
-                        let mut fold_char = None;
+                        let mut fold_suffix = ['\0'; 4];
+                        let mut fold_suffix_len = 0;
                         let start_line_start = editor.line_offsets[phys_line];
                         let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
                             editor.line_offsets[phys_line + 1]
@@ -257,15 +279,34 @@ impl Renderer {
                                 p -= 1;
                                 let b = editor.byte_at(p);
                                 if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                    if b == expected_close {
-                                        fold_char = Some(b as char);
-                                    }
+                                    p += 1;
                                     break;
                                 }
                             }
+                            let mut suffix_bytes = Vec::new();
+                            let mut p_scan = p;
+                            while p_scan > end_line_start && suffix_bytes.len() < 4 {
+                                p_scan -= 1;
+                                let b = editor.byte_at(p_scan);
+                                if b == b' ' || b == b'\t' {
+                                    break;
+                                }
+                                suffix_bytes.push(b);
+                            }
+                            suffix_bytes.reverse();
+                            if suffix_bytes.contains(&expected_close) {
+                                if let Some(pos) = suffix_bytes.iter().position(|&x| x == expected_close) {
+                                    for &b in &suffix_bytes[pos..] {
+                                        if fold_suffix_len < 4 {
+                                            fold_suffix[fold_suffix_len as usize] = b as char;
+                                            fold_suffix_len += 1;
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        if let Some(c) = fold_char {
-                            dots_w += self.char_advance(c);
+                        for i in 0..fold_suffix_len {
+                            dots_w += self.char_advance(fold_suffix[i as usize]);
                         }
 
                         x += dots_w;
