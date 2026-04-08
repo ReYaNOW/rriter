@@ -621,7 +621,33 @@ impl ApplicationHandler for App {
         let mut needs_redraw = false;
 
         if self.current_sticky_lines != self.target_sticky_lines {
-            self.current_sticky_lines = self.target_sticky_lines.clone();
+            let old_len = self.current_sticky_lines.len();
+            let new_len = self.target_sticky_lines.len();
+
+            if new_len > old_len {
+                self.sticky_anim_progress = 0.0;
+                self.sticky_anim_is_adding = true;
+                self.current_sticky_lines = self.target_sticky_lines.clone();
+            } else if new_len < old_len {
+                if self.sticky_anim_is_adding || self.sticky_anim_progress >= 1.0 {
+                    self.sticky_anim_progress = 0.0;
+                    self.sticky_anim_is_adding = false;
+                }
+            } else {
+                self.sticky_anim_progress = 1.0;
+                self.current_sticky_lines = self.target_sticky_lines.clone();
+            }
+            needs_redraw = true;
+        }
+
+        if self.sticky_anim_progress < 1.0 {
+            self.sticky_anim_progress += dt * 6.0;
+            if self.sticky_anim_progress >= 0.99 {
+                self.sticky_anim_progress = 1.0;
+                if !self.sticky_anim_is_adding {
+                    self.current_sticky_lines = self.target_sticky_lines.clone();
+                }
+            }
             needs_redraw = true;
         }
 

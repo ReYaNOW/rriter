@@ -34,8 +34,8 @@ impl Renderer {
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
         current_sticky_lines: &[(usize, usize)],
-        _sticky_anim_progress: f32,
-        _sticky_anim_is_adding: bool,
+        sticky_anim_progress: f32,
+        sticky_anim_is_adding: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -855,6 +855,8 @@ impl Renderer {
             current_sticky_lines,
             render_scroll_y,
             render_scroll_x,
+            sticky_anim_progress,
+            sticky_anim_is_adding,
         );
 
         if scrollbar_width > 0.0 {
@@ -1140,6 +1142,8 @@ impl Renderer {
         current_sticky_lines: &[(usize, usize)],
         render_scroll_y: f32,
         render_scroll_x: f32,
+        anim_progress: f32,
+        anim_is_adding: bool,
     ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
         let mut active_ranges = Vec::new();
@@ -1192,7 +1196,7 @@ impl Renderer {
             let mut next_sl = None;
             for j in (i + 1)..ranges_with_depth.len() {
                 let (sl2, _, d2) = ranges_with_depth[j];
-                if d2 < d1 {
+                if sl2.saturating_sub(el1) > 6 {
                     break;
                 }
                 if d2 == d1 {
@@ -1202,7 +1206,7 @@ impl Renderer {
             }
 
             if let Some(n_sl) = next_sl {
-                if n_sl > el1 && n_sl - el1 <= 4 {
+                if n_sl > el1 {
                     ranges_with_depth[i].1 = n_sl - 1;
                 }
             }
@@ -1240,20 +1244,13 @@ impl Renderer {
             let mut y_positions = vec![0.0; current_sticky_lines.len()];
 
             for i in 0..current_sticky_lines.len() {
-                y_positions[i] = i as f32 * self.line_height;
+                let slot_y = i as f32 * self.line_height;
+                y_positions[i] = slot_y;
             }
 
             let s = self.scale_factor;
             let minimap_w = self.minimap_width;
             let rect_w = self.width - minimap_w;
-            let sticky_bg = [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                1.0,
-            ];
-            let shadow_top = [0.0, 0.0, 0.0, 0.4];
-            let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
 
             let (first, second) = editor.text_parts();
             let first_len = first.len();
@@ -1265,6 +1262,25 @@ impl Renderer {
                 if rect_y + self.line_height < 0.0 {
                     continue;
                 }
+
+                let mut alpha = 1.0;
+                if i == current_sticky_lines.len() - 1 && anim_progress < 1.0 {
+                    let p = anim_progress;
+                    alpha = if anim_is_adding {
+                        1.0 - (1.0 - p) * (1.0 - p)
+                    } else {
+                        (1.0 - p) * (1.0 - p)
+                    };
+                }
+
+                let sticky_bg = [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    alpha,
+                ];
+                let shadow_top = [0.0, 0.0, 0.0, 0.4 * alpha];
+                let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
 
                 self.push_rect(0.0, rect_y, rect_w, self.line_height, sticky_bg);
                 if i == current_sticky_lines.len() - 1 {
@@ -1289,7 +1305,13 @@ impl Renderer {
                 if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                     let num_w = self.measure_ui_width(num_str, 1.0);
                     let draw_x = self.left_padding - 24.0 * s - num_w;
-                    let num_color = self.theme.line_num;
+                    let base_num_alpha = *self.theme.line_num.get(3).unwrap_or(&1.0);
+                    let num_color = [
+                        self.theme.line_num[0],
+                        self.theme.line_num[1],
+                        self.theme.line_num[2],
+                        base_num_alpha * alpha,
+                    ];
                     self.draw_string_scaled(
                         num_str,
                         draw_x,
@@ -1337,6 +1359,13 @@ impl Renderer {
                                     {
                                         color = spans[span_idx].color;
                                     }
+                                    let base_alpha = *color.get(3).unwrap_or(&1.0);
+                                    let draw_color = [
+                                        color[0],
+                                        color[1],
+                                        color[2],
+                                        base_alpha * alpha,
+                                    ];
                                     self.push_quad(
                                         x + g.offset_x,
                                         rect_y + self.baseline_offset - g.offset_y,
@@ -1346,7 +1375,7 @@ impl Renderer {
                                         g.v,
                                         g.uw,
                                         g.vh,
-                                        color,
+                                        draw_color,
                                         g.is_emoji,
                                     );
                                 }

@@ -171,7 +171,7 @@ impl App {
                         .unwrap()
                         .get_max_scroll(&self.editor, wh);
 
-                    let padding = self.renderer.as_ref().unwrap().line_height * 1.5;
+                    let padding = self.renderer.as_ref().unwrap().line_height * 3.0;
                     self.target_scroll_y = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
                     self.scroll_anim_speed = 15.0;
                     self.window.as_ref().unwrap().request_redraw();
