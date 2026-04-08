@@ -821,7 +821,6 @@ impl App {
                         .inner_size()
                         .to_logical::<f64>(scale);
                     crate::save_config(&crate::Config {
-                        show_fps: self.show_fps,
                         window_width: size.width,
                         window_height: size.height,
                     });
@@ -1314,6 +1313,12 @@ impl App {
         }
 
         if key_event.state == ElementState::Pressed {
+            if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
+                self.show_fps = !self.show_fps;
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
             if self.search_focused {
                 self.handle_search_keyboard_input(key_event);
             } else {

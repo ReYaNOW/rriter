@@ -43,22 +43,26 @@ impl Renderer {
 
         let mut wants_pointer = false;
 
-        let now = std::time::Instant::now();
-        if let Some(last) = self.last_frame_time {
-            let dt = now.duration_since(last).as_secs_f32();
-            self.frame_count += 1;
-            self.time_acc += dt;
-            if self.time_acc >= 0.5 {
-                self.fps = self.frame_count as f32 / self.time_acc;
-                self.frame_count = 0;
-                self.time_acc = 0.0;
+        if show_fps {
+            let now = std::time::Instant::now();
+            if let Some(last) = self.last_frame_time {
+                let dt = now.duration_since(last).as_secs_f32();
+                self.frame_count += 1;
+                self.time_acc += dt;
+                if self.time_acc >= 0.5 {
+                    self.fps = self.frame_count as f32 / self.time_acc;
+                    self.frame_count = 0;
+                    self.time_acc = 0.0;
 
-                use std::fmt::Write;
-                self.fps_string.clear();
-                let _ = write!(&mut self.fps_string, "FPS: {:.0}", self.fps);
+                    use std::fmt::Write;
+                    self.fps_string.clear();
+                    let _ = write!(&mut self.fps_string, "FPS: {:.0}", self.fps);
+                }
             }
+            self.last_frame_time = Some(now);
+        } else {
+            self.last_frame_time = None;
         }
-        self.last_frame_time = Some(now);
 
         let cursor_phys_line = editor
             .line_offsets
@@ -133,7 +137,13 @@ impl Renderer {
             let (first, second) = editor.text_parts();
             let longest_width = self.measure_width(first, second, start_byte, end_byte);
             let view_w = self.width - self.minimap_width - self.left_padding;
-            self.max_scroll_x = (longest_width - view_w + 100.0).max(0.0);
+            
+            if longest_width > view_w {
+                self.max_scroll_x = longest_width - view_w + 100.0;
+            } else {
+                self.max_scroll_x = 0.0;
+            }
+            
             self.last_editor_version_for_scroll_x = editor.version;
         }
 

@@ -22,7 +22,6 @@ use winit::keyboard::ModifiersState;
 static GLOBAL: MiMalloc = MiMalloc;
 
 pub struct Config {
-    pub show_fps: bool,
     pub window_width: f64,
     pub window_height: f64,
 }
@@ -30,7 +29,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            show_fps: true,
             window_width: 1000.0,
             window_height: 800.0,
         }
@@ -74,9 +72,14 @@ pub fn save_config(config: &Config) {
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
     let content = format!(
-        "{{\n  \"show_fps\": {},\n  \"window_width\": {:.1},\n  \"window_height\": {:.1}\n}}\n",
-        config.show_fps, config.window_width, config.window_height
+        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1}\n}}\n",
+        config.window_width, config.window_height
     );
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if existing == content {
+            return;
+        }
+    }
     let _ = std::fs::write(&path, content);
 }
 
@@ -93,11 +96,6 @@ fn load_config() -> Config {
     path.push("config.json");
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if content.contains("\"show_fps\": false")
-                || content.replace(" ", "").contains("\"show_fps\":false")
-            {
-                config.show_fps = false;
-            }
             for line in content.lines() {
                 if line.contains("\"window_width\"") {
                     if let Some(val) = line.split(':').nth(1) {
@@ -238,6 +236,9 @@ Ctrl + A\tВыделить весь текст в документе
 Ctrl + Bksp\tУдалить слово слева от курсора
 Ctrl + Del\tУдалить слово справа от курсора
 
+# Прочее
+F8\tПоказать/скрыть счетчик FPS
+
 # Управление мышью
 Зажатие ЛКМ\tПлавное выделение текста
 Двойной клик\tБыстрое выделение одного слова
@@ -289,7 +290,7 @@ Ctrl + Del\tУдалить слово справа от курсора
         h_scroll_drag_offset_x: 0.0,
         is_focused: true,
 
-        show_fps: config.show_fps,
+        show_fps: false,
         window_width: config.window_width,
         window_height: config.window_height,
 

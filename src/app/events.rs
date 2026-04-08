@@ -166,7 +166,6 @@ impl App {
                                             .inner_size()
                                             .to_logical::<f64>(scale);
                                         crate::save_config(&crate::Config {
-                                            show_fps: self.show_fps,
                                             window_width: size.width,
                                             window_height: size.height,
                                         });
@@ -189,7 +188,6 @@ impl App {
                                         .inner_size()
                                         .to_logical::<f64>(scale);
                                     crate::save_config(&crate::Config {
-                                        show_fps: self.show_fps,
                                         window_width: size.width,
                                         window_height: size.height,
                                     });
@@ -377,7 +375,6 @@ impl ApplicationHandler for App {
                         .inner_size()
                         .to_logical::<f64>(scale);
                     crate::save_config(&crate::Config {
-                        show_fps: self.show_fps,
                         window_width: size.width,
                         window_height: size.height,
                     });
@@ -407,6 +404,7 @@ impl ApplicationHandler for App {
                         .as_mut()
                         .unwrap()
                         .resize(size.width, size.height);
+                    self.renderer.as_mut().unwrap().last_editor_version_for_scroll_x = u64::MAX;
                     self.last_resize_time = Some(Instant::now());
                     self.window.as_ref().unwrap().request_redraw();
                 }
