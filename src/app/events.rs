@@ -12,6 +12,7 @@ use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
@@ -280,7 +281,8 @@ impl ApplicationHandler for App {
         let icon_bytes = include_bytes!("../icons/icon.png");
         let icon_image = image::load_from_memory(icon_bytes).unwrap().into_rgba8();
         let (icon_w, icon_h) = icon_image.dimensions();
-        let window_icon = winit::window::Icon::from_rgba(icon_image.into_raw(), icon_w, icon_h).ok();
+        let window_icon =
+            winit::window::Icon::from_rgba(icon_image.into_raw(), icon_w, icon_h).ok();
 
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(
             Window::default_attributes()
@@ -289,6 +291,7 @@ impl ApplicationHandler for App {
                     self.window_width,
                     self.window_height,
                 ))
+                .with_name("rriter", "rriter")
                 .with_window_icon(window_icon)
                 .with_transparent(false),
         ));
@@ -542,7 +545,11 @@ impl ApplicationHandler for App {
                 } else if !self.show_welcome {
                     let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
                     let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, window_height);
+                    let max_scroll = self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .get_max_scroll(&self.editor, window_height);
 
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
@@ -854,7 +861,9 @@ impl ApplicationHandler for App {
             self.editor.foldable_lines.clear();
             self.editor.foldable_ranges_bytes.clear();
             for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
-                self.editor.foldable_ranges_bytes.push((start_b, end_b, is_sticky));
+                self.editor
+                    .foldable_ranges_bytes
+                    .push((start_b, end_b, is_sticky));
                 let sl = self
                     .editor
                     .line_offsets
