@@ -19,7 +19,6 @@ pub struct Theme {
     pub minimap_cursor: [f32; 4],
     pub modified_unsaved: [f32; 4],
     pub modified_saved: [f32; 4],
-    pub titlebar_bg: [f32; 4],
 }
 
 #[repr(C)]
@@ -100,9 +99,6 @@ pub struct Renderer {
     pub left_padding: f32,
     pub last_mouse_x: f32,
     pub last_mouse_y: f32,
-    pub dialog_mouse_x: f32,
-    pub dialog_mouse_y: f32,
-    pub dialog_mouse_pressed: bool,
 
     pub visual_lines: Vec<VisualLine>,
     pub last_editor_version: u64,
@@ -370,9 +366,6 @@ impl Renderer {
                 left_padding: (60.0 * scale_factor).round(),
                 last_mouse_x: 0.0,
                 last_mouse_y: 0.0,
-                dialog_mouse_x: 0.0,
-                dialog_mouse_y: 0.0,
-                dialog_mouse_pressed: false,
                 visual_lines: Vec::new(),
                 last_editor_version: u64::MAX,
                 last_height: 0.0,

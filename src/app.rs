@@ -6,15 +6,12 @@ use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
 use crate::renderer::{Renderer, Theme};
 use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
-use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::FxHashMap;
-use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::ModifiersState;
-use winit::raw_window_handle::HasWindowHandle;
 use winit::window::Window;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -51,9 +48,8 @@ pub struct App {
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,
     pub window: Option<Window>,
-    pub dialog_window: Option<Window>,
-    pub dialog_surface: Option<Surface<WindowSurface>>,
     pub renderer: Option<Renderer>,
+    pub dialog_anim_progress: f32,
     pub editor: Editor,
     pub clipboard: Clipboard,
     pub theme: Theme,
@@ -434,60 +430,18 @@ impl App {
         window.set_title(&title);
     }
 
-    pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
-        if self.dialog_window.is_none() {
-            let (title, p_width, p_height) = match action {
-                PendingAction::Quit => ("Выход из программы — RRiter", 600.0, 200.0),
-                PendingAction::OpenFile => ("Открытие документа — RRiter", 600.0, 200.0),
-                PendingAction::Faq => ("Справка — RRiter", 800.0, 680.0),
-                PendingAction::CloseFile => ("Закрытие файла — RRiter", 600.0, 200.0),
-            };
-
-            let attrs = Window::default_attributes()
-                .with_title(title)
-                .with_inner_size(winit::dpi::LogicalSize::new(p_width, p_height))
-                .with_resizable(false)
-                .with_enabled_buttons(winit::window::WindowButtons::CLOSE)
-                .with_window_level(winit::window::WindowLevel::AlwaysOnTop);
-
-            let dialog_window = event_loop.create_window(attrs).unwrap();
-            let raw_window_handle = dialog_window.window_handle().unwrap().as_raw();
-            let scale = dialog_window.scale_factor();
-            let scaled_width = (p_width * scale) as u32;
-            let scaled_height = (p_height * scale) as u32;
-
-            let surface_attrs = glutin::surface::SurfaceAttributesBuilder::<WindowSurface>::new()
-                .build(
-                    raw_window_handle,
-                    NonZeroU32::new(scaled_width).unwrap(),
-                    NonZeroU32::new(scaled_height).unwrap(),
-                );
-
-            let dialog_surface = unsafe {
-                self.gl_config
-                    .as_ref()
-                    .unwrap()
-                    .display()
-                    .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
-                    .unwrap()
-            };
-
-            self.dialog_window = Some(dialog_window);
-            self.dialog_surface = Some(dialog_surface);
-            self.show_quit_dialog = true;
-            self.is_dragging = false;
-            self.is_dragging_minimap = false;
-            self.is_dragging_h_scroll = false;
-            self.pending_action = action;
-            if let Some(w) = self.window.as_ref() {
-                w.request_redraw();
-            }
+    pub fn show_action_dialog(&mut self, _event_loop: &ActiveEventLoop, action: PendingAction) {
+        self.show_quit_dialog = true;
+        self.is_dragging = false;
+        self.is_dragging_minimap = false;
+        self.is_dragging_h_scroll = false;
+        self.pending_action = action;
+        if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
         }
     }
 
     pub fn close_dialog(&mut self) {
-        self.dialog_window = None;
-        self.dialog_surface = None;
         self.show_quit_dialog = false;
         self.is_dragging_faq = false;
         if let Some(w) = self.window.as_ref() {

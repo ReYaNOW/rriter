@@ -146,10 +146,6 @@ fn load_dracula() -> Theme {
     let sel_color =
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
 
-    let titlebar_bg = get_kde_color("Colors:Header", "BackgroundNormal")
-        .or_else(|| get_kde_color("Colors:Window", "BackgroundNormal"))
-        .unwrap_or([0.192, 0.211, 0.231, 1.0]);
-
     Theme {
         bg: [0.156, 0.164, 0.211, 1.0],
         fg: [0.972, 0.972, 0.949, 1.0],
@@ -159,7 +155,6 @@ fn load_dracula() -> Theme {
         minimap_cursor: sel_color,
         modified_unsaved: [1.0, 0.474, 0.776, 1.0],
         modified_saved: [0.313, 0.980, 0.482, 1.0],
-        titlebar_bg,
     }
 }
 
@@ -262,9 +257,8 @@ F8\tПоказать/скрыть счетчик FPS
         gl_context: None,
         gl_surface: None,
         window: None,
-        dialog_window: None,
-        dialog_surface: None,
         renderer: None,
+        dialog_anim_progress: 0.0,
         editor,
         clipboard: Clipboard::new().unwrap_or_else(|_| Clipboard::new().unwrap()),
         theme: load_dracula(),

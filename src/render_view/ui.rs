@@ -260,22 +260,22 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-    pub fn draw_dialog(&mut self, base_title: &str) -> bool {
-        unsafe {
-            self.gl.bind_vertex_array(Some(self.vao));
-            self.gl.use_program(Some(self.program));
-            self.gl.active_texture(glow::TEXTURE0);
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.clear_color(
-                self.theme.titlebar_bg[0],
-                self.theme.titlebar_bg[1],
-                self.theme.titlebar_bg[2],
-                1.0,
-            );
-            self.gl.clear(glow::COLOR_BUFFER_BIT);
-        }
+    pub fn draw_dialog(&mut self, base_title: &str, anim_progress: f32) -> bool {
+        if anim_progress <= 0.0 { return false; }
+        let s = self.scale_factor;
 
-        let scale = self.scale_factor;
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
+
+        let box_w = 600.0 * s;
+        let box_h = 200.0 * s;
+        let start_y = self.height + 50.0 * s;
+        let target_y = (self.height - box_h) / 2.0;
+        let box_y = start_y + (target_y - start_y) * anim_progress;
+        let box_x = (self.width - box_w) / 2.0;
+
+        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 8.0 * s, [0.25, 0.26, 0.30, 1.0]);
+        self.push_rounded_rect(box_x, box_y, box_w, box_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+
         let msg1 = format!("Документ «{}» был изменен.", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
@@ -283,105 +283,75 @@ impl Renderer {
         let w2 = self.measure_ui_width(msg2, 1.0);
         let text_w = w1.max(w2);
 
-        let icon_sz = 110.0 * scale;
-        let gap = 20.0 * scale;
+        let icon_sz = 110.0 * s;
+        let gap = 20.0 * s;
         let total_content_w = icon_sz + gap + text_w;
 
-        let start_x = (self.width - total_content_w) / 2.0;
-        let icon_y = 15.0 * scale;
+        let start_x = box_x + (box_w - total_content_w) / 2.0;
+        let icon_y = box_y + 15.0 * s;
 
         self.draw_atlas_icon(crate::widgets::IconType::Warning, start_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
 
         let text_x = start_x + icon_sz + gap;
         let fg = self.theme.fg;
 
-        self.draw_string_scaled(&msg1, text_x, 65.0 * scale, fg, 1.0);
-        self.draw_string_scaled(msg2, text_x, 95.0 * scale, fg, 1.0);
+        self.draw_string_scaled(&msg1, text_x, box_y + 65.0 * s, fg, 1.0);
+        self.draw_string_scaled(msg2, text_x, box_y + 95.0 * s, fg, 1.0);
 
         let (btn_save, btn_discard, btn_cancel) =
-            crate::widgets::get_dialog_buttons(self.width, self.height, scale, self);
+            crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
 
-        let mx = self.dialog_mouse_x;
-        let my = self.dialog_mouse_y;
-        let pressed = self.dialog_mouse_pressed;
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
 
         let mut wants_pointer = false;
-        wants_pointer |= btn_save.render(self, mx, my, scale, pressed);
-        wants_pointer |= btn_discard.render(self, mx, my, scale, pressed);
-        wants_pointer |= btn_cancel.render(self, mx, my, scale, pressed);
+        wants_pointer |= btn_save.render(self, mx, my, s, false);
+        wants_pointer |= btn_discard.render(self, mx, my, s, false);
+        wants_pointer |= btn_cancel.render(self, mx, my, s, false);
 
         self.flush();
         wants_pointer
     }
 
-    pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32) -> bool {
-        let scale = self.scale_factor;
+    pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32, anim_progress: f32) -> bool {
+        if anim_progress <= 0.0 { return false; }
+        let s = self.scale_factor;
+        
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
 
-        let top_color = [0.26, 0.20, 0.36, 1.0];
-        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+        let box_w = (800.0 * s).min(self.width - 40.0 * s);
+        let box_h = (680.0 * s).min(self.height - 40.0 * s);
 
-        unsafe {
-            self.gl.bind_vertex_array(Some(self.vao));
-            self.gl.use_program(Some(self.program));
-            self.gl.active_texture(glow::TEXTURE0);
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl
-                .clear_color(bottom_color[0], bottom_color[1], bottom_color[2], 1.0);
-            self.gl.clear(glow::COLOR_BUFFER_BIT);
-        }
+        let start_y = self.height + 50.0 * s;
+        let target_y = (self.height - box_h) / 2.0;
+        let box_y = start_y + (target_y - start_y) * anim_progress;
+        let box_x = (self.width - box_w) / 2.0;
 
-        self.push_vertical_gradient(
-            -1.0,
-            -1.0,
-            self.width + 2.0,
-            self.height + 2.0,
-            top_color,
-            bottom_color,
-        );
+        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect(box_x, box_y, box_w, box_h, 10.0 * s, [0.169, 0.176, 0.188, 1.0]);
         self.flush();
 
-        let content_x = 30.0 * scale;
-        let content_y = 30.0 * scale;
-        let content_w = self.width - 60.0 * scale;
-        let content_h = self.height - 110.0 * scale;
-
-        let card_bg = [0.169, 0.176, 0.188, 1.0];
-        let card_border = [0.224, 0.231, 0.251, 1.0];
-
-        self.push_rounded_rect(
-            content_x - 1.0,
-            content_y - 1.0,
-            content_w + 2.0,
-            content_h + 2.0,
-            10.0 * scale,
-            card_border,
-        );
-        self.push_rounded_rect(
-            content_x,
-            content_y,
-            content_w,
-            content_h,
-            10.0 * scale,
-            card_bg,
-        );
-        self.flush();
+        let content_x = box_x + 30.0 * s;
+        let content_y = box_y + 30.0 * s;
+        let content_w = box_w - 60.0 * s;
+        let content_h = box_h - 110.0 * s;
 
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             let scissor_y = self.height - (content_y + content_h);
             self.gl.scissor(
-                content_x as i32,
-                scissor_y as i32,
-                content_w as i32,
-                content_h as i32,
+                content_x.round() as i32,
+                scissor_y.round() as i32,
+                content_w.round() as i32,
+                content_h.round() as i32,
             );
         }
 
-        let start_x = content_x + 30.0 * scale;
-        let mut y = content_y + 40.0 * scale - scroll_y;
+        let start_x = content_x + 10.0 * s;
+        let mut y = content_y + 10.0 * s - scroll_y;
         let text = faq_editor.get_full_text();
 
-        let left_col_w = 260.0 * scale;
+        let left_col_w = 260.0 * s;
 
         for line in text.split('\n') {
             let is_header = line.starts_with("# ");
@@ -391,16 +361,16 @@ impl Renderer {
                 let header_text = &line[2..];
                 self.draw_string_scaled(header_text, start_x, y, text_color, 1.15);
 
-                let line_y = y + 16.0 * scale;
+                let line_y = y + 16.0 * s;
                 self.push_rect(
                     start_x,
                     line_y,
-                    content_w - 60.0 * scale,
+                    content_w - 40.0 * s,
                     1.0,
                     [1.0, 1.0, 1.0, 0.08],
                 );
 
-                y += 50.0 * scale;
+                y += 50.0 * s;
                 continue;
             }
 
@@ -412,24 +382,24 @@ impl Renderer {
                 let kbd_border = [0.306, 0.318, 0.341, 1.0];
                 let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
 
-                let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * scale;
-                let kbd_h = 24.0 * scale;
+                let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
+                let kbd_h = 24.0 * s;
                 let kbd_x = start_x;
-                let kbd_y = y - 18.0 * scale;
+                let kbd_y = y - 18.0 * s;
 
                 self.push_rounded_rect(
                     kbd_x - 1.0,
                     kbd_y - 1.0,
                     kbd_w + 2.0,
                     kbd_h + 2.0,
-                    4.0 * scale,
+                    4.0 * s,
                     kbd_border,
                 );
-                self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * scale, kbd_bg);
+                self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * s, kbd_bg);
                 self.draw_string_scaled(
                     shortcut,
-                    kbd_x + 10.0 * scale,
-                    y - 1.0 * scale,
+                    kbd_x + 10.0 * s,
+                    y - 1.0 * s,
                     kbd_text_color,
                     0.95,
                 );
@@ -437,16 +407,16 @@ impl Renderer {
                 let desc_color = [0.663, 0.690, 0.729, 1.0];
                 self.draw_string_scaled(description, start_x + left_col_w, y, desc_color, 1.0);
 
-                y += 38.0 * scale;
+                y += 38.0 * s;
                 continue;
             }
 
             if !line.trim().is_empty() {
                 let normal_color = [0.875, 0.882, 0.902, 1.0];
                 self.draw_string_scaled(line.trim(), start_x, y, normal_color, 1.0);
-                y += 30.0 * scale;
+                y += 30.0 * s;
             } else {
-                y += 15.0 * scale;
+                y += 15.0 * s;
             }
         }
 
@@ -455,75 +425,39 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        let max_scroll = self.get_faq_max_scroll(faq_editor, self.height);
+        let max_scroll = self.get_faq_max_scroll(faq_editor, box_h);
         let total_content_h = content_h + max_scroll;
 
         if max_scroll > 0.0 {
             let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let track_h = content_h - 16.0 * scale;
-            let thumb_h = (content_h / total_content_h * track_h).max(40.0 * scale);
-            let thumb_y = content_y + 8.0 * scale + scroll_ratio * (track_h - thumb_h);
-            let scroll_x = content_x + content_w - 14.0 * scale;
+            let track_h = content_h - 16.0 * s;
+            let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
+            let thumb_y = content_y + 8.0 * s + scroll_ratio * (track_h - thumb_h);
+            let scroll_x = content_x + content_w - 14.0 * s;
 
             self.push_rounded_rect(
                 scroll_x,
                 thumb_y,
-                6.0 * scale,
+                6.0 * s,
                 thumb_h,
-                3.0 * scale,
+                3.0 * s,
                 [0.7, 0.33, 0.54, 1.0],
             );
         }
 
-        let btn_ok = crate::widgets::get_faq_button(self.width, self.height, scale, self);
+        let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self);
         let mut wants_pointer = false;
 
         wants_pointer |= btn_ok.render(
             self,
-            self.dialog_mouse_x,
-            self.dialog_mouse_y,
-            scale,
-            self.dialog_mouse_pressed,
+            self.last_mouse_x,
+            self.last_mouse_y,
+            s,
+            false,
         );
 
         self.flush();
         wants_pointer
-    }
-
-    pub fn get_faq_byte_at(
-        &mut self,
-        faq_editor: &Editor,
-        _target_x: f32,
-        target_y: f32,
-        scroll_y: f32,
-    ) -> usize {
-        let scale = self.scale_factor;
-        let content_y = 30.0 * scale;
-        let mut y = content_y + 40.0 * scale - scroll_y;
-
-        let text = faq_editor.get_full_text();
-        let mut last_valid = 0;
-
-        for line in text.split('\n') {
-            let line_h = if line.starts_with("# ") {
-                50.0 * scale
-            } else if line.contains('\t') {
-                38.0 * scale
-            } else if !line.trim().is_empty() {
-                30.0 * scale
-            } else {
-                15.0 * scale
-            };
-
-            if target_y >= y - 25.0 * scale && target_y < y - 25.0 * scale + line_h {
-                return last_valid;
-            }
-
-            last_valid += line.len() + 1;
-            y += line_h;
-        }
-
-        last_valid.saturating_sub(1)
     }
 
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {

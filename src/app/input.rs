@@ -8,7 +8,22 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.show_quit_dialog || self.show_welcome || self.show_settings {
+        if self.show_quit_dialog {
+            if self.pending_action == PendingAction::Faq {
+                self.faq_scroll_anim_speed = 7.0;
+                let scale = self.renderer.as_ref().unwrap().scale_factor;
+                match delta {
+                    MouseScrollDelta::LineDelta(_, y) => { self.faq_target_scroll_y -= y * 50.0 * scale; }
+                    MouseScrollDelta::PixelDelta(pos) => { self.faq_target_scroll_y -= pos.y as f32; }
+                }
+                let box_h = (680.0 * scale).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * scale);
+                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
+                self.faq_target_scroll_y = self.faq_target_scroll_y.clamp(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            return;
+        }
+        if self.show_welcome || self.show_settings {
             return;
         }
         self.scroll_anim_speed = 7.0;
@@ -48,8 +63,74 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_mouse_input(&mut self, state: ElementState) {
+    pub fn handle_main_mouse_input(&mut self, event_loop: &ActiveEventLoop, state: ElementState) {
         if self.show_quit_dialog {
+            if state == ElementState::Pressed {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
+
+                if self.pending_action == PendingAction::Faq {
+                    let box_w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
+                    let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
+                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
+
+                    let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
+                    if btn_ok.is_hovered(mx, my) {
+                        self.close_dialog();
+                    } else {
+                        let scroll_x = box_x + box_w - 20.0 * s;
+                        if mx >= scroll_x - 10.0 * s && mx <= scroll_x + 16.0 * s {
+                            self.is_dragging_faq = true;
+                        }
+                    }
+                } else {
+                    let box_w = 600.0 * s;
+                    let box_h = 200.0 * s;
+                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
+                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
+                    let (btn_save, btn_discard, btn_cancel) = crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
+
+                    if btn_save.is_hovered(mx, my) {
+                        if self.save_current_file() {
+                            if let Some(w) = self.window.as_ref() {
+                                App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+                            }
+                            let action = self.pending_action;
+                            self.close_dialog();
+                            if action == PendingAction::Quit {
+                                let scale = self.window.as_ref().unwrap().scale_factor();
+                                let size = self.window.as_ref().unwrap().inner_size().to_logical::<f64>(scale);
+                                crate::save_config(&crate::Config { window_width: size.width, window_height: size.height });
+                                event_loop.exit();
+                            } else if action == PendingAction::OpenFile {
+                                self.trigger_file_picker();
+                            } else if action == PendingAction::CloseFile {
+                                self.close_current_file();
+                            }
+                        }
+                    } else if btn_discard.is_hovered(mx, my) {
+                        let action = self.pending_action;
+                        self.close_dialog();
+                        if action == PendingAction::Quit {
+                            let scale = self.window.as_ref().unwrap().scale_factor();
+                            let size = self.window.as_ref().unwrap().inner_size().to_logical::<f64>(scale);
+                            crate::save_config(&crate::Config { window_width: size.width, window_height: size.height });
+                            event_loop.exit();
+                        } else if action == PendingAction::OpenFile {
+                            self.trigger_file_picker();
+                        } else if action == PendingAction::CloseFile {
+                            self.close_current_file();
+                        }
+                    } else if btn_cancel.is_hovered(mx, my) {
+                        self.close_dialog();
+                    }
+                }
+            } else if state == ElementState::Released {
+                self.is_dragging_faq = false;
+            }
+            self.window.as_ref().unwrap().request_redraw();
             return;
         }
 
@@ -568,12 +649,34 @@ impl App {
     }
 
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        if self.show_quit_dialog {
-            return;
-        }
-
         self.renderer.as_mut().unwrap().last_mouse_x = position.x as f32;
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
+
+        if self.show_quit_dialog {
+            if self.is_dragging_faq && self.pending_action == PendingAction::Faq {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+                let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
+                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
+
+                let content_y = box_y + 30.0 * s;
+                let content_h = box_h - 110.0 * s;
+                let track_h = content_h - 16.0 * s;
+                let total_content_h = content_h + max_scroll;
+                let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
+
+                let start_y = content_y + 8.0 * s + thumb_h / 2.0;
+                let end_y = content_y + 8.0 * s + track_h - thumb_h / 2.0;
+
+                let mut ratio = (position.y as f32 - start_y) / (end_y - start_y).max(1.0);
+                ratio = ratio.clamp(0.0, 1.0);
+
+                self.faq_target_scroll_y = ratio * max_scroll;
+                self.faq_scroll_anim_speed = 15.0;
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
 
         if self.show_welcome {
             self.window.as_ref().unwrap().request_redraw();
@@ -1351,8 +1454,8 @@ impl App {
         key_event: KeyEvent,
     ) {
         if self.show_quit_dialog {
-            if let Some(dw) = &self.dialog_window {
-                dw.focus_window();
+            if key_event.state == ElementState::Pressed && key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                self.close_dialog();
             }
             return;
         }
