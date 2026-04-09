@@ -162,7 +162,8 @@ impl Renderer {
                         float d = roundedBoxSDF(v_uv, vec2(v_sdf_params.x, v_sdf_params.y), v_sdf_params.z);
                         float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
                         if (alpha <= 0.0) discard;
-                        out_color = vec4(v_col.rgb, v_col.a * alpha);
+                        float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                        out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a * alpha);
                     } else if (v_mode == 4.0) {
                         out_color = v_col;
                     } else {
@@ -944,7 +945,34 @@ impl Renderer {
         }
     }
 
-    pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
+    pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color:[f32; 4]) {
         self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
+    }
+
+    pub fn push_rounded_rect_gradient(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        top_color:[f32; 4],
+        bottom_color: [f32; 4],
+    ) {
+        let x1 = x.round();
+        let y1 = y.round();
+        let x2 = (x + w).round();
+        let y2 = (y + h).round();
+
+        let hw = w / 2.0;
+        let hh = h / 2.0;
+        let sdf_params = [hw, hh, r];
+
+        let v1 = Vertex { pos:[x1, y1], uv: [-hw, -hh], color: top_color, mode: 3.0, sdf_params };
+        let v2 = Vertex { pos: [x2, y1], uv:[hw, -hh], color: top_color, mode: 3.0, sdf_params };
+        let v3 = Vertex { pos: [x2, y2], uv: [hw, hh], color: bottom_color, mode: 3.0, sdf_params };
+        let v4 = Vertex { pos:[x1, y2], uv: [-hw, hh], color: bottom_color, mode: 3.0, sdf_params };
+
+        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 }

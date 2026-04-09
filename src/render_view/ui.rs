@@ -267,14 +267,32 @@ impl Renderer {
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
 
         let box_w = 600.0 * s;
-        let box_h = 200.0 * s;
-        let start_y = self.height + 50.0 * s;
+        let box_h = 240.0 * s;
+        let start_y = self.height + 100.0 * s;
         let target_y = (self.height - box_h) / 2.0;
-        let box_y = start_y + (target_y - start_y) * anim_progress;
-        let box_x = (self.width - box_w) / 2.0;
+        let mut box_y = start_y + (target_y - start_y) * anim_progress;
+        let target_y_px = target_y.round();
+        box_y = if (box_y - target_y_px).abs() < 0.5 { target_y_px } else { box_y.round() };
 
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 8.0 * s, [0.25, 0.26, 0.30, 1.0]);
-        self.push_rounded_rect(box_x, box_y, box_w, box_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+        let mut box_x = ((self.width - box_w) / 2.0).round();
+
+        let top_color = [0.26, 0.20, 0.36, 1.0];
+        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+
+        // 1. Внешний градиент
+        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
+
+        // 2. Внутренний темный блок
+        let pad_h = 40.0 * s;
+        let pad_v = 35.0 * s;
+        let content_x = (box_x + pad_h).round();
+        let content_y = (box_y + pad_v).round();
+        let content_w = (box_w - pad_h * 2.0).round();
+        let content_h = (box_h - 105.0 * s).round();
+
+        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
+        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
 
         let msg1 = format!("Документ «{}» был изменен.", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
@@ -283,20 +301,20 @@ impl Renderer {
         let w2 = self.measure_ui_width(msg2, 1.0);
         let text_w = w1.max(w2);
 
-        let icon_sz = 110.0 * s;
+        let icon_sz = 90.0 * s;
         let gap = 20.0 * s;
         let total_content_w = icon_sz + gap + text_w;
 
-        let start_x = box_x + (box_w - total_content_w) / 2.0;
-        let icon_y = box_y + 15.0 * s;
+        let start_x = content_x + (content_w - total_content_w) / 2.0;
+        let icon_y = content_y + (content_h - icon_sz) / 2.0;
 
         self.draw_atlas_icon(crate::widgets::IconType::Warning, start_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
 
         let text_x = start_x + icon_sz + gap;
         let fg = self.theme.fg;
 
-        self.draw_string_scaled(&msg1, text_x, box_y + 65.0 * s, fg, 1.0);
-        self.draw_string_scaled(msg2, text_x, box_y + 95.0 * s, fg, 1.0);
+        self.draw_string_scaled(&msg1, text_x, content_y + 45.0 * s, fg, 1.0);
+        self.draw_string_scaled(msg2, text_x, content_y + 75.0 * s, fg, 1.0);
 
         let (btn_save, btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
@@ -319,22 +337,32 @@ impl Renderer {
         
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
 
-        let box_w = (800.0 * s).min(self.width - 40.0 * s);
+        let box_w = (860.0 * s).min(self.width - 40.0 * s);
         let box_h = (680.0 * s).min(self.height - 40.0 * s);
 
-        let start_y = self.height + 50.0 * s;
+        let start_y = self.height + 100.0 * s;
         let target_y = (self.height - box_h) / 2.0;
-        let box_y = start_y + (target_y - start_y) * anim_progress;
-        let box_x = (self.width - box_w) / 2.0;
+        let raw_y = start_y + (target_y - start_y) * anim_progress;
+        let target_y_px = target_y.round();
+        let box_y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
+        let box_x = ((self.width - box_w) / 2.0).round();
 
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
-        self.push_rounded_rect(box_x, box_y, box_w, box_h, 10.0 * s, [0.169, 0.176, 0.188, 1.0]);
+        let top_color =[0.26, 0.20, 0.36, 1.0];
+        let bottom_color =[0.12, 0.13, 0.22, 1.0];
+
+        // 1. Внешнее выезжающее окно (Полностью Градиент)
+        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s,[0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
+
+        let content_x = (box_x + 60.0 * s).round();
+        let content_y = (box_y + 55.0 * s).round();
+        let content_w = (box_w - 120.0 * s).round();
+        let content_h = (box_h - 135.0 * s).round();
+
+        // 2. Внутреннее окно с текстом и хоткеями (Сплошной темный цвет для читаемости)
+        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s,[0.224, 0.231, 0.251, 0.8]);
+        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s,[0.15, 0.16, 0.20, 1.0]);
         self.flush();
-
-        let content_x = box_x + 30.0 * s;
-        let content_y = box_y + 30.0 * s;
-        let content_w = box_w - 60.0 * s;
-        let content_h = box_h - 110.0 * s;
 
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -347,8 +375,9 @@ impl Renderer {
             );
         }
 
-        let start_x = content_x + 10.0 * s;
-        let mut y = content_y + 10.0 * s - scroll_y;
+        let start_x = content_x + 30.0 * s;
+        let render_scroll_y = scroll_y.round();
+        let mut y = content_y + 30.0 * s - render_scroll_y;
         let text = faq_editor.get_full_text();
 
         let left_col_w = 260.0 * s;
@@ -365,7 +394,7 @@ impl Renderer {
                 self.push_rect(
                     start_x,
                     line_y,
-                    content_w - 40.0 * s,
+                    content_w - 60.0 * s,
                     1.0,
                     [1.0, 1.0, 1.0, 0.08],
                 );
@@ -432,8 +461,8 @@ impl Renderer {
             let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
             let track_h = content_h - 16.0 * s;
             let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
-            let thumb_y = content_y + 8.0 * s + scroll_ratio * (track_h - thumb_h);
-            let scroll_x = content_x + content_w - 14.0 * s;
+            let thumb_y = (content_y + 8.0 * s + scroll_ratio * (track_h - thumb_h)).round();
+            let scroll_x = (content_x + content_w - 14.0 * s).round();
 
             self.push_rounded_rect(
                 scroll_x,
@@ -462,7 +491,7 @@ impl Renderer {
 
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
         let scale = self.scale_factor;
-        let mut total_h = 40.0 * scale;
+        let mut total_h = 60.0 * scale;
 
         for line in faq_editor.get_full_text().split('\n') {
             if line.starts_with("# ") {
@@ -477,7 +506,7 @@ impl Renderer {
         }
 
         total_h += 80.0 * scale;
-        let content_h = dialog_height - 110.0 * scale;
+        let content_h = dialog_height - 135.0 * scale;
 
         (total_h - content_h).max(0.0)
     }
@@ -695,41 +724,59 @@ impl Renderer {
         
         let start_y = self.height + 100.0 * s;
         let target_y = (self.height - h) / 2.0;
-        let y = start_y + (target_y - start_y) * anim_progress;
-        let x = (self.width - w) / 2.0;
+        let raw_y = start_y + (target_y - start_y) * anim_progress;
+        let target_y_px = target_y.round();
+        let y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
+        let x = ((self.width - w) / 2.0).round();
 
-        self.push_rounded_rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 8.0 * s, [0.25, 0.26, 0.30, 1.0]);
-        self.push_rounded_rect(x, y, w, h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+        let top_color = [0.26, 0.20, 0.36, 1.0];
+        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+
+        // 1. Внешнее окно с градиентом
+        self.push_rounded_rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
+
+        // 2. Внутренняя панель
+        let pad_top = 35.0 * s;
+        let pad_bottom = 30.0 * s;
+        let pad_h = 40.0 * s;
+        let ix = x + pad_h;
+        let iy = y + pad_top;
+        let iw = w - pad_h * 2.0;
+        let ih = h - pad_top - pad_bottom;
+
+        self.push_rounded_rect(ix - 1.0, iy - 1.0, iw + 2.0, ih + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
+        self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
         
         self.flush();
 
         let sidebar_w = 200.0 * s;
-        self.push_rect(x + sidebar_w, y, 1.0, h, [1.0, 1.0, 1.0, 0.05]);
+        self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
         let tabs = ["Основные", "Редактор", "Внешний вид"];
-        let mut tab_y = y + 20.0 * s;
+        let mut tab_y = iy + 20.0 * s;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
             let tab_rect_h = 36.0 * s;
             
-            let is_hovered = self.last_mouse_x >= x + 10.0 * s && self.last_mouse_x <= x + sidebar_w - 10.0 * s 
+            let is_hovered = self.last_mouse_x >= ix + 10.0 * s && self.last_mouse_x <= ix + sidebar_w - 10.0 * s 
                           && self.last_mouse_y >= tab_rect_y && self.last_mouse_y <= tab_rect_y + tab_rect_h;
 
             if is_hovered { wants_pointer = true; }
 
             if i == active_tab {
-                self.push_rounded_rect(x + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.1]);
+                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.1]);
             } else if is_hovered {
-                self.push_rounded_rect(x + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.05]);
+                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.05]);
             }
 
             let color = if i == active_tab { [1.0, 1.0, 1.0, 1.0] } else { [0.7, 0.7, 0.7, 1.0] };
-            self.draw_string_scaled(title, x + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
+            self.draw_string_scaled(title, ix + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
             tab_y += tab_rect_h + 4.0 * s;
         }
 
-        let content_x = x + sidebar_w + 30.0 * s;
-        let mut content_y = y + 40.0 * s;
+        let content_x = ix + sidebar_w + 30.0 * s;
+        let mut content_y = iy + 40.0 * s;
         
         self.draw_string_scaled(tabs[active_tab], content_x, content_y, [1.0, 1.0, 1.0, 1.0], 1.2);
         content_y += 40.0 * s;

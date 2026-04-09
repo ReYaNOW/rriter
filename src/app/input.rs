@@ -76,23 +76,33 @@ impl App {
                     let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
                     let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
 
-                    let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
-                    if btn_ok.is_hovered(mx, my) {
+                    if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
                         self.close_dialog();
                     } else {
-                        let scroll_x = box_x + box_w - 20.0 * s;
-                        if mx >= scroll_x - 10.0 * s && mx <= scroll_x + 16.0 * s {
-                            self.is_dragging_faq = true;
+                        let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
+                        if btn_ok.is_hovered(mx, my) {
+                            self.close_dialog();
+                        } else {
+                            let content_x = box_x + 80.0 * s;
+                            let content_w = box_w - 160.0 * s;
+                            let scroll_x = content_x + content_w - 14.0 * s;
+                            if mx >= scroll_x && mx <= scroll_x + 14.0 * s {
+                                self.is_dragging_faq = true;
+                            }
                         }
                     }
                 } else {
                     let box_w = 600.0 * s;
-                    let box_h = 200.0 * s;
+                    let box_h = 240.0 * s;
                     let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
                     let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
-                    let (btn_save, btn_discard, btn_cancel) = crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
+                    
+                    if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
+                        self.close_dialog();
+                    } else {
+                        let (btn_save, btn_discard, btn_cancel) = crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
 
-                    if btn_save.is_hovered(mx, my) {
+                        if btn_save.is_hovered(mx, my) {
                         if self.save_current_file() {
                             if let Some(w) = self.window.as_ref() {
                                 App::update_window_title(w, &self.base_title, self.editor.is_dirty());
@@ -123,8 +133,9 @@ impl App {
                         } else if action == PendingAction::CloseFile {
                             self.close_current_file();
                         }
-                    } else if btn_cancel.is_hovered(mx, my) {
-                        self.close_dialog();
+                        } else if btn_cancel.is_hovered(mx, my) {
+                            self.close_dialog();
+                        }
                     }
                 }
             } else if state == ElementState::Released {
@@ -148,9 +159,13 @@ impl App {
                 if mx < x || mx > x + w || my < y || my > y + h {
                     self.show_settings = false;
                 } else {
+                    let pad = 20.0 * s;
+                    let pad_h = 40.0 * s;
+                    let ix = x + pad_h;
+                    let iy = y + pad;
                     let sidebar_w = 200.0 * s;
-                    if mx >= x + 10.0 * s && mx <= x + sidebar_w - 10.0 * s {
-                        let mut tab_y = y + 20.0 * s;
+                    if mx >= ix + 10.0 * s && mx <= ix + sidebar_w - 10.0 * s {
+                        let mut tab_y = iy + 20.0 * s;
                         for i in 0..3 {
                             if my >= tab_y && my <= tab_y + 36.0 * s {
                                 self.settings_tab = i;

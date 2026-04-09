@@ -346,7 +346,7 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
-                    if self.show_settings {
+                    if self.show_settings || self.show_quit_dialog || self.dialog_anim_progress > 0.0 || self.settings_anim_progress > 0.0 {
                         is_text = false;
                     }
 
@@ -488,7 +488,7 @@ impl ApplicationHandler for App {
 
         let target_dialog = if self.show_quit_dialog { 1.0 } else { 0.0 };
         if self.dialog_anim_progress != target_dialog {
-            self.dialog_anim_progress += (target_dialog - self.dialog_anim_progress) * 20.0 * dt;
+            self.dialog_anim_progress += (target_dialog - self.dialog_anim_progress) * 12.0 * dt;
             if (self.dialog_anim_progress - target_dialog).abs() < 0.0001 {
                 self.dialog_anim_progress = target_dialog;
             }
@@ -555,7 +555,7 @@ impl ApplicationHandler for App {
 
         let target_settings = if self.show_settings { 1.0 } else { 0.0 };
         if self.settings_anim_progress != target_settings {
-            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * 20.0 * dt;
+            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * 12.0 * dt;
             if (self.settings_anim_progress - target_settings).abs() < 0.0001 {
                 self.settings_anim_progress = target_settings;
             }
