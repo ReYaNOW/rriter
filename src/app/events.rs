@@ -497,36 +497,26 @@ impl ApplicationHandler for App {
             let diff = self.faq_target_scroll_y - self.faq_scroll_y;
             let abs_diff = diff.abs();
             if abs_diff > 0.0 {
-                let anim_speed = self.faq_scroll_anim_speed;
-                let target_v = if abs_diff > 15.0 {
-                    diff * anim_speed
+                let speed = 40.0 * dt;
+                let step = if diff > 0.0 {
+                    (speed).min(abs_diff)
                 } else {
-                    diff.signum() * abs_diff.sqrt() * (15.0_f32.sqrt() * anim_speed)
+                    (-speed).max(-abs_diff)
                 };
-                let v_factor = 1.0 - (-anim_speed * 4.0 * dt).exp();
-                self.faq_scroll_velocity += (target_v - self.faq_scroll_velocity) * v_factor;
-                let step = self.faq_scroll_velocity * dt;
-
-                if step.abs() >= abs_diff
-                    || diff.signum() != (diff - step).signum()
-                    || abs_diff < 0.01
-                {
-                    self.faq_scroll_y = self.faq_target_scroll_y;
-                    self.faq_scroll_velocity = 0.0;
-                } else {
-                    self.faq_scroll_y += step;
-                }
+                self.faq_scroll_y += step;
                 needs_redraw = true;
             }
         }
 
         let target_dialog = if self.show_quit_dialog { 1.0 } else { 0.0 };
         if self.dialog_anim_progress != target_dialog {
-            let factor = 1.0 - (-15.0 * dt).exp();
-            self.dialog_anim_progress += (target_dialog - self.dialog_anim_progress) * factor;
-            if (self.dialog_anim_progress - target_dialog).abs() < 0.0001 {
-                self.dialog_anim_progress = target_dialog;
-            }
+            let speed = 30.0 * dt;
+            let new_progress = if target_dialog > self.dialog_anim_progress {
+                (self.dialog_anim_progress + speed).min(target_dialog)
+            } else {
+                (self.dialog_anim_progress - speed).max(target_dialog)
+            };
+            self.dialog_anim_progress = new_progress;
             needs_redraw = true;
         }
 
@@ -581,31 +571,32 @@ impl ApplicationHandler for App {
         }
 
         if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {
-            let factor = 1.0 - (-20.0 * dt).exp();
-            self.autocomplete_anim_progress += (1.0 - self.autocomplete_anim_progress) * factor;
-            if (1.0 - self.autocomplete_anim_progress).abs() < 0.0001 {
-                self.autocomplete_anim_progress = 1.0;
-            }
+            let speed = 40.0 * dt;
+            self.autocomplete_anim_progress = (self.autocomplete_anim_progress + speed).min(1.0);
             needs_redraw = true;
         }
 
         let target_settings = if self.show_settings { 1.0 } else { 0.0 };
         if self.settings_anim_progress != target_settings {
-            let factor = 1.0 - (-15.0 * dt).exp();
-            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * factor;
-            if (self.settings_anim_progress - target_settings).abs() < 0.0001 {
-                self.settings_anim_progress = target_settings;
-            }
+            let speed = 30.0 * dt;
+            let new_progress = if target_settings > self.settings_anim_progress {
+                (self.settings_anim_progress + speed).min(target_settings)
+            } else {
+                (self.settings_anim_progress - speed).max(target_settings)
+            };
+            self.settings_anim_progress = new_progress;
             needs_redraw = true;
         }
 
         let target_search_y = if self.show_search { 10.0 } else { -120.0 };
         if self.search_anim_y != target_search_y {
-            let factor = 1.0 - (-20.0 * dt).exp();
-            self.search_anim_y += (target_search_y - self.search_anim_y) * factor;
-            if (self.search_anim_y - target_search_y).abs() < 0.01 {
-                self.search_anim_y = target_search_y;
-            }
+            let speed = 40.0 * dt;
+            let new_y = if target_search_y > self.search_anim_y {
+                (self.search_anim_y + speed).min(target_search_y)
+            } else {
+                (self.search_anim_y - speed).max(target_search_y)
+            };
+            self.search_anim_y = new_y;
             needs_redraw = true;
         }
 
