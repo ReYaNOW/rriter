@@ -122,13 +122,17 @@ impl Renderer {
         // --- 3. Scissor Test ---
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (y + current_h)).round() as i32;
-            self.gl.scissor(
-                x.round() as i32,
-                sy,
-                max_w.round() as i32,
-                current_h.round() as i32,
-            );
+            let mut sy = (self.height - (y + current_h)).round() as i32;
+            let mut sh = current_h.round() as i32;
+            if sy < 0 {
+                sh += sy;
+                sy = 0;
+            }
+            if sh < 0 {
+                sh = 0;
+            }
+            self.gl
+                .scissor(x.round() as i32, sy, max_w.round() as i32, sh);
         }
 
         // --- 4. Отрисовка элементов ---
@@ -269,9 +273,18 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-    pub fn draw_dialog(&mut self, base_title: &str, anim_progress: f32) -> bool {
+        /// Рисует затемнение, выезжающее окно и внутреннюю панель.
+    /// Гарантирует pixel-perfect рендеринг (округление координат) и корректный блендинг слоев (flush).
+    pub fn draw_modal_window_frame(&mut self,
+        anim_progress: f32,
+        target_w: f32,
+        target_h: f32,
+        pad_x: f32,
+        pad_y: f32,
+        bottom_area_h: f32,
+    ) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
         if anim_progress <= 0.0 {
-            return false;
+            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         }
         let s = self.scale_factor;
 
@@ -283,75 +296,69 @@ impl Renderer {
             [0.0, 0.0, 0.0, 0.4 * anim_progress],
         );
 
-        let box_w = (600.0 * s).round();
-        let box_h = (240.0 * s).round();
+        let w = (target_w * s).min(self.width - 40.0 * s).round();
+        let h = (target_h * s).min(self.height - 40.0 * s).round();
+
         let start_y = self.height + 100.0 * s;
-        let target_y = ((self.height - box_h) / 2.0).round();
-        let box_y = start_y + (target_y - start_y) * anim_progress;
-        let box_x = ((self.width - box_w) / 2.0).round();
+        let target_y = ((self.height - h) / 2.0).round();
+        let y = (start_y + (target_y - start_y) * anim_progress).round();
+        let x = ((self.width - w) / 2.0).round();
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
-        // 1. Внешний градиент
         self.push_rounded_rect(
-            box_x - 1.0,
-            box_y - 1.0,
-            box_w + 2.0,
-            box_h + 2.0,
+            x - 1.0,
+            y - 1.0,
+            w + 2.0,
+            h + 2.0,
             10.0 * s,
             [0.224, 0.231, 0.251, 1.0],
         );
-        self.push_rounded_rect_gradient(
-            box_x,
-            box_y,
-            box_w,
-            box_h,
-            10.0 * s,
-            top_color,
-            bottom_color,
+        self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
+
+        let ix = (x + pad_x * s).round();
+        let iy = (y + pad_y * s).round();
+        let iw = w - pad_x * s * 2.0;
+        let ih = h - (pad_y + bottom_area_h) * s;
+
+                self.push_rounded_rect(
+            ix - 1.0,
+            iy - 1.0,
+            iw + 2.0,
+            ih + 2.0,
+            8.0 * s,
+            [0.224, 0.231, 0.251, 0.8],
         );
+        self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
 
-        // 2. Внутренний темный блок
-                let pad_h = (40.0 * s).round();
-                let pad_v = (35.0 * s).round();
-                let content_x = (box_x + pad_h).round();
-                let content_y = (box_y + pad_v).round();
-                let content_w = (box_w - pad_h * 2.0).round();
-                let content_h = (box_h - (105.0 * s).round()).round();
+        self.flush();
 
-                self.push_rounded_rect(
-                     content_x - 1.0,
-                    content_y - 1.0,
-                    content_w + 2.0,
-                    content_h + 2.0,
-                    8.0 * s,
-                    [0.224, 0.231, 0.251, 0.8],
-                );
-                self.push_rounded_rect(
-                    content_x,
-                    content_y,
-                    content_w,
-                    content_h,
-                    8.0 * s,
-                    [0.15, 0.16, 0.20, 1.0],
-                );
+        (x, y, w, h, ix, iy, iw, ih)
+    }
 
-                self.flush();
+    pub fn draw_dialog(&mut self, base_title: &str, anim_progress: f32) -> bool {
+        if anim_progress <= 0.0 {
+            return false;
+        }
+        let s = self.scale_factor;
 
-                let msg1 = format!( "Документ «{}» был изменен. ", base_title);
+        let (box_x, box_y, box_w, box_h, content_x, content_y, content_w, content_h) =
+            self.draw_modal_window_frame(anim_progress, 600.0, 240.0, 40.0, 35.0, 70.0);
+
+        let msg1 = format!("Документ «{}» был изменен.   ", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
-        let w1 = self.measure_ui_width(&msg1, 1.0).round();
-        let w2 = self.measure_ui_width(msg2, 1.0).round();
+        let w1 = self.measure_ui_width(&msg1, 1.0);
+        let w2 = self.measure_ui_width(msg2, 1.0);
         let text_w = w1.max(w2);
 
-        let icon_sz = (90.0 * s).round();
-        let gap = (20.0 * s).round();
+        let icon_sz = 90.0 * s;
+        let gap = 20.0 * s;
         let total_content_w = icon_sz + gap + text_w;
 
-        let start_x = content_x + ((content_w - total_content_w) / 2.0).round();
-        let icon_y = content_y + ((content_h - icon_sz) / 2.0).round();
+        let start_x = content_x + (content_w - total_content_w) / 2.0;
+        let icon_y = content_y + (content_h - icon_sz) / 2.0;
 
         self.draw_atlas_icon(
             crate::widgets::IconType::Warning,
@@ -364,8 +371,8 @@ impl Renderer {
         let text_x = start_x + icon_sz + gap;
         let fg = self.theme.fg;
 
-        let txt_y1 = content_y + (45.0 * s).round();
-        let txt_y2 = content_y + (75.0 * s).round();
+                let txt_y1 = content_y + 45.0 * s;
+        let txt_y2 = content_y + 75.0 * s;
         self.draw_string_scaled(&msg1, text_x, txt_y1, fg, 1.0);
         self.draw_string_scaled(msg2, text_x, txt_y2, fg, 1.0);
 
@@ -390,80 +397,21 @@ impl Renderer {
         }
         let s = self.scale_factor;
 
-        self.push_rect(
-            0.0,
-            0.0,
-            self.width,
-            self.height,
-            [0.0, 0.0, 0.0, 0.4 * anim_progress],
-        );
-
-        let box_w = ((860.0 * s).min(self.width - 40.0 * s)).round();
-        let box_h = ((680.0 * s).min(self.height - 40.0 * s)).round();
-
-        let start_y = self.height + 100.0 * s;
-        let target_y = ((self.height - box_h) / 2.0).round();
-        let box_y = start_y + (target_y - start_y) * anim_progress;
-        let box_x = ((self.width - box_w) / 2.0).round();
-
-        let top_color = [0.26, 0.20, 0.36, 1.0];
-        let bottom_color = [0.12, 0.13, 0.22, 1.0];
-
-        // 1. Внешнее выезжающее окно (Полностью Градиент)
-        self.push_rounded_rect(
-            box_x - 1.0,
-            box_y - 1.0,
-            box_w + 2.0,
-            box_h + 2.0,
-            10.0 * s,
-            [0.224, 0.231, 0.251, 1.0],
-        );
-        self.push_rounded_rect_gradient(
-            box_x,
-            box_y,
-            box_w,
-            box_h,
-            10.0 * s,
-            top_color,
-            bottom_color,
-        );
-
-            let pad_x = (60.0 * s).round();
-        let pad_x = (60.0 * s).round();
-        let pad_y = (55.0 * s).round();
-        let content_x = (box_x + pad_x).round();
-        let content_y = (box_y + pad_y).round();
-        let content_w = (box_w - pad_x * 2.0).round();
-        let content_h = (box_h - (135.0 * s).round()).round();
-
-        // 2. Внутреннее окно с текстом и хоткеями (Сплошной темный цвет для читаемости)
-        self.push_rounded_rect(
-            content_x - 1.0,
-            content_y - 1.0,
-            content_w + 2.0,
-            content_h + 2.0,
-            8.0 * s,
-            [0.224, 0.231, 0.251, 0.8],
-        );
-        self.push_rounded_rect(
-            content_x,
-            content_y,
-            content_w,
-            content_h,
-            8.0 * s,
-            [0.15, 0.16, 0.20, 1.0],
-        );
-        self.flush();
+        let (box_x, box_y, box_w, box_h, content_x, content_y, content_w, content_h) =
+            self.draw_modal_window_frame(anim_progress, 860.0, 680.0, 60.0, 55.0, 80.0);
 
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = (self.height - (content_y + content_h)).round();
-            self.gl.scissor(
-                content_x as i32,
-                scissor_y as i32,
-                content_w as i32,
-                content_h as i32,
-            );
+            let mut sy = (self.height - (content_y + content_h)).round() as i32;
+            let mut sh = content_h as i32;
+            if sy < 0 {
+                sh += sy;
+                sy = 0;
+            }
+            if sh < 0 {
+                sh = 0;
+            }
+            self.gl.scissor(content_x as i32, sy, content_w as i32, sh);
         }
 
         let start_x = content_x + (30.0 * s).round();
@@ -813,12 +761,12 @@ impl Renderer {
             [0.0, 0.0, 0.0, 0.4 * anim_progress],
         );
 
-        let w = (800.0 * s).min(self.width - 40.0 * s);
-        let h = (600.0 * s).min(self.height - 40.0 * s);
+        let w = (800.0 * s).min(self.width - 40.0 * s).round();
+        let h = (600.0 * s).min(self.height - 40.0 * s).round();
 
         let start_y = self.height + 100.0 * s;
         let target_y = ((self.height - h) / 2.0).round();
-        let y = start_y + (target_y - start_y) * anim_progress;
+        let y = (start_y + (target_y - start_y) * anim_progress).round();
         let x = ((self.width - w) / 2.0).round();
 
         let top_color = [0.26, 0.20, 0.36, 1.0];

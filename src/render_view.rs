@@ -897,13 +897,9 @@ impl Renderer {
             );
         }
 
-        if show_quit_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
-        }
-        self.flush();
+                self.flush();
 
-        (wants_pointer, target_sticky_lines)
-    }
+        (wants_pointer, target_sticky_lines)}
 
     fn draw_minimap(
         &mut self,

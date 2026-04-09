@@ -47,15 +47,20 @@ impl Button {
             }
         }
 
-        let r = 4.0 * scale;
+        let draw_x = self.x.round();
+        let draw_y = self.y.round();
+        let draw_w = self.w.round();
+        let draw_h = self.h.round();
+        let r = (4.0 * scale).round();
+        let bw = (1.0 * scale).round().max(1.0);
 
-        renderer.push_rounded_rect(self.x, self.y, self.w, self.h, r, border_color);
+        renderer.push_rounded_rect(draw_x, draw_y, draw_w, draw_h, r, border_color);
         renderer.push_rounded_rect(
-            self.x + 1.0 * scale,
-            self.y + 1.0 * scale,
-            self.w - 2.0 * scale,
-            self.h - 2.0 * scale,
-            r - 1.0 * scale,
+            draw_x + bw,
+            draw_y + bw,
+            draw_w - bw * 2.0,
+            draw_h - bw * 2.0,
+            r - bw,
             bg_color,
         );
 
@@ -63,15 +68,15 @@ impl Button {
         let text_scale = 1.0;
         let text_color = renderer.theme.fg;
 
-        let icon_y = self.y + ((self.h - icon_size) / 2.0).round();
-        let text_y = self.y + (self.h / 2.0).round() + (5.0 * scale).round();
+        let icon_y = draw_y + ((draw_h - icon_size) / 2.0).round();
+        let text_y = draw_y + (draw_h / 2.0).round() + (5.0 * scale).round();
 
         let mut content_w = renderer.measure_ui_width(&self.text, text_scale).round();
         if self.icon.is_some() {
             content_w += icon_size + (8.0 * scale).round();
         }
 
-        let mut content_x = self.x + ((self.w - content_w) / 2.0).round();
+        let mut content_x = draw_x + ((draw_w - content_w) / 2.0).round();
 
         if let Some(icon_type) = self.icon {
             renderer.draw_atlas_icon(
@@ -129,14 +134,17 @@ impl IconButton {
             draw_bg = true;
         }
 
-        let r = 4.0 * scale;
+        let draw_x = self.x.round();
+        let draw_y = self.y.round();
+        let draw_s = self.size.round();
+        let r = (4.0 * scale).round();
 
         if draw_bg {
-            renderer.push_rounded_rect(self.x, self.y, self.size, self.size, r, bg_color);
+            renderer.push_rounded_rect(draw_x, draw_y, draw_s, draw_s, r, bg_color);
         }
 
-        let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
-        let offset = (self.size - icon_render_size) / 2.0;
+        let icon_render_size = self.icon_size.unwrap_or((20.0 * scale).round());
+        let offset = ((draw_s - icon_render_size) / 2.0).round();
 
         if let Some(icon_type) = self.icon {
             let icon_color = if self.is_active {
@@ -146,8 +154,8 @@ impl IconButton {
             };
             renderer.draw_atlas_icon(
                 icon_type,
-                self.x + offset,
-                self.y + offset,
+                draw_x + offset,
+                draw_y + offset,
                 icon_render_size,
                 icon_color,
             );
@@ -212,8 +220,8 @@ pub fn get_dialog_buttons(
 
     let total_w = w_save + w_discard + w_cancel + gap * 2.0;
 
-    let mut current_x = box_x + ((box_w - total_w) / 2.0).round();
-    let offset_y = (15.0 * scale).round();
+    let mut current_x = box_x + (box_w - total_w) / 2.0;
+    let offset_y = 15.0 * scale;
     let y = box_y + box_h - bh - offset_y;
 
     let btn_save = Button {
@@ -248,11 +256,18 @@ pub fn get_dialog_buttons(
     (btn_save, btn_discard, btn_cancel)
 }
 
-pub fn get_faq_button(box_x: f32, box_y: f32, box_w: f32, box_h: f32, scale: f32, renderer: &mut Renderer) -> Button {
+pub fn get_faq_button(
+    box_x: f32,
+    box_y: f32,
+    box_w: f32,
+    box_h: f32,
+    scale: f32,
+    renderer: &mut Renderer,
+) -> Button {
     let bh = (36.0 * scale).round();
     let w_ok = renderer.measure_ui_width("ОК", 1.0).round() + (40.0 * scale).round();
-    let x = box_x + ((box_w - w_ok) / 2.0).round();
-    let offset_y = (20.0 * scale).round();
+    let x = box_x + (box_w - w_ok) / 2.0;
+    let offset_y = 20.0 * scale;
     let y = box_y + box_h - bh - offset_y;
     Button {
         x,

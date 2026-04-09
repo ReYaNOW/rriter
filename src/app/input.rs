@@ -70,11 +70,11 @@ impl App {
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                if self.pending_action == PendingAction::Faq {
-                    let box_w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-                    let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
-                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
+                                                                if self.pending_action == PendingAction::Faq {
+                                        let box_w = (860.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s).round();
+                    let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s).round();
+                    let box_x = ((self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0).round();
+                                    let box_y = ((self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0).round();
 
                     if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
                         self.close_dialog();
@@ -91,11 +91,11 @@ impl App {
                             }
                         }
                     }
-                } else {
-                    let box_w = 600.0 * s;
-                    let box_h = 240.0 * s;
-                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
-                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
+                                } else {
+                                        let box_w = (600.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s).round();
+                    let box_h = (240.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s).round();
+                    let box_x = ((self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0).round();
+                    let box_y = ((self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0).round();
                     
                     if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
                         self.close_dialog();
@@ -148,10 +148,10 @@ impl App {
         if self.show_settings {
             if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-                let h = (600.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                let x = (self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0;
-                let y = (self.window.as_ref().unwrap().inner_size().height as f32 - h) / 2.0;
+                                let w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s).round();
+                let h = (600.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s).round();
+                let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
+                let y = ((self.window.as_ref().unwrap().inner_size().height as f32 - h) / 2.0).round();
 
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
@@ -668,11 +668,11 @@ impl App {
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
 
         if self.show_quit_dialog {
-            if self.is_dragging_faq && self.pending_action == PendingAction::Faq {
+                        if self.is_dragging_faq && self.pending_action == PendingAction::Faq {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
-                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
+                                                                let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s).round();
+                let box_y = ((self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0).round();
+                                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
 
                 let content_y = box_y + 30.0 * s;
                 let content_h = box_h - 110.0 * s;
@@ -1090,8 +1090,11 @@ impl App {
                     self.trigger_file_picker();
                 }
             }
-            PhysicalKey::Code(KeyCode::Comma) if ctrl => {
+                        PhysicalKey::Code(KeyCode::Comma) if ctrl => {
                 self.show_settings = !self.show_settings;
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
                 return;
             }
             PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
