@@ -1,12 +1,24 @@
 use crate::renderer::Renderer;
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IconType {
+    Save,
+    Discard,
+    Cancel,
+    Warning,
+    CaseMatch,
+    Up,
+    Down,
+    Close,
+}
+
 pub struct Button {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
     pub text: String,
-    pub icon: Option<glow::Texture>,
+    pub icon: Option<IconType>,
 }
 
 impl Button {
@@ -61,8 +73,14 @@ impl Button {
 
         let mut content_x = self.x + (self.w - content_w) / 2.0;
 
-        if let Some(tex) = self.icon {
-            renderer.draw_icon(&tex, content_x, icon_y, icon_size, icon_size);
+        if let Some(icon_type) = self.icon {
+            renderer.draw_atlas_icon(
+                icon_type,
+                content_x,
+                icon_y,
+                icon_size,
+                [1.0, 1.0, 1.0, 1.0],
+            );
             content_x += icon_size + 8.0 * scale;
         }
 
@@ -76,8 +94,9 @@ pub struct IconButton {
     pub x: f32,
     pub y: f32,
     pub size: f32,
-    pub icon: Option<glow::Texture>,
+    pub icon: Option<IconType>,
     pub is_active: bool,
+    pub icon_size: Option<f32>,
 }
 
 impl IconButton {
@@ -116,16 +135,21 @@ impl IconButton {
             renderer.push_rounded_rect(self.x, self.y, self.size, self.size, r, bg_color);
         }
 
-        let icon_render_size = 20.0 * scale;
+        let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
         let offset = (self.size - icon_render_size) / 2.0;
 
-        if let Some(tex) = self.icon {
-            renderer.draw_icon(
-                &tex,
+        if let Some(icon_type) = self.icon {
+            let icon_color = if self.is_active {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                renderer.theme.fg
+            };
+            renderer.draw_atlas_icon(
+                icon_type,
                 self.x + offset,
                 self.y + offset,
                 icon_render_size,
-                icon_render_size,
+                icon_color,
             );
         }
 
@@ -195,7 +219,7 @@ pub fn get_dialog_buttons(
         w: w_save,
         h: bh,
         text: "Сохранить".to_string(),
-        icon: renderer.icon_save,
+        icon: Some(IconType::Save),
     };
     current_x += w_save + gap;
 
@@ -205,7 +229,7 @@ pub fn get_dialog_buttons(
         w: w_discard,
         h: bh,
         text: "Отклонить".to_string(),
-        icon: renderer.icon_discard,
+        icon: Some(IconType::Discard),
     };
     current_x += w_discard + gap;
 
@@ -215,7 +239,7 @@ pub fn get_dialog_buttons(
         w: w_cancel,
         h: bh,
         text: "Отмена".to_string(),
-        icon: renderer.icon_cancel,
+        icon: Some(IconType::Cancel),
     };
 
     (btn_save, btn_discard, btn_cancel)

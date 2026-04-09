@@ -138,6 +138,10 @@ pub struct App {
     pub target_sticky_lines: Vec<(usize, usize)>,
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
+
+    pub show_settings: bool,
+    pub settings_anim_progress: f32,
+    pub settings_tab: usize,
 }
 
 impl App {

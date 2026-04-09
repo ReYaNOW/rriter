@@ -8,7 +8,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.show_quit_dialog || self.show_welcome {
+        if self.show_quit_dialog || self.show_welcome || self.show_settings {
             return;
         }
         self.scroll_anim_speed = 7.0;
@@ -50,6 +50,37 @@ impl App {
 
     pub fn handle_main_mouse_input(&mut self, state: ElementState) {
         if self.show_quit_dialog {
+            return;
+        }
+
+        if self.show_settings {
+            if state == ElementState::Pressed {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
+                let h = (600.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+                let x = (self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0;
+                let y = (self.window.as_ref().unwrap().inner_size().height as f32 - h) / 2.0;
+
+                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
+
+                if mx < x || mx > x + w || my < y || my > y + h {
+                    self.show_settings = false;
+                } else {
+                    let sidebar_w = 200.0 * s;
+                    if mx >= x + 10.0 * s && mx <= x + sidebar_w - 10.0 * s {
+                        let mut tab_y = y + 20.0 * s;
+                        for i in 0..3 {
+                            if my >= tab_y && my <= tab_y + 36.0 * s {
+                                self.settings_tab = i;
+                                break;
+                            }
+                            tab_y += 40.0 * s;
+                        }
+                    }
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
             return;
         }
 
@@ -139,43 +170,134 @@ impl App {
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
 
-            for &(rx, ry, rw, rh, target_byte) in
-                &self.renderer.as_ref().unwrap().sticky_scroll_rects
-            {
-                if last_mouse_x >= rx
-                    && last_mouse_x <= rx + rw
-                    && last_mouse_y >= ry
-                    && last_mouse_y <= ry + rh
+            let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+            let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
+            let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+            let scrollbar_x = window_width - minimap_w - scrollbar_w;
+
+            if self.show_search && self.search_anim_y > -10.0 {
+                let search_w = 480.0 * s;
+                let search_h = 52.0 * s;
+                let search_x = scrollbar_x - search_w - 20.0 * s;
+
+                if last_mouse_x >= search_x
+                    && last_mouse_x <= search_x + search_w
+                    && last_mouse_y >= self.search_anim_y
+                    && last_mouse_y <= self.search_anim_y + search_h
                 {
-                    self.editor.cursor = target_byte;
-                    self.editor.selection_anchor = None;
+                    let input_x = search_x + 10.0 * s;
+                    let input_w = 260.0 * s;
+                    let btn_y = self.search_anim_y + 8.0 * s;
+                    let btn_size = 36.0 * s;
 
-                    let phys_line = self
-                        .editor
-                        .line_offsets
-                        .partition_point(|&o| o <= target_byte)
-                        .saturating_sub(1);
-                    let visual_line = self
-                        .renderer
-                        .as_ref()
-                        .unwrap()
-                        .phys_to_visual
-                        .get(phys_line)
-                        .copied()
-                        .unwrap_or(phys_line);
-                    let line_y = visual_line as f32 * self.renderer.as_ref().unwrap().line_height;
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let max_scroll = self
-                        .renderer
-                        .as_mut()
-                        .unwrap()
-                        .get_max_scroll(&self.editor, wh);
+                    if last_mouse_x >= input_x && last_mouse_x <= input_x + input_w {
+                        self.search_focused = true;
+                        self.is_dragging_search = true;
 
-                    let padding = self.renderer.as_ref().unwrap().line_height * 3.0;
-                    self.target_scroll_y = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
-                    self.scroll_anim_speed = 15.0;
+                        let text = self.search_editor.get_full_text();
+                        let x_offset = (last_mouse_x - (input_x + 5.0 * s)).max(0.0);
+                        let mut current_x = 0.0;
+                        let mut target_idx = text.len();
+                        let mut byte_idx = 0;
+                        for c in text.chars() {
+                            let adv = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .get_ui_glyph(c)
+                                .map(|g| g.advance)
+                                .unwrap_or(10.0);
+                            if x_offset <= current_x + adv / 2.0 {
+                                target_idx = byte_idx;
+                                break;
+                            }
+                            current_x += adv;
+                            byte_idx += c.len_utf8();
+                        }
+                        self.search_editor.cursor = target_idx;
+                        self.search_editor.selection_anchor = Some(target_idx);
+                    } else {
+                        let mut current_btn_x = search_x + search_w - 10.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_close = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                        };
+                        current_btn_x -= 10.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_down = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                        };
+                        current_btn_x -= 10.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_up = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                        };
+                        current_btn_x -= 10.0 * s;
+
+                        current_btn_x -= btn_size;
+                        let btn_case = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                        };
+
+                        if btn_case.is_hovered(last_mouse_x, last_mouse_y) {
+                            self.search_case_sensitive = !self.search_case_sensitive;
+                            self.update_search();
+                            self.jump_to_search_result();
+                        } else if btn_up.is_hovered(last_mouse_x, last_mouse_y) {
+                            if !self.search_results.is_empty() {
+                                if let Some(idx) = self.search_current_idx {
+                                    self.search_current_idx = Some(if idx == 0 {
+                                        self.search_results.len() - 1
+                                    } else {
+                                        idx - 1
+                                    });
+                                }
+                                self.jump_to_search_result();
+                            }
+                        } else if btn_down.is_hovered(last_mouse_x, last_mouse_y) {
+                            if !self.search_results.is_empty() {
+                                if let Some(idx) = self.search_current_idx {
+                                    self.search_current_idx =
+                                        Some((idx + 1) % self.search_results.len());
+                                }
+                                self.jump_to_search_result();
+                            }
+                        } else if btn_close.is_hovered(last_mouse_x, last_mouse_y) {
+                            self.show_search = false;
+                            self.search_focused = false;
+                            self.search_results.clear();
+                            self.search_current_idx = None;
+                        }
+                    }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
+                } else {
+                    self.search_focused = false;
                 }
             }
 
@@ -227,8 +349,45 @@ impl App {
                 }
             }
 
-            let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
-            let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
+            for &(rx, ry, rw, rh, target_byte) in
+                &self.renderer.as_ref().unwrap().sticky_scroll_rects
+            {
+                if last_mouse_x >= rx
+                    && last_mouse_x <= rx + rw
+                    && last_mouse_y >= ry
+                    && last_mouse_y <= ry + rh
+                {
+                    self.editor.cursor = target_byte;
+                    self.editor.selection_anchor = None;
+
+                    let phys_line = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&o| o <= target_byte)
+                        .saturating_sub(1);
+                    let visual_line = self
+                        .renderer
+                        .as_ref()
+                        .unwrap()
+                        .phys_to_visual
+                        .get(phys_line)
+                        .copied()
+                        .unwrap_or(phys_line);
+                    let line_y = visual_line as f32 * self.renderer.as_ref().unwrap().line_height;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let max_scroll = self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .get_max_scroll(&self.editor, wh);
+
+                    let padding = self.renderer.as_ref().unwrap().line_height * 3.0;
+                    self.target_scroll_y = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
+                    self.scroll_anim_speed = 15.0;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
 
             if let Some(r) = self.renderer.as_mut() {
                 let mut fold_toggled = false;
@@ -295,6 +454,8 @@ impl App {
                 }
             }
 
+            let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+            let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let max_scroll = self
                 .renderer
@@ -303,126 +464,6 @@ impl App {
                 .get_max_scroll(&self.editor, wh);
             let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
             let scrollbar_x = window_width - minimap_w - scrollbar_w;
-
-            if self.show_search && self.search_anim_y > -10.0 {
-                let search_w = 480.0 * s;
-                let search_h = 46.0 * s;
-                let search_x = scrollbar_x - search_w - 20.0 * s;
-
-                if last_mouse_x >= search_x
-                    && last_mouse_x <= search_x + search_w
-                    && last_mouse_y >= self.search_anim_y
-                    && last_mouse_y <= self.search_anim_y + search_h
-                {
-                    let input_x = search_x + 10.0 * s;
-                    let input_w = 260.0 * s;
-                    let btn_y = self.search_anim_y + 8.0 * s;
-                    let btn_size = 30.0 * s;
-
-                    if last_mouse_x >= input_x && last_mouse_x <= input_x + input_w {
-                        self.search_focused = true;
-                        self.is_dragging_search = true;
-
-                        let text = self.search_editor.get_full_text();
-                        let x_offset = (last_mouse_x - (input_x + 5.0 * s)).max(0.0);
-                        let mut current_x = 0.0;
-                        let mut target_idx = text.len();
-                        let mut byte_idx = 0;
-                        for c in text.chars() {
-                            let adv = self
-                                .renderer
-                                .as_mut()
-                                .unwrap()
-                                .get_ui_glyph(c)
-                                .map(|g| g.advance)
-                                .unwrap_or(10.0);
-                            if x_offset <= current_x + adv / 2.0 {
-                                target_idx = byte_idx;
-                                break;
-                            }
-                            current_x += adv;
-                            byte_idx += c.len_utf8();
-                        }
-                        self.search_editor.cursor = target_idx;
-                        self.search_editor.selection_anchor = Some(target_idx);
-                    } else {
-                        let mut current_btn_x = search_x + search_w - 10.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_close = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                        };
-                        current_btn_x -= 8.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_down = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                        };
-                        current_btn_x -= 4.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_up = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                        };
-                        current_btn_x -= 4.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_case = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                        };
-
-                        if btn_case.is_hovered(last_mouse_x, last_mouse_y) {
-                            self.search_case_sensitive = !self.search_case_sensitive;
-                            self.update_search();
-                            self.jump_to_search_result();
-                        } else if btn_up.is_hovered(last_mouse_x, last_mouse_y) {
-                            if !self.search_results.is_empty() {
-                                if let Some(idx) = self.search_current_idx {
-                                    self.search_current_idx = Some(if idx == 0 {
-                                        self.search_results.len() - 1
-                                    } else {
-                                        idx - 1
-                                    });
-                                }
-                                self.jump_to_search_result();
-                            }
-                        } else if btn_down.is_hovered(last_mouse_x, last_mouse_y) {
-                            if !self.search_results.is_empty() {
-                                if let Some(idx) = self.search_current_idx {
-                                    self.search_current_idx =
-                                        Some((idx + 1) % self.search_results.len());
-                                }
-                                self.jump_to_search_result();
-                            }
-                        } else if btn_close.is_hovered(last_mouse_x, last_mouse_y) {
-                            self.show_search = false;
-                            self.search_focused = false;
-                            self.search_results.clear();
-                            self.search_current_idx = None;
-                        }
-                    }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                } else {
-                    self.search_focused = false;
-                }
-            }
 
             let left_pad = self.renderer.as_ref().unwrap().left_padding;
 
@@ -930,6 +971,10 @@ impl App {
                 } else {
                     self.trigger_file_picker();
                 }
+            }
+            PhysicalKey::Code(KeyCode::Comma) if ctrl => {
+                self.show_settings = !self.show_settings;
+                return;
             }
             PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
                 if let Some(delta) = self.editor.undo() {

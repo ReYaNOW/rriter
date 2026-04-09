@@ -508,13 +508,34 @@ impl ApplicationHandler for App {
 
                 self.target_sticky_lines = target_sticky;
 
-                let r = self.renderer.as_ref().unwrap();
-                let mx = r.last_mouse_x;
-                let my = r.last_mouse_y;
-                for &(rx, ry, rw, rh, _) in &r.sticky_scroll_rects {
-                    if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
-                        wants_pointer = true;
-                        break;
+                let (mx, my, s, minimap_w) = {
+                    let r = self.renderer.as_ref().unwrap();
+                    (r.last_mouse_x, r.last_mouse_y, r.scale_factor, r.minimap_width)
+                };
+
+                let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
+                let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
+                let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, window_height);
+                let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+                let scrollbar_x = window_width - minimap_w - scrollbar_w;
+
+                let mut over_search = false;
+                if self.show_search && self.search_anim_y > -10.0 {
+                    let search_w = 480.0 * s;
+                    let search_h = 52.0 * s;
+                    let search_x = scrollbar_x - search_w - 20.0 * s;
+                    if mx >= search_x && mx <= search_x + search_w && my >= self.search_anim_y && my <= self.search_anim_y + search_h {
+                        over_search = true;
+                    }
+                }
+
+                if !over_search {
+                    let r = self.renderer.as_ref().unwrap();
+                    for &(rx, ry, rw, rh, _) in &r.sticky_scroll_rects {
+                        if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                            wants_pointer = true;
+                            break;
+                        }
                     }
                 }
 
@@ -536,6 +557,12 @@ impl ApplicationHandler for App {
                     }
                 } else {
                     self.autocomplete_rect = None;
+                }
+
+                if self.show_settings || self.settings_anim_progress > 0.0 {
+                    if self.renderer.as_mut().unwrap().draw_settings(self.settings_anim_progress, self.settings_tab) {
+                        wants_pointer = true;
+                    }
                 }
 
                 let cursor_icon = if wants_pointer {
@@ -570,12 +597,16 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
+                    if self.show_settings {
+                        is_text = false;
+                    }
+
                     if self.show_search && self.search_anim_y > -10.0 {
                         let search_w = 480.0 * s;
-                        let search_h = 46.0 * s;
-                        let search_x = window_width - minimap_w - search_w - 20.0 * s;
+                        let search_h = 52.0 * s;
+                        let search_x = window_width - minimap_w - scrollbar_w - search_w - 20.0 * s;
                         let input_x = search_x + 10.0 * s;
-                        let input_y = self.search_anim_y + 8.0 * s;
+                        let input_y = self.search_anim_y + 11.0 * s;
                         let input_w = 260.0 * s;
                         let input_h = 30.0 * s;
 
@@ -765,7 +796,16 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        let target_search_y = if self.show_search { 10.0 } else { -70.0 };
+        let target_settings = if self.show_settings { 1.0 } else { 0.0 };
+        if self.settings_anim_progress != target_settings {
+            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * 20.0 * dt;
+            if (self.settings_anim_progress - target_settings).abs() < 0.0001 {
+                self.settings_anim_progress = target_settings;
+            }
+            needs_redraw = true;
+        }
+
+        let target_search_y = if self.show_search { 10.0 } else { -120.0 };
         if (self.search_anim_y - target_search_y).abs() > 0.5 {
             self.search_anim_y += (target_search_y - self.search_anim_y) * 20.0 * dt;
             needs_redraw = true;

@@ -15,6 +15,22 @@ impl Renderer {
         }
     }
 
+    pub fn draw_atlas_icon(&mut self, icon: crate::widgets::IconType, x: f32, y: f32, size: f32, color: [f32; 4]) {
+        if let Some(&tex) = self.icons.get(&icon) {
+            self.flush(); // Сбрасываем батч, чтобы сменить текстуру
+            unsafe {
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            }
+            self.push_quad(x, y, size, size, 0.0, 0.0, 1.0, 1.0, color, 5.0);
+            self.flush();
+            unsafe {
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture)); // Возвращаем шрифтовой атлас
+            }
+        }
+    }
+
+    // (функции удалены)
+
     pub fn draw_autocomplete(
         &mut self,
         x: f32,
@@ -274,9 +290,7 @@ impl Renderer {
         let start_x = (self.width - total_content_w) / 2.0;
         let icon_y = 15.0 * scale;
 
-        if let Some(tex) = self.icon_warning {
-            self.draw_icon(&tex, start_x, icon_y, icon_sz, icon_sz);
-        }
+        self.draw_atlas_icon(crate::widgets::IconType::Warning, start_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
 
         let text_x = start_x + icon_sz + gap;
         let fg = self.theme.fg;
@@ -730,6 +744,71 @@ impl Renderer {
             [0.5, 0.5, 0.55, 1.0],
             scale_hint,
         );
+
+        self.flush();
+        wants_pointer
+    }
+
+    pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize) -> bool {
+        if anim_progress <= 0.0 { return false; }
+        let s = self.scale_factor;
+        let mut wants_pointer = false;
+
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
+
+        let w = (800.0 * s).min(self.width - 40.0 * s);
+        let h = (600.0 * s).min(self.height - 40.0 * s);
+        
+        let start_y = self.height + 100.0 * s;
+        let target_y = (self.height - h) / 2.0;
+        let y = start_y + (target_y - start_y) * anim_progress;
+        let x = (self.width - w) / 2.0;
+
+        self.push_rounded_rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 8.0 * s, [0.25, 0.26, 0.30, 1.0]);
+        self.push_rounded_rect(x, y, w, h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+        
+        self.flush();
+
+        let sidebar_w = 200.0 * s;
+        self.push_rect(x + sidebar_w, y, 1.0, h, [1.0, 1.0, 1.0, 0.05]);
+
+        let tabs = ["Основные", "Редактор", "Внешний вид"];
+        let mut tab_y = y + 20.0 * s;
+        for (i, title) in tabs.iter().enumerate() {
+            let tab_rect_y = tab_y;
+            let tab_rect_h = 36.0 * s;
+            
+            let is_hovered = self.last_mouse_x >= x + 10.0 * s && self.last_mouse_x <= x + sidebar_w - 10.0 * s 
+                          && self.last_mouse_y >= tab_rect_y && self.last_mouse_y <= tab_rect_y + tab_rect_h;
+
+            if is_hovered { wants_pointer = true; }
+
+            if i == active_tab {
+                self.push_rounded_rect(x + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.1]);
+            } else if is_hovered {
+                self.push_rounded_rect(x + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.05]);
+            }
+
+            let color = if i == active_tab { [1.0, 1.0, 1.0, 1.0] } else { [0.7, 0.7, 0.7, 1.0] };
+            self.draw_string_scaled(title, x + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
+            tab_y += tab_rect_h + 4.0 * s;
+        }
+
+        let content_x = x + sidebar_w + 30.0 * s;
+        let mut content_y = y + 40.0 * s;
+        
+        self.draw_string_scaled(tabs[active_tab], content_x, content_y, [1.0, 1.0, 1.0, 1.0], 1.2);
+        content_y += 40.0 * s;
+
+        if active_tab == 0 {
+            self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
+        } else if active_tab == 1 {
+            self.draw_string_scaled("Размер шрифта: 14px", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            content_y += 30.0 * s;
+            self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+        } else if active_tab == 2 {
+            self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+        }
 
         self.flush();
         wants_pointer

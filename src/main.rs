@@ -310,7 +310,7 @@ F8\tПоказать/скрыть счетчик FPS
         recent_files,
 
         show_search: false,
-        search_anim_y: -70.0,
+        search_anim_y: -120.0,
         search_editor: Editor::new(256),
         search_focused: false,
         search_case_sensitive: false,
@@ -344,6 +344,10 @@ F8\tПоказать/скрыть счетчик FPS
         target_sticky_lines: Vec::new(),
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
+
+        show_settings: false,
+        settings_anim_progress: 0.0,
+        settings_tab: 0,
     };
 
     app.highlighter.reset(

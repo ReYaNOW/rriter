@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
+// (удаляем строку)
+use tiny_skia;
 
 pub const MAX_VERTICES: usize = 100_000;
 pub const ATLAS_SIZE: i32 = 2048;
@@ -46,6 +48,8 @@ pub struct GlyphInfo {
     pub advance: f32,
     pub is_emoji: f32,
 }
+
+// SvgIcon удалён, используем glow::Texture напрямую
 
 #[derive(Clone, Copy, Debug)]
 pub struct VisualLine {
@@ -121,15 +125,7 @@ pub struct Renderer {
     pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
 
-    pub icon_save: Option<glow::Texture>,
-    pub icon_discard: Option<glow::Texture>,
-    pub icon_cancel: Option<glow::Texture>,
-    pub icon_warning: Option<glow::Texture>,
-
-    pub icon_case_match: Option<glow::Texture>,
-    pub icon_up: Option<glow::Texture>,
-    pub icon_down: Option<glow::Texture>,
-    pub icon_close: Option<glow::Texture>,
+    pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
     pub icon_logo: Option<glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
@@ -139,14 +135,17 @@ impl Renderer {
     pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
         unsafe {
             let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(v_shader, "#version 330
+            gl.shader_source(
+                v_shader,
+                "#version 330
                 in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;
                 out vec2 v_uv; out vec4 v_col; out float v_mode; out vec3 v_sdf_params;
                 uniform mat4 proj;
                 void main() { 
                     gl_Position = proj * vec4(pos, 0.0, 1.0); 
                     v_uv = uv; v_col = color; v_mode = mode; v_sdf_params = sdf_params; 
-                }");
+                }",
+            );
             gl.compile_shader(v_shader);
 
             let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
@@ -168,9 +167,12 @@ impl Renderer {
                         float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
                         if (alpha <= 0.0) discard;
                         out_color = vec4(v_col.rgb, v_col.a * alpha);
+                    } else if (v_mode == 4.0) {
+                        out_color = v_col;
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
+                        else if (v_mode == 5.0) { out_color = tex_color * v_col; }
                         else { out_color = vec4(v_col.rgb, tex_color.a * v_col.a); }
                     }
                 }");
@@ -339,25 +341,7 @@ impl Renderer {
                 Some(tex)
             };
 
-            let icon_save =
-                load_icon_from_memory(include_bytes!("icons/document-save.png"), "document-save");
-            let icon_discard =
-                load_icon_from_memory(include_bytes!("icons/edit-delete.png"), "edit-delete");
-            let icon_cancel =
-                load_icon_from_memory(include_bytes!("icons/dialog-cancel.png"), "dialog-cancel");
-            let icon_warning =
-                load_icon_from_memory(include_bytes!("icons/dialog-warning.png"), "dialog-warning");
-
-            let icon_case_match = load_icon_from_memory(
-                include_bytes!("icons/format-text-uppercase.png"),
-                "format-text-uppercase",
-            );
-            let icon_up = load_icon_from_memory(include_bytes!("icons/go-up.png"), "go-up");
-            let icon_down = load_icon_from_memory(include_bytes!("icons/go-down.png"), "go-down");
-            let icon_close =
-                load_icon_from_memory(include_bytes!("icons/window-close.png"), "window-close");
-            let icon_logo =
-                load_icon_from_memory(include_bytes!("icons/icon.png"), "icon");
+            let icon_logo = load_icon_from_memory(include_bytes!("icons/icon.png"), "icon");
 
             let mut renderer = Self {
                 gl,
@@ -406,14 +390,7 @@ impl Renderer {
                 search_res_string: String::new(),
                 last_search_idx: None,
                 last_search_len: 0,
-                icon_save,
-                icon_discard,
-                icon_cancel,
-                icon_warning,
-                icon_case_match,
-                icon_up,
-                icon_down,
-                icon_close,
+                icons: HashMap::new(),
                 icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
@@ -425,6 +402,8 @@ impl Renderer {
                     renderer.ascii_advances[i as usize] = g.advance;
                 }
             }
+
+            renderer.load_builtin_icons();
 
             renderer
         }
@@ -807,12 +786,169 @@ impl Renderer {
 
         let sdf_params = [0.0, 0.0, 0.0];
 
-        let v1 = Vertex { pos: [x1, y1], uv: [u, v], color, mode, sdf_params };
-        let v2 = Vertex { pos: [x2, y1], uv: [u + uw, v], color, mode, sdf_params };
-        let v3 = Vertex { pos: [x2, y2], uv: [u + uw, v + vh], color, mode, sdf_params };
-        let v4 = Vertex { pos: [x1, y2], uv: [u, v + vh], color, mode, sdf_params };
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [u, v],
+            color,
+            mode,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [u + uw, v],
+            color,
+            mode,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [u + uw, v + vh],
+            color,
+            mode,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [u, v + vh],
+            color,
+            mode,
+            sdf_params,
+        };
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+    }
+
+    pub fn load_builtin_icons(&mut self) {
+        let builtin = [
+            (
+                crate::widgets::IconType::Save,
+                include_bytes!("icons/document-save.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Discard,
+                include_bytes!("icons/edit-delete.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Cancel,
+                include_bytes!("icons/dialog-cancel.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Warning,
+                include_bytes!("icons/dialog-warning.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::CaseMatch,
+                include_bytes!("icons/format-text-uppercase.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Up,
+                include_bytes!("icons/go-up.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Down,
+                include_bytes!("icons/go-down.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Close,
+                include_bytes!("icons/window-close.svg").as_slice(),
+            ),
+        ];
+
+        let opt = resvg::usvg::Options::default();
+        for (icon_type, data) in builtin {
+            let svg_data_str = String::from_utf8_lossy(data);
+            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+                // Заменяем жестко прописанный белый цвет на старый розовый #da4453
+                svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
+            } else {
+                svg_data_str.into_owned()
+            };
+
+            // Подбираем идеальную толщину для разных иконок, чтобы они выглядели сбалансированно.
+            let target_stroke_width = match icon_type {
+                crate::widgets::IconType::Up | crate::widgets::IconType::Down => "1.7", // Стрелки делаем чуть изящнее
+                _ => "2.0", // Остальные иконки - "сочные" и жирные
+            };
+            svg_str = svg_str.replace(
+                "stroke-width=\"2\"",
+                &format!("stroke-width=\"{}\"", target_stroke_width),
+            );
+
+            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
+                let size = tree.size();
+                // SSAA (Super-Sampling): растеризуем вектор в гигантском разрешении.
+                // GPU Mipmaps аппаратно сожмут её до нужного размера без "мыла" и "лесенок".
+                let target_size = 256.0;
+
+                let scale = if size.width() > size.height() {
+                    target_size / size.width()
+                } else {
+                    target_size / size.height()
+                };
+                let width = (size.width() * scale).ceil() as u32;
+                let height = (size.height() * scale).ceil() as u32;
+                if let Some(mut pixmap) = tiny_skia::Pixmap::new(width, height) {
+                    let transform = tiny_skia::Transform::from_scale(scale, scale);
+                    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+                    let mut data = pixmap.data().to_vec();
+                    for pixel in data.chunks_exact_mut(4) {
+                        let a = pixel[3] as u32;
+                        if a > 0 && a < 255 {
+                            pixel[0] = ((pixel[0] as u32 * 255) / a).min(255) as u8;
+                            pixel[1] = ((pixel[1] as u32 * 255) / a).min(255) as u8;
+                            pixel[2] = ((pixel[2] as u32 * 255) / a).min(255) as u8;
+                        }
+                    }
+
+                    let tex = unsafe {
+                        use glow::HasContext;
+                        let tex = self.gl.create_texture().unwrap();
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                        self.gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            glow::RGBA8 as i32,
+                            width as i32,
+                            height as i32,
+                            0,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(Some(&data)),
+                        );
+                        self.gl.generate_mipmap(glow::TEXTURE_2D);
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MIN_FILTER,
+                            glow::LINEAR_MIPMAP_LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MAG_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_S,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_T,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        tex
+                    };
+
+                    self.icons.insert(icon_type, tex);
+                }
+            }
+        }
+
+        unsafe {
+            use glow::HasContext;
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+        }
     }
 
     pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {

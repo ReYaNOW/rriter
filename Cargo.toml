@@ -16,6 +16,9 @@ bytemuck = "1.14"
 mimalloc = "0.1"
 rustc-hash = "2.1.2"
 image = "0.25.1"
+resvg = "0.47.0"
+usvg = "0.47.0"
+tiny-skia = "0.12"
 rfd = { version = "0.17", default-features = false, features = [
     "xdg-portal",
     "pollster",
@@ -46,6 +49,7 @@ syntect = { version = "5.3.0", default-features = false, features = [
     "default-themes",
 ] }
 regex = "1.12.3"
+rayon = "1.10.0"
 
 [profile.release]
 opt-level = 3

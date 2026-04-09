@@ -137,13 +137,13 @@ impl Renderer {
             let (first, second) = editor.text_parts();
             let longest_width = self.measure_width(first, second, start_byte, end_byte);
             let view_w = self.width - self.minimap_width - self.left_padding;
-            
+
             if longest_width > view_w {
                 self.max_scroll_x = longest_width - view_w + 100.0;
             } else {
                 self.max_scroll_x = 0.0;
             }
-            
+
             self.last_editor_version_for_scroll_x = editor.version;
         }
 
@@ -884,7 +884,7 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
-        if search_anim_y > -70.0 {
+        if search_anim_y > -110.0 {
             wants_pointer |= self.draw_search_panel(
                 search_anim_y,
                 search_editor,
@@ -1360,12 +1360,8 @@ impl Renderer {
                                         color = spans[span_idx].color;
                                     }
                                     let base_alpha = *color.get(3).unwrap_or(&1.0);
-                                    let draw_color = [
-                                        color[0],
-                                        color[1],
-                                        color[2],
-                                        base_alpha * alpha,
-                                    ];
+                                    let draw_color =
+                                        [color[0], color[1], color[2], base_alpha * alpha];
                                     self.push_quad(
                                         x + g.offset_x,
                                         rect_y + self.baseline_offset - g.offset_y,
@@ -1414,7 +1410,7 @@ impl Renderer {
         let s = self.scale_factor;
         let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
         let search_w = 480.0 * s;
-        let search_h = 46.0 * s;
+        let search_h = 52.0 * s;
         let search_x = scrollbar_x - search_w - 20.0 * s;
 
         self.push_rounded_rect(
@@ -1449,8 +1445,8 @@ impl Renderer {
         );
 
         let input_x = search_x + 10.0 * s;
-        let input_y = search_anim_y + 8.0 * s;
-        let input_w = 260.0 * s;
+        let input_y = search_anim_y + 11.0 * s;
+        let input_w = 215.0 * s;
         let input_h = 30.0 * s;
 
         let input_bg = self.theme.bg;
@@ -1581,8 +1577,8 @@ impl Renderer {
         }
 
         let text_y = input_y + input_h / 2.0 + 6.0 * s;
-        let btn_y = input_y;
-        let btn_size = 30.0 * s;
+        let btn_y = search_anim_y + 8.0 * s;
+        let btn_size = 36.0 * s;
 
         let mut current_x = search_x + search_w - 10.0 * s;
 
@@ -1591,38 +1587,42 @@ impl Renderer {
             x: current_x,
             y: btn_y,
             size: btn_size,
-            icon: self.icon_close,
+            icon: Some(crate::widgets::IconType::Close),
             is_active: false,
+            icon_size: Some(26.0 * s),
         };
-        current_x -= 8.0 * s;
+        current_x -= 10.0 * s;
 
         current_x -= btn_size;
         let btn_down = IconButton {
             x: current_x,
             y: btn_y,
             size: btn_size,
-            icon: self.icon_down,
+            icon: Some(crate::widgets::IconType::Down),
             is_active: false,
+            icon_size: Some(37.0 * s),
         };
-        current_x -= 4.0 * s;
+        current_x -= 10.0 * s;
 
         current_x -= btn_size;
         let btn_up = IconButton {
             x: current_x,
             y: btn_y,
             size: btn_size,
-            icon: self.icon_up,
+            icon: Some(crate::widgets::IconType::Up),
             is_active: false,
+            icon_size: Some(37.0 * s),
         };
-        current_x -= 4.0 * s;
+        current_x -= 10.0 * s;
 
         current_x -= btn_size;
         let btn_case = IconButton {
             x: current_x,
             y: btn_y,
             size: btn_size,
-            icon: self.icon_case_match,
+            icon: Some(crate::widgets::IconType::CaseMatch),
             is_active: search_case_sensitive,
+            icon_size: Some(30.0 * s),
         };
 
         if search_results.len() != self.last_search_len
