@@ -177,7 +177,7 @@ impl Renderer {
                     is_soft_wrap: false,
                     whitespace_px_width,
                     text_px_width: text_px_width + dots_width,
-                    y_offset: current_y,
+                    y_offset: (current_y - scroll_y).round() + scroll_y,
                     is_folded,
                     fold_suffix,
                     fold_suffix_len,

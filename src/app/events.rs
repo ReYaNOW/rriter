@@ -1,9 +1,7 @@
 use crate::app::{App, PendingAction};
 use crate::renderer::Renderer;
 use glutin::config::ConfigTemplateBuilder;
-use glutin::context::{
-    ContextApi, ContextAttributesBuilder, NotCurrentGlContext,
-};
+use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext};
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{GlSurface, WindowSurface};
 use glutin_winit::DisplayBuilder;
@@ -141,7 +139,10 @@ impl ApplicationHandler for App {
                         .as_mut()
                         .unwrap()
                         .resize(size.width, size.height);
-                    self.renderer.as_mut().unwrap().last_editor_version_for_scroll_x = u64::MAX;
+                    self.renderer
+                        .as_mut()
+                        .unwrap()
+                        .last_editor_version_for_scroll_x = u64::MAX;
                     self.last_resize_time = Some(Instant::now());
                     self.window.as_ref().unwrap().request_redraw();
                 }
@@ -247,12 +248,21 @@ impl ApplicationHandler for App {
 
                 let (mx, my, s, minimap_w) = {
                     let r = self.renderer.as_ref().unwrap();
-                    (r.last_mouse_x, r.last_mouse_y, r.scale_factor, r.minimap_width)
+                    (
+                        r.last_mouse_x,
+                        r.last_mouse_y,
+                        r.scale_factor,
+                        r.minimap_width,
+                    )
                 };
 
                 let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
                 let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
-                let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, window_height);
+                let max_scroll = self
+                    .renderer
+                    .as_mut()
+                    .unwrap()
+                    .get_max_scroll(&self.editor, window_height);
                 let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
                 let scrollbar_x = window_width - minimap_w - scrollbar_w;
 
@@ -261,7 +271,11 @@ impl ApplicationHandler for App {
                     let search_w = 480.0 * s;
                     let search_h = 52.0 * s;
                     let search_x = scrollbar_x - search_w - 20.0 * s;
-                    if mx >= search_x && mx <= search_x + search_w && my >= self.search_anim_y && my <= self.search_anim_y + search_h {
+                    if mx >= search_x
+                        && mx <= search_x + search_w
+                        && my >= self.search_anim_y
+                        && my <= self.search_anim_y + search_h
+                    {
                         over_search = true;
                     }
                 }
@@ -297,18 +311,32 @@ impl ApplicationHandler for App {
                 }
 
                 if self.show_settings || self.settings_anim_progress > 0.0 {
-                    if self.renderer.as_mut().unwrap().draw_settings(self.settings_anim_progress, self.settings_tab) {
+                    if self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .draw_settings(self.settings_anim_progress, self.settings_tab)
+                    {
                         wants_pointer = true;
                     }
                 }
 
                 if self.show_quit_dialog || self.dialog_anim_progress > 0.0 {
                     if self.pending_action == PendingAction::Faq {
-                        if self.renderer.as_mut().unwrap().draw_faq(&self.faq_editor, self.faq_scroll_y, self.dialog_anim_progress) {
+                        if self.renderer.as_mut().unwrap().draw_faq(
+                            &self.faq_editor,
+                            self.faq_scroll_y,
+                            self.dialog_anim_progress,
+                        ) {
                             wants_pointer = true;
                         }
                     } else {
-                        if self.renderer.as_mut().unwrap().draw_dialog(&self.base_title, self.dialog_anim_progress) {
+                        if self
+                            .renderer
+                            .as_mut()
+                            .unwrap()
+                            .draw_dialog(&self.base_title, self.dialog_anim_progress)
+                        {
                             wants_pointer = true;
                         }
                     }
@@ -346,7 +374,11 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
-                    if self.show_settings || self.show_quit_dialog || self.dialog_anim_progress > 0.0 || self.settings_anim_progress > 0.0 {
+                    if self.show_settings
+                        || self.show_quit_dialog
+                        || self.dialog_anim_progress > 0.0
+                        || self.settings_anim_progress > 0.0
+                    {
                         is_text = false;
                     }
 
@@ -459,7 +491,9 @@ impl ApplicationHandler for App {
             }
         }
 
-        if self.pending_action == PendingAction::Faq && (self.show_quit_dialog || self.dialog_anim_progress > 0.0) {
+        if self.pending_action == PendingAction::Faq
+            && (self.show_quit_dialog || self.dialog_anim_progress > 0.0)
+        {
             let diff = self.faq_target_scroll_y - self.faq_scroll_y;
             let abs_diff = diff.abs();
             if abs_diff > 0.0 {
@@ -488,7 +522,8 @@ impl ApplicationHandler for App {
 
         let target_dialog = if self.show_quit_dialog { 1.0 } else { 0.0 };
         if self.dialog_anim_progress != target_dialog {
-            self.dialog_anim_progress += (target_dialog - self.dialog_anim_progress) * 12.0 * dt;
+            let factor = 1.0 - (-15.0 * dt).exp();
+            self.dialog_anim_progress += (target_dialog - self.dialog_anim_progress) * factor;
             if (self.dialog_anim_progress - target_dialog).abs() < 0.0001 {
                 self.dialog_anim_progress = target_dialog;
             }
@@ -546,8 +581,9 @@ impl ApplicationHandler for App {
         }
 
         if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {
-            self.autocomplete_anim_progress += (1.0 - self.autocomplete_anim_progress) * 20.0 * dt;
-            if self.autocomplete_anim_progress > 0.99 {
+            let factor = 1.0 - (-20.0 * dt).exp();
+            self.autocomplete_anim_progress += (1.0 - self.autocomplete_anim_progress) * factor;
+            if (1.0 - self.autocomplete_anim_progress).abs() < 0.0001 {
                 self.autocomplete_anim_progress = 1.0;
             }
             needs_redraw = true;
@@ -555,7 +591,8 @@ impl ApplicationHandler for App {
 
         let target_settings = if self.show_settings { 1.0 } else { 0.0 };
         if self.settings_anim_progress != target_settings {
-            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * 12.0 * dt;
+            let factor = 1.0 - (-15.0 * dt).exp();
+            self.settings_anim_progress += (target_settings - self.settings_anim_progress) * factor;
             if (self.settings_anim_progress - target_settings).abs() < 0.0001 {
                 self.settings_anim_progress = target_settings;
             }
@@ -563,8 +600,12 @@ impl ApplicationHandler for App {
         }
 
         let target_search_y = if self.show_search { 10.0 } else { -120.0 };
-        if (self.search_anim_y - target_search_y).abs() > 0.5 {
-            self.search_anim_y += (target_search_y - self.search_anim_y) * 20.0 * dt;
+        if self.search_anim_y != target_search_y {
+            let factor = 1.0 - (-20.0 * dt).exp();
+            self.search_anim_y += (target_search_y - self.search_anim_y) * factor;
+            if (self.search_anim_y - target_search_y).abs() < 0.01 {
+                self.search_anim_y = target_search_y;
+            }
             needs_redraw = true;
         }
 

@@ -122,7 +122,7 @@ impl Renderer {
         self.update_cache(editor, scroll_x, scroll_y, is_resizing);
 
         let render_scroll_x = scroll_x.round();
-        let render_scroll_y = scroll_y.round();
+        let render_scroll_y = scroll_y;
 
         if self.last_editor_version_for_scroll_x != editor.version
             || (self.last_width - self.width).abs() > 0.5
@@ -1411,7 +1411,7 @@ impl Renderer {
         let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
         let search_w = 480.0 * s;
         let search_h = 52.0 * s;
-        let search_x = scrollbar_x - search_w - 20.0 * s;
+        let search_x = (scrollbar_x - search_w - 20.0 * s).round();
 
         self.push_rounded_rect(
             search_x,

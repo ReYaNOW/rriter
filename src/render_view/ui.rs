@@ -15,7 +15,14 @@ impl Renderer {
         }
     }
 
-    pub fn draw_atlas_icon(&mut self, icon: crate::widgets::IconType, x: f32, y: f32, size: f32, color: [f32; 4]) {
+    pub fn draw_atlas_icon(
+        &mut self,
+        icon: crate::widgets::IconType,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: [f32; 4],
+    ) {
         if let Some(&tex) = self.icons.get(&icon) {
             self.flush(); // Сбрасываем батч, чтобы сменить текстуру
             unsafe {
@@ -70,6 +77,8 @@ impl Renderer {
         } else {
             y += 10.0 * scale;
         }
+        y = y.round();
+        let x = x.round();
 
         // --- 1. Отрисовка Тени ---
         for i in 1..=5 {
@@ -261,60 +270,104 @@ impl Renderer {
     }
 
     pub fn draw_dialog(&mut self, base_title: &str, anim_progress: f32) -> bool {
-        if anim_progress <= 0.0 { return false; }
+        if anim_progress <= 0.0 {
+            return false;
+        }
         let s = self.scale_factor;
 
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
+        self.push_rect(
+            0.0,
+            0.0,
+            self.width,
+            self.height,
+            [0.0, 0.0, 0.0, 0.4 * anim_progress],
+        );
 
-        let box_w = 600.0 * s;
-        let box_h = 240.0 * s;
+        let box_w = (600.0 * s).round();
+        let box_h = (240.0 * s).round();
         let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - box_h) / 2.0;
-        let mut box_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        box_y = if (box_y - target_y_px).abs() < 0.5 { target_y_px } else { box_y.round() };
-
-        let mut box_x = ((self.width - box_w) / 2.0).round();
+        let target_y = ((self.height - box_h) / 2.0).round();
+        let box_y = start_y + (target_y - start_y) * anim_progress;
+        let box_x = ((self.width - box_w) / 2.0).round();
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
         // 1. Внешний градиент
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
-        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
+        self.push_rounded_rect(
+            box_x - 1.0,
+            box_y - 1.0,
+            box_w + 2.0,
+            box_h + 2.0,
+            10.0 * s,
+            [0.224, 0.231, 0.251, 1.0],
+        );
+        self.push_rounded_rect_gradient(
+            box_x,
+            box_y,
+            box_w,
+            box_h,
+            10.0 * s,
+            top_color,
+            bottom_color,
+        );
 
         // 2. Внутренний темный блок
-        let pad_h = 40.0 * s;
-        let pad_v = 35.0 * s;
-        let content_x = (box_x + pad_h).round();
-        let content_y = (box_y + pad_v).round();
-        let content_w = (box_w - pad_h * 2.0).round();
-        let content_h = (box_h - 105.0 * s).round();
+                let pad_h = (40.0 * s).round();
+                let pad_v = (35.0 * s).round();
+                let content_x = (box_x + pad_h).round();
+                let content_y = (box_y + pad_v).round();
+                let content_w = (box_w - pad_h * 2.0).round();
+                let content_h = (box_h - (105.0 * s).round()).round();
 
-        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
-        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+                self.push_rounded_rect(
+                     content_x - 1.0,
+                    content_y - 1.0,
+                    content_w + 2.0,
+                    content_h + 2.0,
+                    8.0 * s,
+                    [0.224, 0.231, 0.251, 0.8],
+                );
+                self.push_rounded_rect(
+                    content_x,
+                    content_y,
+                    content_w,
+                    content_h,
+                    8.0 * s,
+                    [0.15, 0.16, 0.20, 1.0],
+                );
 
-        let msg1 = format!("Документ «{}» был изменен.", base_title);
+                self.flush();
+
+                let msg1 = format!( "Документ «{}» был изменен. ", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
-        let w1 = self.measure_ui_width(&msg1, 1.0);
-        let w2 = self.measure_ui_width(msg2, 1.0);
+        let w1 = self.measure_ui_width(&msg1, 1.0).round();
+        let w2 = self.measure_ui_width(msg2, 1.0).round();
         let text_w = w1.max(w2);
 
-        let icon_sz = 90.0 * s;
-        let gap = 20.0 * s;
+        let icon_sz = (90.0 * s).round();
+        let gap = (20.0 * s).round();
         let total_content_w = icon_sz + gap + text_w;
 
-        let start_x = content_x + (content_w - total_content_w) / 2.0;
-        let icon_y = content_y + (content_h - icon_sz) / 2.0;
+        let start_x = content_x + ((content_w - total_content_w) / 2.0).round();
+        let icon_y = content_y + ((content_h - icon_sz) / 2.0).round();
 
-        self.draw_atlas_icon(crate::widgets::IconType::Warning, start_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Warning,
+            start_x,
+            icon_y,
+            icon_sz,
+            [1.0, 1.0, 1.0, 1.0],
+        );
 
         let text_x = start_x + icon_sz + gap;
         let fg = self.theme.fg;
 
-        self.draw_string_scaled(&msg1, text_x, content_y + 45.0 * s, fg, 1.0);
-        self.draw_string_scaled(msg2, text_x, content_y + 75.0 * s, fg, 1.0);
+        let txt_y1 = content_y + (45.0 * s).round();
+        let txt_y2 = content_y + (75.0 * s).round();
+        self.draw_string_scaled(&msg1, text_x, txt_y1, fg, 1.0);
+        self.draw_string_scaled(msg2, text_x, txt_y2, fg, 1.0);
 
         let (btn_save, btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
@@ -332,55 +385,93 @@ impl Renderer {
     }
 
     pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32, anim_progress: f32) -> bool {
-        if anim_progress <= 0.0 { return false; }
+        if anim_progress <= 0.0 {
+            return false;
+        }
         let s = self.scale_factor;
-        
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
 
-        let box_w = (860.0 * s).min(self.width - 40.0 * s);
-        let box_h = (680.0 * s).min(self.height - 40.0 * s);
+        self.push_rect(
+            0.0,
+            0.0,
+            self.width,
+            self.height,
+            [0.0, 0.0, 0.0, 0.4 * anim_progress],
+        );
+
+        let box_w = ((860.0 * s).min(self.width - 40.0 * s)).round();
+        let box_h = ((680.0 * s).min(self.height - 40.0 * s)).round();
 
         let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - box_h) / 2.0;
-        let raw_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        let box_y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
+        let target_y = ((self.height - box_h) / 2.0).round();
+        let box_y = start_y + (target_y - start_y) * anim_progress;
         let box_x = ((self.width - box_w) / 2.0).round();
 
-        let top_color =[0.26, 0.20, 0.36, 1.0];
-        let bottom_color =[0.12, 0.13, 0.22, 1.0];
+        let top_color = [0.26, 0.20, 0.36, 1.0];
+        let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
         // 1. Внешнее выезжающее окно (Полностью Градиент)
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s,[0.224, 0.231, 0.251, 1.0]);
-        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
+        self.push_rounded_rect(
+            box_x - 1.0,
+            box_y - 1.0,
+            box_w + 2.0,
+            box_h + 2.0,
+            10.0 * s,
+            [0.224, 0.231, 0.251, 1.0],
+        );
+        self.push_rounded_rect_gradient(
+            box_x,
+            box_y,
+            box_w,
+            box_h,
+            10.0 * s,
+            top_color,
+            bottom_color,
+        );
 
-        let content_x = (box_x + 60.0 * s).round();
-        let content_y = (box_y + 55.0 * s).round();
-        let content_w = (box_w - 120.0 * s).round();
-        let content_h = (box_h - 135.0 * s).round();
+            let pad_x = (60.0 * s).round();
+        let pad_x = (60.0 * s).round();
+        let pad_y = (55.0 * s).round();
+        let content_x = (box_x + pad_x).round();
+        let content_y = (box_y + pad_y).round();
+        let content_w = (box_w - pad_x * 2.0).round();
+        let content_h = (box_h - (135.0 * s).round()).round();
 
         // 2. Внутреннее окно с текстом и хоткеями (Сплошной темный цвет для читаемости)
-        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s,[0.224, 0.231, 0.251, 0.8]);
-        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s,[0.15, 0.16, 0.20, 1.0]);
+        self.push_rounded_rect(
+            content_x - 1.0,
+            content_y - 1.0,
+            content_w + 2.0,
+            content_h + 2.0,
+            8.0 * s,
+            [0.224, 0.231, 0.251, 0.8],
+        );
+        self.push_rounded_rect(
+            content_x,
+            content_y,
+            content_w,
+            content_h,
+            8.0 * s,
+            [0.15, 0.16, 0.20, 1.0],
+        );
         self.flush();
 
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (content_y + content_h);
+            let scissor_y = (self.height - (content_y + content_h)).round();
             self.gl.scissor(
-                content_x.round() as i32,
-                scissor_y.round() as i32,
-                content_w.round() as i32,
-                content_h.round() as i32,
+                content_x as i32,
+                scissor_y as i32,
+                content_w as i32,
+                content_h as i32,
             );
         }
 
-        let start_x = content_x + 30.0 * s;
+        let start_x = content_x + (30.0 * s).round();
         let render_scroll_y = scroll_y.round();
-        let mut y = content_y + 30.0 * s - render_scroll_y;
+        let mut y = content_y + (30.0 * s).round() - render_scroll_y;
         let text = faq_editor.get_full_text();
 
-        let left_col_w = 260.0 * s;
+        let left_col_w = (260.0 * s).round();
 
         for line in text.split('\n') {
             let is_header = line.starts_with("# ");
@@ -390,16 +481,16 @@ impl Renderer {
                 let header_text = &line[2..];
                 self.draw_string_scaled(header_text, start_x, y, text_color, 1.15);
 
-                let line_y = y + 16.0 * s;
+                let line_y = y + (16.0 * s).round();
                 self.push_rect(
                     start_x,
                     line_y,
-                    content_w - 60.0 * s,
+                    content_w - (60.0 * s).round(),
                     1.0,
                     [1.0, 1.0, 1.0, 0.08],
                 );
 
-                y += 50.0 * s;
+                y += (50.0 * s).round();
                 continue;
             }
 
@@ -411,10 +502,10 @@ impl Renderer {
                 let kbd_border = [0.306, 0.318, 0.341, 1.0];
                 let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
 
-                let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
-                let kbd_h = 24.0 * s;
+                let kbd_w = self.measure_ui_width(shortcut, 0.95).round() + (20.0 * s).round();
+                let kbd_h = (24.0 * s).round();
                 let kbd_x = start_x;
-                let kbd_y = y - 18.0 * s;
+                let kbd_y = y - (18.0 * s).round();
 
                 self.push_rounded_rect(
                     kbd_x - 1.0,
@@ -427,8 +518,8 @@ impl Renderer {
                 self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * s, kbd_bg);
                 self.draw_string_scaled(
                     shortcut,
-                    kbd_x + 10.0 * s,
-                    y - 1.0 * s,
+                    kbd_x + (10.0 * s).round(),
+                    y - (1.0 * s).round(),
                     kbd_text_color,
                     0.95,
                 );
@@ -436,16 +527,16 @@ impl Renderer {
                 let desc_color = [0.663, 0.690, 0.729, 1.0];
                 self.draw_string_scaled(description, start_x + left_col_w, y, desc_color, 1.0);
 
-                y += 38.0 * s;
+                y += (38.0 * s).round();
                 continue;
             }
 
             if !line.trim().is_empty() {
                 let normal_color = [0.875, 0.882, 0.902, 1.0];
                 self.draw_string_scaled(line.trim(), start_x, y, normal_color, 1.0);
-                y += 30.0 * s;
+                y += (30.0 * s).round();
             } else {
-                y += 15.0 * s;
+                y += (15.0 * s).round();
             }
         }
 
@@ -459,10 +550,11 @@ impl Renderer {
 
         if max_scroll > 0.0 {
             let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let track_h = content_h - 16.0 * s;
-            let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
-            let thumb_y = (content_y + 8.0 * s + scroll_ratio * (track_h - thumb_h)).round();
-            let scroll_x = (content_x + content_w - 14.0 * s).round();
+            let track_h = content_h - (16.0 * s).round();
+            let thumb_h = ((content_h / total_content_h * track_h).max(40.0 * s)).round();
+            let thumb_y =
+                content_y + (8.0 * s).round() + (scroll_ratio * (track_h - thumb_h)).round();
+            let scroll_x = content_x + content_w - (14.0 * s).round();
 
             self.push_rounded_rect(
                 scroll_x,
@@ -477,13 +569,7 @@ impl Renderer {
         let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self);
         let mut wants_pointer = false;
 
-        wants_pointer |= btn_ok.render(
-            self,
-            self.last_mouse_x,
-            self.last_mouse_y,
-            s,
-            false,
-        );
+        wants_pointer |= btn_ok.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
 
         self.flush();
         wants_pointer
@@ -713,41 +799,61 @@ impl Renderer {
     }
 
     pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize) -> bool {
-        if anim_progress <= 0.0 { return false; }
+        if anim_progress <= 0.0 {
+            return false;
+        }
         let s = self.scale_factor;
         let mut wants_pointer = false;
 
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
+        self.push_rect(
+            0.0,
+            0.0,
+            self.width,
+            self.height,
+            [0.0, 0.0, 0.0, 0.4 * anim_progress],
+        );
 
         let w = (800.0 * s).min(self.width - 40.0 * s);
         let h = (600.0 * s).min(self.height - 40.0 * s);
-        
+
         let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - h) / 2.0;
-        let raw_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        let y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
+        let target_y = ((self.height - h) / 2.0).round();
+        let y = start_y + (target_y - start_y) * anim_progress;
         let x = ((self.width - w) / 2.0).round();
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
         // 1. Внешнее окно с градиентом
-        self.push_rounded_rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect(
+            x - 1.0,
+            y - 1.0,
+            w + 2.0,
+            h + 2.0,
+            10.0 * s,
+            [0.224, 0.231, 0.251, 1.0],
+        );
         self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
 
-        // 2. Внутренняя панель
+        // 2. Внутренняя панель — ix/iy rounded чтобы текст внутри был pixel-perfect
         let pad_top = 35.0 * s;
         let pad_bottom = 30.0 * s;
         let pad_h = 40.0 * s;
-        let ix = x + pad_h;
-        let iy = y + pad_top;
+        let ix = (x + pad_h).round();
+        let iy = (y + pad_top).round();
         let iw = w - pad_h * 2.0;
         let ih = h - pad_top - pad_bottom;
 
-        self.push_rounded_rect(ix - 1.0, iy - 1.0, iw + 2.0, ih + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
+        self.push_rounded_rect(
+            ix - 1.0,
+            iy - 1.0,
+            iw + 2.0,
+            ih + 2.0,
+            8.0 * s,
+            [0.224, 0.231, 0.251, 0.8],
+        );
         self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
-        
+
         self.flush();
 
         let sidebar_w = 200.0 * s;
@@ -758,37 +864,89 @@ impl Renderer {
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
             let tab_rect_h = 36.0 * s;
-            
-            let is_hovered = self.last_mouse_x >= ix + 10.0 * s && self.last_mouse_x <= ix + sidebar_w - 10.0 * s 
-                          && self.last_mouse_y >= tab_rect_y && self.last_mouse_y <= tab_rect_y + tab_rect_h;
 
-            if is_hovered { wants_pointer = true; }
+            let is_hovered = self.last_mouse_x >= ix + 10.0 * s
+                && self.last_mouse_x <= ix + sidebar_w - 10.0 * s
+                && self.last_mouse_y >= tab_rect_y
+                && self.last_mouse_y <= tab_rect_y + tab_rect_h;
 
-            if i == active_tab {
-                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.1]);
-            } else if is_hovered {
-                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.05]);
+            if is_hovered {
+                wants_pointer = true;
             }
 
-            let color = if i == active_tab { [1.0, 1.0, 1.0, 1.0] } else { [0.7, 0.7, 0.7, 1.0] };
+            if i == active_tab {
+                self.push_rounded_rect(
+                    ix + 10.0 * s,
+                    tab_rect_y,
+                    sidebar_w - 20.0 * s,
+                    tab_rect_h,
+                    6.0 * s,
+                    [1.0, 1.0, 1.0, 0.1],
+                );
+            } else if is_hovered {
+                self.push_rounded_rect(
+                    ix + 10.0 * s,
+                    tab_rect_y,
+                    sidebar_w - 20.0 * s,
+                    tab_rect_h,
+                    6.0 * s,
+                    [1.0, 1.0, 1.0, 0.05],
+                );
+            }
+
+            let color = if i == active_tab {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.7, 0.7, 0.7, 1.0]
+            };
             self.draw_string_scaled(title, ix + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
             tab_y += tab_rect_h + 4.0 * s;
         }
 
         let content_x = ix + sidebar_w + 30.0 * s;
         let mut content_y = iy + 40.0 * s;
-        
-        self.draw_string_scaled(tabs[active_tab], content_x, content_y, [1.0, 1.0, 1.0, 1.0], 1.2);
+
+        self.draw_string_scaled(
+            tabs[active_tab],
+            content_x,
+            content_y,
+            [1.0, 1.0, 1.0, 1.0],
+            1.2,
+        );
         content_y += 40.0 * s;
 
         if active_tab == 0 {
-            self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Скоро здесь появятся настройки...",
+                content_x,
+                content_y,
+                [0.6, 0.6, 0.6, 1.0],
+                1.0,
+            );
         } else if active_tab == 1 {
-            self.draw_string_scaled("Размер шрифта: 14px", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Размер шрифта: 14px",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
             content_y += 30.0 * s;
-            self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Межстрочный интервал: 1.5",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
         } else if active_tab == 2 {
-            self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Тема: Dracula (По умолчанию)",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
         }
 
         self.flush();

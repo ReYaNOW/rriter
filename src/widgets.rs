@@ -59,19 +59,19 @@ impl Button {
             bg_color,
         );
 
-        let icon_size = 26.0 * scale;
+        let icon_size = (26.0 * scale).round();
         let text_scale = 1.0;
         let text_color = renderer.theme.fg;
 
-        let icon_y = self.y + (self.h - icon_size) / 2.0;
-        let text_y = self.y + self.h / 2.0 + 5.0 * scale;
+        let icon_y = self.y + ((self.h - icon_size) / 2.0).round();
+        let text_y = self.y + (self.h / 2.0).round() + (5.0 * scale).round();
 
-        let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
+        let mut content_w = renderer.measure_ui_width(&self.text, text_scale).round();
         if self.icon.is_some() {
-            content_w += icon_size + 8.0 * scale;
+            content_w += icon_size + (8.0 * scale).round();
         }
 
-        let mut content_x = self.x + (self.w - content_w) / 2.0;
+        let mut content_x = self.x + ((self.w - content_w) / 2.0).round();
 
         if let Some(icon_type) = self.icon {
             renderer.draw_atlas_icon(
@@ -81,7 +81,7 @@ impl Button {
                 icon_size,
                 [1.0, 1.0, 1.0, 1.0],
             );
-            content_x += icon_size + 8.0 * scale;
+            content_x += icon_size + (8.0 * scale).round();
         }
 
         renderer.draw_string_scaled(&self.text, content_x, text_y, text_color, text_scale);
@@ -201,19 +201,20 @@ pub fn get_dialog_buttons(
     scale: f32,
     renderer: &mut Renderer,
 ) -> (Button, Button, Button) {
-    let bh = 36.0 * scale;
-    let gap = 12.0 * scale;
-    let icon_sz = 26.0 * scale;
-    let padding = 8.0 * scale + 32.0 * scale;
+    let bh = (36.0 * scale).round();
+    let gap = (12.0 * scale).round();
+    let icon_sz = (26.0 * scale).round();
+    let padding = (40.0 * scale).round();
 
-    let w_save = renderer.measure_ui_width("Сохранить", 1.0) + icon_sz + padding;
-    let w_discard = renderer.measure_ui_width("Отклонить", 1.0) + icon_sz + padding;
-    let w_cancel = renderer.measure_ui_width("Отмена", 1.0) + icon_sz + padding;
+    let w_save = renderer.measure_ui_width("Сохранить", 1.0).round() + icon_sz + padding;
+    let w_discard = renderer.measure_ui_width("Отклонить", 1.0).round() + icon_sz + padding;
+    let w_cancel = renderer.measure_ui_width("Отмена", 1.0).round() + icon_sz + padding;
 
     let total_w = w_save + w_discard + w_cancel + gap * 2.0;
 
-    let mut current_x = box_x + (box_w - total_w) / 2.0;
-    let y = box_y + box_h - bh - 15.0 * scale;
+    let mut current_x = box_x + ((box_w - total_w) / 2.0).round();
+    let offset_y = (15.0 * scale).round();
+    let y = box_y + box_h - bh - offset_y;
 
     let btn_save = Button {
         x: current_x,
@@ -248,10 +249,11 @@ pub fn get_dialog_buttons(
 }
 
 pub fn get_faq_button(box_x: f32, box_y: f32, box_w: f32, box_h: f32, scale: f32, renderer: &mut Renderer) -> Button {
-    let bh = 36.0 * scale;
-    let w_ok = renderer.measure_ui_width("ОК", 1.0) + 40.0 * scale;
-    let x = box_x + (box_w - w_ok) / 2.0;
-    let y = box_y + box_h - bh - 20.0 * scale;
+    let bh = (36.0 * scale).round();
+    let w_ok = renderer.measure_ui_width("ОК", 1.0).round() + (40.0 * scale).round();
+    let x = box_x + ((box_w - w_ok) / 2.0).round();
+    let offset_y = (20.0 * scale).round();
+    let y = box_y + box_h - bh - offset_y;
     Button {
         x,
         y,
