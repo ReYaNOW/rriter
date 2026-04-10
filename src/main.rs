@@ -232,6 +232,7 @@ Ctrl + Bksp\tУдалить слово слева от курсора
 Ctrl + Del\tУдалить слово справа от курсора
 
 # Прочее
+F1\tОткрыть настройки редактора
 F8\tПоказать/скрыть счетчик FPS
 
 # Управление мышью
@@ -255,10 +256,14 @@ F8\tПоказать/скрыть счетчик FPS
     let mut app = App {
         gl_config: None,
         gl_context: None,
-        gl_surface: None,
+                gl_surface: None,
         window: None,
+                dialog_window: None,
+        dialog_gl_surface: None,
+        settings_scroll_y: 0.0,
+        settings_target_scroll_y: 0.0,
+        settings_scroll_velocity: 0.0,
         renderer: None,
-        dialog_anim_progress: 0.0,
         editor,
         clipboard: Clipboard::new().unwrap_or_else(|_| Clipboard::new().unwrap()),
         theme: load_dracula(),
@@ -288,8 +293,7 @@ F8\tПоказать/скрыть счетчик FPS
         window_width: config.window_width,
         window_height: config.window_height,
 
-        scroll_anim_speed: 15.0,
-        show_quit_dialog: false,
+                scroll_anim_speed: 15.0,
         last_resize_time: None,
 
         last_click_time: Instant::now(),
@@ -312,12 +316,7 @@ F8\tПоказать/скрыть счетчик FPS
         search_current_idx: None,
         is_dragging_search: false,
 
-        faq_editor,
-        is_dragging_faq: false,
-        faq_scroll_y: 0.0,
-        faq_target_scroll_y: 0.0,
-        faq_scroll_velocity: 0.0,
-        faq_scroll_anim_speed: 15.0,
+                faq_editor,
 
         is_ready: false,
         is_highlighted_once: false,

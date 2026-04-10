@@ -15,7 +15,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-    pub fn draw(
+        pub fn draw(
         &mut self,
         editor: &mut Editor,
         scroll_x: f32,
@@ -23,7 +23,7 @@ impl Renderer {
         blink_alpha: f32,
         show_fps: bool,
         spans: &[ColorSpan],
-        show_quit_dialog: bool,
+        dialog_window_open: bool,
         is_resizing: bool,
         search_results: &[(usize, usize)],
         search_current_idx: Option<usize>,
@@ -729,8 +729,8 @@ impl Renderer {
             }
         }
 
-        if let Some((cx_screen, cy)) = cursor_pos {
-            if sel_start == sel_end && blink_alpha > 0.5 && !show_quit_dialog && !search_focused {
+                if let Some((cx_screen, cy)) = cursor_pos {
+            if sel_start == sel_end && blink_alpha > 0.5 && !dialog_window_open && !search_focused {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
                     && cx_screen < scrollbar_x
@@ -897,7 +897,7 @@ impl Renderer {
             );
         }
 
-        if show_quit_dialog {
+                if dialog_window_open {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
         self.flush();

@@ -260,30 +260,18 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-    pub fn draw_dialog(&mut self, base_title: &str, anim_progress: f32) -> bool {
-        if anim_progress <= 0.0 { return false; }
+        pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
         let s = self.scale_factor;
-
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
-
         let box_w = 600.0 * s;
         let box_h = 240.0 * s;
-        let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - box_h) / 2.0;
-        let mut box_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        box_y = if (box_y - target_y_px).abs() < 0.5 { target_y_px } else { box_y.round() };
-
-        let mut box_x = ((self.width - box_w) / 2.0).round();
+        let box_x = 0.0;
+        let box_y = 0.0;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
-        // 1. Внешний градиент
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
-        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
+        self.push_vertical_gradient(box_x, box_y, box_w, box_h, top_color, bottom_color);
 
-        // 2. Внутренний темный блок
         let pad_h = 40.0 * s;
         let pad_v = 35.0 * s;
         let content_x = (box_x + pad_h).round();
@@ -331,167 +319,9 @@ impl Renderer {
         wants_pointer
     }
 
-    pub fn draw_faq(&mut self, faq_editor: &Editor, scroll_y: f32, anim_progress: f32) -> bool {
-        if anim_progress <= 0.0 { return false; }
-        let s = self.scale_factor;
-        
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
-
-        let box_w = (860.0 * s).min(self.width - 40.0 * s);
-        let box_h = (680.0 * s).min(self.height - 40.0 * s);
-
-        let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - box_h) / 2.0;
-        let raw_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        let box_y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
-        let box_x = ((self.width - box_w) / 2.0).round();
-
-        let top_color =[0.26, 0.20, 0.36, 1.0];
-        let bottom_color =[0.12, 0.13, 0.22, 1.0];
-
-        // 1. Внешнее выезжающее окно (Полностью Градиент)
-        self.push_rounded_rect(box_x - 1.0, box_y - 1.0, box_w + 2.0, box_h + 2.0, 10.0 * s,[0.224, 0.231, 0.251, 1.0]);
-        self.push_rounded_rect_gradient(box_x, box_y, box_w, box_h, 10.0 * s, top_color, bottom_color);
-
-        let content_x = (box_x + 60.0 * s).round();
-        let content_y = (box_y + 55.0 * s).round();
-        let content_w = (box_w - 120.0 * s).round();
-        let content_h = (box_h - 135.0 * s).round();
-
-        // 2. Внутреннее окно с текстом и хоткеями (Сплошной темный цвет для читаемости)
-        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s,[0.224, 0.231, 0.251, 0.8]);
-        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s,[0.15, 0.16, 0.20, 1.0]);
-        self.flush();
-
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (content_y + content_h);
-            self.gl.scissor(
-                content_x.round() as i32,
-                scissor_y.round() as i32,
-                content_w.round() as i32,
-                content_h.round() as i32,
-            );
-        }
-
-        let start_x = content_x + 30.0 * s;
-        let render_scroll_y = scroll_y.round();
-        let mut y = content_y + 30.0 * s - render_scroll_y;
-        let text = faq_editor.get_full_text();
-
-        let left_col_w = 260.0 * s;
-
-        for line in text.split('\n') {
-            let is_header = line.starts_with("# ");
-
-            if is_header {
-                let text_color = [1.0, 1.0, 1.0, 1.0];
-                let header_text = &line[2..];
-                self.draw_string_scaled(header_text, start_x, y, text_color, 1.15);
-
-                let line_y = y + 16.0 * s;
-                self.push_rect(
-                    start_x,
-                    line_y,
-                    content_w - 60.0 * s,
-                    1.0,
-                    [1.0, 1.0, 1.0, 0.08],
-                );
-
-                y += 50.0 * s;
-                continue;
-            }
-
-            if let Some(tab_idx) = line.find('\t') {
-                let shortcut = &line[..tab_idx];
-                let description = &line[tab_idx + 1..];
-
-                let kbd_bg = [0.224, 0.231, 0.251, 1.0];
-                let kbd_border = [0.306, 0.318, 0.341, 1.0];
-                let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
-
-                let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
-                let kbd_h = 24.0 * s;
-                let kbd_x = start_x;
-                let kbd_y = y - 18.0 * s;
-
-                self.push_rounded_rect(
-                    kbd_x - 1.0,
-                    kbd_y - 1.0,
-                    kbd_w + 2.0,
-                    kbd_h + 2.0,
-                    4.0 * s,
-                    kbd_border,
-                );
-                self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * s, kbd_bg);
-                self.draw_string_scaled(
-                    shortcut,
-                    kbd_x + 10.0 * s,
-                    y - 1.0 * s,
-                    kbd_text_color,
-                    0.95,
-                );
-
-                let desc_color = [0.663, 0.690, 0.729, 1.0];
-                self.draw_string_scaled(description, start_x + left_col_w, y, desc_color, 1.0);
-
-                y += 38.0 * s;
-                continue;
-            }
-
-            if !line.trim().is_empty() {
-                let normal_color = [0.875, 0.882, 0.902, 1.0];
-                self.draw_string_scaled(line.trim(), start_x, y, normal_color, 1.0);
-                y += 30.0 * s;
-            } else {
-                y += 15.0 * s;
-            }
-        }
-
-        self.flush();
-        unsafe {
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
-
-        let max_scroll = self.get_faq_max_scroll(faq_editor, box_h);
-        let total_content_h = content_h + max_scroll;
-
-        if max_scroll > 0.0 {
-            let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let track_h = content_h - 16.0 * s;
-            let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
-            let thumb_y = (content_y + 8.0 * s + scroll_ratio * (track_h - thumb_h)).round();
-            let scroll_x = (content_x + content_w - 14.0 * s).round();
-
-            self.push_rounded_rect(
-                scroll_x,
-                thumb_y,
-                6.0 * s,
-                thumb_h,
-                3.0 * s,
-                [0.7, 0.33, 0.54, 1.0],
-            );
-        }
-
-        let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self);
-        let mut wants_pointer = false;
-
-        wants_pointer |= btn_ok.render(
-            self,
-            self.last_mouse_x,
-            self.last_mouse_y,
-            s,
-            false,
-        );
-
-        self.flush();
-        wants_pointer
-    }
-
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
         let scale = self.scale_factor;
-        let mut total_h = 60.0 * scale;
+        let mut total_h = 0.0;
 
         for line in faq_editor.get_full_text().split('\n') {
             if line.starts_with("# ") {
@@ -505,8 +335,11 @@ impl Renderer {
             }
         }
 
-        total_h += 80.0 * scale;
-        let content_h = dialog_height - 135.0 * scale;
+                        total_h += 80.0 * scale;
+        let pad_top = 35.0 * scale;
+        let pad_bottom = 30.0 * scale;
+        let title_h = 40.0 * scale;
+        let content_h = dialog_height - pad_top - pad_bottom - title_h - 20.0 * scale;
 
         (total_h - content_h).max(0.0)
     }
@@ -664,8 +497,8 @@ impl Renderer {
             y += item_h;
         }
 
-        let hint_str_1 = "F1";
-        let hint_str_2 = " — Справка (Внутри редактора)";
+                let hint_str_1 = "F1";
+        let hint_str_2 = " — Настройки редактора";
         let scale_hint = 0.9;
 
         let w1 = self.measure_ui_width(hint_str_1, scale_hint) + 16.0 * scale;
@@ -712,16 +545,16 @@ impl Renderer {
         wants_pointer
     }
 
-    pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize) -> bool {
+        pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize, faq_editor: &Editor, scroll_y: f32) -> bool {
         if anim_progress <= 0.0 { return false; }
         let s = self.scale_factor;
         let mut wants_pointer = false;
 
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
 
-        let w = (800.0 * s).min(self.width - 40.0 * s);
-        let h = (600.0 * s).min(self.height - 40.0 * s);
-        
+                let w = (1000.0 * s).min(self.width - 40.0 * s);
+        let h = (700.0 * s).min(self.height - 40.0 * s);
+
         let start_y = self.height + 100.0 * s;
         let target_y = (self.height - h) / 2.0;
         let raw_y = start_y + (target_y - start_y) * anim_progress;
@@ -747,18 +580,18 @@ impl Renderer {
 
         self.push_rounded_rect(ix - 1.0, iy - 1.0, iw + 2.0, ih + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
         self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
-        
+
         self.flush();
 
         let sidebar_w = 200.0 * s;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
-        let tabs = ["Основные", "Редактор", "Внешний вид"];
+        let tabs = ["Основные", "Редактор", "Внешний вид", "Помощь"];
         let mut tab_y = iy + 20.0 * s;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
             let tab_rect_h = 36.0 * s;
-            
+
             let is_hovered = self.last_mouse_x >= ix + 10.0 * s && self.last_mouse_x <= ix + sidebar_w - 10.0 * s 
                           && self.last_mouse_y >= tab_rect_y && self.last_mouse_y <= tab_rect_y + tab_rect_h;
 
@@ -777,7 +610,7 @@ impl Renderer {
 
         let content_x = ix + sidebar_w + 30.0 * s;
         let mut content_y = iy + 40.0 * s;
-        
+
         self.draw_string_scaled(tabs[active_tab], content_x, content_y, [1.0, 1.0, 1.0, 1.0], 1.2);
         content_y += 40.0 * s;
 
@@ -789,6 +622,121 @@ impl Renderer {
             self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
         } else if active_tab == 2 {
             self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+                        } else if active_tab == 3 {
+            self.flush();
+            let text_area_y = content_y;
+            let text_area_h = ih - (text_area_y - iy) - 20.0 * s;
+
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                let scissor_y = self.height - (text_area_y + text_area_h);
+                self.gl.scissor(
+                    (content_x - 10.0 * s).round() as i32,
+                    scissor_y.round() as i32,
+                    (iw - sidebar_w - 10.0 * s).round() as i32,
+                    text_area_h.round() as i32,
+                );
+            }
+
+            let start_x = content_x + 10.0 * s;
+            let render_scroll_y = scroll_y.round();
+            let mut text_y = text_area_y + 10.0 * s - render_scroll_y;
+            let text = faq_editor.get_full_text();
+
+            let left_col_w = 260.0 * s;
+            let cw = iw - sidebar_w - 50.0 * s;
+
+            for line in text.split('\n') {
+                let is_header = line.starts_with("# ");
+
+                if is_header {
+                    let text_color = [1.0, 1.0, 1.0, 1.0];
+                    let header_text = &line[2..];
+                    self.draw_string_scaled(header_text, start_x, text_y, text_color, 1.15);
+
+                    let line_y = text_y + 16.0 * s;
+                    self.push_rect(
+                        start_x,
+                        line_y,
+                        cw,
+                        1.0,
+                        [1.0, 1.0, 1.0, 0.08],
+                    );
+
+                    text_y += 50.0 * s;
+                    continue;
+                }
+
+                if let Some(tab_idx) = line.find('\t') {
+                    let shortcut = &line[..tab_idx];
+                    let description = &line[tab_idx + 1..];
+
+                    let kbd_bg = [0.224, 0.231, 0.251, 1.0];
+                    let kbd_border = [0.306, 0.318, 0.341, 1.0];
+                    let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
+
+                    let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
+                    let kbd_h = 24.0 * s;
+                    let kbd_x = start_x;
+                    let kbd_y = text_y - 18.0 * s;
+
+                    self.push_rounded_rect(
+                        kbd_x - 1.0,
+                        kbd_y - 1.0,
+                        kbd_w + 2.0,
+                        kbd_h + 2.0,
+                        4.0 * s,
+                        kbd_border,
+                    );
+                    self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * s, kbd_bg);
+                    self.draw_string_scaled(
+                        shortcut,
+                        kbd_x + 10.0 * s,
+                        text_y - 1.0 * s,
+                        kbd_text_color,
+                        0.95,
+                    );
+
+                    let desc_color = [0.663, 0.690, 0.729, 1.0];
+                    self.draw_string_scaled(description, start_x + left_col_w, text_y, desc_color, 1.0);
+
+                    text_y += 38.0 * s;
+                    continue;
+                }
+
+                if !line.trim().is_empty() {
+                    let normal_color = [0.875, 0.882, 0.902, 1.0];
+                    self.draw_string_scaled(line.trim(), start_x, text_y, normal_color, 1.0);
+                    text_y += 30.0 * s;
+                } else {
+                    text_y += 15.0 * s;
+                }
+            }
+
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+
+                                    let max_scroll = self.get_faq_max_scroll(faq_editor, h);
+            let total_content_h = text_area_h + max_scroll;
+
+            if max_scroll > 0.0 {
+                let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
+                let track_h = text_area_h;
+                let thumb_h = (text_area_h / total_content_h * track_h).max(40.0 * s);
+                let thumb_y = (text_area_y + scroll_ratio * (track_h - thumb_h)).round();
+                let scroll_x = (start_x + cw + 20.0 * s).round();
+
+                self.push_rounded_rect(
+                    scroll_x,
+                    thumb_y,
+                    6.0 * s,
+                    thumb_h,
+                    3.0 * s,
+                    [0.7, 0.33, 0.54, 1.0],
+                );
+            }
         }
 
         self.flush();

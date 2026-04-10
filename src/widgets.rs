@@ -247,17 +247,4 @@ pub fn get_dialog_buttons(
     (btn_save, btn_discard, btn_cancel)
 }
 
-pub fn get_faq_button(box_x: f32, box_y: f32, box_w: f32, box_h: f32, scale: f32, renderer: &mut Renderer) -> Button {
-    let bh = 36.0 * scale;
-    let w_ok = renderer.measure_ui_width("ОК", 1.0) + 40.0 * scale;
-    let x = box_x + (box_w - w_ok) / 2.0;
-    let y = box_y + box_h - bh - 20.0 * scale;
-    Button {
-        x,
-        y,
-        w: w_ok,
-        h: bh,
-        text: "ОК".to_string(),
-        icon: None,
-    }
-}
+

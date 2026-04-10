@@ -6,9 +6,11 @@ use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
 use crate::renderer::{Renderer, Theme};
 use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
+use glutin::display::GetGlDisplay;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
+use winit::platform::wayland::WindowAttributesExtWayland;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::ModifiersState;
@@ -18,7 +20,6 @@ use winit::window::Window;
 pub enum PendingAction {
     Quit,
     OpenFile,
-    Faq,
     CloseFile,
 }
 
@@ -48,8 +49,12 @@ pub struct App {
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,
     pub window: Option<Window>,
+        pub dialog_window: Option<Window>,
+    pub dialog_gl_surface: Option<Surface<WindowSurface>>,
+    pub settings_scroll_y: f32,
+    pub settings_target_scroll_y: f32,
+    pub settings_scroll_velocity: f32,
     pub renderer: Option<Renderer>,
-    pub dialog_anim_progress: f32,
     pub editor: Editor,
     pub clipboard: Clipboard,
     pub theme: Theme,
@@ -83,8 +88,7 @@ pub struct App {
     pub window_width: f64,
     pub window_height: f64,
 
-    pub scroll_anim_speed: f32,
-    pub show_quit_dialog: bool,
+        pub scroll_anim_speed: f32,
 
     pub last_resize_time: Option<Instant>,
 
@@ -108,12 +112,7 @@ pub struct App {
     pub search_current_idx: Option<usize>,
     pub is_dragging_search: bool,
 
-    pub faq_editor: Editor,
-    pub is_dragging_faq: bool,
-    pub faq_scroll_y: f32,
-    pub faq_target_scroll_y: f32,
-    pub faq_scroll_velocity: f32,
-    pub faq_scroll_anim_speed: f32,
+        pub faq_editor: Editor,
 
     pub is_ready: bool,
     pub is_highlighted_once: bool,
@@ -141,8 +140,31 @@ pub struct App {
 }
 
 impl App {
-    pub fn ensure_cursor_visible(
-        target_scroll_y: &mut f32,
+    pub fn update_smooth_scroll(current: &mut f32, target: f32, velocity: &mut f32, dt: f32, anim_speed: f32) -> bool {
+        let diff = target - *current;
+        let abs_diff = diff.abs();
+        if abs_diff > 0.0 {
+            let target_v = if abs_diff > 15.0 {
+                diff * anim_speed
+            } else {
+                diff.signum() * abs_diff.sqrt() * (15.0_f32.sqrt() * anim_speed)
+            };
+            let v_factor = 1.0 - (-anim_speed * 4.0 * dt).exp();
+            *velocity += (target_v - *velocity) * v_factor;
+            let step = *velocity * dt;
+
+            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01 {
+                *current = target;
+                *velocity = 0.0;
+            } else {
+                *current += step;
+            }
+            return true;
+        }
+        false
+    }
+
+    pub fn ensure_cursor_visible(target_scroll_y: &mut f32,
         target_scroll_x: &mut f32,
         editor: &Editor,
         renderer: &mut Renderer,
@@ -430,20 +452,40 @@ impl App {
         window.set_title(&title);
     }
 
-    pub fn show_action_dialog(&mut self, _event_loop: &ActiveEventLoop, action: PendingAction) {
-        self.show_quit_dialog = true;
+        pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         self.is_dragging = false;
         self.is_dragging_minimap = false;
         self.is_dragging_h_scroll = false;
         self.pending_action = action;
-        if let Some(w) = self.window.as_ref() {
-            w.request_redraw();
+
+        if self.dialog_window.is_some() { return; }
+
+        let attrs = winit::window::Window::default_attributes()
+            .with_title("Подтверждение — RRiter")
+            .with_inner_size(winit::dpi::LogicalSize::new(600.0, 240.0))
+            .with_name("rriter", "rriter")
+            .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
+            .with_resizable(false);
+
+        if let Ok(window) = event_loop.create_window(attrs) {
+            use glutin::display::GlDisplay;
+            use winit::raw_window_handle::HasWindowHandle;
+            let raw_handle = window.window_handle().unwrap().as_raw();
+            let display = self.gl_config.as_ref().unwrap().display();
+            let surface_attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
+                raw_handle,
+                std::num::NonZeroU32::new(600).unwrap(),
+                std::num::NonZeroU32::new(240).unwrap(),
+            );
+            let surface = unsafe { display.create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs).unwrap() };
+            self.dialog_window = Some(window);
+            self.dialog_gl_surface = Some(surface);
         }
     }
 
     pub fn close_dialog(&mut self) {
-        self.show_quit_dialog = false;
-        self.is_dragging_faq = false;
+        self.dialog_window = None;
+        self.dialog_gl_surface = None;
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }

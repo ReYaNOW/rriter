@@ -7,55 +7,57 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 impl App {
-    pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.show_quit_dialog {
-            if self.pending_action == PendingAction::Faq {
-                self.faq_scroll_anim_speed = 7.0;
-                let scale = self.renderer.as_ref().unwrap().scale_factor;
-                match delta {
-                    MouseScrollDelta::LineDelta(_, y) => { self.faq_target_scroll_y -= y * 50.0 * scale; }
-                    MouseScrollDelta::PixelDelta(pos) => { self.faq_target_scroll_y -= pos.y as f32; }
-                }
-                let box_h = (680.0 * scale).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * scale);
-                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
-                self.faq_target_scroll_y = self.faq_target_scroll_y.clamp(0.0, max_scroll);
-                self.window.as_ref().unwrap().request_redraw();
-            }
-            return;
-        }
-        if self.show_welcome || self.show_settings {
-            return;
-        }
-        self.scroll_anim_speed = 7.0;
+        pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         let lh = self.renderer.as_ref().unwrap().line_height;
+        let s = self.renderer.as_ref().unwrap().scale_factor;
         let shift = self.modifiers.shift_key();
 
-        match delta {
-            MouseScrollDelta::LineDelta(x, y) => {
-                if shift {
-                    self.target_scroll_x -= y * 4.0 * lh;
-                } else {
-                    self.target_scroll_y -= y * 4.0 * lh;
-                    self.target_scroll_x -= x * 4.0 * lh;
-                }
+        // Единая дельта как эталон для всех скролл-панелей в редакторе
+        let (dx, dy) = match delta {
+            MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
+            MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
+        };
+
+        if self.autocomplete_active && self.autocomplete_rect.is_some() {
+            let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                self.autocomplete_target_scroll_y += dy;
+                let step = 36.0 * s;
+                let total_items = self.autocomplete_options.len() as f32;
+                let visible_items = total_items.min(7.0);
+                let max_scroll = ((total_items - visible_items) * step).max(0.0);
+                self.autocomplete_target_scroll_y = self.autocomplete_target_scroll_y.clamp(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
             }
-            MouseScrollDelta::PixelDelta(pos) => {
-                if shift {
-                    self.target_scroll_x -= pos.y as f32;
-                } else {
-                    self.target_scroll_y -= pos.y as f32;
-                    self.target_scroll_x -= pos.x as f32;
-                }
-            }
+        }
+
+        if self.show_settings && self.settings_tab == 3 {
+            self.settings_target_scroll_y += dy;
+            let box_h = (700.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+            let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
+            self.settings_target_scroll_y = self.settings_target_scroll_y.clamp(0.0, max_scroll);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.show_welcome || self.show_settings || self.dialog_window.is_some() {
+            return;
+        }
+
+        self.scroll_anim_speed = 7.0;
+
+        if shift {
+            self.target_scroll_x += dy; // Shift конвертирует вертикальный скролл в горизонтальный
+        } else {
+            self.target_scroll_y += dy;
+            self.target_scroll_x += dx;
         }
 
         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-        let max_scroll_y = self
-            .renderer
-            .as_mut()
-            .unwrap()
-            .get_max_scroll(&self.editor, wh);
-
+        let max_scroll_y = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
         let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
 
         self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll_y).round();
@@ -63,110 +65,33 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_mouse_input(&mut self, event_loop: &ActiveEventLoop, state: ElementState) {
-        if self.show_quit_dialog {
-            if state == ElementState::Pressed {
-                let s = self.renderer.as_ref().unwrap().scale_factor;
-                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
-
-                if self.pending_action == PendingAction::Faq {
-                    let box_w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-                    let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
-                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
-
-                    if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
-                        self.close_dialog();
-                    } else {
-                        let btn_ok = crate::widgets::get_faq_button(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
-                        if btn_ok.is_hovered(mx, my) {
-                            self.close_dialog();
-                        } else {
-                            let content_x = box_x + 80.0 * s;
-                            let content_w = box_w - 160.0 * s;
-                            let scroll_x = content_x + content_w - 14.0 * s;
-                            if mx >= scroll_x && mx <= scroll_x + 14.0 * s {
-                                self.is_dragging_faq = true;
-                            }
-                        }
-                    }
-                } else {
-                    let box_w = 600.0 * s;
-                    let box_h = 240.0 * s;
-                    let box_x = (self.window.as_ref().unwrap().inner_size().width as f32 - box_w) / 2.0;
-                    let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
-                    
-                    if mx < box_x || mx > box_x + box_w || my < box_y || my > box_y + box_h {
-                        self.close_dialog();
-                    } else {
-                        let (btn_save, btn_discard, btn_cancel) = crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self.renderer.as_mut().unwrap());
-
-                        if btn_save.is_hovered(mx, my) {
-                        if self.save_current_file() {
-                            if let Some(w) = self.window.as_ref() {
-                                App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-                            }
-                            let action = self.pending_action;
-                            self.close_dialog();
-                            if action == PendingAction::Quit {
-                                let scale = self.window.as_ref().unwrap().scale_factor();
-                                let size = self.window.as_ref().unwrap().inner_size().to_logical::<f64>(scale);
-                                crate::save_config(&crate::Config { window_width: size.width, window_height: size.height });
-                                event_loop.exit();
-                            } else if action == PendingAction::OpenFile {
-                                self.trigger_file_picker();
-                            } else if action == PendingAction::CloseFile {
-                                self.close_current_file();
-                            }
-                        }
-                    } else if btn_discard.is_hovered(mx, my) {
-                        let action = self.pending_action;
-                        self.close_dialog();
-                        if action == PendingAction::Quit {
-                            let scale = self.window.as_ref().unwrap().scale_factor();
-                            let size = self.window.as_ref().unwrap().inner_size().to_logical::<f64>(scale);
-                            crate::save_config(&crate::Config { window_width: size.width, window_height: size.height });
-                            event_loop.exit();
-                        } else if action == PendingAction::OpenFile {
-                            self.trigger_file_picker();
-                        } else if action == PendingAction::CloseFile {
-                            self.close_current_file();
-                        }
-                        } else if btn_cancel.is_hovered(mx, my) {
-                            self.close_dialog();
-                        }
-                    }
-                }
-            } else if state == ElementState::Released {
-                self.is_dragging_faq = false;
-            }
-            self.window.as_ref().unwrap().request_redraw();
+        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+        if self.dialog_window.is_some() {
             return;
         }
 
-        if self.show_settings {
+                if self.show_settings {
             if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let w = (800.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-                let h = (600.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+                let w = (1000.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
+                let h = (700.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
                 let x = (self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0;
                 let y = (self.window.as_ref().unwrap().inner_size().height as f32 - h) / 2.0;
 
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                if mx < x || mx > x + w || my < y || my > y + h {
+                                if mx < x || mx > x + w || my < y || my > y + h {
                     self.show_settings = false;
                 } else {
-                    let pad = 20.0 * s;
+                    let pad_top = 35.0 * s;
                     let pad_h = 40.0 * s;
                     let ix = x + pad_h;
-                    let iy = y + pad;
+                    let iy = y + pad_top;
                     let sidebar_w = 200.0 * s;
                     if mx >= ix + 10.0 * s && mx <= ix + sidebar_w - 10.0 * s {
                         let mut tab_y = iy + 20.0 * s;
-                        for i in 0..3 {
+                        for i in 0..4 {
                             if my >= tab_y && my <= tab_y + 36.0 * s {
                                 self.settings_tab = i;
                                 break;
@@ -667,29 +592,7 @@ impl App {
         self.renderer.as_mut().unwrap().last_mouse_x = position.x as f32;
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
 
-        if self.show_quit_dialog {
-            if self.is_dragging_faq && self.pending_action == PendingAction::Faq {
-                let s = self.renderer.as_ref().unwrap().scale_factor;
-                let box_h = (680.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                let box_y = (self.window.as_ref().unwrap().inner_size().height as f32 - box_h) / 2.0;
-                let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
-
-                let content_y = box_y + 30.0 * s;
-                let content_h = box_h - 110.0 * s;
-                let track_h = content_h - 16.0 * s;
-                let total_content_h = content_h + max_scroll;
-                let thumb_h = (content_h / total_content_h * track_h).max(40.0 * s);
-
-                let start_y = content_y + 8.0 * s + thumb_h / 2.0;
-                let end_y = content_y + 8.0 * s + track_h - thumb_h / 2.0;
-
-                let mut ratio = (position.y as f32 - start_y) / (end_y - start_y).max(1.0);
-                ratio = ratio.clamp(0.0, 1.0);
-
-                self.faq_target_scroll_y = ratio * max_scroll;
-                self.faq_scroll_anim_speed = 15.0;
-            }
-            self.window.as_ref().unwrap().request_redraw();
+                if self.dialog_window.is_some() {
             return;
         }
 
@@ -1047,10 +950,8 @@ impl App {
                 }
                 return;
             }
-            PhysicalKey::Code(KeyCode::F1) => {
-                self.faq_scroll_y = 0.0;
-                self.faq_target_scroll_y = 0.0;
-                self.show_action_dialog(event_loop, PendingAction::Faq);
+                                    PhysicalKey::Code(KeyCode::F1) => {
+                self.show_settings = true;
                 return;
             }
             PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
@@ -1090,11 +991,7 @@ impl App {
                     self.trigger_file_picker();
                 }
             }
-            PhysicalKey::Code(KeyCode::Comma) if ctrl => {
-                self.show_settings = !self.show_settings;
-                return;
-            }
-            PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
+                        PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
                 if let Some(delta) = self.editor.undo() {
                     match delta {
                         crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
@@ -1463,12 +1360,12 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_keyboard_input(
+        pub fn handle_main_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        if self.show_quit_dialog {
+        if self.dialog_window.is_some() {
             if key_event.state == ElementState::Pressed && key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                 self.close_dialog();
             }
