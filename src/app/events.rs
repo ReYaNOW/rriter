@@ -262,7 +262,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(mod_state) => self.modifiers = mod_state.state(),
-                        WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
             WindowEvent::MouseInput {
@@ -310,8 +310,8 @@ impl ApplicationHandler for App {
 
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
-                    self.scroll_x,
-                    self.scroll_y,
+                    self.scroll_x.current,
+                    self.scroll_y.current,
                     blink_alpha,
                     self.show_fps,
                     &self.highlighter.spans,
@@ -378,14 +378,14 @@ impl ApplicationHandler for App {
 
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-                    let render_scroll_y = self.scroll_y.round();
+                    let render_scroll_y = self.scroll_y.current.round();
                     let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
                         cx,
                         cy - render_scroll_y,
                         &self.autocomplete_options,
                         self.autocomplete_selected_idx,
                         self.autocomplete_anim_progress,
-                        self.autocomplete_scroll_y,
+                        self.autocomplete_scroll.current,
                         self.autocomplete_hovered_idx,
                     );
                     self.autocomplete_rect = Some(rect);
@@ -401,7 +401,7 @@ impl ApplicationHandler for App {
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
-                        self.settings_scroll_y,
+                        self.settings_scroll.current,
                     ) {
                         wants_pointer = true;
                     }
@@ -435,7 +435,7 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if self.is_dragging_h_scroll || self.is_dragging_minimap {
+                    if self.scroll_x.is_dragging || self.scroll_y.is_dragging {
                         is_text = false;
                     }
 
@@ -527,47 +527,19 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.autocomplete_active {
-            if App::update_smooth_scroll(
-                &mut self.autocomplete_scroll_y,
-                self.autocomplete_target_scroll_y,
-                &mut self.autocomplete_scroll_velocity,
-                dt,
-                15.0,
-            ) {
-                needs_redraw = true;
-            }
-        }
-
-        if self.show_settings && self.settings_tab == 3 {
-            if App::update_smooth_scroll(
-                &mut self.settings_scroll_y,
-                self.settings_target_scroll_y,
-                &mut self.settings_scroll_velocity,
-                dt,
-                15.0,
-            ) {
-                needs_redraw = true;
-            }
-        }
-
-        if App::update_smooth_scroll(
-            &mut self.scroll_y,
-            self.target_scroll_y,
-            &mut self.scroll_velocity,
-            dt,
-            self.scroll_anim_speed,
-        ) {
+        if self.autocomplete_active && self.autocomplete_scroll.update(dt) {
             needs_redraw = true;
         }
 
-        if App::update_smooth_scroll(
-            &mut self.scroll_x,
-            self.target_scroll_x,
-            &mut self.scroll_x_velocity,
-            dt,
-            self.scroll_anim_speed,
-        ) {
+        if self.show_settings && self.settings_tab == 3 && self.settings_scroll.update(dt) {
+            needs_redraw = true;
+        }
+
+        if self.scroll_y.update(dt) {
+            needs_redraw = true;
+        }
+
+        if self.scroll_x.update(dt) {
             needs_redraw = true;
         }
 
@@ -595,7 +567,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.is_dragging && !self.is_dragging_minimap {
+        if self.is_dragging && !self.scroll_y.is_dragging {
             if let Some(w) = self.window.as_ref() {
                 let wh = w.inner_size().height as f32;
                 let ww = w.inner_size().width as f32;
@@ -623,18 +595,18 @@ impl ApplicationHandler for App {
                     if drag_scroll_delta_y != 0.0 {
                         let drag_amount = drag_scroll_delta_y.abs();
                         let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
-                        self.target_scroll_y += drag_scroll_delta_y.signum() * speed * dt;
+                        self.scroll_y.target += drag_scroll_delta_y.signum() * speed * dt;
                     }
 
                     if drag_scroll_delta_x != 0.0 {
                         let drag_amount = drag_scroll_delta_x.abs();
                         let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
-                        self.target_scroll_x += drag_scroll_delta_x.signum() * speed * dt;
+                        self.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                     }
 
                     self.editor.set_cursor_at_pos(
                         mx,
-                        my + self.scroll_y,
+                        my + self.scroll_y.current,
                         self.renderer.as_mut().unwrap(),
                         false,
                     );
@@ -649,12 +621,12 @@ impl ApplicationHandler for App {
                 .as_mut()
                 .unwrap()
                 .get_max_scroll(&self.editor, w.inner_size().height as f32);
-            self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll_y);
-            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
+            self.scroll_y.clamp_target(0.0, max_scroll_y);
+            self.scroll_y.clamp_current(0.0, max_scroll_y);
 
             let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
-            self.target_scroll_x = self.target_scroll_x.clamp(0.0, max_scroll_x);
-            self.scroll_x = self.scroll_x.clamp(0.0, max_scroll_x);
+            self.scroll_x.clamp_target(0.0, max_scroll_x);
+            self.scroll_x.clamp_current(0.0, max_scroll_x);
         }
 
         if let Some(rx) = &self.open_file_rx {

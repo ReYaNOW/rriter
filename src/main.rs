@@ -4,6 +4,7 @@ mod highlighter;
 mod queries;
 mod render_view;
 mod renderer;
+mod scroll;
 mod widgets;
 
 use crate::app::{App, PendingAction};
@@ -258,11 +259,9 @@ F8\tПоказать/скрыть счетчик FPS
         gl_context: None,
                 gl_surface: None,
         window: None,
-                dialog_window: None,
+                        dialog_window: None,
         dialog_gl_surface: None,
-        settings_scroll_y: 0.0,
-        settings_target_scroll_y: 0.0,
-        settings_scroll_velocity: 0.0,
+        settings_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor,
         clipboard: Clipboard::new().unwrap_or_else(|_| Clipboard::new().unwrap()),
@@ -270,30 +269,21 @@ F8\tПоказать/скрыть счетчик FPS
         base_title: title,
         file_path,
         file_extension: ext,
-        highlighter,
+                highlighter,
         last_sent_version: u64::MAX,
-        target_scroll_y: 0.0,
-        scroll_y: 0.0,
-        scroll_velocity: 0.0,
-        target_scroll_x: 0.0,
-        scroll_x: 0.0,
-        scroll_x_velocity: 0.0,
+        scroll_y: crate::scroll::ScrollState::new(15.0),
+        scroll_x: crate::scroll::ScrollState::new(15.0),
         last_frame: Instant::now(),
         last_action: Instant::now(),
         last_blink_state: true,
         modifiers: ModifiersState::empty(),
         is_dragging: false,
-        is_dragging_minimap: false,
-        is_dragging_h_scroll: false,
-        minimap_drag_offset_y: 0.0,
-        h_scroll_drag_offset_x: 0.0,
         is_focused: true,
 
         show_fps: false,
         window_width: config.window_width,
         window_height: config.window_height,
 
-                scroll_anim_speed: 15.0,
         last_resize_time: None,
 
         last_click_time: Instant::now(),
@@ -321,17 +311,13 @@ F8\tПоказать/скрыть счетчик FPS
         is_ready: false,
         is_highlighted_once: false,
 
-        autocomplete_active: false,
+                autocomplete_active: false,
         autocomplete_options: Vec::new(),
         autocomplete_selected_idx: 0,
         autocomplete_anim_progress: 0.0,
-        autocomplete_scroll_y: 0.0,
-        autocomplete_target_scroll_y: 0.0,
-        autocomplete_scroll_velocity: 0.0,
+        autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
         autocomplete_hovered_idx: None,
         autocomplete_rect: None,
-        is_dragging_autocomplete: false,
-        autocomplete_drag_offset_y: 0.0,
 
         current_sticky_lines: Vec::new(),
         target_sticky_lines: Vec::new(),

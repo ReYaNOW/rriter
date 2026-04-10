@@ -18,27 +18,29 @@ impl App {
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
 
-        if self.autocomplete_active && self.autocomplete_rect.is_some() {
+                if self.autocomplete_active && self.autocomplete_rect.is_some() {
             let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
-            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                        let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
-                self.autocomplete_target_scroll_y += dy;
+                self.autocomplete_scroll.anim_speed = 7.0;
+                self.autocomplete_scroll.scroll_by(dy);
                 let step = 36.0 * s;
                 let total_items = self.autocomplete_options.len() as f32;
                 let visible_items = total_items.min(7.0);
                 let max_scroll = ((total_items - visible_items) * step).max(0.0);
-                self.autocomplete_target_scroll_y = self.autocomplete_target_scroll_y.clamp(0.0, max_scroll);
+                self.autocomplete_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
         }
 
-        if self.show_settings && self.settings_tab == 3 {
-            self.settings_target_scroll_y += dy;
+                if self.show_settings && self.settings_tab == 3 {
+            self.settings_scroll.anim_speed = 7.0;
+            self.settings_scroll.scroll_by(dy);
             let box_h = (700.0 * s).min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
             let max_scroll = self.renderer.as_mut().unwrap().get_faq_max_scroll(&self.faq_editor, box_h);
-            self.settings_target_scroll_y = self.settings_target_scroll_y.clamp(0.0, max_scroll);
+            self.settings_scroll.clamp_target(0.0, max_scroll);
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -47,21 +49,24 @@ impl App {
             return;
         }
 
-        self.scroll_anim_speed = 7.0;
+        self.scroll_y.anim_speed = 7.0;
+        self.scroll_x.anim_speed = 7.0;
 
         if shift {
-            self.target_scroll_x += dy; // Shift конвертирует вертикальный скролл в горизонтальный
+            self.scroll_x.scroll_by(dy); // Shift конвертирует вертикальный скролл в горизонтальный
         } else {
-            self.target_scroll_y += dy;
-            self.target_scroll_x += dx;
+            self.scroll_y.scroll_by(dy);
+            self.scroll_x.scroll_by(dx);
         }
 
         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
         let max_scroll_y = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
         let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
 
-        self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll_y).round();
-        self.target_scroll_x = self.target_scroll_x.clamp(0.0, max_scroll_x).round();
+        self.scroll_y.clamp_target(0.0, max_scroll_y);
+        self.scroll_y.target = self.scroll_y.target.round();
+        self.scroll_x.clamp_target(0.0, max_scroll_x);
+        self.scroll_x.target = self.scroll_x.target.round();
         self.window.as_ref().unwrap().request_redraw();
     }
 
@@ -174,14 +179,14 @@ impl App {
             return;
         }
 
-        if state == ElementState::Released {
+                if state == ElementState::Released {
             self.is_dragging = false;
-            self.is_dragging_minimap = false;
+            self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
-            self.is_dragging_autocomplete = false;
-            self.is_dragging_h_scroll = false;
-            self.target_scroll_y = self.target_scroll_y.round();
-            self.target_scroll_x = self.target_scroll_x.round();
+            self.autocomplete_scroll.is_dragging = false;
+            self.scroll_x.is_dragging = false;
+            self.scroll_y.target = self.scroll_y.target.round();
+            self.scroll_x.target = self.scroll_x.target.round();
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -329,32 +334,33 @@ impl App {
                         && last_mouse_y >= ry
                         && last_mouse_y <= ry + rh
                     {
-                        let scroll_x = rx + rw - 14.0 * s;
+                                                let scroll_x = rx + rw - 14.0 * s;
                         let step = 36.0 * s;
                         let total_items = self.autocomplete_options.len() as f32;
                         let visible_items = total_items.min(7.0);
                         let total_h = total_items * step + 16.0 * s;
 
                         if last_mouse_x >= scroll_x && total_h > rh {
-                            self.is_dragging_autocomplete = true;
+                            self.autocomplete_scroll.is_dragging = true;
                             let max_scroll = ((total_items - visible_items) * step).max(0.0);
                             let scroll_ratio =
-                                (self.autocomplete_scroll_y / max_scroll.max(1.0)).clamp(0.0, 1.0);
+                                (self.autocomplete_scroll.current / max_scroll.max(1.0)).clamp(0.0, 1.0);
 
                             let track_h = rh - 8.0 * s;
                             let thumb_h = (rh / total_h * track_h).max(20.0 * s);
                             let thumb_start_y = ry + 4.0 * s + scroll_ratio * (track_h - thumb_h);
 
-                            if last_mouse_y >= thumb_start_y
+                                                        if last_mouse_y >= thumb_start_y
                                 && last_mouse_y <= thumb_start_y + thumb_h
                             {
-                                self.autocomplete_drag_offset_y = last_mouse_y - thumb_start_y;
+                                self.autocomplete_scroll.drag_offset = last_mouse_y - thumb_start_y;
                             } else {
-                                self.autocomplete_drag_offset_y = thumb_h / 2.0;
+                                self.autocomplete_scroll.anim_speed = 15.0;
+                                self.autocomplete_scroll.drag_offset = thumb_h / 2.0;
                                 let new_ratio =
-                                    (last_mouse_y - ry - 4.0 * s - self.autocomplete_drag_offset_y)
+                                    (last_mouse_y - ry - 4.0 * s - self.autocomplete_scroll.drag_offset)
                                         / (track_h - thumb_h).max(1.0);
-                                self.autocomplete_target_scroll_y =
+                                self.autocomplete_scroll.target =
                                     (new_ratio * max_scroll).clamp(0.0, max_scroll);
                             }
                         } else if let Some(idx) = self.autocomplete_hovered_idx {
@@ -402,9 +408,9 @@ impl App {
                         .unwrap()
                         .get_max_scroll(&self.editor, wh);
 
-                    let padding = self.renderer.as_ref().unwrap().line_height * 3.0;
-                    self.target_scroll_y = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
-                    self.scroll_anim_speed = 15.0;
+                                        let padding = self.renderer.as_ref().unwrap().line_height * 3.0;
+                    self.scroll_y.target = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
+                    self.scroll_y.anim_speed = 15.0;
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
@@ -415,7 +421,7 @@ impl App {
                 let visual_lines = r.visual_lines.clone();
 
                 for v_line in &visual_lines {
-                    let y = r.baseline_offset + v_line.y_offset - self.scroll_y;
+                                        let y = r.baseline_offset + v_line.y_offset - self.scroll_y.current;
                     let phys_idx = v_line.physical_line - 1;
 
                     if self.editor.foldable_lines.contains_key(&phys_idx) {
@@ -449,10 +455,10 @@ impl App {
                             full_fold_width += r.char_advance(v_line.fold_suffix[i as usize]);
                         }
 
-                        let dots_x =
+                                            let dots_x =
                             r.left_padding + v_line.whitespace_px_width + v_line.text_px_width
                                 - full_fold_width
-                                - self.scroll_x;
+                                - self.scroll_x.current;
 
                         if last_mouse_x >= dots_x
                             && last_mouse_x <= dots_x + button_width
@@ -488,35 +494,35 @@ impl App {
 
             let left_pad = self.renderer.as_ref().unwrap().left_padding;
 
-            if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 14.0 * s {
+                        if self.renderer.as_ref().unwrap().max_scroll_x > 0.0 && last_mouse_y > wh - 14.0 * s {
                 if last_mouse_x > left_pad && last_mouse_x < scrollbar_x {
-                    self.is_dragging_h_scroll = true;
+                    self.scroll_x.is_dragging = true;
                     let track_w = scrollbar_x - left_pad;
                     let max_x = self.renderer.as_ref().unwrap().max_scroll_x;
                     let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
 
                     let scroll_ratio = if max_x > 0.0 {
-                        (self.scroll_x / max_x).clamp(0.0, 1.0)
+                        (self.scroll_x.current / max_x).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
                     let thumb_start_x = left_pad + scroll_ratio * (track_w - thumb_w);
 
                     if last_mouse_x >= thumb_start_x && last_mouse_x <= thumb_start_x + thumb_w {
-                        self.h_scroll_drag_offset_x = last_mouse_x - thumb_start_x;
+                        self.scroll_x.drag_offset = last_mouse_x - thumb_start_x;
                     } else {
-                        self.h_scroll_drag_offset_x = thumb_w / 2.0;
-                        let ratio = (last_mouse_x - left_pad - self.h_scroll_drag_offset_x)
+                        self.scroll_x.drag_offset = thumb_w / 2.0;
+                        let ratio = (last_mouse_x - left_pad - self.scroll_x.drag_offset)
                             / (track_w - thumb_w).max(0.0001);
-                        self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
-                        self.scroll_x = self.target_scroll_x;
+                        self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
+                        self.scroll_x.current = self.scroll_x.target;
                     }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
             }
 
-            if last_mouse_x >= scrollbar_x {
+                        if last_mouse_x >= scrollbar_x {
                 let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
                     * self.renderer.as_ref().unwrap().line_height;
                 let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
@@ -524,36 +530,34 @@ impl App {
                 let track_start_y = 0.0;
                 let track_h = wh;
 
-                self.is_dragging_minimap = true;
+                self.scroll_y.is_dragging = true;
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
                 self.last_click_time = Instant::now();
 
                 let scroll_ratio = if max_scroll > 0.0 {
-                    (self.scroll_y / max_scroll).clamp(0.0, 1.0)
+                    (self.scroll_y.current / max_scroll).clamp(0.0, 1.0)
                 } else {
                     0.0
                 };
                 let thumb_start_y = scroll_ratio * (wh - thumb_h);
 
                 if last_mouse_y >= thumb_start_y && last_mouse_y <= thumb_start_y + thumb_h {
-                    self.minimap_drag_offset_y = last_mouse_y - thumb_start_y;
+                    self.scroll_y.drag_offset = last_mouse_y - thumb_start_y;
                 } else {
-                    self.minimap_drag_offset_y = thumb_h / 2.0;
+                    self.scroll_y.drag_offset = thumb_h / 2.0;
                     let new_scroll_ratio =
-                        (last_mouse_y - track_start_y - self.minimap_drag_offset_y)
+                        (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
                             / (track_h - thumb_h).max(0.0001);
-                    self.target_scroll_y = (new_scroll_ratio * max_scroll)
+                    self.scroll_y.target = (new_scroll_ratio * max_scroll)
                         .clamp(0.0, max_scroll)
                         .round();
-                    self.scroll_y = self.target_scroll_y;
+                    self.scroll_y.current = self.scroll_y.target;
                 }
             } else {
                 self.is_dragging = true;
-                self.scroll_anim_speed = 15.0;
+                self.scroll_y.anim_speed = 15.0;
 
-                self.target_scroll_y = self.scroll_y.round();
-                self.scroll_y = self.target_scroll_y;
-                self.scroll_velocity = 0.0;
+                self.scroll_y.stop_anim();
 
                 let now = Instant::now();
                 let dx = last_mouse_x - self.last_click_pos.0;
@@ -569,9 +573,9 @@ impl App {
                 self.last_click_time = now;
                 self.last_click_pos = (last_mouse_x, last_mouse_y);
 
-                self.editor.set_cursor_at_pos(
+                                self.editor.set_cursor_at_pos(
                     last_mouse_x,
-                    last_mouse_y + self.scroll_y,
+                    last_mouse_y + self.scroll_y.current,
                     self.renderer.as_mut().unwrap(),
                     true,
                 );
@@ -608,7 +612,8 @@ impl App {
             let px = position.x as f32;
             let py = position.y as f32;
 
-            if self.is_dragging_autocomplete {
+                                    if self.autocomplete_scroll.is_dragging {
+                self.autocomplete_scroll.anim_speed = 15.0;
                 let step = 36.0 * s;
                 let total_items = self.autocomplete_options.len() as f32;
                 let visible_items = total_items.min(7.0);
@@ -618,9 +623,9 @@ impl App {
                 let thumb_h = (rh / total_h * track_h).max(20.0 * s);
                 let max_scroll = ((total_items - visible_items) * step).max(0.0);
 
-                let ratio = (py - ry - 4.0 * s - self.autocomplete_drag_offset_y)
+                let ratio = (py - ry - 4.0 * s - self.autocomplete_scroll.drag_offset)
                     / (track_h - thumb_h).max(1.0);
-                self.autocomplete_target_scroll_y = (ratio * max_scroll).clamp(0.0, max_scroll);
+                self.autocomplete_scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
@@ -632,9 +637,9 @@ impl App {
                     .set_cursor(winit::window::CursorIcon::Pointer);
 
                 let scroll_x = rx + rw - 14.0 * s;
-                if px < scroll_x {
+                                if px < scroll_x {
                     let item_h = 36.0 * s;
-                    let scroll = self.autocomplete_scroll_y;
+                    let scroll = self.autocomplete_scroll.current;
                     let content_y = py - ry + scroll - (4.0 * s);
                     if content_y >= 0.0 {
                         let idx = (content_y / item_h) as usize;
@@ -694,16 +699,16 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.search_editor.cursor = target_idx;
-        } else if self.is_dragging_h_scroll {
+                } else if self.scroll_x.is_dragging {
             let r = self.renderer.as_ref().unwrap();
             let track_w = scrollbar_x - padding;
             let max_x = r.max_scroll_x;
             let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
-            let ratio = (position.x as f32 - padding - self.h_scroll_drag_offset_x)
+            let ratio = (position.x as f32 - padding - self.scroll_x.drag_offset)
                 / (track_w - thumb_w).max(0.0001);
-            self.target_scroll_x = (ratio * max_x).clamp(0.0, max_x);
-            self.scroll_x = self.target_scroll_x;
-        } else if self.is_dragging_minimap {
+            self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
+            self.scroll_x.current = self.scroll_x.target;
+        } else if self.scroll_y.is_dragging {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_click_time).as_millis();
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
@@ -717,19 +722,19 @@ impl App {
 
                 let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                let scroll_ratio = (last_mouse_y - track_start_y - self.minimap_drag_offset_y)
+                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
                     / (track_h - thumb_h).max(0.0001);
 
-                self.target_scroll_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
+                self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
-                self.scroll_anim_speed = 15.0;
+                self.scroll_y.anim_speed = 15.0;
             }
         } else if self.is_dragging {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             self.editor.set_cursor_at_pos(
                 last_mouse_x,
-                last_mouse_y + self.scroll_y,
+                last_mouse_y + self.scroll_y.current,
                 self.renderer.as_mut().unwrap(),
                 false,
             );
@@ -1060,16 +1065,16 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::PageUp) => {
+                        PhysicalKey::Code(KeyCode::PageUp) => {
                 let step = self.window.as_ref().unwrap().inner_size().height as f32 * 0.8;
-                self.target_scroll_y -= step;
+                self.scroll_y.scroll_by(-step);
                 self.editor
                     .move_page_up(self.renderer.as_mut().unwrap(), shift, step);
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::PageDown) => {
                 let step = self.window.as_ref().unwrap().inner_size().height as f32 * 0.8;
-                self.target_scroll_y += step;
+                self.scroll_y.scroll_by(step);
                 self.editor
                     .move_page_down(self.renderer.as_mut().unwrap(), shift, step);
                 cursor_moved = true;
@@ -1303,12 +1308,15 @@ impl App {
                 PhysicalKey::Code(KeyCode::PageUp | KeyCode::PageDown)
             );
 
-            if is_arrow {
-                self.scroll_anim_speed = 10.0;
+                        if is_arrow {
+                self.scroll_y.anim_speed = 10.0;
+                self.scroll_x.anim_speed = 10.0;
             } else if is_page {
-                self.scroll_anim_speed = 7.0;
+                self.scroll_y.anim_speed = 7.0;
+                self.scroll_x.anim_speed = 7.0;
             } else {
-                self.scroll_anim_speed = 25.0;
+                self.scroll_y.anim_speed = 25.0;
+                self.scroll_x.anim_speed = 25.0;
             }
 
             let wh_width = self.window.as_ref().unwrap().inner_size().width as f32;
@@ -1327,22 +1335,23 @@ impl App {
                     .get_cursor_xy(&self.editor)
                     .1;
                 let delta_y = new_cursor_y - old_cursor_y;
-                self.target_scroll_y += delta_y;
-                self.scroll_y += delta_y;
+                self.scroll_y.target += delta_y;
+                self.scroll_y.current += delta_y;
                 let max_scroll = self
                     .renderer
                     .as_mut()
                     .unwrap()
                     .get_max_scroll(&self.editor, wh_height);
-                self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_scroll).round();
-                self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+                self.scroll_y.clamp_target(0.0, max_scroll);
+                self.scroll_y.target = self.scroll_y.target.round();
+                self.scroll_y.clamp_current(0.0, max_scroll);
             } else {
-                let old_target_y = self.target_scroll_y;
-                let old_target_x = self.target_scroll_x;
+                let old_target_y = self.scroll_y.target;
+                let old_target_x = self.scroll_x.target;
 
                 App::ensure_cursor_visible(
-                    &mut self.target_scroll_y,
-                    &mut self.target_scroll_x,
+                    &mut self.scroll_y.target,
+                    &mut self.scroll_x.target,
                     &self.editor,
                     self.renderer.as_mut().unwrap(),
                     wh_width,
@@ -1350,8 +1359,8 @@ impl App {
                 );
 
                 if key_event.repeat && !is_arrow && !is_page {
-                    self.scroll_y += self.target_scroll_y - old_target_y;
-                    self.scroll_x += self.target_scroll_x - old_target_x;
+                    self.scroll_y.current += self.scroll_y.target - old_target_y;
+                    self.scroll_x.current += self.scroll_x.target - old_target_x;
                 }
             }
         }

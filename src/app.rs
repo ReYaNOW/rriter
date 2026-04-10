@@ -51,9 +51,7 @@ pub struct App {
     pub window: Option<Window>,
         pub dialog_window: Option<Window>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
-    pub settings_scroll_y: f32,
-    pub settings_target_scroll_y: f32,
-    pub settings_scroll_velocity: f32,
+    pub settings_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
     pub editor: Editor,
     pub clipboard: Clipboard,
@@ -65,30 +63,19 @@ pub struct App {
     pub highlighter: Highlighter,
     pub last_sent_version: u64,
 
-    pub target_scroll_y: f32,
-    pub scroll_y: f32,
-    pub scroll_velocity: f32,
-
-    pub target_scroll_x: f32,
-    pub scroll_x: f32,
-    pub scroll_x_velocity: f32,
+    pub scroll_y: crate::scroll::ScrollState,
+    pub scroll_x: crate::scroll::ScrollState,
 
     pub last_frame: Instant,
     pub last_action: Instant,
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
     pub is_dragging: bool,
-    pub is_dragging_minimap: bool,
-    pub is_dragging_h_scroll: bool,
-    pub minimap_drag_offset_y: f32,
-    pub h_scroll_drag_offset_x: f32,
     pub is_focused: bool,
 
     pub show_fps: bool,
     pub window_width: f64,
     pub window_height: f64,
-
-        pub scroll_anim_speed: f32,
 
     pub last_resize_time: Option<Instant>,
 
@@ -121,13 +108,9 @@ pub struct App {
     pub autocomplete_options: Vec<(CompletionItem, Vec<usize>)>,
     pub autocomplete_selected_idx: usize,
     pub autocomplete_anim_progress: f32,
-    pub autocomplete_scroll_y: f32,
-    pub autocomplete_target_scroll_y: f32,
-    pub autocomplete_scroll_velocity: f32,
+    pub autocomplete_scroll: crate::scroll::ScrollState,
     pub autocomplete_hovered_idx: Option<usize>,
     pub autocomplete_rect: Option<(f32, f32, f32, f32)>,
-    pub is_dragging_autocomplete: bool,
-    pub autocomplete_drag_offset_y: f32,
 
     pub current_sticky_lines: Vec<(usize, usize)>,
     pub target_sticky_lines: Vec<(usize, usize)>,
@@ -140,30 +123,6 @@ pub struct App {
 }
 
 impl App {
-    pub fn update_smooth_scroll(current: &mut f32, target: f32, velocity: &mut f32, dt: f32, anim_speed: f32) -> bool {
-        let diff = target - *current;
-        let abs_diff = diff.abs();
-        if abs_diff > 0.0 {
-            let target_v = if abs_diff > 15.0 {
-                diff * anim_speed
-            } else {
-                diff.signum() * abs_diff.sqrt() * (15.0_f32.sqrt() * anim_speed)
-            };
-            let v_factor = 1.0 - (-anim_speed * 4.0 * dt).exp();
-            *velocity += (target_v - *velocity) * v_factor;
-            let step = *velocity * dt;
-
-            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01 {
-                *current = target;
-                *velocity = 0.0;
-            } else {
-                *current += step;
-            }
-            return true;
-        }
-        false
-    }
-
     pub fn ensure_cursor_visible(target_scroll_y: &mut f32,
         target_scroll_x: &mut f32,
         editor: &Editor,
@@ -286,11 +245,11 @@ impl App {
 
         self.autocomplete_options = matches.into_iter().take(60).map(|m| (m.2, m.3)).collect();
 
-        if !self.autocomplete_options.is_empty() {
+                if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
                 self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_scroll_y = 0.0;
-                self.autocomplete_target_scroll_y = 0.0;
+                self.autocomplete_scroll.current = 0.0;
+                self.autocomplete_scroll.target = 0.0;
             }
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
@@ -299,7 +258,7 @@ impl App {
         }
     }
 
-    pub fn ensure_autocomplete_visible(&mut self) {
+        pub fn ensure_autocomplete_visible(&mut self) {
         let scale = self
             .renderer
             .as_ref()
@@ -308,24 +267,24 @@ impl App {
         let step = 36.0 * scale;
         let visible_items = 7.0;
 
-        let top = self.autocomplete_target_scroll_y;
+        self.autocomplete_scroll.anim_speed = 15.0;
+        let top = self.autocomplete_scroll.target;
         let bottom = top + (visible_items * step);
 
         let item_top = self.autocomplete_selected_idx as f32 * step;
         let item_bottom = item_top + step;
 
         if item_top < top {
-            self.autocomplete_target_scroll_y = item_top;
+            self.autocomplete_scroll.set_target(item_top);
         } else if item_bottom > bottom {
-            self.autocomplete_target_scroll_y = item_bottom - (visible_items * step);
+            self.autocomplete_scroll.set_target(item_bottom - (visible_items * step));
         }
 
         let total_items = self.autocomplete_options.len() as f32;
         let visible_limit = total_items.min(visible_items);
         let max_scroll = ((total_items - visible_limit) * step).max(0.0);
 
-        self.autocomplete_target_scroll_y =
-            self.autocomplete_target_scroll_y.clamp(0.0, max_scroll);
+        self.autocomplete_scroll.clamp_target(0.0, max_scroll);
     }
 
     pub fn apply_autocomplete(&mut self) {
@@ -351,10 +310,10 @@ impl App {
         self.highlighter
             .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
 
-        self.autocomplete_active = false;
+                self.autocomplete_active = false;
         self.autocomplete_selected_idx = 0;
-        self.autocomplete_scroll_y = 0.0;
-        self.autocomplete_target_scroll_y = 0.0;
+        self.autocomplete_scroll.current = 0.0;
+        self.autocomplete_scroll.target = 0.0;
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
@@ -432,12 +391,13 @@ impl App {
 
                     let line_top_y = phys_line as f32 * r.line_height;
 
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    self.target_scroll_y = (line_top_y - wh / 2.0).max(0.0);
+                                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    self.scroll_y.target = (line_top_y - wh / 2.0).max(0.0);
 
                     let max_s = r.get_max_scroll(&self.editor, wh);
-                    self.target_scroll_y = self.target_scroll_y.clamp(0.0, max_s).round();
-                    self.scroll_anim_speed = 10.0;
+                    self.scroll_y.clamp_target(0.0, max_s);
+                    self.scroll_y.target = self.scroll_y.target.round();
+                    self.scroll_y.anim_speed = 10.0;
                 }
             }
         }
@@ -452,10 +412,10 @@ impl App {
         window.set_title(&title);
     }
 
-        pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
+            pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         self.is_dragging = false;
-        self.is_dragging_minimap = false;
-        self.is_dragging_h_scroll = false;
+        self.scroll_y.is_dragging = false;
+        self.scroll_x.is_dragging = false;
         self.pending_action = action;
 
         if self.dialog_window.is_some() { return; }
@@ -504,13 +464,13 @@ impl App {
         self.search_results.clear();
         self.search_current_idx = None;
         self.show_search = false;
-        self.autocomplete_active = false;
+                self.autocomplete_active = false;
         self.show_welcome = true;
 
-        self.target_scroll_y = 0.0;
-        self.scroll_y = 0.0;
-        self.target_scroll_x = 0.0;
-        self.scroll_x = 0.0;
+        self.scroll_y.current = 0.0;
+        self.scroll_y.target = 0.0;
+        self.scroll_x.current = 0.0;
+        self.scroll_x.target = 0.0;
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
@@ -608,17 +568,17 @@ impl App {
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 self.highlighter.spans.clear();
-                self.is_highlighted_once = false;
+                                self.is_highlighted_once = false;
                 self.highlighter.reset(
                     self.editor.version,
                     self.editor.get_full_text(),
                     self.file_extension.clone(),
                 );
 
-                self.target_scroll_y = 0.0;
-                self.scroll_y = 0.0;
-                self.target_scroll_x = 0.0;
-                self.scroll_x = 0.0;
+                self.scroll_y.current = 0.0;
+                self.scroll_y.target = 0.0;
+                self.scroll_x.current = 0.0;
+                self.scroll_x.target = 0.0;
 
                 self.last_sent_version = u64::MAX;
                 self.search_results.clear();
