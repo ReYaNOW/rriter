@@ -115,11 +115,11 @@ impl ApplicationHandler for App {
                         let my = self.renderer.as_ref().unwrap().last_mouse_y;
                         let s = self.renderer.as_ref().unwrap().scale_factor;
                         let (btn_save, btn_discard, btn_cancel) =
-                            crate::widgets::get_dialog_buttons(
+                                                        crate::widgets::get_dialog_buttons(
                                 0.0,
                                 0.0,
-                                600.0 * s,
-                                240.0 * s,
+                                560.0 * s,
+                                200.0 * s,
                                 s,
                                 self.renderer.as_mut().unwrap(),
                             );
@@ -191,7 +191,7 @@ impl ApplicationHandler for App {
 
                         let r = self.renderer.as_mut().unwrap();
                         let s = r.scale_factor;
-                        r.resize((600.0 * s) as u32, (240.0 * s) as u32);
+                                                                                                r.resize((560.0 * s) as u32, (200.0 * s) as u32);
 
                         unsafe {
                             use glow::HasContext;
@@ -236,8 +236,13 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                 }
             }
-            WindowEvent::Focused(focused) => {
+                        WindowEvent::Focused(focused) => {
                 self.is_focused = focused;
+                if focused {
+                    if let Some(dw) = self.dialog_window.as_ref() {
+                        dw.focus_window();
+                    }
+                }
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(size) => {
@@ -551,24 +556,27 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                                let target_show = self.show_settings;
-        let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
-                        let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
-                        let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
-                        let h = (700.0 * s).min(window_height - 40.0 * s);
-                        let start_y = window_height + 100.0 * s;
-                        let open_y = (window_height - h) / 2.0;
-                        let target_y = if self.show_settings { open_y } else { start_y };
+        let s = self
+            .renderer
+            .as_ref()
+            .map(|r| r.scale_factor)
+            .unwrap_or(1.0);
+        let window_height = self.window.as_ref().unwrap().inner_size().height as f32;
+        let h = (700.0 * s).min(window_height - 40.0 * s);
+        let start_y = window_height + 100.0 * s;
+        let open_y = (window_height - h) / 2.0;
+        let target_y = if self.show_settings { open_y } else { start_y };
 
-                                                let diff = target_y - self.settings_y;
-                        if diff.abs() > 1.5 {
-                            self.settings_y += diff * 10.0 * dt;
-                            let total_distance = (start_y - open_y).max(1.0);
-                            self.settings_anim_progress = ((start_y - self.settings_y) / total_distance).clamp(0.0, 1.0);
-                            needs_redraw = true;
-                        }
+        let diff = target_y - self.settings_y;
+        if diff.abs() > 1.5 {
+            self.settings_y += diff * 10.0 * dt;
+            let total_distance = (start_y - open_y).max(1.0);
+            self.settings_anim_progress =
+                ((start_y - self.settings_y) / total_distance).clamp(0.0, 1.0);
+            needs_redraw = true;
+        }
 
-                let target_search_y = if self.show_search { 10.0 } else { -120.0 };
+        let target_search_y = if self.show_search { 10.0 } else { -120.0 * s };
         let search_diff = target_search_y - self.search_anim_y;
         if search_diff.abs() > 1.5 {
             self.search_anim_y += search_diff * 20.0 * dt;

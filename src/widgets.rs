@@ -59,8 +59,8 @@ impl Button {
             bg_color,
         );
 
-        let icon_size = 26.0 * scale;
-        let text_scale = 1.0;
+        let icon_size = 20.0 * scale;
+        let text_scale = 0.85;
         let text_color = renderer.theme.fg;
 
         let icon_y = self.y + (self.h - icon_size) / 2.0;
@@ -201,19 +201,20 @@ pub fn get_dialog_buttons(
     scale: f32,
     renderer: &mut Renderer,
 ) -> (Button, Button, Button) {
-    let bh = 36.0 * scale;
+    let bh = 34.0 * scale;
     let gap = 12.0 * scale;
-    let icon_sz = 26.0 * scale;
-    let padding = 8.0 * scale + 32.0 * scale;
+    let icon_sz = 20.0 * scale;
+    let text_scale = 0.85;
+    let padding = 8.0 * scale + 28.0 * scale;
 
-    let w_save = renderer.measure_ui_width("Сохранить", 1.0) + icon_sz + padding;
-    let w_discard = renderer.measure_ui_width("Отклонить", 1.0) + icon_sz + padding;
-    let w_cancel = renderer.measure_ui_width("Отмена", 1.0) + icon_sz + padding;
+    let w_save = renderer.measure_ui_width("Сохранить", text_scale) + icon_sz + padding;
+    let w_discard = renderer.measure_ui_width("Отклонить", text_scale) + icon_sz + padding;
+    let w_cancel = renderer.measure_ui_width("Отмена", text_scale) + icon_sz + padding;
 
     let total_w = w_save + w_discard + w_cancel + gap * 2.0;
 
     let mut current_x = box_x + (box_w - total_w) / 2.0;
-    let y = box_y + box_h - bh - 15.0 * scale;
+    let y = box_y + box_h - bh - 22.0 * scale;
 
     let btn_save = Button {
         x: current_x,

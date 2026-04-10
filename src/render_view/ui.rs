@@ -262,8 +262,8 @@ impl Renderer {
 
         pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
         let s = self.scale_factor;
-        let box_w = 600.0 * s;
-        let box_h = 240.0 * s;
+        let box_w = 560.0 * s;
+        let box_h = 200.0 * s;
         let box_x = 0.0;
         let box_y = 0.0;
 
@@ -272,12 +272,14 @@ impl Renderer {
 
         self.push_vertical_gradient(box_x, box_y, box_w, box_h, top_color, bottom_color);
 
-        let pad_h = 40.0 * s;
-        let pad_v = 35.0 * s;
+        let pad_h = 24.0 * s;
+        let pad_v = 18.0 * s;
+        let btn_h = 34.0 * s;
+        let btn_margin = 12.0 * s;
         let content_x = (box_x + pad_h).round();
         let content_y = (box_y + pad_v).round();
         let content_w = (box_w - pad_h * 2.0).round();
-        let content_h = (box_h - 105.0 * s).round();
+        let content_h = (box_h - pad_v - btn_h - btn_margin * 2.0 - pad_v).round();
 
         self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
         self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
@@ -285,24 +287,24 @@ impl Renderer {
         let msg1 = format!("Документ «{}» был изменен.", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
-        let w1 = self.measure_ui_width(&msg1, 1.0);
-        let w2 = self.measure_ui_width(msg2, 1.0);
-        let text_w = w1.max(w2);
+        let icon_sz = 36.0 * s;
+        let gap = 14.0 * s;
+        let padding_inner = 14.0 * s;
 
-        let icon_sz = 90.0 * s;
-        let gap = 20.0 * s;
-        let total_content_w = icon_sz + gap + text_w;
-
-        let start_x = content_x + (content_w - total_content_w) / 2.0;
+        let icon_x = content_x + padding_inner;
         let icon_y = content_y + (content_h - icon_sz) / 2.0;
 
-        self.draw_atlas_icon(crate::widgets::IconType::Warning, start_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
+        self.draw_atlas_icon(crate::widgets::IconType::Warning, icon_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
 
-        let text_x = start_x + icon_sz + gap;
+        let text_x = icon_x + icon_sz + gap;
         let fg = self.theme.fg;
+        let text_scale = 0.85;
+        let line_h = 22.0 * s;
+        let text_block_h = line_h * 2.0;
+        let text_y_start = content_y + (content_h - text_block_h) / 2.0 + line_h * 0.85;
 
-        self.draw_string_scaled(&msg1, text_x, content_y + 45.0 * s, fg, 1.0);
-        self.draw_string_scaled(msg2, text_x, content_y + 75.0 * s, fg, 1.0);
+        self.draw_string_scaled(&msg1, text_x, text_y_start, fg, text_scale);
+        self.draw_string_scaled(msg2, text_x, text_y_start + line_h, [0.75, 0.75, 0.80, 1.0], text_scale);
 
         let (btn_save, btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
@@ -608,10 +610,17 @@ impl Renderer {
         }
 
         let content_x = ix + sidebar_w + 30.0 * s;
+        let content_title_x = content_x - 14.0 * s;
         let mut content_y = iy + 40.0 * s;
 
-        self.draw_string_scaled(tabs[active_tab], content_x, content_y, [1.0, 1.0, 1.0, 1.0], 1.2);
-        content_y += 40.0 * s;
+        let tab_title = tabs[active_tab];
+        let pill_w = self.measure_ui_width(tab_title, 1.1) + 28.0 * s;
+        let pill_h = 30.0 * s;
+        let pill_y = content_y - 22.0 * s;
+        self.push_rounded_rect(content_title_x - 1.0, pill_y - 1.0, pill_w + 2.0, pill_h + 2.0, 6.0 * s, [0.35, 0.26, 0.48, 1.0]);
+        self.push_rounded_rect(content_title_x, pill_y, pill_w, pill_h, 6.0 * s, [0.26, 0.20, 0.36, 1.0]);
+        self.draw_string_scaled(tab_title, content_title_x + 14.0 * s, content_y, [1.0, 1.0, 1.0, 1.0], 1.1);
+        content_y += if active_tab == 3 { 30.0 * s } else { 46.0 * s };
 
         if active_tab == 0 {
             self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
@@ -621,7 +630,7 @@ impl Renderer {
             self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
         } else if active_tab == 2 {
             self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
-                        } else if active_tab == 3 {
+        } else if active_tab == 3 {
             self.flush();
             let text_area_y = content_y;
             let text_area_h = ih - (text_area_y - iy) - 20.0 * s;
@@ -637,30 +646,53 @@ impl Renderer {
                 );
             }
 
-                                                let start_x = content_x + 30.0 * s;
+            let start_x = content_x;
+            let main_header_x = content_x - 14.0 * s;
             let render_scroll_y = scroll_y.round();
             let mut text_y = text_area_y + 20.0 * s - render_scroll_y;
             let text = faq_editor.get_full_text();
 
             let left_col_w = 260.0 * s;
             let cw = iw - sidebar_w - 76.0 * s;
+            let mut main_header_drawn = false;
 
             for line in text.split('\n') {
                 let is_header = line.starts_with("# ");
 
                 if is_header {
-                    let text_color = [1.0, 1.0, 1.0, 1.0];
                     let header_text = &line[2..];
-                    self.draw_string_scaled(header_text, start_x, text_y, text_color, 1.15);
+                    let is_main = !main_header_drawn && header_text == tab_title;
 
-                    let line_y = text_y + 16.0 * s;
-                    self.push_rect(
-                        start_x,
-                        line_y,
-                        cw,
-                        1.0,
-                        [1.0, 1.0, 1.0, 0.08],
-                    );
+                    if is_main {
+                        let pill_w = self.measure_ui_width(header_text, 1.05) + 24.0 * s;
+                        let pill_h = 26.0 * s;
+                        let pill_y = text_y - 19.0 * s;
+
+                        self.push_rounded_rect(
+                            main_header_x - 1.0,
+                            pill_y - 1.0,
+                            pill_w + 2.0,
+                            pill_h + 2.0,
+                            5.0 * s,
+                            [0.35, 0.26, 0.48, 1.0],
+                        );
+                        self.push_rounded_rect(
+                            main_header_x,
+                            pill_y,
+                            pill_w,
+                            pill_h,
+                            5.0 * s,
+                            [0.26, 0.20, 0.36, 1.0],
+                        );
+                        self.draw_string_scaled(header_text, main_header_x + 12.0 * s, text_y, [1.0, 1.0, 1.0, 1.0], 1.05);
+                        main_header_drawn = true;
+                    } else {
+                        let sep_y = text_y + 10.0 * s;
+                        let sep_x = start_x + 8.0 * s;
+                        let sep_w = (cw - 32.0 * s).max(0.0);
+                        self.draw_string_scaled(header_text, start_x, text_y, [0.875, 0.882, 0.902, 1.0], 1.05);
+                        self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.10]);
+                    }
 
                     text_y += 50.0 * s;
                     continue;

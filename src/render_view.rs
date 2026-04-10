@@ -884,7 +884,7 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
-        if search_anim_y > -110.0 {
+                if search_anim_y > -100.0 * self.scale_factor {
             wants_pointer |= self.draw_search_panel(
                 search_anim_y,
                 search_editor,

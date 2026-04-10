@@ -423,8 +423,7 @@ impl App {
 
         let attrs = winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
-            .with_inner_size(winit::dpi::LogicalSize::new(600.0, 240.0))
-            .with_name("rriter", "rriter")
+                        .with_inner_size(winit::dpi::LogicalSize::new(560.0, 200.0)).with_name("rriter", "rriter")
             .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
             .with_resizable(false);
 
@@ -435,8 +434,8 @@ impl App {
             let display = self.gl_config.as_ref().unwrap().display();
             let surface_attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
                 raw_handle,
-                std::num::NonZeroU32::new(600).unwrap(),
-                std::num::NonZeroU32::new(240).unwrap(),
+                                std::num::NonZeroU32::new(560).unwrap(),
+                std::num::NonZeroU32::new(200).unwrap(),
             );
             let surface = unsafe { display.create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs).unwrap() };
             self.dialog_window = Some(window);
