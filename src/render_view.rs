@@ -15,7 +15,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-        pub fn draw(
+    pub fn draw(
         &mut self,
         editor: &mut Editor,
         scroll_x: f32,
@@ -33,7 +33,7 @@ impl Renderer {
         search_case_sensitive: bool,
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
-                current_sticky_lines: &[(usize, usize)],
+        current_sticky_lines: &[(usize, usize)],
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
         is_ide_mode: bool,
@@ -106,15 +106,15 @@ impl Renderer {
         let total_lines = visible_lines_count.max(1);
         let s = self.scale_factor;
 
-                let target_minimap_w = 119.0 * s;
+        let target_minimap_w = 119.0 * s;
 
         if (self.minimap_width - target_minimap_w).abs() > 0.5 {
             self.minimap_width = target_minimap_w;
             self.visual_lines.clear();
         }
 
-        let sidebar_w = if is_ide_mode { 56.0 * s } else { 0.0 };
-        let digits = editor.line_offsets.len().to_string().len().max(3);
+            let sidebar_w = if is_ide_mode { 48.0 * s } else { 0.0 };
+    let digits = editor.line_offsets.len().to_string().len().max(3);
         let target_padding = (30.0 * s + digits as f32 * 10.0 * s + sidebar_w).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
@@ -149,7 +149,7 @@ impl Renderer {
             self.last_editor_version_for_scroll_x = editor.version;
         }
 
-                unsafe {
+        unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
             self.gl.active_texture(glow::TEXTURE0);
@@ -163,48 +163,51 @@ impl Renderer {
         let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
 
-                        if is_ide_mode {
-            let sb_w = 56.0 * s;
-                        let sidebar_bg = [
-                (self.theme.bg[0] + 0.04).min(1.0),
-                (self.theme.bg[1] + 0.04).min(1.0),
-                (self.theme.bg[2] + 0.05).min(1.0),
-                1.0,
-            ];
-            self.push_rect(0.0, 0.0, sb_w, self.height, sidebar_bg);
-            self.push_rect(sb_w - 1.0, 0.0, 1.0, self.height, [1.0, 1.0, 1.0, 0.12]);
+                if is_ide_mode {
+                    let sb_w = 48.0 * s;
+                    let sidebar_bg = [
+                        (self.theme.bg[0] + 0.04).min(1.0),
+                        (self.theme.bg[1] + 0.04).min(1.0),
+                        (self.theme.bg[2] + 0.05).min(1.0),
+                        1.0,
+                    ];
+                    self.push_rect(0.0, 0.0, sb_w, self.height, sidebar_bg);
+                    self.push_rect(sb_w - 1.0, 0.0, 1.0, self.height, [1.0, 1.0, 1.0, 0.12]);
 
-            let btn_explorer = IconButton {
-                x: 10.0 * s,
-                y: 20.0 * s,
-                size: 36.0 * s,
-                icon: Some(crate::widgets::IconType::Save),
-                is_active: true,
-                icon_size: Some(22.0 * s),
-            };
+                    let btn_explorer = IconButton {
+                        x: 6.0 * s,
+                        y: 20.0 * s,
+                        size: 36.0 * s,
+                        icon: Some(crate::widgets::IconType::Save),
+                        is_active: false,
+                        icon_size: Some(22.0 * s),
+                        active_square_width: Some(sb_w),
+                    };
 
-            let btn_terminal = IconButton {
-                x: 10.0 * s,
-                y: self.height - 100.0 * s,
-                size: 36.0 * s,
-                icon: Some(crate::widgets::IconType::CaseMatch),
-                is_active: false,
-                icon_size: Some(24.0 * s),
-            };
+                let btn_terminal = IconButton {
+                    x: 6.0 * s,
+                    y: self.height - 100.0 * s,
+                    size: 36.0 * s,
+                    icon: Some(crate::widgets::IconType::CaseMatch),
+                    is_active: false,
+                    icon_size: Some(24.0 * s),
+                    active_square_width: Some(sb_w),
+                };
 
-            let btn_problems = IconButton {
-                x: 10.0 * s,
-                y: self.height - 50.0 * s,
-                size: 36.0 * s,
-                icon: Some(crate::widgets::IconType::Warning),
-                is_active: false,
-                icon_size: Some(22.0 * s),
-            };
+                let btn_problems = IconButton {
+                    x: 6.0 * s,
+                    y: self.height - 50.0 * s,
+                    size: 36.0 * s,
+                    icon: Some(crate::widgets::IconType::Warning),
+                    is_active: false,
+                    icon_size: Some(22.0 * s),
+                    active_square_width: Some(sb_w),
+                };
 
-            wants_pointer |= btn_explorer.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            wants_pointer |= btn_terminal.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            wants_pointer |= btn_problems.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-        }
+        btn_explorer.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+        btn_terminal.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+        btn_problems.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+    }
 
         let first_len = first.len();
         let len = first_len + second.len();
@@ -774,7 +777,7 @@ impl Renderer {
             }
         }
 
-                if let Some((cx_screen, cy)) = cursor_pos {
+        if let Some((cx_screen, cy)) = cursor_pos {
             if sel_start == sel_end && blink_alpha > 0.5 && !dialog_window_open && !search_focused {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
@@ -794,8 +797,14 @@ impl Renderer {
 
         self.flush();
 
-                let gutter_x = if is_ide_mode { 56.0 * s } else { 0.0 };
-        self.push_rect(gutter_x, 0.0, self.left_padding - gutter_x, self.height, solid_minimap_bg);
+            let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
+    self.push_rect(
+        gutter_x,
+        0.0,
+        self.left_padding - gutter_x,
+        self.height,
+        solid_minimap_bg,
+    );
 
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
@@ -930,7 +939,7 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
-                if search_anim_y > -100.0 * self.scale_factor {
+        if search_anim_y > -100.0 * self.scale_factor {
             wants_pointer |= self.draw_search_panel(
                 search_anim_y,
                 search_editor,
@@ -943,7 +952,7 @@ impl Renderer {
             );
         }
 
-                if dialog_window_open {
+        if dialog_window_open {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
         self.flush();
@@ -1628,48 +1637,52 @@ impl Renderer {
 
         let mut current_x = search_x + search_w - 10.0 * s;
 
-        current_x -= btn_size;
-        let btn_close = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::Close),
-            is_active: false,
-            icon_size: Some(26.0 * s),
-        };
+            current_x -= btn_size;
+    let btn_close = IconButton {
+        x: current_x,
+        y: btn_y,
+        size: btn_size,
+        icon: Some(crate::widgets::IconType::Close),
+        is_active: false,
+        icon_size: Some(26.0 * s),
+        active_square_width: None,
+    };
         current_x -= 10.0 * s;
 
-        current_x -= btn_size;
-        let btn_down = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::Down),
-            is_active: false,
-            icon_size: Some(37.0 * s),
-        };
+            current_x -= btn_size;
+    let btn_down = IconButton {
+        x: current_x,
+        y: btn_y,
+        size: btn_size,
+        icon: Some(crate::widgets::IconType::Down),
+        is_active: false,
+        icon_size: Some(37.0 * s),
+        active_square_width: None,
+    };
         current_x -= 10.0 * s;
 
-        current_x -= btn_size;
-        let btn_up = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::Up),
-            is_active: false,
-            icon_size: Some(37.0 * s),
-        };
+            current_x -= btn_size;
+    let btn_up = IconButton {
+        x: current_x,
+        y: btn_y,
+        size: btn_size,
+        icon: Some(crate::widgets::IconType::Up),
+        is_active: false,
+        icon_size: Some(37.0 * s),
+        active_square_width: None,
+    };
         current_x -= 10.0 * s;
 
-        current_x -= btn_size;
-        let btn_case = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::CaseMatch),
-            is_active: search_case_sensitive,
-            icon_size: Some(30.0 * s),
-        };
+            current_x -= btn_size;
+    let btn_case = IconButton {
+        x: current_x,
+        y: btn_y,
+        size: btn_size,
+        icon: Some(crate::widgets::IconType::CaseMatch),
+        is_active: search_case_sensitive,
+        icon_size: Some(30.0 * s),
+        active_square_width: None,
+    };
 
         if search_results.len() != self.last_search_len
             || search_current_idx != self.last_search_idx

@@ -100,7 +100,7 @@ impl Renderer {
                         } else {
                             editor.len()
                         };
-                        
+
                         let mut p_start = start_line_end;
                         let mut last_start_char = 0;
                         while p_start > start_line_start {
@@ -112,14 +112,17 @@ impl Renderer {
                             }
                         }
 
-                        if last_start_char == b'{' || last_start_char == b'[' || last_start_char == b'(' {
+                        if last_start_char == b'{'
+                            || last_start_char == b'['
+                            || last_start_char == b'('
+                        {
                             let expected_close = match last_start_char {
                                 b'{' => b'}',
                                 b'[' => b']',
                                 b'(' => b')',
                                 _ => 0,
                             };
-                            
+
                             let end_line_start = editor.line_offsets[fold_end];
                             let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
                                 editor.line_offsets[fold_end + 1]
@@ -148,7 +151,9 @@ impl Renderer {
                             }
                             suffix_bytes.reverse();
                             if suffix_bytes.contains(&expected_close) {
-                                if let Some(pos) = suffix_bytes.iter().position(|&x| x == expected_close) {
+                                if let Some(pos) =
+                                    suffix_bytes.iter().position(|&x| x == expected_close)
+                                {
                                     for &b in &suffix_bytes[pos..] {
                                         if fold_suffix_len < 4 {
                                             fold_suffix[fold_suffix_len as usize] = b as char;
@@ -254,7 +259,7 @@ impl Renderer {
                         } else {
                             editor.len()
                         };
-                        
+
                         let mut p_start = start_line_end;
                         let mut last_start_char = 0;
                         while p_start > start_line_start {
@@ -266,7 +271,10 @@ impl Renderer {
                             }
                         }
 
-                        if last_start_char == b'{' || last_start_char == b'[' || last_start_char == b'(' {
+                        if last_start_char == b'{'
+                            || last_start_char == b'['
+                            || last_start_char == b'('
+                        {
                             let expected_close = match last_start_char {
                                 b'{' => b'}',
                                 b'[' => b']',
@@ -295,7 +303,9 @@ impl Renderer {
                             }
                             suffix_bytes.reverse();
                             if suffix_bytes.contains(&expected_close) {
-                                if let Some(pos) = suffix_bytes.iter().position(|&x| x == expected_close) {
+                                if let Some(pos) =
+                                    suffix_bytes.iter().position(|&x| x == expected_close)
+                                {
                                     for &b in &suffix_bytes[pos..] {
                                         if fold_suffix_len < 4 {
                                             fold_suffix[fold_suffix_len as usize] = b as char;
@@ -529,10 +539,34 @@ impl Renderer {
 
         let sdf_params = [0.0, 0.0, 0.0];
 
-        let v1 = Vertex { pos: [x1, y1], uv: [0.0, 0.0], color: top, mode: 2.0, sdf_params };
-        let v2 = Vertex { pos: [x2, y1], uv: [0.0, 0.0], color: top, mode: 2.0, sdf_params };
-        let v3 = Vertex { pos: [x2, y2], uv: [0.0, 0.0], color: bottom, mode: 2.0, sdf_params };
-        let v4 = Vertex { pos: [x1, y2], uv: [0.0, 0.0], color: bottom, mode: 2.0, sdf_params };
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [0.0, 0.0],
+            color: top,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [0.0, 0.0],
+            color: top,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [0.0, 0.0],
+            color: bottom,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [0.0, 0.0],
+            color: bottom,
+            mode: 2.0,
+            sdf_params,
+        };
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
@@ -600,10 +634,34 @@ impl Renderer {
         let half_h = h / 2.0;
         let sdf_params = [half_w, half_h, r];
 
-        let v1 = Vertex { pos: [x1, y1], uv: [-half_w, -half_h], color, mode: 3.0, sdf_params };
-        let v2 = Vertex { pos: [x2, y1], uv: [half_w, -half_h], color, mode: 3.0, sdf_params };
-        let v3 = Vertex { pos: [x2, y2], uv: [half_w, half_h], color, mode: 3.0, sdf_params };
-        let v4 = Vertex { pos: [x1, y2], uv: [-half_w, half_h], color, mode: 3.0, sdf_params };
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [-half_w, -half_h],
+            color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [half_w, -half_h],
+            color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [half_w, half_h],
+            color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [-half_w, half_h],
+            color,
+            mode: 3.0,
+            sdf_params,
+        };
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }

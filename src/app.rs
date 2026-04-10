@@ -10,10 +10,10 @@ use glutin::display::GetGlDisplay;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
-use winit::platform::wayland::WindowAttributesExtWayland;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::ModifiersState;
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -49,7 +49,7 @@ pub struct App {
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,
     pub window: Option<Window>,
-        pub dialog_window: Option<Window>,
+    pub dialog_window: Option<Window>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
     pub settings_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
@@ -87,7 +87,7 @@ pub struct App {
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 
-        pub show_welcome: bool,
+    pub show_welcome: bool,
     pub recent_files: Vec<PathBuf>,
 
     pub is_ide_mode: bool,
@@ -103,9 +103,9 @@ pub struct App {
     pub search_current_idx: Option<usize>,
     pub is_dragging_search: bool,
 
-        pub faq_editor: Editor,
+    pub faq_editor: Editor,
 
-                            pub is_ready: bool,
+    pub is_ready: bool,
     pub is_highlighted_once: bool,
     pub tried_maximize: bool,
     pub should_maximize: bool,
@@ -123,14 +123,15 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-        pub show_settings: bool,
+    pub show_settings: bool,
     pub settings_anim_progress: f32,
     pub settings_y: f32,
     pub settings_tab: usize,
 }
 
 impl App {
-    pub fn ensure_cursor_visible(target_scroll_y: &mut f32,
+    pub fn ensure_cursor_visible(
+        target_scroll_y: &mut f32,
         target_scroll_x: &mut f32,
         editor: &Editor,
         renderer: &mut Renderer,
@@ -252,7 +253,7 @@ impl App {
 
         self.autocomplete_options = matches.into_iter().take(60).map(|m| (m.2, m.3)).collect();
 
-                if !self.autocomplete_options.is_empty() {
+        if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
                 self.autocomplete_anim_progress = 0.0;
                 self.autocomplete_scroll.current = 0.0;
@@ -265,7 +266,7 @@ impl App {
         }
     }
 
-        pub fn ensure_autocomplete_visible(&mut self) {
+    pub fn ensure_autocomplete_visible(&mut self) {
         let scale = self
             .renderer
             .as_ref()
@@ -284,7 +285,8 @@ impl App {
         if item_top < top {
             self.autocomplete_scroll.set_target(item_top);
         } else if item_bottom > bottom {
-            self.autocomplete_scroll.set_target(item_bottom - (visible_items * step));
+            self.autocomplete_scroll
+                .set_target(item_bottom - (visible_items * step));
         }
 
         let total_items = self.autocomplete_options.len() as f32;
@@ -317,7 +319,7 @@ impl App {
         self.highlighter
             .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
 
-                self.autocomplete_active = false;
+        self.autocomplete_active = false;
         self.autocomplete_selected_idx = 0;
         self.autocomplete_scroll.current = 0.0;
         self.autocomplete_scroll.target = 0.0;
@@ -398,7 +400,7 @@ impl App {
 
                     let line_top_y = phys_line as f32 * r.line_height;
 
-                                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     self.scroll_y.target = (line_top_y - wh / 2.0).max(0.0);
 
                     let max_s = r.get_max_scroll(&self.editor, wh);
@@ -419,17 +421,20 @@ impl App {
         window.set_title(&title);
     }
 
-            pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
+    pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         self.is_dragging = false;
         self.scroll_y.is_dragging = false;
         self.scroll_x.is_dragging = false;
         self.pending_action = action;
 
-        if self.dialog_window.is_some() { return; }
+        if self.dialog_window.is_some() {
+            return;
+        }
 
-                        let attrs = winit::window::Window::default_attributes()
+        let attrs = winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
-            .with_inner_size(winit::dpi::LogicalSize::new(660.0, 260.0)).with_name("rriter", "rriter")
+            .with_inner_size(winit::dpi::LogicalSize::new(660.0, 260.0))
+            .with_name("rriter", "rriter")
             .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
             .with_resizable(false);
 
@@ -441,12 +446,18 @@ impl App {
             let scale = window.scale_factor();
             let phys_w = (660.0 * scale).round() as u32;
             let phys_h = (260.0 * scale).round() as u32;
-            let surface_attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
-                raw_handle,
-                std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
-                std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
-            );
-            let surface = unsafe { display.create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs).unwrap() };
+            let surface_attrs =
+                glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
+                    .build(
+                        raw_handle,
+                        std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
+                        std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
+                    );
+            let surface = unsafe {
+                display
+                    .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
+                    .unwrap()
+            };
             self.dialog_window = Some(window);
             self.dialog_gl_surface = Some(surface);
         }
@@ -473,7 +484,7 @@ impl App {
         self.search_results.clear();
         self.search_current_idx = None;
         self.show_search = false;
-                self.autocomplete_active = false;
+        self.autocomplete_active = false;
         self.show_welcome = true;
 
         self.scroll_y.current = 0.0;
@@ -496,11 +507,13 @@ impl App {
         });
     }
 
-        pub fn trigger_folder_picker(&mut self) {
+    pub fn trigger_folder_picker(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
         std::thread::spawn(move || {
-            let folder = rfd::FileDialog::new().set_title("Выбрать папку").pick_folder();
+            let folder = rfd::FileDialog::new()
+                .set_title("Выбрать папку")
+                .pick_folder();
             let _ = tx.send(folder);
         });
     }
@@ -586,7 +599,7 @@ impl App {
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 self.highlighter.spans.clear();
-                                self.is_highlighted_once = false;
+                self.is_highlighted_once = false;
                 self.highlighter.reset(
                     self.editor.version,
                     self.editor.get_full_text(),

@@ -76,7 +76,12 @@ pub fn save_config(config: &Config) {
     path.push("RRiter");
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
-        let paths_str = config.ide_workspaces.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("|");
+    let paths_str = config
+        .ide_workspaces
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("|");
     let content = format!(
         "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\"\n}}\n",
         config.window_width, config.window_height, config.maximized, paths_str
@@ -117,7 +122,7 @@ fn load_config() -> Config {
                         }
                     }
                 }
-                                if line.contains("\"maximized\"") {
+                if line.contains("\"maximized\"") {
                     if let Some(val) = line.split(':').nth(1) {
                         if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
                             config.maximized = v;
@@ -184,7 +189,7 @@ fn main() {
     std::env::set_var("MIMALLOC_ARENA_CAPACITY", "4");
 
     let args: Vec<String> = env::args().collect();
-        let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
+    let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
@@ -278,9 +283,9 @@ F8\tПоказать/скрыть счетчик FPS
     let mut app = App {
         gl_config: None,
         gl_context: None,
-                gl_surface: None,
+        gl_surface: None,
         window: None,
-                        dialog_window: None,
+        dialog_window: None,
         dialog_gl_surface: None,
         settings_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
@@ -290,7 +295,7 @@ F8\tПоказать/скрыть счетчик FPS
         base_title: title,
         file_path,
         file_extension: ext,
-                highlighter,
+        highlighter,
         last_sent_version: u64::MAX,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
@@ -315,7 +320,7 @@ F8\tПоказать/скрыть счетчик FPS
         open_file_rx: None,
         save_file_rx: None,
 
-                show_welcome,
+        show_welcome,
         recent_files,
 
         is_ide_mode: is_ide_cli,
@@ -331,14 +336,14 @@ F8\tПоказать/скрыть счетчик FPS
         search_current_idx: None,
         is_dragging_search: false,
 
-                faq_editor,
+        faq_editor,
 
-                        is_ready: false,
+        is_ready: false,
         is_highlighted_once: false,
         tried_maximize: false,
         should_maximize: config.maximized,
 
-                autocomplete_active: false,
+        autocomplete_active: false,
         autocomplete_options: Vec::new(),
         autocomplete_selected_idx: 0,
         autocomplete_anim_progress: 0.0,
@@ -351,7 +356,7 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-                show_settings: false,
+        show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,

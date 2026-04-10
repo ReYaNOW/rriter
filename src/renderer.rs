@@ -833,30 +833,31 @@ impl Renderer {
             (
                 crate::widgets::IconType::CaseMatch,
                 include_bytes!("icons/format-text-uppercase.svg").as_slice(),
-            ),                        (
-                            crate::widgets::IconType::Down,
-                            include_bytes!("icons/go-down.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Close,
-                            include_bytes!("icons/window-close.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Plus,
-                            include_bytes!("icons/plus.svg").as_slice(),
-                        ),
-                    ];
-                                let opt = resvg::usvg::Options::default();
-                                for (icon_type, data) in builtin {
-                                    let svg_data_str = String::from_utf8_lossy(data);
-                                    let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
-                                        // Заменяем жестко прописанный белый цвет на старый розовый #da4453
-                                        svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-                                    } else if icon_type == crate::widgets::IconType::Plus {
-                                        svg_data_str.replace("currentColor", "#ffffff")
-                                    } else {
-                                        svg_data_str.into_owned()
-                                    };
+            ),
+            (
+                crate::widgets::IconType::Down,
+                include_bytes!("icons/go-down.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Close,
+                include_bytes!("icons/window-close.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Plus,
+                include_bytes!("icons/plus.svg").as_slice(),
+            ),
+        ];
+        let opt = resvg::usvg::Options::default();
+        for (icon_type, data) in builtin {
+            let svg_data_str = String::from_utf8_lossy(data);
+            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+                // Заменяем жестко прописанный белый цвет на старый розовый #da4453
+                svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
+            } else if icon_type == crate::widgets::IconType::Plus {
+                svg_data_str.replace("currentColor", "#ffffff")
+            } else {
+                svg_data_str.into_owned()
+            };
 
             // Подбираем идеальную толщину для разных иконок, чтобы они выглядели сбалансированно.
             let target_stroke_width = match icon_type {
@@ -945,7 +946,7 @@ impl Renderer {
         }
     }
 
-    pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color:[f32; 4]) {
+    pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
         self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
     }
 
@@ -956,7 +957,7 @@ impl Renderer {
         w: f32,
         h: f32,
         r: f32,
-        top_color:[f32; 4],
+        top_color: [f32; 4],
         bottom_color: [f32; 4],
     ) {
         let x1 = x.round();
@@ -968,10 +969,34 @@ impl Renderer {
         let hh = h / 2.0;
         let sdf_params = [hw, hh, r];
 
-        let v1 = Vertex { pos:[x1, y1], uv: [-hw, -hh], color: top_color, mode: 3.0, sdf_params };
-        let v2 = Vertex { pos: [x2, y1], uv:[hw, -hh], color: top_color, mode: 3.0, sdf_params };
-        let v3 = Vertex { pos: [x2, y2], uv: [hw, hh], color: bottom_color, mode: 3.0, sdf_params };
-        let v4 = Vertex { pos:[x1, y2], uv: [-hw, hh], color: bottom_color, mode: 3.0, sdf_params };
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [-hw, -hh],
+            color: top_color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [hw, -hh],
+            color: top_color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [hw, hh],
+            color: bottom_color,
+            mode: 3.0,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [-hw, hh],
+            color: bottom_color,
+            mode: 3.0,
+            sdf_params,
+        };
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }

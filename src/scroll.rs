@@ -32,7 +32,8 @@ impl ScrollState {
             self.velocity += (target_v - self.velocity) * v_factor;
             let step = self.velocity * dt;
 
-            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01 {
+            if step.abs() >= abs_diff || diff.signum() != (diff - step).signum() || abs_diff < 0.01
+            {
                 self.current = self.target;
                 self.velocity = 0.0;
             } else {

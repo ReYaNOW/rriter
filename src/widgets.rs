@@ -29,59 +29,59 @@ impl Button {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
     }
 
-        pub fn render(
-            &self,
-            renderer: &mut Renderer,
-            mx: f32,
-            my: f32,
-            scale: f32,
-            pressed: bool,
-        ) -> bool {
-            let x = self.x.round();
-            let y = self.y.round();
-            let w = self.w.round();
-            let h = self.h.round();
+    pub fn render(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
+        let x = self.x.round();
+        let y = self.y.round();
+        let w = self.w.round();
+        let h = self.h.round();
 
-            let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
 
-            let border_color = renderer.theme.sel;
-            let mut bg_color = [0.22, 0.24, 0.26, 1.0];
+        let border_color = renderer.theme.sel;
+        let mut bg_color = [0.22, 0.24, 0.26, 1.0];
 
-            if hovered {
-                if pressed {
-                    bg_color = renderer.theme.sel;
-                } else {
-                    bg_color = [0.28, 0.30, 0.33, 1.0];
-                }
+        if hovered {
+            if pressed {
+                bg_color = renderer.theme.sel;
+            } else {
+                bg_color = [0.28, 0.30, 0.33, 1.0];
             }
+        }
 
-            let r = 4.0 * scale;
-            let bw = (1.0 * scale).round().max(1.0);
-            renderer.push_rounded_rect(x, y, w, h, r, border_color);
-            renderer.push_rounded_rect(
-                x + bw,
-                y + bw,
-                w - bw * 2.0,
-                h - bw * 2.0,
-                (r - bw).max(1.0),
-                bg_color,
-            );
+        let r = 4.0 * scale;
+        let bw = (1.0 * scale).round().max(1.0);
+        renderer.push_rounded_rect(x, y, w, h, r, border_color);
+        renderer.push_rounded_rect(
+            x + bw,
+            y + bw,
+            w - bw * 2.0,
+            h - bw * 2.0,
+            (r - bw).max(1.0),
+            bg_color,
+        );
 
-            let icon_size = self.icon_size;
-            let text_scale = self.text_scale;
-            let text_color = renderer.theme.fg;
+        let icon_size = self.icon_size;
+        let text_scale = self.text_scale;
+        let text_color = renderer.theme.fg;
 
-            let icon_y = y + (h - icon_size) / 2.0;
-            let text_y = y + h / 2.0 + 5.0 * scale;
+        let icon_y = y + (h - icon_size) / 2.0;
+        let text_y = y + h / 2.0 + 5.0 * scale;
 
-            let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
-            if self.icon.is_some() {
-                content_w += icon_size + 8.0 * scale;
-            }
+        let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
+        if self.icon.is_some() {
+            content_w += icon_size + 8.0 * scale;
+        }
 
-            let mut content_x = x + (w - content_w) / 2.0;
+        let mut content_x = x + (w - content_w) / 2.0;
 
-            if let Some(icon_type) = self.icon {
+        if let Some(icon_type) = self.icon {
             renderer.draw_atlas_icon(
                 icon_type,
                 content_x,
@@ -105,13 +105,13 @@ pub struct IconButton {
     pub icon: Option<IconType>,
     pub is_active: bool,
     pub icon_size: Option<f32>,
+    pub active_square_width: Option<f32>,
 }
 
 impl IconButton {
     pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
         mx >= self.x && mx <= self.x + self.size && my >= self.y && my <= self.y + self.size
     }
-
     pub fn render(
         &self,
         renderer: &mut Renderer,
@@ -122,8 +122,33 @@ impl IconButton {
     ) -> bool {
         let hovered = self.is_hovered(mx, my);
 
+        if self.is_active {
+            if let Some(sq_w) = self.active_square_width {
+                renderer.push_rect(
+                    0.0,
+                    self.y,
+                    sq_w,
+                    sq_w,
+                    [0.35, 0.26, 0.48, 1.0],
+                );
+                let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
+                let offset = (self.size - icon_render_size) / 2.0;
+                if let Some(icon_type) = self.icon {
+                    renderer.draw_atlas_icon(
+                        icon_type,
+                        self.x + offset,
+                        self.y + offset,
+                        icon_render_size,
+                        [1.0, 1.0, 1.0, 1.0],
+                    );
+                }
+                return false;
+            }
+        }
+
         let mut bg_color = [0.0, 0.0, 0.0, 0.0];
         let mut draw_bg = false;
+        let mut radius = 4.0 * scale;
 
         if self.is_active {
             bg_color = renderer.theme.sel;
@@ -131,16 +156,16 @@ impl IconButton {
         } else if hovered {
             if pressed {
                 bg_color = renderer.theme.sel;
+                radius = 4.0 * scale;
             } else {
                 bg_color = [0.26, 0.28, 0.30, 1.0];
+                radius = self.size / 2.0;
             }
             draw_bg = true;
         }
 
-        let r = 4.0 * scale;
-
         if draw_bg {
-            renderer.push_rounded_rect(self.x, self.y, self.size, self.size, r, bg_color);
+            renderer.push_rounded_rect(self.x, self.y, self.size, self.size, radius, bg_color);
         }
 
         let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
@@ -180,7 +205,7 @@ pub fn get_welcome_buttons(
     let w_new = renderer.measure_ui_width("Новый файл", 1.0) + icon_sz + padding;
     let w_open = renderer.measure_ui_width("Открыть файл", 1.0) + icon_sz + padding;
 
-        let btn_new = Button {
+    let btn_new = Button {
         x,
         y,
         w: w_new,
@@ -191,7 +216,7 @@ pub fn get_welcome_buttons(
         icon_size: icon_sz,
     };
 
-        let btn_open = Button {
+    let btn_open = Button {
         x: x + w_new + gap,
         y,
         w: w_open,
@@ -234,7 +259,8 @@ pub fn get_dialog_buttons(
 
     // Считаем габариты со старым масштабом 1.0, чтобы размер кнопок не менялся
     let w_save = renderer.measure_ui_width("Сохранить", text_scale_calc) + icon_sz_calc + padding;
-    let w_discard = renderer.measure_ui_width("Отклонить", text_scale_calc) + icon_sz_calc + padding;
+    let w_discard =
+        renderer.measure_ui_width("Отклонить", text_scale_calc) + icon_sz_calc + padding;
     let w_cancel = renderer.measure_ui_width("Отмена", text_scale_calc) + icon_sz_calc + padding;
 
     let total_w = w_save + w_discard + w_cancel + gap * 2.0;
@@ -242,7 +268,7 @@ pub fn get_dialog_buttons(
     let mut current_x = box_x + (box_w - total_w) / 2.0;
     let y = box_y + box_h - bh - 22.0 * scale;
 
-        // Для отрисовки передаем скорректированные размеры
+    // Для отрисовки передаем скорректированные размеры
     let render_icon_sz = 28.0 * scale;
     let render_text_scale = 1.04;
 
@@ -283,5 +309,3 @@ pub fn get_dialog_buttons(
 
     (btn_save, btn_discard, btn_cancel)
 }
-
-

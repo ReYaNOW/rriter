@@ -15,7 +15,14 @@ impl Renderer {
         }
     }
 
-    pub fn draw_atlas_icon(&mut self, icon: crate::widgets::IconType, x: f32, y: f32, size: f32, color: [f32; 4]) {
+    pub fn draw_atlas_icon(
+        &mut self,
+        icon: crate::widgets::IconType,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: [f32; 4],
+    ) {
         if let Some(&tex) = self.icons.get(&icon) {
             self.flush(); // Сбрасываем батч, чтобы сменить текстуру
             unsafe {
@@ -260,7 +267,7 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-                pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
+    pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
         let s = self.scale_factor;
         let box_w = 660.0 * s;
         let box_h = 260.0 * s;
@@ -281,20 +288,40 @@ impl Renderer {
         let content_w = (box_w - pad_h * 2.0).round();
         let content_h = (box_h - pad_v - btn_h - btn_margin * 2.0 - pad_v).round();
 
-        self.push_rounded_rect(content_x - 1.0, content_y - 1.0, content_w + 2.0, content_h + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
-        self.push_rounded_rect(content_x, content_y, content_w, content_h, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+        self.push_rounded_rect(
+            content_x - 1.0,
+            content_y - 1.0,
+            content_w + 2.0,
+            content_h + 2.0,
+            8.0 * s,
+            [0.224, 0.231, 0.251, 0.8],
+        );
+        self.push_rounded_rect(
+            content_x,
+            content_y,
+            content_w,
+            content_h,
+            8.0 * s,
+            [0.15, 0.16, 0.20, 1.0],
+        );
 
         let msg1 = format!("Документ «{}» был изменен.", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
-                let icon_sz = 120.0 * s;
+        let icon_sz = 120.0 * s;
         let gap = 45.0 * s;
         let padding_inner = 20.0 * s;
 
         let icon_x = content_x + padding_inner;
         let icon_y = content_y + (content_h - icon_sz) / 2.0;
 
-        self.draw_atlas_icon(crate::widgets::IconType::Warning, icon_x, icon_y, icon_sz, [1.0, 1.0, 1.0, 1.0]);
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Warning,
+            icon_x,
+            icon_y,
+            icon_sz,
+            [1.0, 1.0, 1.0, 1.0],
+        );
 
         let text_x = icon_x + icon_sz + gap;
         let fg = self.theme.fg;
@@ -304,7 +331,13 @@ impl Renderer {
         let text_y_start = content_y + (content_h - text_block_h) / 2.0 + line_h * 0.85;
 
         self.draw_string_scaled(&msg1, text_x, text_y_start, fg, text_scale);
-        self.draw_string_scaled(msg2, text_x, text_y_start + line_h, [0.75, 0.75, 0.80, 1.0], text_scale);
+        self.draw_string_scaled(
+            msg2,
+            text_x,
+            text_y_start + line_h,
+            [0.75, 0.75, 0.80, 1.0],
+            text_scale,
+        );
 
         let (btn_save, btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
@@ -337,7 +370,7 @@ impl Renderer {
             }
         }
 
-                        total_h += 80.0 * scale;
+        total_h += 80.0 * scale;
         let pad_top = 35.0 * scale;
         let pad_bottom = 30.0 * scale;
         let title_h = 40.0 * scale;
@@ -421,7 +454,7 @@ impl Renderer {
             1.0,
         );
 
-                y += 60.0 * scale;
+        y += 60.0 * scale;
         let (btn_new, btn_open, btn_ide) =
             crate::widgets::get_welcome_buttons(content_w, title_x, y, scale, self);
 
@@ -500,7 +533,7 @@ impl Renderer {
             y += item_h;
         }
 
-                let hint_str_1 = "F1";
+        let hint_str_1 = "F1";
         let hint_str_2 = " — Настройки редактора";
         let scale_hint = 0.9;
 
@@ -548,17 +581,32 @@ impl Renderer {
         wants_pointer
     }
 
-            pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize, faq_editor: &Editor, scroll_y: f32, ide_workspaces: &[std::path::PathBuf]) -> bool {
-        if anim_progress <= 0.0 { return false; }
+    pub fn draw_settings(
+        &mut self,
+        anim_progress: f32,
+        active_tab: usize,
+        faq_editor: &Editor,
+        scroll_y: f32,
+        ide_workspaces: &[std::path::PathBuf],
+    ) -> bool {
+        if anim_progress <= 0.0 {
+            return false;
+        }
         let s = self.scale_factor;
         let mut wants_pointer = false;
 
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.4 * anim_progress]);
+        self.push_rect(
+            0.0,
+            0.0,
+            self.width,
+            self.height,
+            [0.0, 0.0, 0.0, 0.4 * anim_progress],
+        );
 
-                let w = (1000.0 * s).min(self.width - 40.0 * s);
+        let w = (1000.0 * s).min(self.width - 40.0 * s);
         let h = (700.0 * s).min(self.height - 40.0 * s);
 
-                let start_y = self.height + 100.0 * s;
+        let start_y = self.height + 100.0 * s;
         let target_y = (self.height - h) / 2.0;
         let raw_y = start_y + (target_y - start_y) * anim_progress;
         let y = raw_y.round();
@@ -568,7 +616,14 @@ impl Renderer {
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
 
         // 1. Внешнее окно с градиентом
-        self.push_rounded_rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 10.0 * s, [0.224, 0.231, 0.251, 1.0]);
+        self.push_rounded_rect(
+            x - 1.0,
+            y - 1.0,
+            w + 2.0,
+            h + 2.0,
+            10.0 * s,
+            [0.224, 0.231, 0.251, 1.0],
+        );
         self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
 
         // 2. Внутренняя панель
@@ -580,12 +635,19 @@ impl Renderer {
         let iw = w - pad_h * 2.0;
         let ih = h - pad_top - pad_bottom;
 
-        self.push_rounded_rect(ix - 1.0, iy - 1.0, iw + 2.0, ih + 2.0, 8.0 * s, [0.224, 0.231, 0.251, 0.8]);
+        self.push_rounded_rect(
+            ix - 1.0,
+            iy - 1.0,
+            iw + 2.0,
+            ih + 2.0,
+            8.0 * s,
+            [0.224, 0.231, 0.251, 0.8],
+        );
         self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
 
         self.flush();
 
-                let sidebar_w = 200.0 * s;
+        let sidebar_w = 200.0 * s;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь"];
@@ -594,18 +656,40 @@ impl Renderer {
             let tab_rect_y = tab_y;
             let tab_rect_h = 36.0 * s;
 
-            let is_hovered = self.last_mouse_x >= ix + 10.0 * s && self.last_mouse_x <= ix + sidebar_w - 10.0 * s 
-                          && self.last_mouse_y >= tab_rect_y && self.last_mouse_y <= tab_rect_y + tab_rect_h;
+            let is_hovered = self.last_mouse_x >= ix + 10.0 * s
+                && self.last_mouse_x <= ix + sidebar_w - 10.0 * s
+                && self.last_mouse_y >= tab_rect_y
+                && self.last_mouse_y <= tab_rect_y + tab_rect_h;
 
-            if is_hovered { wants_pointer = true; }
-
-            if i == active_tab {
-                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.1]);
-            } else if is_hovered {
-                self.push_rounded_rect(ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h, 6.0 * s, [1.0, 1.0, 1.0, 0.05]);
+            if is_hovered {
+                wants_pointer = true;
             }
 
-            let color = if i == active_tab { [1.0, 1.0, 1.0, 1.0] } else { [0.7, 0.7, 0.7, 1.0] };
+            if i == active_tab {
+                self.push_rounded_rect(
+                    ix + 10.0 * s,
+                    tab_rect_y,
+                    sidebar_w - 20.0 * s,
+                    tab_rect_h,
+                    6.0 * s,
+                    [1.0, 1.0, 1.0, 0.1],
+                );
+            } else if is_hovered {
+                self.push_rounded_rect(
+                    ix + 10.0 * s,
+                    tab_rect_y,
+                    sidebar_w - 20.0 * s,
+                    tab_rect_h,
+                    6.0 * s,
+                    [1.0, 1.0, 1.0, 0.05],
+                );
+            }
+
+            let color = if i == active_tab {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.7, 0.7, 0.7, 1.0]
+            };
             self.draw_string_scaled(title, ix + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
             tab_y += tab_rect_h + 4.0 * s;
         }
@@ -618,24 +702,69 @@ impl Renderer {
         let pill_w = self.measure_ui_width(tab_title, 1.1) + 28.0 * s;
         let pill_h = 30.0 * s;
         let pill_y = content_y - 22.0 * s;
-                self.push_rounded_rect(content_title_x - 1.0, pill_y - 1.0, pill_w + 2.0, pill_h + 2.0, 6.0 * s, [0.35, 0.26, 0.48, 1.0]);
-        self.push_rounded_rect(content_title_x, pill_y, pill_w, pill_h, 6.0 * s, [0.26, 0.20, 0.36, 1.0]);
-        self.draw_string_scaled(tab_title, content_title_x + 14.0 * s, content_y, [1.0, 1.0, 1.0, 1.0], 1.1);
+        self.push_rounded_rect(
+            content_title_x - 1.0,
+            pill_y - 1.0,
+            pill_w + 2.0,
+            pill_h + 2.0,
+            6.0 * s,
+            [0.35, 0.26, 0.48, 1.0],
+        );
+        self.push_rounded_rect(
+            content_title_x,
+            pill_y,
+            pill_w,
+            pill_h,
+            6.0 * s,
+            [0.26, 0.20, 0.36, 1.0],
+        );
+        self.draw_string_scaled(
+            tab_title,
+            content_title_x + 14.0 * s,
+            content_y,
+            [1.0, 1.0, 1.0, 1.0],
+            1.1,
+        );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
         if active_tab == 0 {
-            self.draw_string_scaled("Рабочие области (Воркспэйсы)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Рабочие области (Воркспэйсы)",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
             content_y += 40.0 * s;
 
             for path in ide_workspaces {
                 let path_str = path.to_string_lossy();
-                self.draw_string_scaled(&path_str, content_x, content_y + 18.0 * s, [0.9, 0.9, 0.9, 1.0], 1.0);
-                self.push_rounded_rect(content_x + 300.0 * s, content_y, 30.0 * s, 24.0 * s, 4.0 * s, [0.8, 0.3, 0.3, 1.0]);
-                self.draw_string_scaled("-", content_x + 310.0 * s, content_y + 18.0 * s, [1.0, 1.0, 1.0, 1.0], 1.2);
+                self.draw_string_scaled(
+                    &path_str,
+                    content_x,
+                    content_y + 18.0 * s,
+                    [0.9, 0.9, 0.9, 1.0],
+                    1.0,
+                );
+                self.push_rounded_rect(
+                    content_x + 300.0 * s,
+                    content_y,
+                    30.0 * s,
+                    24.0 * s,
+                    4.0 * s,
+                    [0.8, 0.3, 0.3, 1.0],
+                );
+                self.draw_string_scaled(
+                    "-",
+                    content_x + 310.0 * s,
+                    content_y + 18.0 * s,
+                    [1.0, 1.0, 1.0, 1.0],
+                    1.2,
+                );
                 content_y += 34.0 * s;
             }
 
-                                    let btn_add = crate::widgets::Button {
+            let btn_add = crate::widgets::Button {
                 x: content_x,
                 y: content_y.round(),
                 w: 190.0 * s,
@@ -646,15 +775,38 @@ impl Renderer {
                 icon_size: 20.0 * s,
             };
             wants_pointer |= btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-
         } else if active_tab == 1 {
-            self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Скоро здесь появятся настройки...",
+                content_x,
+                content_y,
+                [0.6, 0.6, 0.6, 1.0],
+                1.0,
+            );
         } else if active_tab == 2 {
-            self.draw_string_scaled("Размер шрифта: 14px", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Размер шрифта: 14px",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
             content_y += 30.0 * s;
-            self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Межстрочный интервал: 1.5",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
         } else if active_tab == 3 {
-            self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            self.draw_string_scaled(
+                "Тема: Dracula (По умолчанию)",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
         } else if active_tab == 4 {
             self.flush();
             let text_area_y = content_y;
@@ -709,13 +861,25 @@ impl Renderer {
                             5.0 * s,
                             [0.26, 0.20, 0.36, 1.0],
                         );
-                        self.draw_string_scaled(header_text, main_header_x + 12.0 * s, text_y, [1.0, 1.0, 1.0, 1.0], 1.05);
+                        self.draw_string_scaled(
+                            header_text,
+                            main_header_x + 12.0 * s,
+                            text_y,
+                            [1.0, 1.0, 1.0, 1.0],
+                            1.05,
+                        );
                         main_header_drawn = true;
                     } else {
                         let sep_y = text_y + 10.0 * s;
                         let sep_x = start_x + 8.0 * s;
                         let sep_w = (cw - 32.0 * s).max(0.0);
-                        self.draw_string_scaled(header_text, start_x, text_y, [0.875, 0.882, 0.902, 1.0], 1.05);
+                        self.draw_string_scaled(
+                            header_text,
+                            start_x,
+                            text_y,
+                            [0.875, 0.882, 0.902, 1.0],
+                            1.05,
+                        );
                         self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.10]);
                     }
 
@@ -754,7 +918,13 @@ impl Renderer {
                     );
 
                     let desc_color = [0.663, 0.690, 0.729, 1.0];
-                    self.draw_string_scaled(description, start_x + left_col_w, text_y, desc_color, 1.0);
+                    self.draw_string_scaled(
+                        description,
+                        start_x + left_col_w,
+                        text_y,
+                        desc_color,
+                        1.0,
+                    );
 
                     text_y += 38.0 * s;
                     continue;
@@ -774,7 +944,7 @@ impl Renderer {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
 
-                                    let max_scroll = self.get_faq_max_scroll(faq_editor, h);
+            let max_scroll = self.get_faq_max_scroll(faq_editor, h);
             let total_content_h = text_area_h + max_scroll;
 
             if max_scroll > 0.0 {
@@ -782,7 +952,7 @@ impl Renderer {
                 let track_h = text_area_h;
                 let thumb_h = (text_area_h / total_content_h * track_h).max(40.0 * s);
                 let thumb_y = (text_area_y + scroll_ratio * (track_h - thumb_h)).round();
-                                let scroll_x = (start_x + cw + 5.0 * s).round();
+                let scroll_x = (start_x + cw + 5.0 * s).round();
 
                 self.push_rounded_rect(
                     scroll_x,
