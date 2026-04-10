@@ -149,6 +149,7 @@ impl ApplicationHandler for App {
                                         window_width: width,
                                         window_height: height,
                                         maximized,
+                                        ide_workspaces: self.ide_workspaces.clone(),
                                     });
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
@@ -174,6 +175,7 @@ impl ApplicationHandler for App {
                                     window_width: width,
                                     window_height: height,
                                     maximized,
+                                    ide_workspaces: self.ide_workspaces.clone(),
                                 });
                                 event_loop.exit();
                             } else if action == PendingAction::OpenFile {
@@ -241,6 +243,7 @@ impl ApplicationHandler for App {
                         window_width: width,
                         window_height: height,
                         maximized,
+                        ide_workspaces: self.ide_workspaces.clone(),
                     });
                     event_loop.exit();
                 }
@@ -354,6 +357,7 @@ impl ApplicationHandler for App {
                     &self.current_sticky_lines,
                     self.sticky_anim_progress,
                     self.sticky_anim_is_adding,
+                    self.is_ide_mode,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -428,6 +432,7 @@ impl ApplicationHandler for App {
                         self.settings_tab,
                         &self.faq_editor,
                         self.settings_scroll.current,
+                        &self.ide_workspaces,
                     ) {
                         wants_pointer = true;
                     }
@@ -557,7 +562,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.show_settings && self.settings_tab == 3 && self.settings_scroll.update(dt) {
+        if self.show_settings && self.settings_tab == 4 && self.settings_scroll.update(dt) {
             needs_redraw = true;
         }
 
@@ -664,6 +669,30 @@ impl ApplicationHandler for App {
             let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
             self.scroll_x.clamp_target(0.0, max_scroll_x);
             self.scroll_x.clamp_current(0.0, max_scroll_x);
+        }
+
+        if let Some(rx) = &self.open_folder_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.open_folder_rx = None;
+                if let Some(path) = result {
+                    self.ide_workspaces.push(path);
+                    let w = self.window.as_ref().unwrap();
+                    let maximized = w.is_maximized();
+                    let (width, height) = if maximized {
+                        (self.window_width, self.window_height)
+                    } else {
+                        let scale = w.scale_factor();
+                        let size = w.inner_size().to_logical::<f64>(scale);
+                        (size.width, size.height)
+                    };
+                    crate::save_config(&crate::Config {
+                        window_width: width,
+                        window_height: height,
+                        maximized,
+                        ide_workspaces: self.ide_workspaces.clone(),
+                    });
+                }
+            }
         }
 
         if let Some(rx) = &self.open_file_rx {

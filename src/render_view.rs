@@ -33,9 +33,10 @@ impl Renderer {
         search_case_sensitive: bool,
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
-        current_sticky_lines: &[(usize, usize)],
+                current_sticky_lines: &[(usize, usize)],
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
+        is_ide_mode: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -105,15 +106,16 @@ impl Renderer {
         let total_lines = visible_lines_count.max(1);
         let s = self.scale_factor;
 
-        let target_minimap_w = 119.0 * s;
+                let target_minimap_w = 119.0 * s;
 
         if (self.minimap_width - target_minimap_w).abs() > 0.5 {
             self.minimap_width = target_minimap_w;
             self.visual_lines.clear();
         }
 
+        let sidebar_w = if is_ide_mode { 56.0 * s } else { 0.0 };
         let digits = editor.line_offsets.len().to_string().len().max(3);
-        let target_padding = (30.0 * s + digits as f32 * 10.0 * s).round();
+        let target_padding = (30.0 * s + digits as f32 * 10.0 * s + sidebar_w).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -147,7 +149,7 @@ impl Renderer {
             self.last_editor_version_for_scroll_x = editor.version;
         }
 
-        unsafe {
+                unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
             self.gl.active_texture(glow::TEXTURE0);
@@ -160,6 +162,49 @@ impl Renderer {
         editor.ensure_indent_cache_updated();
         let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
+
+                        if is_ide_mode {
+            let sb_w = 56.0 * s;
+                        let sidebar_bg = [
+                (self.theme.bg[0] + 0.04).min(1.0),
+                (self.theme.bg[1] + 0.04).min(1.0),
+                (self.theme.bg[2] + 0.05).min(1.0),
+                1.0,
+            ];
+            self.push_rect(0.0, 0.0, sb_w, self.height, sidebar_bg);
+            self.push_rect(sb_w - 1.0, 0.0, 1.0, self.height, [1.0, 1.0, 1.0, 0.12]);
+
+            let btn_explorer = IconButton {
+                x: 10.0 * s,
+                y: 20.0 * s,
+                size: 36.0 * s,
+                icon: Some(crate::widgets::IconType::Save),
+                is_active: true,
+                icon_size: Some(22.0 * s),
+            };
+
+            let btn_terminal = IconButton {
+                x: 10.0 * s,
+                y: self.height - 100.0 * s,
+                size: 36.0 * s,
+                icon: Some(crate::widgets::IconType::CaseMatch),
+                is_active: false,
+                icon_size: Some(24.0 * s),
+            };
+
+            let btn_problems = IconButton {
+                x: 10.0 * s,
+                y: self.height - 50.0 * s,
+                size: 36.0 * s,
+                icon: Some(crate::widgets::IconType::Warning),
+                is_active: false,
+                icon_size: Some(22.0 * s),
+            };
+
+            wants_pointer |= btn_explorer.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            wants_pointer |= btn_terminal.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            wants_pointer |= btn_problems.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+        }
 
         let first_len = first.len();
         let len = first_len + second.len();
@@ -749,7 +794,8 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(0.0, 0.0, self.left_padding, self.height, solid_minimap_bg);
+                let gutter_x = if is_ide_mode { 56.0 * s } else { 0.0 };
+        self.push_rect(gutter_x, 0.0, self.left_padding - gutter_x, self.height, solid_minimap_bg);
 
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];

@@ -87,8 +87,12 @@ pub struct App {
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 
-    pub show_welcome: bool,
+        pub show_welcome: bool,
     pub recent_files: Vec<PathBuf>,
+
+    pub is_ide_mode: bool,
+    pub ide_workspaces: Vec<PathBuf>,
+    pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 
     pub show_search: bool,
     pub search_anim_y: f32,
@@ -489,6 +493,15 @@ impl App {
         std::thread::spawn(move || {
             let file = rfd::FileDialog::new().set_title("Открыть файл").pick_file();
             let _ = tx.send(file);
+        });
+    }
+
+        pub fn trigger_folder_picker(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.open_folder_rx = Some(rx);
+        std::thread::spawn(move || {
+            let folder = rfd::FileDialog::new().set_title("Выбрать папку").pick_folder();
+            let _ = tx.send(folder);
         });
     }
 

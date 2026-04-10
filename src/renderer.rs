@@ -833,30 +833,30 @@ impl Renderer {
             (
                 crate::widgets::IconType::CaseMatch,
                 include_bytes!("icons/format-text-uppercase.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Up,
-                include_bytes!("icons/go-up.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Down,
-                include_bytes!("icons/go-down.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Close,
-                include_bytes!("icons/window-close.svg").as_slice(),
-            ),
-        ];
-
-        let opt = resvg::usvg::Options::default();
-        for (icon_type, data) in builtin {
-            let svg_data_str = String::from_utf8_lossy(data);
-            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
-                // Заменяем жестко прописанный белый цвет на старый розовый #da4453
-                svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-            } else {
-                svg_data_str.into_owned()
-            };
+            ),                        (
+                            crate::widgets::IconType::Down,
+                            include_bytes!("icons/go-down.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Close,
+                            include_bytes!("icons/window-close.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Plus,
+                            include_bytes!("icons/plus.svg").as_slice(),
+                        ),
+                    ];
+                                let opt = resvg::usvg::Options::default();
+                                for (icon_type, data) in builtin {
+                                    let svg_data_str = String::from_utf8_lossy(data);
+                                    let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+                                        // Заменяем жестко прописанный белый цвет на старый розовый #da4453
+                                        svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
+                                    } else if icon_type == crate::widgets::IconType::Plus {
+                                        svg_data_str.replace("currentColor", "#ffffff")
+                                    } else {
+                                        svg_data_str.into_owned()
+                                    };
 
             // Подбираем идеальную толщину для разных иконок, чтобы они выглядели сбалансированно.
             let target_stroke_width = match icon_type {

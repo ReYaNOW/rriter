@@ -421,13 +421,14 @@ impl Renderer {
             1.0,
         );
 
-        y += 60.0 * scale;
-        let (btn_new, btn_open) =
+                y += 60.0 * scale;
+        let (btn_new, btn_open, btn_ide) =
             crate::widgets::get_welcome_buttons(content_w, title_x, y, scale, self);
 
         let mut wants_pointer = false;
         wants_pointer |= btn_new.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
         wants_pointer |= btn_open.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
+        wants_pointer |= btn_ide.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
 
         y += 80.0 * scale;
         self.draw_string_scaled(
@@ -547,7 +548,7 @@ impl Renderer {
         wants_pointer
     }
 
-        pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize, faq_editor: &Editor, scroll_y: f32) -> bool {
+            pub fn draw_settings(&mut self, anim_progress: f32, active_tab: usize, faq_editor: &Editor, scroll_y: f32, ide_workspaces: &[std::path::PathBuf]) -> bool {
         if anim_progress <= 0.0 { return false; }
         let s = self.scale_factor;
         let mut wants_pointer = false;
@@ -584,10 +585,10 @@ impl Renderer {
 
         self.flush();
 
-        let sidebar_w = 200.0 * s;
+                let sidebar_w = 200.0 * s;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
-        let tabs = ["Основные", "Редактор", "Внешний вид", "Помощь"];
+        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь"];
         let mut tab_y = iy + 20.0 * s;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
@@ -617,20 +618,44 @@ impl Renderer {
         let pill_w = self.measure_ui_width(tab_title, 1.1) + 28.0 * s;
         let pill_h = 30.0 * s;
         let pill_y = content_y - 22.0 * s;
-        self.push_rounded_rect(content_title_x - 1.0, pill_y - 1.0, pill_w + 2.0, pill_h + 2.0, 6.0 * s, [0.35, 0.26, 0.48, 1.0]);
+                self.push_rounded_rect(content_title_x - 1.0, pill_y - 1.0, pill_w + 2.0, pill_h + 2.0, 6.0 * s, [0.35, 0.26, 0.48, 1.0]);
         self.push_rounded_rect(content_title_x, pill_y, pill_w, pill_h, 6.0 * s, [0.26, 0.20, 0.36, 1.0]);
         self.draw_string_scaled(tab_title, content_title_x + 14.0 * s, content_y, [1.0, 1.0, 1.0, 1.0], 1.1);
-        content_y += if active_tab == 3 { 30.0 * s } else { 46.0 * s };
+        content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
         if active_tab == 0 {
-            self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
+            self.draw_string_scaled("Рабочие области (Воркспэйсы)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+            content_y += 40.0 * s;
+
+            for path in ide_workspaces {
+                let path_str = path.to_string_lossy();
+                self.draw_string_scaled(&path_str, content_x, content_y + 18.0 * s, [0.9, 0.9, 0.9, 1.0], 1.0);
+                self.push_rounded_rect(content_x + 300.0 * s, content_y, 30.0 * s, 24.0 * s, 4.0 * s, [0.8, 0.3, 0.3, 1.0]);
+                self.draw_string_scaled("-", content_x + 310.0 * s, content_y + 18.0 * s, [1.0, 1.0, 1.0, 1.0], 1.2);
+                content_y += 34.0 * s;
+            }
+
+                                    let btn_add = crate::widgets::Button {
+                x: content_x,
+                y: content_y.round(),
+                w: 190.0 * s,
+                h: 36.0 * s,
+                text: "Добавить папку".to_string(),
+                icon: Some(crate::widgets::IconType::Plus),
+                text_scale: 1.0,
+                icon_size: 20.0 * s,
+            };
+            wants_pointer |= btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
         } else if active_tab == 1 {
+            self.draw_string_scaled("Скоро здесь появятся настройки...", content_x, content_y, [0.6, 0.6, 0.6, 1.0], 1.0);
+        } else if active_tab == 2 {
             self.draw_string_scaled("Размер шрифта: 14px", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
             content_y += 30.0 * s;
             self.draw_string_scaled("Межстрочный интервал: 1.5", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
-        } else if active_tab == 2 {
-            self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
         } else if active_tab == 3 {
+            self.draw_string_scaled("Тема: Dracula (По умолчанию)", content_x, content_y, [0.8, 0.8, 0.8, 1.0], 1.0);
+        } else if active_tab == 4 {
             self.flush();
             let text_area_y = content_y;
             let text_area_h = ih - (text_area_y - iy) - 20.0 * s;

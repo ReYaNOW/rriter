@@ -10,6 +10,7 @@ pub enum IconType {
     Up,
     Down,
     Close,
+    Plus,
 }
 
 pub struct Button {
@@ -28,54 +29,59 @@ impl Button {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
     }
 
-    pub fn render(
-        &self,
-        renderer: &mut Renderer,
-        mx: f32,
-        my: f32,
-        scale: f32,
-        pressed: bool,
-    ) -> bool {
-        let hovered = self.is_hovered(mx, my);
+        pub fn render(
+            &self,
+            renderer: &mut Renderer,
+            mx: f32,
+            my: f32,
+            scale: f32,
+            pressed: bool,
+        ) -> bool {
+            let x = self.x.round();
+            let y = self.y.round();
+            let w = self.w.round();
+            let h = self.h.round();
 
-        let border_color = renderer.theme.sel;
-        let mut bg_color = [0.22, 0.24, 0.26, 1.0];
+            let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
 
-        if hovered {
-            if pressed {
-                bg_color = renderer.theme.sel;
-            } else {
-                bg_color = [0.28, 0.30, 0.33, 1.0];
+            let border_color = renderer.theme.sel;
+            let mut bg_color = [0.22, 0.24, 0.26, 1.0];
+
+            if hovered {
+                if pressed {
+                    bg_color = renderer.theme.sel;
+                } else {
+                    bg_color = [0.28, 0.30, 0.33, 1.0];
+                }
             }
-        }
 
-                let r = 4.0 * scale;
+            let r = 4.0 * scale;
+            let bw = (1.0 * scale).round().max(1.0);
+            renderer.push_rounded_rect(x, y, w, h, r, border_color);
+            renderer.push_rounded_rect(
+                x + bw,
+                y + bw,
+                w - bw * 2.0,
+                h - bw * 2.0,
+                (r - bw).max(1.0),
+                bg_color,
+            );
 
-        renderer.push_rounded_rect(self.x, self.y, self.w, self.h, r, border_color);
-        renderer.push_rounded_rect(
-            self.x + 1.0 * scale,
-            self.y + 1.0 * scale,
-            self.w - 2.0 * scale,
-            self.h - 2.0 * scale,
-            r - 1.0 * scale,
-            bg_color,
-        );
+            let icon_size = self.icon_size;
+            let text_scale = self.text_scale;
+            let text_color = renderer.theme.fg;
 
-        let icon_size = self.icon_size;
-        let text_scale = self.text_scale;
-        let text_color = renderer.theme.fg;
+            let icon_y = y + (h - icon_size) / 2.0;
+            let text_y = y + h / 2.0 + 5.0 * scale;
 
-        let icon_y = self.y + (self.h - icon_size) / 2.0;
-        let text_y = self.y + self.h / 2.0 + 5.0 * scale;
+            let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
+            if self.icon.is_some() {
+                content_w += icon_size + 8.0 * scale;
+            }
 
-        let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
-        if self.icon.is_some() {
-            content_w += icon_size + 8.0 * scale;
-        }
+            let mut content_x = x + (w - content_w) / 2.0;
 
-        let mut content_x = self.x + (self.w - content_w) / 2.0;
-
-        if let Some(icon_type) = self.icon {
+            if let Some(icon_type) = self.icon {
             renderer.draw_atlas_icon(
                 icon_type,
                 content_x,
@@ -165,7 +171,7 @@ pub fn get_welcome_buttons(
     y: f32,
     scale: f32,
     renderer: &mut Renderer,
-) -> (Button, Button) {
+) -> (Button, Button, Button) {
     let bh = 40.0 * scale;
     let gap = 15.0 * scale;
     let icon_sz = 26.0 * scale;
@@ -185,7 +191,7 @@ pub fn get_welcome_buttons(
         icon_size: icon_sz,
     };
 
-    let btn_open = Button {
+        let btn_open = Button {
         x: x + w_new + gap,
         y,
         w: w_open,
@@ -196,7 +202,20 @@ pub fn get_welcome_buttons(
         icon_size: icon_sz,
     };
 
-    (btn_new, btn_open)
+    let w_ide = renderer.measure_ui_width("Режим IDE", 1.0) + icon_sz + padding;
+
+    let btn_ide = Button {
+        x: x + w_new + gap + w_open + gap,
+        y,
+        w: w_ide,
+        h: bh,
+        text: "Режим IDE".to_string(),
+        icon: None,
+        text_scale: 1.0,
+        icon_size: icon_sz,
+    };
+
+    (btn_new, btn_open, btn_ide)
 }
 
 pub fn get_dialog_buttons(

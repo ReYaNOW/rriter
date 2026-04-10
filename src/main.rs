@@ -26,6 +26,7 @@ pub struct Config {
     pub window_width: f64,
     pub window_height: f64,
     pub maximized: bool,
+    pub ide_workspaces: Vec<PathBuf>,
 }
 
 impl Default for Config {
@@ -34,6 +35,7 @@ impl Default for Config {
             window_width: 1000.0,
             window_height: 800.0,
             maximized: false,
+            ide_workspaces: Vec::new(),
         }
     }
 }
@@ -74,9 +76,10 @@ pub fn save_config(config: &Config) {
     path.push("RRiter");
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
+        let paths_str = config.ide_workspaces.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("|");
     let content = format!(
-        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {}\n}}\n",
-        config.window_width, config.window_height, config.maximized
+        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\"\n}}\n",
+        config.window_width, config.window_height, config.maximized, paths_str
     );
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if existing == content {
@@ -114,10 +117,18 @@ fn load_config() -> Config {
                         }
                     }
                 }
-                if line.contains("\"maximized\"") {
+                                if line.contains("\"maximized\"") {
                     if let Some(val) = line.split(':').nth(1) {
                         if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
                             config.maximized = v;
+                        }
+                    }
+                }
+                if line.contains("\"ide_workspaces\"") {
+                    if let Some(val) = line.split("\": \"").nth(1) {
+                        let paths = val.trim().trim_matches(',').trim_matches('"');
+                        if !paths.is_empty() {
+                            config.ide_workspaces = paths.split('|').map(PathBuf::from).collect();
                         }
                     }
                 }
@@ -173,11 +184,12 @@ fn main() {
     std::env::set_var("MIMALLOC_ARENA_CAPACITY", "4");
 
     let args: Vec<String> = env::args().collect();
+        let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
     let mut file_path = None;
-    let show_welcome = args.len() <= 1;
+    let show_welcome = args.len() <= 1 && !is_ide_cli;
 
     let mut recent_files = load_recent_files();
 
@@ -303,8 +315,12 @@ F8\tПоказать/скрыть счетчик FPS
         open_file_rx: None,
         save_file_rx: None,
 
-        show_welcome,
+                show_welcome,
         recent_files,
+
+        is_ide_mode: is_ide_cli,
+        ide_workspaces: config.ide_workspaces.clone(),
+        open_folder_rx: None,
 
         show_search: false,
         search_anim_y: -120.0,
