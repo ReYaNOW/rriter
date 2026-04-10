@@ -1381,18 +1381,26 @@ impl App {
             return;
         }
 
-        if key_event.state == ElementState::Pressed {
-            if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
-                self.show_fps = !self.show_fps;
+            if key_event.state == ElementState::Pressed {
+        if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
+            if self.show_settings {
+                self.show_settings = false;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
-
-            if self.search_focused {
-                self.handle_search_keyboard_input(key_event);
-            } else {
-                self.handle_editor_keyboard_input(event_loop, key_event);
-            }
         }
+
+        if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
+            self.show_fps = !self.show_fps;
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.search_focused {
+            self.handle_search_keyboard_input(key_event);
+        } else {
+            self.handle_editor_keyboard_input(event_loop, key_event);
+        }
+    }
     }
 }

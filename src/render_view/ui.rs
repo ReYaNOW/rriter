@@ -555,11 +555,10 @@ impl Renderer {
                 let w = (1000.0 * s).min(self.width - 40.0 * s);
         let h = (700.0 * s).min(self.height - 40.0 * s);
 
-        let start_y = self.height + 100.0 * s;
+                let start_y = self.height + 100.0 * s;
         let target_y = (self.height - h) / 2.0;
         let raw_y = start_y + (target_y - start_y) * anim_progress;
-        let target_y_px = target_y.round();
-        let y = if (raw_y - target_y_px).abs() < 0.5 { target_y_px } else { raw_y.round() };
+        let y = raw_y.round();
         let x = ((self.width - w) / 2.0).round();
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
@@ -638,13 +637,13 @@ impl Renderer {
                 );
             }
 
-            let start_x = content_x + 10.0 * s;
+                                                let start_x = content_x + 30.0 * s;
             let render_scroll_y = scroll_y.round();
-            let mut text_y = text_area_y + 10.0 * s - render_scroll_y;
+            let mut text_y = text_area_y + 20.0 * s - render_scroll_y;
             let text = faq_editor.get_full_text();
 
             let left_col_w = 260.0 * s;
-            let cw = iw - sidebar_w - 50.0 * s;
+            let cw = iw - sidebar_w - 76.0 * s;
 
             for line in text.split('\n') {
                 let is_header = line.starts_with("# ");
@@ -726,7 +725,7 @@ impl Renderer {
                 let track_h = text_area_h;
                 let thumb_h = (text_area_h / total_content_h * track_h).max(40.0 * s);
                 let thumb_y = (text_area_y + scroll_ratio * (track_h - thumb_h)).round();
-                let scroll_x = (start_x + cw + 20.0 * s).round();
+                                let scroll_x = (start_x + cw + 5.0 * s).round();
 
                 self.push_rounded_rect(
                     scroll_x,

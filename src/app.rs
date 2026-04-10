@@ -117,8 +117,9 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-    pub show_settings: bool,
+        pub show_settings: bool,
     pub settings_anim_progress: f32,
+    pub settings_y: f32,
     pub settings_tab: usize,
 }
 
