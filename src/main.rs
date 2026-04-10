@@ -25,6 +25,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 pub struct Config {
     pub window_width: f64,
     pub window_height: f64,
+    pub maximized: bool,
 }
 
 impl Default for Config {
@@ -32,6 +33,7 @@ impl Default for Config {
         Self {
             window_width: 1000.0,
             window_height: 800.0,
+            maximized: false,
         }
     }
 }
@@ -73,8 +75,8 @@ pub fn save_config(config: &Config) {
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
     let content = format!(
-        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1}\n}}\n",
-        config.window_width, config.window_height
+        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {}\n}}\n",
+        config.window_width, config.window_height, config.maximized
     );
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if existing == content {
@@ -109,6 +111,13 @@ fn load_config() -> Config {
                     if let Some(val) = line.split(':').nth(1) {
                         if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
                             config.window_height = v;
+                        }
+                    }
+                }
+                if line.contains("\"maximized\"") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
+                            config.maximized = v;
                         }
                     }
                 }
@@ -308,8 +317,10 @@ F8\tПоказать/скрыть счетчик FPS
 
                 faq_editor,
 
-        is_ready: false,
+                        is_ready: false,
         is_highlighted_once: false,
+        tried_maximize: false,
+        should_maximize: config.maximized,
 
                 autocomplete_active: false,
         autocomplete_options: Vec::new(),

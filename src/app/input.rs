@@ -70,8 +70,14 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+            pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
         if self.dialog_window.is_some() {
+            if state == ElementState::Pressed {
+                if let Some(dw) = self.dialog_window.as_ref() {
+                    dw.focus_window();
+                    dw.request_redraw();
+                }
+            }
             return;
         }
 
@@ -879,17 +885,20 @@ impl App {
                 PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
                     self.trigger_file_picker();
                 }
-                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
-                    let scale = self.window.as_ref().unwrap().scale_factor();
-                    let size = self
-                        .window
-                        .as_ref()
-                        .unwrap()
-                        .inner_size()
-                        .to_logical::<f64>(scale);
+                                                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                    let w = self.window.as_ref().unwrap();
+                    let maximized = w.is_maximized();
+                    let (width, height) = if maximized {
+                        (self.window_width, self.window_height)
+                    } else {
+                        let scale = w.scale_factor();
+                        let size = w.inner_size().to_logical::<f64>(scale);
+                        (size.width, size.height)
+                    };
                     crate::save_config(&crate::Config {
-                        window_width: size.width,
-                        window_height: size.height,
+                        window_width: width,
+                        window_height: height,
+                        maximized,
                     });
                     event_loop.exit();
                 }
@@ -947,10 +956,24 @@ impl App {
             .1;
 
         match key_event.physical_key {
-            PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                                    PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::CloseFile);
                 } else {
+                    let w = self.window.as_ref().unwrap();
+                    let maximized = w.is_maximized();
+                    let (width, height) = if maximized {
+                        (self.window_width, self.window_height)
+                    } else {
+                        let scale = w.scale_factor();
+                        let size = w.inner_size().to_logical::<f64>(scale);
+                        (size.width, size.height)
+                    };
+                    crate::save_config(&crate::Config {
+                        window_width: width,
+                        window_height: height,
+                        maximized,
+                    });
                     self.close_current_file();
                 }
                 return;
@@ -1369,14 +1392,21 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_keyboard_input(
+            pub fn handle_main_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
         if self.dialog_window.is_some() {
-            if key_event.state == ElementState::Pressed && key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
-                self.close_dialog();
+            if key_event.state == ElementState::Pressed {
+                if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                    self.close_dialog();
+                } else {
+                    if let Some(dw) = self.dialog_window.as_ref() {
+                        dw.focus_window();
+                        dw.request_redraw();
+                    }
+                }
             }
             return;
         }

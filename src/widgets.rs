@@ -19,6 +19,8 @@ pub struct Button {
     pub h: f32,
     pub text: String,
     pub icon: Option<IconType>,
+    pub text_scale: f32,
+    pub icon_size: f32,
 }
 
 impl Button {
@@ -47,7 +49,7 @@ impl Button {
             }
         }
 
-        let r = 4.0 * scale;
+                let r = 4.0 * scale;
 
         renderer.push_rounded_rect(self.x, self.y, self.w, self.h, r, border_color);
         renderer.push_rounded_rect(
@@ -59,8 +61,8 @@ impl Button {
             bg_color,
         );
 
-        let icon_size = 20.0 * scale;
-        let text_scale = 0.85;
+        let icon_size = self.icon_size;
+        let text_scale = self.text_scale;
         let text_color = renderer.theme.fg;
 
         let icon_y = self.y + (self.h - icon_size) / 2.0;
@@ -172,13 +174,15 @@ pub fn get_welcome_buttons(
     let w_new = renderer.measure_ui_width("Новый файл", 1.0) + icon_sz + padding;
     let w_open = renderer.measure_ui_width("Открыть файл", 1.0) + icon_sz + padding;
 
-    let btn_new = Button {
+        let btn_new = Button {
         x,
         y,
         w: w_new,
         h: bh,
         text: "Новый файл".to_string(),
         icon: None,
+        text_scale: 1.0,
+        icon_size: icon_sz,
     };
 
     let btn_open = Button {
@@ -188,6 +192,8 @@ pub fn get_welcome_buttons(
         h: bh,
         text: "Открыть файл".to_string(),
         icon: None,
+        text_scale: 1.0,
+        icon_size: icon_sz,
     };
 
     (btn_new, btn_open)
@@ -201,20 +207,25 @@ pub fn get_dialog_buttons(
     scale: f32,
     renderer: &mut Renderer,
 ) -> (Button, Button, Button) {
-    let bh = 34.0 * scale;
-    let gap = 12.0 * scale;
-    let icon_sz = 20.0 * scale;
-    let text_scale = 0.85;
-    let padding = 8.0 * scale + 28.0 * scale;
+    let bh = 44.0 * scale;
+    let gap = 14.0 * scale;
+    let icon_sz_calc = 24.0 * scale;
+    let text_scale_calc = 1.0;
+    let padding = 12.0 * scale + 30.0 * scale;
 
-    let w_save = renderer.measure_ui_width("Сохранить", text_scale) + icon_sz + padding;
-    let w_discard = renderer.measure_ui_width("Отклонить", text_scale) + icon_sz + padding;
-    let w_cancel = renderer.measure_ui_width("Отмена", text_scale) + icon_sz + padding;
+    // Считаем габариты со старым масштабом 1.0, чтобы размер кнопок не менялся
+    let w_save = renderer.measure_ui_width("Сохранить", text_scale_calc) + icon_sz_calc + padding;
+    let w_discard = renderer.measure_ui_width("Отклонить", text_scale_calc) + icon_sz_calc + padding;
+    let w_cancel = renderer.measure_ui_width("Отмена", text_scale_calc) + icon_sz_calc + padding;
 
     let total_w = w_save + w_discard + w_cancel + gap * 2.0;
 
     let mut current_x = box_x + (box_w - total_w) / 2.0;
     let y = box_y + box_h - bh - 22.0 * scale;
+
+        // Для отрисовки передаем скорректированные размеры
+    let render_icon_sz = 28.0 * scale;
+    let render_text_scale = 1.04;
 
     let btn_save = Button {
         x: current_x,
@@ -223,6 +234,8 @@ pub fn get_dialog_buttons(
         h: bh,
         text: "Сохранить".to_string(),
         icon: Some(IconType::Save),
+        text_scale: render_text_scale,
+        icon_size: render_icon_sz,
     };
     current_x += w_save + gap;
 
@@ -233,6 +246,8 @@ pub fn get_dialog_buttons(
         h: bh,
         text: "Отклонить".to_string(),
         icon: Some(IconType::Discard),
+        text_scale: render_text_scale,
+        icon_size: render_icon_sz,
     };
     current_x += w_discard + gap;
 
@@ -243,6 +258,8 @@ pub fn get_dialog_buttons(
         h: bh,
         text: "Отмена".to_string(),
         icon: Some(IconType::Cancel),
+        text_scale: render_text_scale,
+        icon_size: render_icon_sz,
     };
 
     (btn_save, btn_discard, btn_cancel)

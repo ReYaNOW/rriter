@@ -260,10 +260,10 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-        pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
+                pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
         let s = self.scale_factor;
-        let box_w = 560.0 * s;
-        let box_h = 200.0 * s;
+        let box_w = 660.0 * s;
+        let box_h = 260.0 * s;
         let box_x = 0.0;
         let box_y = 0.0;
 
@@ -274,7 +274,7 @@ impl Renderer {
 
         let pad_h = 24.0 * s;
         let pad_v = 18.0 * s;
-        let btn_h = 34.0 * s;
+        let btn_h = 44.0 * s;
         let btn_margin = 12.0 * s;
         let content_x = (box_x + pad_h).round();
         let content_y = (box_y + pad_v).round();
@@ -287,9 +287,9 @@ impl Renderer {
         let msg1 = format!("Документ «{}» был изменен.", base_title);
         let msg2 = "Сохранить или отклонить изменения?";
 
-        let icon_sz = 36.0 * s;
-        let gap = 14.0 * s;
-        let padding_inner = 14.0 * s;
+                let icon_sz = 120.0 * s;
+        let gap = 45.0 * s;
+        let padding_inner = 20.0 * s;
 
         let icon_x = content_x + padding_inner;
         let icon_y = content_y + (content_h - icon_sz) / 2.0;
@@ -298,8 +298,8 @@ impl Renderer {
 
         let text_x = icon_x + icon_sz + gap;
         let fg = self.theme.fg;
-        let text_scale = 0.85;
-        let line_h = 22.0 * s;
+        let text_scale = 1.05;
+        let line_h = 28.0 * s;
         let text_block_h = line_h * 2.0;
         let text_y_start = content_y + (content_h - text_block_h) / 2.0 + line_h * 0.85;
 

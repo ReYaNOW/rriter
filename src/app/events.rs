@@ -115,11 +115,11 @@ impl ApplicationHandler for App {
                         let my = self.renderer.as_ref().unwrap().last_mouse_y;
                         let s = self.renderer.as_ref().unwrap().scale_factor;
                         let (btn_save, btn_discard, btn_cancel) =
-                                                        crate::widgets::get_dialog_buttons(
+                            crate::widgets::get_dialog_buttons(
                                 0.0,
                                 0.0,
-                                560.0 * s,
-                                200.0 * s,
+                                660.0 * s,
+                                260.0 * s,
                                 s,
                                 self.renderer.as_mut().unwrap(),
                             );
@@ -136,16 +136,19 @@ impl ApplicationHandler for App {
                                 let action = self.pending_action;
                                 self.close_dialog();
                                 if action == PendingAction::Quit {
-                                    let scale = self.window.as_ref().unwrap().scale_factor();
-                                    let size = self
-                                        .window
-                                        .as_ref()
-                                        .unwrap()
-                                        .inner_size()
-                                        .to_logical::<f64>(scale);
+                                    let w = self.window.as_ref().unwrap();
+                                    let maximized = w.is_maximized();
+                                    let (width, height) = if maximized {
+                                        (self.window_width, self.window_height)
+                                    } else {
+                                        let scale = w.scale_factor();
+                                        let size = w.inner_size().to_logical::<f64>(scale);
+                                        (size.width, size.height)
+                                    };
                                     crate::save_config(&crate::Config {
-                                        window_width: size.width,
-                                        window_height: size.height,
+                                        window_width: width,
+                                        window_height: height,
+                                        maximized,
                                     });
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
@@ -158,16 +161,19 @@ impl ApplicationHandler for App {
                             let action = self.pending_action;
                             self.close_dialog();
                             if action == PendingAction::Quit {
-                                let scale = self.window.as_ref().unwrap().scale_factor();
-                                let size = self
-                                    .window
-                                    .as_ref()
-                                    .unwrap()
-                                    .inner_size()
-                                    .to_logical::<f64>(scale);
+                                let w = self.window.as_ref().unwrap();
+                                let maximized = w.is_maximized();
+                                let (width, height) = if maximized {
+                                    (self.window_width, self.window_height)
+                                } else {
+                                    let scale = w.scale_factor();
+                                    let size = w.inner_size().to_logical::<f64>(scale);
+                                    (size.width, size.height)
+                                };
                                 crate::save_config(&crate::Config {
-                                    window_width: size.width,
-                                    window_height: size.height,
+                                    window_width: width,
+                                    window_height: height,
+                                    maximized,
                                 });
                                 event_loop.exit();
                             } else if action == PendingAction::OpenFile {
@@ -191,7 +197,7 @@ impl ApplicationHandler for App {
 
                         let r = self.renderer.as_mut().unwrap();
                         let s = r.scale_factor;
-                                                                                                r.resize((560.0 * s) as u32, (200.0 * s) as u32);
+                        r.resize((660.0 * s) as u32, (260.0 * s) as u32);
 
                         unsafe {
                             use glow::HasContext;
@@ -222,25 +228,33 @@ impl ApplicationHandler for App {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
-                    let scale = self.window.as_ref().unwrap().scale_factor();
-                    let size = self
-                        .window
-                        .as_ref()
-                        .unwrap()
-                        .inner_size()
-                        .to_logical::<f64>(scale);
+                    let w = self.window.as_ref().unwrap();
+                    let maximized = w.is_maximized();
+                    let (width, height) = if maximized {
+                        (self.window_width, self.window_height)
+                    } else {
+                        let scale = w.scale_factor();
+                        let size = w.inner_size().to_logical::<f64>(scale);
+                        (size.width, size.height)
+                    };
                     crate::save_config(&crate::Config {
-                        window_width: size.width,
-                        window_height: size.height,
+                        window_width: width,
+                        window_height: height,
+                        maximized,
                     });
                     event_loop.exit();
                 }
             }
-                        WindowEvent::Focused(focused) => {
+            WindowEvent::Focused(focused) => {
                 self.is_focused = focused;
                 if focused {
                     if let Some(dw) = self.dialog_window.as_ref() {
-                        dw.focus_window();
+                        // НЕ вызываем focus_window() здесь.
+                        // Это - главная причина "мерцания" при Alt+Tab, т.к. приложение
+                        // начинает бороться с оконным менеджером за фокус.
+                        // Вместо этого, фокус будет восстановлен при клике или нажатии
+                        // клавиши на основное окно, что является более предсказуемым поведением.
+                        dw.request_redraw();
                     }
                 }
                 self.window.as_ref().unwrap().request_redraw();
@@ -297,8 +311,15 @@ impl ApplicationHandler for App {
                     gl_surface.swap_buffers(gl_context).unwrap();
 
                     self.is_ready = true;
-                    self.last_frame = Instant::now();
-
+                    // Применяем максимизацию, если сохранено
+                    if !self.tried_maximize {
+                        self.tried_maximize = true;
+                        if self.should_maximize {
+                            if let Some(w) = self.window.as_ref() {
+                                w.set_maximized(true);
+                            }
+                        }
+                    }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }

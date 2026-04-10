@@ -1,3 +1,5 @@
+MAKEFLAGS += --no-print-directory
+
 # Имя бинарника
 BINARY_NAME = rriter
 
@@ -24,6 +26,10 @@ fast:
 	--target $(TARGET) \
 	--release
 	@echo "✅ Собрано: target/$(TARGET)/release/$(BINARY_NAME)"
+
+run:
+	@$(MAKE) fast
+	@target/x86_64-unknown-linux-gnu/release/$(BINARY_NAME)
 
 # 2. Версия MAX (Ультимативная)
 # Для финального использования. Медленная сборка, максимальный FPS

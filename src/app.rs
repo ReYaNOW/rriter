@@ -101,8 +101,10 @@ pub struct App {
 
         pub faq_editor: Editor,
 
-    pub is_ready: bool,
+                            pub is_ready: bool,
     pub is_highlighted_once: bool,
+    pub tried_maximize: bool,
+    pub should_maximize: bool,
 
     pub autocomplete_active: bool,
     pub autocomplete_options: Vec<(CompletionItem, Vec<usize>)>,
@@ -421,9 +423,9 @@ impl App {
 
         if self.dialog_window.is_some() { return; }
 
-        let attrs = winit::window::Window::default_attributes()
+                        let attrs = winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
-                        .with_inner_size(winit::dpi::LogicalSize::new(560.0, 200.0)).with_name("rriter", "rriter")
+            .with_inner_size(winit::dpi::LogicalSize::new(660.0, 260.0)).with_name("rriter", "rriter")
             .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
             .with_resizable(false);
 
@@ -432,10 +434,13 @@ impl App {
             use winit::raw_window_handle::HasWindowHandle;
             let raw_handle = window.window_handle().unwrap().as_raw();
             let display = self.gl_config.as_ref().unwrap().display();
+            let scale = window.scale_factor();
+            let phys_w = (660.0 * scale).round() as u32;
+            let phys_h = (260.0 * scale).round() as u32;
             let surface_attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
                 raw_handle,
-                                std::num::NonZeroU32::new(560).unwrap(),
-                std::num::NonZeroU32::new(200).unwrap(),
+                std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
+                std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
             );
             let surface = unsafe { display.create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs).unwrap() };
             self.dialog_window = Some(window);
