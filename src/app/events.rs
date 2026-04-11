@@ -439,7 +439,48 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                let cursor_icon = if wants_pointer {
+                                // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
+                let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
+                if self.is_ide_mode && !self.show_welcome && !self.show_settings {
+                    let r = self.renderer.as_ref().unwrap();
+                    let mx = r.last_mouse_x;
+                    let my = r.last_mouse_y;
+                    let s = r.scale_factor;
+                    let sb_w = 48.0 * s;
+
+                    let panel_left_w = if self.ide_panel.any_top_open() {
+                        self.ide_panel.left_width * s
+                    } else {
+                        0.0
+                    };
+                    let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                        self.ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
+                    if panel_left_w > 0.0 {
+                        let resize_x = sb_w + panel_left_w;
+                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - panel_bottom_h {
+                            ide_resize_cursor = Some(winit::window::CursorIcon::EwResize);
+                        }
+                    }
+                    if panel_bottom_h > 0.0 && ide_resize_cursor.is_none() {
+                        let resize_y = wh - panel_bottom_h;
+                        if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
+                            ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
+                        }
+                    }
+                }
+
+                let cursor_icon = if let Some(rc) = ide_resize_cursor {
+                    rc
+                } else if self.ide_panel.is_resizing_left {
+                    winit::window::CursorIcon::EwResize
+                } else if self.ide_panel.is_resizing_bottom {
+                    winit::window::CursorIcon::NsResize
+                } else if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if !self.show_welcome {
                     let window_width = self.window.as_ref().unwrap().inner_size().width as f32;

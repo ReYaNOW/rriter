@@ -117,12 +117,14 @@ impl Renderer {
         } else {
             0.0
         };
-        let real_height = self.height;
-        self.height -= panel_bottom_h;
+                let real_height = self.height;
+        // НЕ мутируем self.height глобально — это ломает матрицу проекции flush().
+        // Вместо этого используем editor_height как локальную "рабочую" высоту редактора.
+        let editor_height = real_height - panel_bottom_h;
 
         let target_minimap_w = 119.0 * s;
 
-        if (self.minimap_width - target_minimap_w).abs() > 0.5 {
+                if (self.minimap_width - target_minimap_w).abs() > 0.5 {
             self.minimap_width = target_minimap_w;
             self.visual_lines.clear();
         }
@@ -135,6 +137,8 @@ impl Renderer {
             self.visual_lines.clear();
         }
 
+                // self.height = real_height — текст рендерится на полную высоту окна,
+        // включая зону нижней панели (нужно для работы прозрачности панели).
         self.update_cache(editor, scroll_x, scroll_y, is_resizing);
 
         let render_scroll_x = scroll_x.round();
@@ -163,6 +167,8 @@ impl Renderer {
             self.last_editor_version_for_scroll_x = editor.version;
         }
 
+                // С этого момента self.height = real_height на всём протяжении кадра.
+        // Матрица проекции в flush() всегда корректна.
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
@@ -213,7 +219,8 @@ impl Renderer {
                     let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
                     top_idx += 1;
                     y
-                } else {
+                                                } else {
+                    // Кнопки нижней группы фиксированы у дна окна, независимо от панели
                     let y = real_height - 16.0 * s - btn_size
                         - bottom_idx as f32 * (btn_size + btn_gap);
                     bottom_idx += 1;
@@ -256,7 +263,7 @@ impl Renderer {
                 }
             }
 
-            // Левая панель (для групп Top)
+                        // Левая панель (для групп Top)
             if panel_left_w > 0.0 {
                 let panel_x = sb_w;
                 let panel_bg = [
@@ -265,10 +272,14 @@ impl Renderer {
                     (self.theme.bg[2] + 0.025).min(1.0),
                     1.0,
                 ];
-                // self.height уже уменьшен на panel_bottom_h — левая панель не заходит под нижнюю
-                self.push_rect(panel_x, 0.0, panel_left_w, self.height, panel_bg);
-                self.push_rect(panel_x + panel_left_w - 1.0, 0.0, 1.0, self.height,
+                // Левая панель не заходит под нижнюю — используем editor_height
+                self.push_rect(panel_x, 0.0, panel_left_w, editor_height, panel_bg);
+                self.push_rect(panel_x + panel_left_w - 1.0, 0.0, 1.0, editor_height,
                     [1.0, 1.0, 1.0, 0.12]);
+                // Тонкая линия-разделитель между левой панелью и зоной номеров строк (аналог Indent Guide)
+                let sep_x = (panel_x + panel_left_w).round();
+                self.push_rect(sep_x, 0.0, 1.0, editor_height,
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10]);
 
                 let title_h = 32.0 * s;
                 let title_bg = [
@@ -308,14 +319,14 @@ impl Renderer {
                     }
                 }
 
-                // Подсветка ручки ресайза
+                                            // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
                 if mx >= resize_x - 4.0 * s && mx <= resize_x + 4.0 * s
-                    && my >= 0.0 && my <= self.height
+                    && my >= 0.0 && my <= editor_height
                 {
-                    self.push_rect(resize_x - 2.0, 0.0, 2.0, self.height,
+                    self.push_rect(resize_x - 2.0, 0.0, 2.0, editor_height,
                         [0.60, 0.35, 0.85, 0.4]);
-                    wants_pointer = true;
+                    // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
                 }
             }
         }
@@ -449,8 +460,9 @@ impl Renderer {
             }
         }
 
-        let max_scroll = self.get_max_scroll(editor, self.height);
-        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+                                        let max_scroll = self.get_max_scroll(editor, editor_height);
+                                        let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
+                                        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
@@ -466,7 +478,7 @@ impl Renderer {
         let cursor_line_y = self.baseline_offset - render_scroll_y
             + (visible_cursor_line as f32 * self.line_height);
 
-        if cursor_line_y > -self.line_height * 2.0 && cursor_line_y < self.height + self.line_height
+                if cursor_line_y > -self.line_height * 2.0 && cursor_line_y < editor_height + self.line_height
         {
             self.push_rect(
                 self.left_padding,
@@ -908,13 +920,22 @@ impl Renderer {
 
         self.flush();
 
-            let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
+                    let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
+    // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
     self.push_rect(
         gutter_x,
         0.0,
         self.left_padding - gutter_x,
-        self.height,
-        solid_minimap_bg,
+        editor_height,
+        self.theme.bg,
+    );
+    // Правая граница гаттера (тонкая линия, как у Indent Guide)
+    self.push_rect(
+        self.left_padding - 1.0,
+        0.0,
+        1.0,
+        editor_height,
+        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
     );
 
         for i in skip_visual_lines..end_visual_line {
@@ -949,8 +970,8 @@ impl Renderer {
             }
         }
 
-        for m in merged {
-            if m.bottom < 0.0 || m.top > self.height {
+                for m in merged {
+            if m.bottom < 0.0 || m.top > editor_height {
                 continue;
             }
             let color = if m.state == crate::editor::LineModState::ModifiedUnsaved {
@@ -973,8 +994,10 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(minimap_x, 0.0, minimap_w, self.height, solid_minimap_bg);
+                self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
 
+        // Временно подменяем self.height для draw_minimap (он использует self.height для расчётов)
+        self.height = editor_height;
         self.draw_minimap(
             editor,
             spans,
@@ -983,11 +1006,12 @@ impl Renderer {
             total_lines,
             visible_cursor_line,
         );
+        self.height = real_height;
 
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
             let track_h_bg = 14.0 * s;
-            let track_y_bg = self.height - track_h_bg;
+            let track_y_bg = editor_height - track_h_bg;
 
             self.push_rect(
                 self.left_padding,
@@ -997,12 +1021,12 @@ impl Renderer {
                 [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
             );
 
-            let thumb_w =
+                        let thumb_w =
                 (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s);
             let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
             let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 
-            let thumb_y = self.height - 10.0 * s;
+            let thumb_y = editor_height - 10.0 * s;
             let thumb_h = 6.0 * s;
 
             self.push_rounded_rect(
@@ -1025,12 +1049,12 @@ impl Renderer {
             sticky_anim_is_adding,
         );
 
-        if scrollbar_width > 0.0 {
+                if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h =
-                (self.height / total_content_height.max(self.height) * self.height).max(20.0 * s);
-            let thumb_y = scroll_ratio_y * (self.height - thumb_h);
+                (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+            let thumb_y = scroll_ratio_y * (editor_height - thumb_h);
             self.push_rounded_rect(
                 scrollbar_x + 1.0 * s,
                 thumb_y,
@@ -1063,19 +1087,18 @@ impl Renderer {
             );
         }
 
-                // Восстанавливаем полную высоту и рисуем нижние панели поверх редактора
-        self.height = real_height;
+                        // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
         if is_ide_mode && panel_bottom_h > 0.0 {
             let sb_w = 48.0 * s;
             let panel_x = sb_w;
             let panel_y = self.height - panel_bottom_h;
             let panel_w = self.width - panel_x;
-            let panel_bg = [
+                        let panel_bg = [
                 (self.theme.bg[0] + 0.02).min(1.0),
                 (self.theme.bg[1] + 0.02).min(1.0),
                 (self.theme.bg[2] + 0.025).min(1.0),
-                1.0,
+                0.5,
             ];
             // Ручка ресайза (1px линия вверху панели)
             self.push_rect(panel_x, panel_y, panel_w, 1.0, [1.0, 1.0, 1.0, 0.15]);
@@ -1086,7 +1109,7 @@ impl Renderer {
                 (self.theme.bg[0] + 0.07).min(1.0),
                 (self.theme.bg[1] + 0.07).min(1.0),
                 (self.theme.bg[2] + 0.08).min(1.0),
-                1.0,
+                0.5,
             ];
             self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
@@ -1112,12 +1135,12 @@ impl Renderer {
                 tx += tw;
             }
 
-            // Подсветка ручки ресайза при наведении
+                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
             if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
                 self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
-                wants_pointer = true;
+                // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
             }
 
             // Плейсхолдер контента

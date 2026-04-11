@@ -249,10 +249,33 @@ impl App {
                 if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
-                if let Some(drag) = self.ide_panel.drag.take() {
+                                if let Some(drag) = self.ide_panel.drag.take() {
                     if !drag.threshold_passed {
                         // Клик без движения → переключить панель
+                        let toggled_open = {
+                            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id);
+                            slot.map(|s| !s.open).unwrap_or(false)
+                        };
+                        let toggled_group = {
+                            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id);
+                            slot.map(|s| s.group.clone())
+                        };
                         self.ide_panel.toggle(drag.panel_id);
+                        // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
+                        if toggled_open {
+                            if let Some(group) = toggled_group {
+                                for sl in self.ide_panel.slots.iter_mut() {
+                                    if sl.id != drag.panel_id && sl.group == group {
+                                        sl.open = false;
+                                    }
+                                }
+                            }
+                        }
+                        // Clamp scroll_y к новому max_scroll после изменения высоты панелей
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
+                        self.scroll_y.clamp_target(0.0, max_scroll);
+                        self.scroll_y.clamp_current(0.0, max_scroll);
                     } else {
                         // DnD завершён — определяем новую группу по позиции
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
