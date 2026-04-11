@@ -194,10 +194,10 @@ impl Renderer {
             // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
             self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
-            let btn_size = 36.0 * s;
+                        let btn_size = 36.0 * s;
             let btn_gap = 8.0 * s;
             let btn_x = 6.0 * s;
-            let top_start_y = 16.0 * s;
+            let top_start_y = 6.0 * s;
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
 
@@ -223,10 +223,10 @@ impl Renderer {
                     let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
                     top_idx += 1;
                     y
-                } else {
+                                } else {
                     // Кнопки нижней группы фиксированы у дна окна, независимо от панели
                     let y = real_height
-                        - 16.0 * s
+                        - 6.0 * s
                         - btn_size
                         - bottom_idx as f32 * (btn_size + btn_gap);
                     bottom_idx += 1;

@@ -325,22 +325,22 @@ impl App {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
                 if last_mouse_x <= sb_w {
-                    let btn_size = 36.0 * s;
+                                        let btn_size = 36.0 * s;
                     let btn_gap = 8.0 * s;
                     let btn_x_min = 6.0 * s;
                     let btn_x_max = btn_x_min + btn_size;
-                    let top_start_y = 16.0 * s;
+                    let top_start_y = 6.0 * s;
                     let mut top_idx = 0usize;
                     let mut bottom_idx = 0usize;
                     let mut hit_id: Option<crate::app::PanelId> = None;
 
-                    for slot in &self.ide_panel.slots {
+                                        for slot in &self.ide_panel.slots {
                         let btn_y = if slot.group == crate::app::PanelGroup::Top {
                             let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
                             top_idx += 1;
                             y
                         } else {
-                            let y = wh - 16.0 * s - btn_size
+                            let y = wh - 6.0 * s - btn_size
                                 - bottom_idx as f32 * (btn_size + btn_gap);
                             bottom_idx += 1;
                             y
