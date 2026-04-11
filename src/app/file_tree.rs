@@ -20,6 +20,39 @@ pub struct FileNode {
 }
 
 // ---------------------------------------------------------------------------
+// Вспомогательная функция: читает прямых детей директории через `ignore`
+// (уважает .gitignore, пропускает скрытые файлы).
+// Возвращает (папки, файлы), обе группы отсортированы натурально.
+// ---------------------------------------------------------------------------
+
+fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>) {
+    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+
+    let walker = ignore::WalkBuilder::new(dir)
+        .max_depth(Some(1))
+        .hidden(true) // фильтровать скрытые (начинающиеся с '.')
+        .git_ignore(true) // уважать .gitignore
+        .build();
+
+    for entry in walker.skip(1).flatten() {
+        let path = entry.path().to_path_buf();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            dirs.push((name, path));
+        } else {
+            files.push((name, path));
+        }
+    }
+
+    // Натуральная сортировка: file2 < file10
+    dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
+    files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
+
+    (dirs, files)
+}
+
+// ---------------------------------------------------------------------------
 // Фоновый скан
 // ---------------------------------------------------------------------------
 
@@ -33,40 +66,30 @@ fn scan_recursive(
     if depth > max_depth {
         return;
     }
-    let entries = match std::fs::read_dir(root) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
 
-    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue; // Скрытые файлы пропускаем
-        }
-        if path.is_dir() {
-            dirs.push((name, path));
-        } else {
-            files.push((name, path));
-        }
-    }
-
-    // Папки сначала, потом файлы. Каждая группа — регистронезависимо алфавитно.
-    dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-    files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    let (dirs, files) = read_children(root);
 
     for (name, path) in dirs {
         let is_expanded = expanded.contains(&path);
-        result.push(FileNode { path: path.clone(), name, depth, is_dir: true, is_expanded });
+        result.push(FileNode {
+            path: path.clone(),
+            name,
+            depth,
+            is_dir: true,
+            is_expanded,
+        });
         if is_expanded {
             scan_recursive(&path, depth + 1, expanded, result, max_depth);
         }
     }
     for (name, path) in files {
-        result.push(FileNode { path, name, depth, is_dir: false, is_expanded: false });
+        result.push(FileNode {
+            path,
+            name,
+            depth,
+            is_dir: false,
+            is_expanded: false,
+        });
     }
 }
 
@@ -87,7 +110,13 @@ pub fn spawn_scan(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.to_string_lossy().into_owned());
             let is_expanded = expanded.contains(root);
-            nodes.push(FileNode { path: root.clone(), name, depth: 0, is_dir: true, is_expanded });
+            nodes.push(FileNode {
+                path: root.clone(),
+                name,
+                depth: 0,
+                is_dir: true,
+                is_expanded,
+            });
             if is_expanded {
                 scan_recursive(root, 1, &expanded, &mut nodes, 10);
             }
@@ -95,6 +124,39 @@ pub fn spawn_scan(
         let _ = tx.send(nodes);
     });
     rx
+}
+
+/// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
+/// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
+/// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
+pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
+    std::thread::spawn(move || {
+        use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+
+        let (dtx, drx) = mpsc::channel();
+        let mut debouncer = match new_debouncer(std::time::Duration::from_millis(300), dtx) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        for path in &paths {
+            let _ = debouncer.watcher().watch(path, RecursiveMode::Recursive);
+        }
+
+        // Блокируемся в цикле — debouncer должен жить, пока работает watcher.
+        loop {
+            match drx.recv() {
+                Ok(result) => {
+                    if result.is_ok() {
+                        if tx.send(()).is_err() {
+                            break; // главный поток упал / rx закрыт
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +188,19 @@ impl App {
             }
         }
         false
+    }
+
+    /// Запускает (или перезапускает) фоновый watcher для текущих workspaces.
+    /// Старый watcher бricht автоматически, т.к. его `Sender` дропается вместе с rx.
+    pub fn start_file_watcher(&mut self) {
+        if self.ide_workspaces.is_empty() {
+            self.file_tree_notify_rx = None;
+            return;
+        }
+        let paths = self.ide_workspaces.clone();
+        let (tx, rx) = mpsc::channel();
+        self.file_tree_notify_rx = Some(rx);
+        crate::app::file_tree::spawn_watcher(paths, tx);
     }
 
     /// Обрабатывает клик по узлу с индексом node_idx.
@@ -177,6 +252,10 @@ impl App {
             return None;
         }
         let idx = (content_y / row_h) as usize;
-        if idx < self.ide_panel.file_tree_nodes.len() { Some(idx) } else { None }
+        if idx < self.ide_panel.file_tree_nodes.len() {
+            Some(idx)
+        } else {
+            None
+        }
     }
 }

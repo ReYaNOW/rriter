@@ -187,7 +187,7 @@ impl Highlighter {
         )>();
 
         thread::spawn(move || {
-                        let mut syntect_assets: Option<(
+            let mut syntect_assets: Option<(
                 syntect::parsing::SyntaxSet,
                 syntect::highlighting::Theme,
             )> = None;
@@ -895,8 +895,8 @@ impl Highlighter {
                         }
                     }
 
-                                        if !used_ts && !lang_name.is_empty() {
-                                                if syntect_assets.is_none() {
+                    if !used_ts && !lang_name.is_empty() {
+                        if syntect_assets.is_none() {
                             let ps = syntect::parsing::SyntaxSet::load_defaults_newlines();
                             let ts = syntect::highlighting::ThemeSet::load_defaults();
                             let mut theme = ts.themes["base16-ocean.dark"].clone();
@@ -913,9 +913,8 @@ impl Highlighter {
                                 }
                             });
 
-                                                        if let Some(syntax) = syntax {
-                                let mut h =
-                                    syntect::easy::HighlightLines::new(syntax, theme);
+                            if let Some(syntax) = syntax {
+                                let mut h = syntect::easy::HighlightLines::new(syntax, theme);
                                 let mut byte_offset = 0;
                                 for line in syntect::util::LinesWithEndings::from(text.as_str()) {
                                     if let Ok(ranges) = h.highlight_line(line, &ps) {
@@ -943,7 +942,7 @@ impl Highlighter {
                     }
                 }
 
-                                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
+                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
                 let flat_spans = flatten_spans(
                     spans,

@@ -86,11 +86,23 @@ impl Default for IdePanelState {
     fn default() -> Self {
         Self {
             slots: vec![
-                PanelSlot { id: PanelId::Explorer, group: PanelGroup::Top,    open: false },
-                PanelSlot { id: PanelId::Terminal, group: PanelGroup::Bottom, open: false },
-                PanelSlot { id: PanelId::Problems, group: PanelGroup::Bottom, open: false },
+                PanelSlot {
+                    id: PanelId::Explorer,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
+                    id: PanelId::Terminal,
+                    group: PanelGroup::Bottom,
+                    open: false,
+                },
+                PanelSlot {
+                    id: PanelId::Problems,
+                    group: PanelGroup::Bottom,
+                    open: false,
+                },
             ],
-                        left_width: 240.0,
+            left_width: 240.0,
             bottom_height: 180.0,
             drag: None,
             is_resizing_left: false,
@@ -105,10 +117,14 @@ impl Default for IdePanelState {
 
 impl IdePanelState {
     pub fn any_top_open(&self) -> bool {
-        self.slots.iter().any(|s| s.group == PanelGroup::Top && s.open)
+        self.slots
+            .iter()
+            .any(|s| s.group == PanelGroup::Top && s.open)
     }
     pub fn any_bottom_open(&self) -> bool {
-        self.slots.iter().any(|s| s.group == PanelGroup::Bottom && s.open)
+        self.slots
+            .iter()
+            .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
     pub fn toggle(&mut self, id: PanelId) {
         if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
@@ -116,7 +132,11 @@ impl IdePanelState {
         }
     }
     pub fn is_open(&self, id: PanelId) -> bool {
-        self.slots.iter().find(|s| s.id == id).map(|s| s.open).unwrap_or(false)
+        self.slots
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.open)
+            .unwrap_or(false)
     }
 }
 
@@ -220,14 +240,16 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-                        pub show_settings: bool,
-            pub settings_anim_progress: f32,
-            pub settings_y: f32,
-            pub settings_tab: usize,
+    pub show_settings: bool,
+    pub settings_anim_progress: f32,
+    pub settings_y: f32,
+    pub settings_tab: usize,
 
-            pub ide_panel: IdePanelState,
-            pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
-        }
+    pub ide_panel: IdePanelState,
+    pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
+    /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
+    pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
+}
 
 impl App {
     pub fn ensure_cursor_visible(

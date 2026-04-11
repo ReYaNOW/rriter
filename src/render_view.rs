@@ -117,7 +117,7 @@ impl Renderer {
         } else {
             0.0
         };
-                let real_height = self.height;
+        let real_height = self.height;
         // Нижняя панель полупрозрачная, поэтому текст, скролл и мини-карта
         // рендерятся на всю высоту окна, проходя ПОД панелью без сжатия.
         let editor_height = real_height;
@@ -194,7 +194,7 @@ impl Renderer {
             // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
             self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
-                        let btn_size = 36.0 * s;
+            let btn_size = 36.0 * s;
             let btn_gap = 8.0 * s;
             let btn_x = 6.0 * s;
             let top_start_y = 6.0 * s;
@@ -223,12 +223,10 @@ impl Renderer {
                     let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
                     top_idx += 1;
                     y
-                                } else {
+                } else {
                     // Кнопки нижней группы фиксированы у дна окна, независимо от панели
-                    let y = real_height
-                        - 6.0 * s
-                        - btn_size
-                        - bottom_idx as f32 * (btn_size + btn_gap);
+                    let y =
+                        real_height - 6.0 * s - btn_size - bottom_idx as f32 * (btn_size + btn_gap);
                     bottom_idx += 1;
                     y
                 };
@@ -366,7 +364,7 @@ impl Renderer {
                         editor_height,
                         [0.60, 0.35, 0.85, 0.4],
                     );
-                                        // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
+                    // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
                 }
 
                 // --- Дерево файлов проводника ---
@@ -392,35 +390,76 @@ impl Renderer {
                         let hint = "Нет папок в проекте";
                         let tw = self.measure_ui_width(hint, 0.8);
                         let tx = panel_x + (panel_left_w - tw) / 2.0;
-                        self.draw_string_scaled(hint, tx, title_h + 30.0 * s, [0.45, 0.45, 0.45, 1.0], 0.8);
+                        self.draw_string_scaled(
+                            hint,
+                            tx,
+                            title_h + 30.0 * s,
+                            [0.45, 0.45, 0.45, 1.0],
+                            0.8,
+                        );
                     } else {
                         let first_vis = (scroll / row_h).floor() as usize;
-                        let last_vis = (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+                        let last_vis =
+                            (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
 
                         for i in first_vis..last_vis {
                             let node = &ide_panel.file_tree_nodes[i];
                             let row_y = title_h + i as f32 * row_h - scroll;
 
                             if ide_panel.file_tree_hovered_idx == Some(i) {
-                                self.push_rect(panel_x, row_y, panel_left_w, row_h, [1.0, 1.0, 1.0, 0.06]);
+                                self.push_rect(
+                                    panel_x,
+                                    row_y,
+                                    panel_left_w,
+                                    row_h,
+                                    [1.0, 1.0, 1.0, 0.06],
+                                );
                             }
 
                             let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
                             let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                            let color: [f32; 4] = if node.is_dir { [0.78, 0.68, 1.0, 1.0] } else { self.theme.fg };
+                            let color: [f32; 4] = if node.is_dir {
+                                [0.78, 0.68, 1.0, 1.0]
+                            } else {
+                                self.theme.fg
+                            };
 
                             if node.is_dir {
                                 // Индикатор раскрытия: горизонт — раскрыто, вертикаль — закрыто
                                 let arrow_cx = indent_x + 4.0 * s;
                                 let arrow_cy = row_y + row_h / 2.0;
                                 if node.is_expanded {
-                                    self.push_rect(arrow_cx - 3.5 * s, arrow_cy - 1.0, 7.0 * s, 2.0, [0.78, 0.68, 1.0, 0.75]);
+                                    self.push_rect(
+                                        arrow_cx - 3.5 * s,
+                                        arrow_cy - 1.0,
+                                        7.0 * s,
+                                        2.0,
+                                        [0.78, 0.68, 1.0, 0.75],
+                                    );
                                 } else {
-                                    self.push_rect(arrow_cx - 1.0, arrow_cy - 3.5 * s, 2.0, 7.0 * s, [0.78, 0.68, 1.0, 0.75]);
+                                    self.push_rect(
+                                        arrow_cx - 1.0,
+                                        arrow_cy - 3.5 * s,
+                                        2.0,
+                                        7.0 * s,
+                                        [0.78, 0.68, 1.0, 0.75],
+                                    );
                                 }
-                                self.draw_string_scaled(&node.name, indent_x + 12.0 * s, text_y, color, 0.85);
+                                self.draw_string_scaled(
+                                    &node.name,
+                                    indent_x + 12.0 * s,
+                                    text_y,
+                                    color,
+                                    0.85,
+                                );
                             } else {
-                                self.draw_string_scaled(&node.name, indent_x + 4.0 * s, text_y, color, 0.85);
+                                self.draw_string_scaled(
+                                    &node.name,
+                                    indent_x + 4.0 * s,
+                                    text_y,
+                                    color,
+                                    0.85,
+                                );
                             }
                         }
 
@@ -429,8 +468,10 @@ impl Renderer {
                         if total_h > content_h {
                             let max_s = (total_h - content_h).max(1.0);
                             let ratio = (scroll / max_s).clamp(0.0, 1.0);
-                            let thumb_h = (content_h / total_h * (content_h - 8.0 * s)).max(20.0 * s);
-                            let thumb_y = title_h + 4.0 * s + ratio * (content_h - 8.0 * s - thumb_h);
+                            let thumb_h =
+                                (content_h / total_h * (content_h - 8.0 * s)).max(20.0 * s);
+                            let thumb_y =
+                                title_h + 4.0 * s + ratio * (content_h - 8.0 * s - thumb_h);
                             self.push_rounded_rect(
                                 panel_x + panel_left_w - 5.0 * s,
                                 thumb_y,
@@ -1040,7 +1081,11 @@ impl Renderer {
 
         self.flush();
 
-                let gutter_x = if is_ide_mode { 48.0 * s + panel_left_w } else { 0.0 };
+        let gutter_x = if is_ide_mode {
+            48.0 * s + panel_left_w
+        } else {
+            0.0
+        };
         // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
         self.push_rect(
             gutter_x,
@@ -1124,7 +1169,7 @@ impl Renderer {
 
         self.flush();
 
-                        self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
+        self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
 
         self.draw_minimap(
             editor,
@@ -1309,12 +1354,12 @@ impl Renderer {
         (wants_pointer, target_sticky_lines)
     }
 
-        fn draw_minimap(
+    fn draw_minimap(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
         render_scroll_y: f32,
-                max_scroll: f32,
+        max_scroll: f32,
         total_lines: usize,
         visible_cursor_line: usize,
     ) {
@@ -1328,7 +1373,7 @@ impl Renderer {
         let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
 
-                let minimap_line_h = (self.height / (total_lines_f32 + 2.0).max(200.0))
+        let minimap_line_h = (self.height / (total_lines_f32 + 2.0).max(200.0))
             .max(self.height / 1250.0)
             .max(1.5);
 
@@ -1362,7 +1407,7 @@ impl Renderer {
         self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
         self.flush();
 
-                        let map_bg = self.theme.minimap_bg;
+        let map_bg = self.theme.minimap_bg;
         let mut current_y: f32 = 0.0;
         let mut phys_line = 0;
         let rect_h = minimap_line_h.ceil().max(1.0);
@@ -1531,9 +1576,10 @@ impl Renderer {
             phys_line += 1;
         }
 
-                self.flush();
+        self.flush();
 
-        let y_cursor = (visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll).round();
+        let y_cursor =
+            (visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll).round();
         self.push_rect(
             minimap_x,
             y_cursor,

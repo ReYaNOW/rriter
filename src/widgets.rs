@@ -109,7 +109,7 @@ pub struct IconButton {
 }
 
 impl IconButton {
-        pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
+    pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
         if let Some(sq_w) = self.active_square_width {
             let icon_center = self.y + self.size / 2.0;
             let sq_y = (icon_center - sq_w / 2.0).round();
@@ -128,14 +128,14 @@ impl IconButton {
     ) -> bool {
         let hovered = self.is_hovered(mx, my);
 
-                if self.is_active {
+        if self.is_active {
             if let Some(sq_w) = self.active_square_width {
-                                                // Центрируем квадрат точно по центру иконки
+                // Центрируем квадрат точно по центру иконки
                 let icon_center = self.y + self.size / 2.0;
                 let sq_h = sq_w;
                 let sq_y = (icon_center - sq_h / 2.0).round();
                 let bg_color = [0.35, 0.26, 0.48, 1.0];
-                                renderer.push_rect(0.0, sq_y, sq_w, sq_h, bg_color);
+                renderer.push_rect(0.0, sq_y, sq_w, sq_h, bg_color);
 
                 // Вертикальная акцентная полоска у левого края
                 let stripe_w = (3.0 * scale).max(2.0);
@@ -161,7 +161,7 @@ impl IconButton {
         let mut draw_bg = false;
         let mut radius = 4.0 * scale;
 
-                if self.is_active {
+        if self.is_active {
             bg_color = renderer.theme.sel;
             draw_bg = true;
         } else if hovered {

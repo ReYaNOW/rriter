@@ -499,17 +499,19 @@ impl Editor {
 
         let curr_hashes = self.get_line_hashes();
 
-                // Хеш пустой строки — чтобы определить, был ли файл изначально пустым.
+        // Хеш пустой строки — чтобы определить, был ли файл изначально пустым.
         // Если saved-состояние == пустой файл, LCS матчит пустые строки в новом тексте
         // к единственной оригинальной пустой строке, и они ложно выглядят немодифицированными.
         let empty_hash = FxHasher::default().finish();
         let curr_is_empty = curr_hashes.len() == 1 && curr_hashes[0] == empty_hash;
 
-        let saved_was_empty =
-            self.saved_hashes.len() == 1 && self.saved_hashes[0] == empty_hash;
+        let saved_was_empty = self.saved_hashes.len() == 1 && self.saved_hashes[0] == empty_hash;
         let (mod_saved, mut del_saved) = if saved_was_empty && !curr_is_empty {
             // Весь текущий контент — новый, всё помечаем как unsaved.
-            (vec![true; curr_hashes.len()], vec![false; curr_hashes.len() + 1])
+            (
+                vec![true; curr_hashes.len()],
+                vec![false; curr_hashes.len() + 1],
+            )
         } else {
             get_diff_info(&self.saved_hashes, &curr_hashes)
         };
@@ -518,7 +520,10 @@ impl Editor {
             self.original_hashes.len() == 1 && self.original_hashes[0] == empty_hash;
         let (mod_orig, mut del_orig) = if orig_was_empty && !curr_is_empty {
             // Оригинал тоже был пустым — зелёных (saved) маркеров нет.
-            (vec![false; curr_hashes.len()], vec![false; curr_hashes.len() + 1])
+            (
+                vec![false; curr_hashes.len()],
+                vec![false; curr_hashes.len() + 1],
+            )
         } else {
             get_diff_info(&self.original_hashes, &curr_hashes)
         };

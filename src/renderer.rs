@@ -875,7 +875,7 @@ impl Renderer {
                 // GPU Mipmaps аппаратно сожмут её до нужного размера без "мыла" и "лесенок".
                 let target_size = 256.0;
 
-                                let scale = if size.width() > size.height() {
+                let scale = if size.width() > size.height() {
                     target_size / size.width()
                 } else {
                     target_size / size.height()

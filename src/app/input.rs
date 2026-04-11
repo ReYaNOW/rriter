@@ -18,7 +18,7 @@ impl App {
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
 
-                // Скролл в области проводника файлов — перехватываем до всего остального
+        // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let sb_w = 48.0 * s;
@@ -141,7 +141,7 @@ impl App {
                             }
                             tab_y += 40.0 * s;
                         }
-                                                            } else if self.settings_tab == 0 {
+                    } else if self.settings_tab == 0 {
                         let mut current_y = iy + 126.0 * s;
                         for (idx, _path) in self.ide_workspaces.clone().iter().enumerate() {
                             let item_w = 460.0 * s;
@@ -168,7 +168,8 @@ impl App {
                             current_y += 46.0 * s;
                         }
 
-                        let add_btn_y = iy + 126.0 * s + self.ide_workspaces.len() as f32 * 46.0 * s;
+                        let add_btn_y =
+                            iy + 126.0 * s + self.ide_workspaces.len() as f32 * 46.0 * s;
                         if mx >= ix + sidebar_w + 30.0 * s
                             && mx <= ix + sidebar_w + 30.0 * s + 190.0 * s
                             && my >= add_btn_y
@@ -272,21 +273,29 @@ impl App {
             return;
         }
 
-                if state == ElementState::Released {
+        if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
-                                if let Some(drag) = self.ide_panel.drag.take() {
+                if let Some(drag) = self.ide_panel.drag.take() {
                     if !drag.threshold_passed {
                         // Клик без движения → переключить панель
                         let toggled_open = {
-                            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id);
+                            let slot = self
+                                .ide_panel
+                                .slots
+                                .iter()
+                                .find(|sl| sl.id == drag.panel_id);
                             slot.map(|s| !s.open).unwrap_or(false)
                         };
                         let toggled_group = {
-                            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id);
+                            let slot = self
+                                .ide_panel
+                                .slots
+                                .iter()
+                                .find(|sl| sl.id == drag.panel_id);
                             slot.map(|s| s.group.clone())
                         };
-                                                self.ide_panel.toggle(drag.panel_id);
+                        self.ide_panel.toggle(drag.panel_id);
                         // При открытии Explorer — запускаем скан файлов
                         if toggled_open && drag.panel_id == crate::app::PanelId::Explorer {
                             self.refresh_file_tree();
@@ -303,10 +312,14 @@ impl App {
                         }
                         // Clamp scroll_y к новому max_scroll после изменения высоты панелей
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                        let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
+                        let max_scroll = self
+                            .renderer
+                            .as_mut()
+                            .unwrap()
+                            .get_max_scroll(&self.editor, wh);
                         self.scroll_y.clamp_target(0.0, max_scroll);
                         self.scroll_y.clamp_current(0.0, max_scroll);
-                                        } else {
+                    } else {
                         // DnD завершён — определяем новую группу по позиции и сортируем
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                         let new_group = if drag.current_y < wh / 2.0 {
@@ -340,7 +353,10 @@ impl App {
                                     top_items.push((y, slot));
                                     top_idx += 1;
                                 } else {
-                                    let y = wh - 6.0 * s - btn_size - bottom_idx as f32 * (btn_size + btn_gap);
+                                    let y = wh
+                                        - 6.0 * s
+                                        - btn_size
+                                        - bottom_idx as f32 * (btn_size + btn_gap);
                                     bottom_items.push((y, slot));
                                     bottom_idx += 1;
                                 }
@@ -348,12 +364,20 @@ impl App {
                         }
 
                         // Сортируем: для Top сверху вниз (по возрастанию Y), для Bottom снизу вверх (по убыванию Y)
-                        top_items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-                        bottom_items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                        top_items.sort_by(|a, b| {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        bottom_items.sort_by(|a, b| {
+                            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
 
                         // Собираем массив обратно
-                        self.ide_panel.slots.extend(top_items.into_iter().map(|(_, s)| s));
-                        self.ide_panel.slots.extend(bottom_items.into_iter().map(|(_, s)| s));
+                        self.ide_panel
+                            .slots
+                            .extend(top_items.into_iter().map(|(_, s)| s));
+                        self.ide_panel
+                            .slots
+                            .extend(bottom_items.into_iter().map(|(_, s)| s));
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
@@ -374,32 +398,32 @@ impl App {
             return;
         }
 
-                if state == ElementState::Pressed {
+        if state == ElementState::Pressed {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
 
-                                // Обработка кликов/DnD по кнопкам IDE-сайдбара и ресайза панелей
+            // Обработка кликов/DnD по кнопкам IDE-сайдбара и ресайза панелей
             if self.is_ide_mode {
                 let sb_w = 48.0 * s;
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                                if last_mouse_x <= sb_w {
-                                        let btn_size = 36.0 * s;
+                if last_mouse_x <= sb_w {
+                    let btn_size = 36.0 * s;
                     let btn_gap = 8.0 * s;
                     let top_start_y = 6.0 * s;
                     let mut top_idx = 0usize;
                     let mut bottom_idx = 0usize;
                     let mut hit_id: Option<crate::app::PanelId> = None;
 
-                                        for slot in &self.ide_panel.slots {
+                    for slot in &self.ide_panel.slots {
                         let btn_y = if slot.group == crate::app::PanelGroup::Top {
                             let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
                             top_idx += 1;
                             y
                         } else {
-                            let y = wh - 6.0 * s - btn_size
-                                - bottom_idx as f32 * (btn_size + btn_gap);
+                            let y =
+                                wh - 6.0 * s - btn_size - bottom_idx as f32 * (btn_size + btn_gap);
                             bottom_idx += 1;
                             y
                         };
@@ -408,8 +432,10 @@ impl App {
                         let sq_w = sb_w;
                         let sq_y = (icon_center - sq_w / 2.0).round();
 
-                        if last_mouse_x >= 0.0 && last_mouse_x <= sq_w
-                            && last_mouse_y >= sq_y && last_mouse_y <= sq_y + sq_w
+                        if last_mouse_x >= 0.0
+                            && last_mouse_x <= sq_w
+                            && last_mouse_y >= sq_y
+                            && last_mouse_y <= sq_y + sq_w
                         {
                             hit_id = Some(slot.id);
                             break;
@@ -451,11 +477,9 @@ impl App {
                         return;
                     }
                 }
-                                if panel_bottom_h > 0.0 {
+                if panel_bottom_h > 0.0 {
                     let resize_y = wh - panel_bottom_h;
-                    if (last_mouse_y - resize_y).abs() < 6.0 * s
-                        && last_mouse_x >= sb_w
-                    {
+                    if (last_mouse_y - resize_y).abs() < 6.0 * s && last_mouse_x >= sb_w {
                         self.ide_panel.is_resizing_bottom = true;
                         self.window.as_ref().unwrap().request_redraw();
                         return;
@@ -534,52 +558,52 @@ impl App {
                     } else {
                         let mut current_btn_x = search_x + search_w - 10.0 * s;
 
-                                            current_btn_x -= btn_size;
-                    let btn_close = IconButton {
-                        x: current_btn_x,
-                        y: btn_y,
-                        size: btn_size,
-                        icon: None,
-                        is_active: false,
-                        icon_size: Some(26.0 * s),
-                        active_square_width: None,
-                    };
+                        current_btn_x -= btn_size;
+                        let btn_close = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                            active_square_width: None,
+                        };
                         current_btn_x -= 10.0 * s;
 
-                                            current_btn_x -= btn_size;
-                    let btn_down = IconButton {
-                        x: current_btn_x,
-                        y: btn_y,
-                        size: btn_size,
-                        icon: None,
-                        is_active: false,
-                        icon_size: Some(26.0 * s),
-                        active_square_width: None,
-                    };
+                        current_btn_x -= btn_size;
+                        let btn_down = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                            active_square_width: None,
+                        };
                         current_btn_x -= 10.0 * s;
 
-                                            current_btn_x -= btn_size;
-                    let btn_up = IconButton {
-                        x: current_btn_x,
-                        y: btn_y,
-                        size: btn_size,
-                        icon: None,
-                        is_active: false,
-                        icon_size: Some(26.0 * s),
-                        active_square_width: None,
-                    };
+                        current_btn_x -= btn_size;
+                        let btn_up = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                            active_square_width: None,
+                        };
                         current_btn_x -= 10.0 * s;
 
-                                            current_btn_x -= btn_size;
-                    let btn_case = IconButton {
-                        x: current_btn_x,
-                        y: btn_y,
-                        size: btn_size,
-                        icon: None,
-                        is_active: false,
-                        icon_size: Some(26.0 * s),
-                        active_square_width: None,
-                    };
+                        current_btn_x -= btn_size;
+                        let btn_case = IconButton {
+                            x: current_btn_x,
+                            y: btn_y,
+                            size: btn_size,
+                            icon: None,
+                            is_active: false,
+                            icon_size: Some(26.0 * s),
+                            active_square_width: None,
+                        };
 
                         if btn_case.is_hovered(last_mouse_x, last_mouse_y) {
                             self.search_case_sensitive = !self.search_case_sensitive;
@@ -956,7 +980,7 @@ impl App {
             }
         }
 
-                // DnD и ресайз IDE-панелей (обработка движения мыши)
+        // DnD и ресайз IDE-панелей (обработка движения мыши)
         if self.is_ide_mode {
             let px = position.x as f32;
             let py = position.y as f32;
@@ -978,7 +1002,7 @@ impl App {
                 return;
             }
 
-                        if self.ide_panel.is_resizing_bottom {
+            if self.ide_panel.is_resizing_bottom {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let new_h = ((wh - py) / s).max(60.0).min(500.0);
                 self.ide_panel.bottom_height = new_h;

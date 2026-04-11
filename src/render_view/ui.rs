@@ -727,7 +727,7 @@ impl Renderer {
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
-                if active_tab == 0 {
+        if active_tab == 0 {
             self.draw_string_scaled(
                 "Рабочие области",
                 content_x,
@@ -776,7 +776,8 @@ impl Renderer {
                     icon_size: Some(18.0 * s),
                     active_square_width: None,
                 };
-                wants_pointer |= btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                wants_pointer |=
+                    btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
 
                 content_y += 46.0 * s;
             }

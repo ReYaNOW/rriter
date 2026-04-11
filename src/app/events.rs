@@ -356,9 +356,9 @@ impl ApplicationHandler for App {
                     &self.recent_files,
                     &self.current_sticky_lines,
                     self.sticky_anim_progress,
-                                        self.sticky_anim_is_adding,
+                    self.sticky_anim_is_adding,
                     self.is_ide_mode,
-                                        &self.ide_panel,
+                    &self.ide_panel,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -439,7 +439,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                                // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
+                // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
                 let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
                 if self.is_ide_mode && !self.show_welcome && !self.show_settings {
                     let r = self.renderer.as_ref().unwrap();
@@ -462,7 +462,8 @@ impl ApplicationHandler for App {
 
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - panel_bottom_h {
+                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - panel_bottom_h
+                        {
                             ide_resize_cursor = Some(winit::window::CursorIcon::EwResize);
                         }
                     }
@@ -612,12 +613,26 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                if self.scroll_x.update(dt) {
+        if self.scroll_x.update(dt) {
             needs_redraw = true;
         }
 
         if self.poll_file_tree() {
             needs_redraw = true;
+        }
+
+        // Watcher сигнализирует об изменениях на диске — обновляем дерево
+        {
+            let mut fs_changed = false;
+            if let Some(rx) = &self.file_tree_notify_rx {
+                while rx.try_recv().is_ok() {
+                    fs_changed = true;
+                }
+            }
+            if fs_changed {
+                self.refresh_file_tree();
+                needs_redraw = true;
+            }
         }
         if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
@@ -723,10 +738,11 @@ impl ApplicationHandler for App {
         if let Some(rx) = &self.open_folder_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_folder_rx = None;
-                                if let Some(path) = result {
+                if let Some(path) = result {
                     self.ide_workspaces.push(path.clone());
                     self.ide_panel.file_tree_expanded.insert(path.clone());
                     self.refresh_file_tree();
+                    self.start_file_watcher();
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {

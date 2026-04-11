@@ -84,10 +84,15 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
             crate::app::PanelId::Problems => "Problems",
         };
         let grp_s = match slot.group {
-            crate::app::PanelGroup::Top    => "Top",
+            crate::app::PanelGroup::Top => "Top",
             crate::app::PanelGroup::Bottom => "Bottom",
         };
-        lines.push(format!("{}:{}:{}", id_s, grp_s, if slot.open { "1" } else { "0" }));
+        lines.push(format!(
+            "{}:{}:{}",
+            id_s,
+            grp_s,
+            if slot.open { "1" } else { "0" }
+        ));
     }
     lines.push(format!("left_width:{:.1}", state.left_width));
     lines.push(format!("bottom_height:{:.1}", state.bottom_height));
@@ -119,16 +124,26 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
             } else {
                 crate::app::PanelGroup::Bottom
             };
-            loaded.push(crate::app::PanelSlot { id, group, open: parts[2] == "1" });
+            loaded.push(crate::app::PanelSlot {
+                id,
+                group,
+                open: parts[2] == "1",
+            });
         } else if parts.len() == 2 {
             if parts[0] == "left_width" {
-                if let Ok(v) = parts[1].parse::<f32>() { state.left_width = v; }
+                if let Ok(v) = parts[1].parse::<f32>() {
+                    state.left_width = v;
+                }
             } else if parts[0] == "bottom_height" {
-                if let Ok(v) = parts[1].parse::<f32>() { state.bottom_height = v; }
+                if let Ok(v) = parts[1].parse::<f32>() {
+                    state.bottom_height = v;
+                }
             }
         }
     }
-    if !loaded.is_empty() { state.slots = loaded; }
+    if !loaded.is_empty() {
+        state.slots = loaded;
+    }
     state
 }
 
@@ -418,13 +433,14 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-                show_settings: false,
+        show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,
 
-                                ide_panel: crate::load_panel_state(),
+        ide_panel: crate::load_panel_state(),
         file_tree_rx: None,
+        file_tree_notify_rx: None,
     };
 
     app.highlighter.reset(
