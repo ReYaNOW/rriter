@@ -23,6 +23,13 @@ pub enum PendingAction {
     CloseFile,
 }
 
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct IdePanelState {
+    pub explorer: bool,
+    pub terminal: bool,
+    pub problems: bool,
+}
+
 #[inline(always)]
 fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
     let mut p_chars = pattern.chars().peekable();
@@ -123,11 +130,13 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-    pub show_settings: bool,
-    pub settings_anim_progress: f32,
-    pub settings_y: f32,
-    pub settings_tab: usize,
-}
+            pub show_settings: bool,
+            pub settings_anim_progress: f32,
+            pub settings_y: f32,
+            pub settings_tab: usize,
+
+            pub ide_panel: IdePanelState,
+        }
 
 impl App {
     pub fn ensure_cursor_visible(

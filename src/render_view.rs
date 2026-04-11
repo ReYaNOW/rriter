@@ -15,7 +15,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-    pub fn draw(
+        pub fn draw(
         &mut self,
         editor: &mut Editor,
         scroll_x: f32,
@@ -37,6 +37,7 @@ impl Renderer {
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
         is_ide_mode: bool,
+        ide_panel: crate::app::IdePanelState,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -174,12 +175,12 @@ impl Renderer {
                     self.push_rect(0.0, 0.0, sb_w, self.height, sidebar_bg);
                     self.push_rect(sb_w - 1.0, 0.0, 1.0, self.height, [1.0, 1.0, 1.0, 0.12]);
 
-                    let btn_explorer = IconButton {
+                                        let btn_explorer = IconButton {
                         x: 6.0 * s,
                         y: 20.0 * s,
                         size: 36.0 * s,
                         icon: Some(crate::widgets::IconType::Save),
-                        is_active: false,
+                        is_active: ide_panel.explorer,
                         icon_size: Some(22.0 * s),
                         active_square_width: Some(sb_w),
                     };
@@ -189,17 +190,17 @@ impl Renderer {
                     y: self.height - 100.0 * s,
                     size: 36.0 * s,
                     icon: Some(crate::widgets::IconType::CaseMatch),
-                    is_active: false,
+                    is_active: ide_panel.terminal,
                     icon_size: Some(24.0 * s),
                     active_square_width: Some(sb_w),
                 };
 
-                let btn_problems = IconButton {
+                                let btn_problems = IconButton {
                     x: 6.0 * s,
-                    y: self.height - 50.0 * s,
+                    y: self.height - 52.0 * s,
                     size: 36.0 * s,
                     icon: Some(crate::widgets::IconType::Warning),
-                    is_active: false,
+                    is_active: ide_panel.problems,
                     icon_size: Some(22.0 * s),
                     active_square_width: Some(sb_w),
                 };

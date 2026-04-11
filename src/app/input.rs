@@ -258,10 +258,41 @@ impl App {
             return;
         }
 
-        if state == ElementState::Pressed {
+                if state == ElementState::Pressed {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
+
+            // Обработка кликов по кнопкам IDE-сайдбара
+            if self.is_ide_mode {
+                let sb_w = 48.0 * s;
+                if last_mouse_x <= sb_w {
+                    let height = self.renderer.as_ref().unwrap().height;
+                    let btn_size = 36.0 * s;
+
+                    let explorer_y = 20.0 * s;
+                    let terminal_y = height - 100.0 * s;
+                    let problems_y = height - 50.0 * s;
+
+                    let hit = |btn_y: f32| -> bool {
+                        last_mouse_x >= 6.0 * s
+                            && last_mouse_x <= 6.0 * s + btn_size
+                            && last_mouse_y >= btn_y
+                            && last_mouse_y <= btn_y + btn_size
+                    };
+
+                    if hit(explorer_y) {
+                        self.ide_panel.explorer = !self.ide_panel.explorer;
+                    } else if hit(terminal_y) {
+                        self.ide_panel.terminal = !self.ide_panel.terminal;
+                    } else if hit(problems_y) {
+                        self.ide_panel.problems = !self.ide_panel.problems;
+                    }
+
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
 
             let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
             let minimap_w = self.renderer.as_ref().unwrap().minimap_width;

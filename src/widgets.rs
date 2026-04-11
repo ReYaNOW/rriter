@@ -122,15 +122,20 @@ impl IconButton {
     ) -> bool {
         let hovered = self.is_hovered(mx, my);
 
-        if self.is_active {
+                if self.is_active {
             if let Some(sq_w) = self.active_square_width {
-                renderer.push_rect(
-                    0.0,
-                    self.y,
-                    sq_w,
-                    sq_w,
-                    [0.35, 0.26, 0.48, 1.0],
-                );
+                                                // Центрируем квадрат точно по центру иконки
+                let icon_center = self.y + self.size / 2.0;
+                let sq_h = sq_w;
+                let sq_y = (icon_center - sq_h / 2.0).round();
+                let bg_color = [0.35, 0.26, 0.48, 1.0];
+                                renderer.push_rect(0.0, sq_y, sq_w, sq_h, bg_color);
+
+                // Вертикальная акцентная полоска у левого края
+                let stripe_w = (3.0 * scale).max(2.0);
+                let stripe_color = [0.60, 0.35, 0.85, 1.0];
+                renderer.push_rect(0.0, sq_y, stripe_w, sq_h, stripe_color);
+
                 let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
                 let offset = (self.size - icon_render_size) / 2.0;
                 if let Some(icon_type) = self.icon {

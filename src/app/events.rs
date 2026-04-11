@@ -356,8 +356,9 @@ impl ApplicationHandler for App {
                     &self.recent_files,
                     &self.current_sticky_lines,
                     self.sticky_anim_progress,
-                    self.sticky_anim_is_adding,
+                                        self.sticky_anim_is_adding,
                     self.is_ide_mode,
+                    self.ide_panel,
                 );
 
                 self.target_sticky_lines = target_sticky;
