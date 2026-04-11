@@ -70,6 +70,68 @@ pub fn save_recent_files(files: &[PathBuf]) {
     let _ = std::fs::write(&path, content);
 }
 
+pub fn save_panel_state(state: &crate::app::IdePanelState) {
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+    let _ = std::fs::create_dir_all(&path);
+    path.push("panels.txt");
+    let mut lines: Vec<String> = Vec::new();
+    for slot in &state.slots {
+        let id_s = match slot.id {
+            crate::app::PanelId::Explorer => "Explorer",
+            crate::app::PanelId::Terminal => "Terminal",
+            crate::app::PanelId::Problems => "Problems",
+        };
+        let grp_s = match slot.group {
+            crate::app::PanelGroup::Top    => "Top",
+            crate::app::PanelGroup::Bottom => "Bottom",
+        };
+        lines.push(format!("{}:{}:{}", id_s, grp_s, if slot.open { "1" } else { "0" }));
+    }
+    lines.push(format!("left_width:{:.1}", state.left_width));
+    lines.push(format!("bottom_height:{:.1}", state.bottom_height));
+    let _ = std::fs::write(&path, lines.join("\n"));
+}
+
+pub fn load_panel_state() -> crate::app::IdePanelState {
+    let mut state = crate::app::IdePanelState::default();
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+    path.push("panels.txt");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return state,
+    };
+    let mut loaded: Vec<crate::app::PanelSlot> = Vec::new();
+    for line in content.lines() {
+        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        if parts.len() == 3 {
+            let id = match parts[0] {
+                "Explorer" => crate::app::PanelId::Explorer,
+                "Terminal" => crate::app::PanelId::Terminal,
+                "Problems" => crate::app::PanelId::Problems,
+                _ => continue,
+            };
+            let group = if parts[1] == "Top" {
+                crate::app::PanelGroup::Top
+            } else {
+                crate::app::PanelGroup::Bottom
+            };
+            loaded.push(crate::app::PanelSlot { id, group, open: parts[2] == "1" });
+        } else if parts.len() == 2 {
+            if parts[0] == "left_width" {
+                if let Ok(v) = parts[1].parse::<f32>() { state.left_width = v; }
+            } else if parts[0] == "bottom_height" {
+                if let Ok(v) = parts[1].parse::<f32>() { state.bottom_height = v; }
+            }
+        }
+    }
+    if !loaded.is_empty() { state.slots = loaded; }
+    state
+}
+
 pub fn save_config(config: &Config) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -361,7 +423,7 @@ F8\tПоказать/скрыть счетчик FPS
         settings_y: 10000.0,
         settings_tab: 0,
 
-        ide_panel: crate::app::IdePanelState::default(),
+                ide_panel: crate::load_panel_state(),
     };
 
     app.highlighter.reset(

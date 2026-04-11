@@ -23,11 +23,92 @@ pub enum PendingAction {
     CloseFile,
 }
 
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PanelId {
+    Explorer,
+    Terminal,
+    Problems,
+}
+
+impl PanelId {
+    pub fn label(self) -> &'static str {
+        match self {
+            PanelId::Explorer => "Проводник",
+            PanelId::Terminal => "Терминал",
+            PanelId::Problems => "Ляпы",
+        }
+    }
+    pub fn icon(self) -> crate::widgets::IconType {
+        match self {
+            PanelId::Explorer => crate::widgets::IconType::Plus,
+            PanelId::Terminal => crate::widgets::IconType::CaseMatch,
+            PanelId::Problems => crate::widgets::IconType::Warning,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PanelGroup {
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Debug)]
+pub struct PanelSlot {
+    pub id: PanelId,
+    pub group: PanelGroup,
+    pub open: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PanelDragState {
+    pub panel_id: PanelId,
+    pub start_y: f32,
+    pub current_y: f32,
+    pub threshold_passed: bool,
+}
+
 pub struct IdePanelState {
-    pub explorer: bool,
-    pub terminal: bool,
-    pub problems: bool,
+    pub slots: Vec<PanelSlot>,
+    pub left_width: f32,
+    pub bottom_height: f32,
+    pub drag: Option<PanelDragState>,
+    pub is_resizing_left: bool,
+    pub is_resizing_bottom: bool,
+}
+
+impl Default for IdePanelState {
+    fn default() -> Self {
+        Self {
+            slots: vec![
+                PanelSlot { id: PanelId::Explorer, group: PanelGroup::Top,    open: false },
+                PanelSlot { id: PanelId::Terminal, group: PanelGroup::Bottom, open: false },
+                PanelSlot { id: PanelId::Problems, group: PanelGroup::Bottom, open: false },
+            ],
+            left_width: 240.0,
+            bottom_height: 180.0,
+            drag: None,
+            is_resizing_left: false,
+            is_resizing_bottom: false,
+        }
+    }
+}
+
+impl IdePanelState {
+    pub fn any_top_open(&self) -> bool {
+        self.slots.iter().any(|s| s.group == PanelGroup::Top && s.open)
+    }
+    pub fn any_bottom_open(&self) -> bool {
+        self.slots.iter().any(|s| s.group == PanelGroup::Bottom && s.open)
+    }
+    pub fn toggle(&mut self, id: PanelId) {
+        if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
+            slot.open = !slot.open;
+        }
+    }
+    pub fn is_open(&self, id: PanelId) -> bool {
+        self.slots.iter().find(|s| s.id == id).map(|s| s.open).unwrap_or(false)
+    }
 }
 
 #[inline(always)]

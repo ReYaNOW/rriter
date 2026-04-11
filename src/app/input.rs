@@ -246,7 +246,35 @@ impl App {
             return;
         }
 
-        if state == ElementState::Released {
+                if state == ElementState::Released {
+            // Завершаем DnD и ресайз IDE-панелей
+            if self.is_ide_mode {
+                if let Some(drag) = self.ide_panel.drag.take() {
+                    if !drag.threshold_passed {
+                        // Клик без движения → переключить панель
+                        self.ide_panel.toggle(drag.panel_id);
+                    } else {
+                        // DnD завершён — определяем новую группу по позиции
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let new_group = if drag.current_y < wh / 2.0 {
+                            crate::app::PanelGroup::Top
+                        } else {
+                            crate::app::PanelGroup::Bottom
+                        };
+                        if let Some(slot) = self.ide_panel.slots.iter_mut()
+                            .find(|sl| sl.id == drag.panel_id)
+                        {
+                            slot.group = new_group;
+                        }
+                    }
+                    crate::save_panel_state(&self.ide_panel);
+                }
+                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
+                    self.ide_panel.is_resizing_left = false;
+                    self.ide_panel.is_resizing_bottom = false;
+                    crate::save_panel_state(&self.ide_panel);
+                }
+            }
             self.is_dragging = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
@@ -263,34 +291,84 @@ impl App {
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
 
-            // Обработка кликов по кнопкам IDE-сайдбара
+                                // Обработка кликов/DnD по кнопкам IDE-сайдбара и ресайза панелей
             if self.is_ide_mode {
                 let sb_w = 48.0 * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
                 if last_mouse_x <= sb_w {
-                    let height = self.renderer.as_ref().unwrap().height;
                     let btn_size = 36.0 * s;
+                    let btn_gap = 8.0 * s;
+                    let btn_x_min = 6.0 * s;
+                    let btn_x_max = btn_x_min + btn_size;
+                    let top_start_y = 16.0 * s;
+                    let mut top_idx = 0usize;
+                    let mut bottom_idx = 0usize;
+                    let mut hit_id: Option<crate::app::PanelId> = None;
 
-                    let explorer_y = 20.0 * s;
-                    let terminal_y = height - 100.0 * s;
-                    let problems_y = height - 50.0 * s;
+                    for slot in &self.ide_panel.slots {
+                        let btn_y = if slot.group == crate::app::PanelGroup::Top {
+                            let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
+                            top_idx += 1;
+                            y
+                        } else {
+                            let y = wh - 16.0 * s - btn_size
+                                - bottom_idx as f32 * (btn_size + btn_gap);
+                            bottom_idx += 1;
+                            y
+                        };
+                        if last_mouse_x >= btn_x_min && last_mouse_x <= btn_x_max
+                            && last_mouse_y >= btn_y && last_mouse_y <= btn_y + btn_size
+                        {
+                            hit_id = Some(slot.id);
+                            break;
+                        }
+                    }
 
-                    let hit = |btn_y: f32| -> bool {
-                        last_mouse_x >= 6.0 * s
-                            && last_mouse_x <= 6.0 * s + btn_size
-                            && last_mouse_y >= btn_y
-                            && last_mouse_y <= btn_y + btn_size
-                    };
-
-                    if hit(explorer_y) {
-                        self.ide_panel.explorer = !self.ide_panel.explorer;
-                    } else if hit(terminal_y) {
-                        self.ide_panel.terminal = !self.ide_panel.terminal;
-                    } else if hit(problems_y) {
-                        self.ide_panel.problems = !self.ide_panel.problems;
+                    if let Some(panel_id) = hit_id {
+                        self.ide_panel.drag = Some(crate::app::PanelDragState {
+                            panel_id,
+                            start_y: last_mouse_y,
+                            current_y: last_mouse_y,
+                            threshold_passed: false,
+                        });
                     }
 
                     self.window.as_ref().unwrap().request_redraw();
                     return;
+                }
+
+                // Ресайз левой панели
+                let panel_left_w = if self.ide_panel.any_top_open() {
+                    self.ide_panel.left_width * s
+                } else {
+                    0.0
+                };
+                let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                    self.ide_panel.bottom_height * s
+                } else {
+                    0.0
+                };
+
+                if panel_left_w > 0.0 {
+                    let resize_x = sb_w + panel_left_w;
+                    if (last_mouse_x - resize_x).abs() < 6.0 * s
+                        && last_mouse_y < wh - panel_bottom_h
+                    {
+                        self.ide_panel.is_resizing_left = true;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                }
+                if panel_bottom_h > 0.0 {
+                    let resize_y = wh - panel_bottom_h;
+                    if (last_mouse_y - resize_y).abs() < 6.0 * s
+                        && last_mouse_x >= sb_w
+                    {
+                        self.ide_panel.is_resizing_bottom = true;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
                 }
             }
 
@@ -768,6 +846,37 @@ impl App {
                 return;
             } else {
                 self.autocomplete_hovered_idx = None;
+            }
+        }
+
+                // DnD и ресайз IDE-панелей (обработка движения мыши)
+        if self.is_ide_mode {
+            let px = position.x as f32;
+            let py = position.y as f32;
+
+            if let Some(ref mut drag) = self.ide_panel.drag {
+                drag.current_y = py;
+                if (py - drag.start_y).abs() > 5.0 * s {
+                    drag.threshold_passed = true;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
+            if self.ide_panel.is_resizing_left {
+                let sb_w = 48.0 * s;
+                let new_w = ((px - sb_w) / s).max(80.0).min(600.0);
+                self.ide_panel.left_width = new_w;
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
+            if self.ide_panel.is_resizing_bottom {
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let new_h = ((wh - py) / s).max(60.0).min(500.0);
+                self.ide_panel.bottom_height = new_h;
+                self.window.as_ref().unwrap().request_redraw();
+                return;
             }
         }
 

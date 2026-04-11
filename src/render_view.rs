@@ -37,7 +37,7 @@ impl Renderer {
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
         is_ide_mode: bool,
-        ide_panel: crate::app::IdePanelState,
+                ide_panel: &crate::app::IdePanelState,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -104,8 +104,21 @@ impl Renderer {
             temp_phys += 1;
         }
 
-        let total_lines = visible_lines_count.max(1);
+                let total_lines = visible_lines_count.max(1);
         let s = self.scale_factor;
+
+        let panel_left_w = if is_ide_mode && ide_panel.any_top_open() {
+            ide_panel.left_width * s
+        } else {
+            0.0
+        };
+        let panel_bottom_h = if is_ide_mode && ide_panel.any_bottom_open() {
+            ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
+        let real_height = self.height;
+        self.height -= panel_bottom_h;
 
         let target_minimap_w = 119.0 * s;
 
@@ -116,7 +129,7 @@ impl Renderer {
 
             let sidebar_w = if is_ide_mode { 48.0 * s } else { 0.0 };
     let digits = editor.line_offsets.len().to_string().len().max(3);
-        let target_padding = (30.0 * s + digits as f32 * 10.0 * s + sidebar_w).round();
+                let target_padding = (30.0 * s + digits as f32 * 10.0 * s + sidebar_w + panel_left_w).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -164,51 +177,148 @@ impl Renderer {
         let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
 
-                if is_ide_mode {
-                    let sb_w = 48.0 * s;
-                    let sidebar_bg = [
-                        (self.theme.bg[0] + 0.04).min(1.0),
-                        (self.theme.bg[1] + 0.04).min(1.0),
-                        (self.theme.bg[2] + 0.05).min(1.0),
-                        1.0,
-                    ];
-                    self.push_rect(0.0, 0.0, sb_w, self.height, sidebar_bg);
-                    self.push_rect(sb_w - 1.0, 0.0, 1.0, self.height, [1.0, 1.0, 1.0, 0.12]);
+                        if is_ide_mode {
+            let sb_w = 48.0 * s;
+            let sidebar_bg = [
+                (self.theme.bg[0] + 0.04).min(1.0),
+                (self.theme.bg[1] + 0.04).min(1.0),
+                (self.theme.bg[2] + 0.05).min(1.0),
+                1.0,
+            ];
+            // Сайдбар рисуется на полную высоту окна (real_height)
+            self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
+            self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
-                                        let btn_explorer = IconButton {
-                        x: 6.0 * s,
-                        y: 20.0 * s,
-                        size: 36.0 * s,
-                        icon: Some(crate::widgets::IconType::Save),
-                        is_active: ide_panel.explorer,
-                        icon_size: Some(22.0 * s),
-                        active_square_width: Some(sb_w),
-                    };
+            let btn_size = 36.0 * s;
+            let btn_gap = 8.0 * s;
+            let btn_x = 6.0 * s;
+            let top_start_y = 16.0 * s;
+            let mx = self.last_mouse_x;
+            let my = self.last_mouse_y;
 
-                let btn_terminal = IconButton {
-                    x: 6.0 * s,
-                    y: self.height - 100.0 * s,
-                    size: 36.0 * s,
-                    icon: Some(crate::widgets::IconType::CaseMatch),
-                    is_active: ide_panel.terminal,
-                    icon_size: Some(24.0 * s),
-                    active_square_width: Some(sb_w),
+            let mut top_idx = 0usize;
+            let mut bottom_idx = 0usize;
+
+            for slot in &ide_panel.slots {
+                let is_dragging_this = ide_panel.drag.as_ref()
+                    .map(|d| d.panel_id == slot.id && d.threshold_passed)
+                    .unwrap_or(false);
+                if is_dragging_this {
+                    if slot.group == crate::app::PanelGroup::Top { top_idx += 1; }
+                    else { bottom_idx += 1; }
+                    continue;
+                }
+
+                let btn_y = if slot.group == crate::app::PanelGroup::Top {
+                    let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
+                    top_idx += 1;
+                    y
+                } else {
+                    let y = real_height - 16.0 * s - btn_size
+                        - bottom_idx as f32 * (btn_size + btn_gap);
+                    bottom_idx += 1;
+                    y
                 };
 
-                                let btn_problems = IconButton {
-                    x: 6.0 * s,
-                    y: self.height - 52.0 * s,
-                    size: 36.0 * s,
-                    icon: Some(crate::widgets::IconType::Warning),
-                    is_active: ide_panel.problems,
+                let btn = IconButton {
+                    x: btn_x,
+                    y: btn_y,
+                    size: btn_size,
+                    icon: Some(slot.id.icon()),
+                    is_active: slot.open,
                     icon_size: Some(22.0 * s),
                     active_square_width: Some(sb_w),
                 };
+                wants_pointer |= btn.render(self, mx, my, s, false);
+            }
 
-        btn_explorer.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-        btn_terminal.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-        btn_problems.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-    }
+            // Призрак перетаскиваемой кнопки + разделитель
+            if let Some(drag) = &ide_panel.drag {
+                if drag.threshold_passed {
+                    if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
+                        let ghost_y = (drag.current_y - btn_size / 2.0)
+                            .clamp(0.0, real_height - btn_size);
+                        let ghost = IconButton {
+                            x: btn_x,
+                            y: ghost_y,
+                            size: btn_size,
+                            icon: Some(slot.id.icon()),
+                            is_active: false,
+                            icon_size: Some(22.0 * s),
+                            active_square_width: None,
+                        };
+                        ghost.render(self, -1.0, -1.0, s, false);
+                    }
+                    // Горизонтальный разделитель посередине сайдбара
+                    let sep_y = (real_height / 2.0).round();
+                    self.push_rect(2.0 * s, sep_y - 1.0, sb_w - 4.0 * s, 2.0,
+                        [0.60, 0.35, 0.85, 0.9]);
+                }
+            }
+
+            // Левая панель (для групп Top)
+            if panel_left_w > 0.0 {
+                let panel_x = sb_w;
+                let panel_bg = [
+                    (self.theme.bg[0] + 0.02).min(1.0),
+                    (self.theme.bg[1] + 0.02).min(1.0),
+                    (self.theme.bg[2] + 0.025).min(1.0),
+                    1.0,
+                ];
+                // self.height уже уменьшен на panel_bottom_h — левая панель не заходит под нижнюю
+                self.push_rect(panel_x, 0.0, panel_left_w, self.height, panel_bg);
+                self.push_rect(panel_x + panel_left_w - 1.0, 0.0, 1.0, self.height,
+                    [1.0, 1.0, 1.0, 0.12]);
+
+                let title_h = 32.0 * s;
+                let title_bg = [
+                    (self.theme.bg[0] + 0.07).min(1.0),
+                    (self.theme.bg[1] + 0.07).min(1.0),
+                    (self.theme.bg[2] + 0.08).min(1.0),
+                    1.0,
+                ];
+                self.push_rect(panel_x, 0.0, panel_left_w, title_h, title_bg);
+
+                let open_top: Vec<_> = ide_panel.slots.iter()
+                    .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                    .collect();
+
+                if open_top.len() == 1 {
+                    let label = open_top[0].id.label();
+                    self.draw_string_scaled(label, panel_x + 12.0 * s,
+                        title_h / 2.0 + 6.0 * s, self.theme.fg, 0.9);
+                } else {
+                    let mut tx = panel_x + 6.0 * s;
+                    for (i, slot) in open_top.iter().enumerate() {
+                        let label = slot.id.label();
+                        let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
+                        if i == 0 {
+                            let act_bg = [
+                                (self.theme.bg[0] + 0.12).min(1.0),
+                                (self.theme.bg[1] + 0.12).min(1.0),
+                                (self.theme.bg[2] + 0.13).min(1.0),
+                                1.0,
+                            ];
+                            self.push_rect(tx, 0.0, tw, title_h, act_bg);
+                            self.push_rect(tx, title_h - 2.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+                        }
+                        self.draw_string_scaled(label, tx + 10.0 * s,
+                            title_h / 2.0 + 6.0 * s, self.theme.fg, 0.85);
+                        tx += tw;
+                    }
+                }
+
+                // Подсветка ручки ресайза
+                let resize_x = panel_x + panel_left_w;
+                if mx >= resize_x - 4.0 * s && mx <= resize_x + 4.0 * s
+                    && my >= 0.0 && my <= self.height
+                {
+                    self.push_rect(resize_x - 2.0, 0.0, 2.0, self.height,
+                        [0.60, 0.35, 0.85, 0.4]);
+                    wants_pointer = true;
+                }
+            }
+        }
 
         let first_len = first.len();
         let len = first_len + second.len();
@@ -953,13 +1063,84 @@ impl Renderer {
             );
         }
 
+                // Восстанавливаем полную высоту и рисуем нижние панели поверх редактора
+        self.height = real_height;
+
+        if is_ide_mode && panel_bottom_h > 0.0 {
+            let sb_w = 48.0 * s;
+            let panel_x = sb_w;
+            let panel_y = self.height - panel_bottom_h;
+            let panel_w = self.width - panel_x;
+            let panel_bg = [
+                (self.theme.bg[0] + 0.02).min(1.0),
+                (self.theme.bg[1] + 0.02).min(1.0),
+                (self.theme.bg[2] + 0.025).min(1.0),
+                1.0,
+            ];
+            // Ручка ресайза (1px линия вверху панели)
+            self.push_rect(panel_x, panel_y, panel_w, 1.0, [1.0, 1.0, 1.0, 0.15]);
+            self.push_rect(panel_x, panel_y + 1.0, panel_w, panel_bottom_h - 1.0, panel_bg);
+
+            let tab_h = 32.0 * s;
+            let tab_bar_bg = [
+                (self.theme.bg[0] + 0.07).min(1.0),
+                (self.theme.bg[1] + 0.07).min(1.0),
+                (self.theme.bg[2] + 0.08).min(1.0),
+                1.0,
+            ];
+            self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
+
+            let open_bottom: Vec<_> = ide_panel.slots.iter()
+                .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                .collect();
+            let mut tx = panel_x + 8.0 * s;
+            for (i, slot) in open_bottom.iter().enumerate() {
+                let label = slot.id.label();
+                let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
+                if i == 0 {
+                    let act_bg = [
+                        (self.theme.bg[0] + 0.12).min(1.0),
+                        (self.theme.bg[1] + 0.12).min(1.0),
+                        (self.theme.bg[2] + 0.13).min(1.0),
+                        1.0,
+                    ];
+                    self.push_rect(tx, panel_y + 1.0, tw, tab_h, act_bg);
+                    self.push_rect(tx, panel_y + tab_h - 1.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+                }
+                self.draw_string_scaled(label, tx + 10.0 * s,
+                    panel_y + 1.0 + tab_h / 2.0 + 5.5 * s, self.theme.fg, 0.9);
+                tx += tw;
+            }
+
+            // Подсветка ручки ресайза при наведении
+            let mx = self.last_mouse_x;
+            let my = self.last_mouse_y;
+            if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
+                self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
+                wants_pointer = true;
+            }
+
+            // Плейсхолдер контента
+            let content_y = panel_y + 1.0 + tab_h;
+            let content_h = panel_bottom_h - 1.0 - tab_h;
+            if content_h > 8.0 * s {
+                if let Some(slot) = open_bottom.first() {
+                    let label = slot.id.label();
+                    let lw = self.measure_ui_width(label, 0.85);
+                    let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
+                    self.draw_string_scaled(label,
+                        panel_x + (panel_w - lw) / 2.0,
+                        content_y + content_h / 2.0 + 6.0 * s, col, 0.85);
+                }
+            }
+        }
+
         if dialog_window_open {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
         self.flush();
 
-        (wants_pointer, target_sticky_lines)
-    }
+        (wants_pointer, target_sticky_lines)}
 
     fn draw_minimap(
         &mut self,
