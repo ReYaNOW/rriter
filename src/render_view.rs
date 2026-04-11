@@ -172,10 +172,14 @@ impl Renderer {
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
-            self.gl.active_texture(glow::TEXTURE0);
+                        self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl
-                .clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
+            self.gl.clear_color(
+                (self.theme.bg[0] + 0.04).min(1.0),
+                (self.theme.bg[1] + 0.04).min(1.0),
+                (self.theme.bg[2] + 0.05).min(1.0),
+                1.0,
+            );
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
