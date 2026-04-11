@@ -379,7 +379,7 @@ F8\tПоказать/скрыть счетчик FPS
         last_frame: Instant::now(),
         last_action: Instant::now(),
         last_blink_state: true,
-                modifiers: ModifiersState::empty(),
+        modifiers: ModifiersState::empty(),
         is_dragging: false,
         is_focused: true,
         current_cursor: winit::window::CursorIcon::Default,
@@ -451,7 +451,7 @@ F8\tПоказать/скрыть счетчик FPS
     );
     app.last_sent_version = app.editor.version;
 
-        if app.show_welcome {
+    if app.show_welcome {
         app.base_title = "Добро пожаловать".to_string();
     }
 

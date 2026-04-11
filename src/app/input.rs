@@ -26,7 +26,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
-                        if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
+            if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
                 let row_h = 28.0 * s;
@@ -227,7 +227,7 @@ impl App {
                 } else if btn_open.is_hovered(last_mouse_x, last_mouse_y) {
                     self.is_ide_mode = false;
                     self.trigger_file_picker();
-                                } else if btn_ide.is_hovered(last_mouse_x, last_mouse_y) {
+                } else if btn_ide.is_hovered(last_mouse_x, last_mouse_y) {
                     self.show_welcome = false;
                     self.is_ide_mode = true;
                     self.file_path = None;
@@ -267,7 +267,7 @@ impl App {
                         }
                         current_y += item_h;
                     }
-                                        if let Some(p) = selected_path {
+                    if let Some(p) = selected_path {
                         self.is_ide_mode = false;
                         self.load_file(p, true);
                     }
@@ -955,7 +955,7 @@ impl App {
                 return;
             }
 
-                        if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
                 if self.current_cursor != winit::window::CursorIcon::Pointer {
                     self.current_cursor = winit::window::CursorIcon::Pointer;
                     self.window

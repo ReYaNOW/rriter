@@ -257,7 +257,7 @@ impl Renderer {
                 }
             }
 
-                        let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").to_vec();
+            let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").to_vec();
             let inter_font_data = include_bytes!("fonts/Inter-Regular.otf").to_vec();
 
             fonts.push(FontData {
@@ -278,7 +278,7 @@ impl Renderer {
                 "/usr/share/fonts/Inter/Inter-Regular.ttf",
             ];
 
-                        let mut ui_fonts = Vec::new();
+            let mut ui_fonts = Vec::new();
 
             // Inter теперь первый в приоритете для UI
             ui_fonts.push(FontData {

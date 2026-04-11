@@ -210,7 +210,7 @@ impl App {
             Some(n) => n.clone(),
             None => return,
         };
-                if node.is_dir {
+        if node.is_dir {
             if node.is_expanded {
                 self.ide_panel.file_tree_expanded.remove(&node.path);
             } else {
@@ -242,7 +242,7 @@ impl App {
         if mx < sb_w || mx > sb_w + panel_left_w {
             return None;
         }
-                let title_h = 32.0 * s;
+        let title_h = 32.0 * s;
         if my < title_h {
             return None;
         }

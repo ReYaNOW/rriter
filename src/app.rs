@@ -187,7 +187,7 @@ pub struct App {
     pub last_action: Instant,
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
-        pub is_dragging: bool,
+    pub is_dragging: bool,
     pub is_focused: bool,
     pub current_cursor: winit::window::CursorIcon,
 
@@ -697,7 +697,7 @@ impl App {
         crate::save_recent_files(&self.recent_files);
     }
 
-        pub fn load_file(&mut self, path: PathBuf, add_to_history: bool) {
+    pub fn load_file(&mut self, path: PathBuf, add_to_history: bool) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 self.show_welcome = false;
