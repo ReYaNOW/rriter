@@ -451,8 +451,13 @@ F8\tПоказать/скрыть счетчик FPS
     );
     app.last_sent_version = app.editor.version;
 
-    if app.show_welcome {
+        if app.show_welcome {
         app.base_title = "Добро пожаловать".to_string();
+    }
+
+    if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
+        app.refresh_file_tree();
+        app.start_file_watcher();
     }
 
     event_loop.run_app(&mut app).unwrap();

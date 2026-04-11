@@ -697,11 +697,13 @@ impl App {
         crate::save_recent_files(&self.recent_files);
     }
 
-    pub fn load_file(&mut self, path: PathBuf) {
+        pub fn load_file(&mut self, path: PathBuf, add_to_history: bool) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 self.show_welcome = false;
-                self.add_recent_file(path.clone());
+                if add_to_history {
+                    self.add_recent_file(path.clone());
+                }
 
                 let old_version = self.editor.version;
                 self.editor = Editor::new(content.len() + 8192);

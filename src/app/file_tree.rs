@@ -210,7 +210,7 @@ impl App {
             Some(n) => n.clone(),
             None => return,
         };
-        if node.is_dir {
+                if node.is_dir {
             if node.is_expanded {
                 self.ide_panel.file_tree_expanded.remove(&node.path);
             } else {
@@ -218,7 +218,7 @@ impl App {
             }
             self.refresh_file_tree();
         } else {
-            self.load_file(node.path.clone());
+            self.load_file(node.path.clone(), false);
         }
     }
 

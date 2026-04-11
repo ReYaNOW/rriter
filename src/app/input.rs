@@ -227,7 +227,7 @@ impl App {
                 } else if btn_open.is_hovered(last_mouse_x, last_mouse_y) {
                     self.is_ide_mode = false;
                     self.trigger_file_picker();
-                } else if btn_ide.is_hovered(last_mouse_x, last_mouse_y) {
+                                } else if btn_ide.is_hovered(last_mouse_x, last_mouse_y) {
                     self.show_welcome = false;
                     self.is_ide_mode = true;
                     self.file_path = None;
@@ -244,6 +244,10 @@ impl App {
                         &self.base_title,
                         false,
                     );
+                    if self.ide_panel.is_open(crate::app::PanelId::Explorer) {
+                        self.refresh_file_tree();
+                        self.start_file_watcher();
+                    }
                 } else {
                     y += 80.0 * s;
                     y += 35.0 * s;
@@ -263,9 +267,9 @@ impl App {
                         }
                         current_y += item_h;
                     }
-                    if let Some(p) = selected_path {
+                                        if let Some(p) = selected_path {
                         self.is_ide_mode = false;
-                        self.load_file(p);
+                        self.load_file(p, true);
                     }
                 }
             }

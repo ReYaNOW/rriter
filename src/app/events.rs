@@ -765,11 +765,11 @@ impl ApplicationHandler for App {
             }
         }
 
-        if let Some(rx) = &self.open_file_rx {
+                if let Some(rx) = &self.open_file_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_file_rx = None;
                 if let Some(path) = result {
-                    self.load_file(path);
+                    self.load_file(path, true);
                 }
             }
         }
