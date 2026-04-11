@@ -961,7 +961,7 @@ impl Renderer {
 
         self.flush();
 
-        let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
+                let gutter_x = if is_ide_mode { 48.0 * s + panel_left_w } else { 0.0 };
         // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
         self.push_rect(
             gutter_x,
@@ -970,6 +970,16 @@ impl Renderer {
             editor_height,
             solid_minimap_bg,
         );
+        // Левая граница гаттера (отделяет IDE панель от зоны номеров строк)
+        if is_ide_mode && panel_left_w > 0.0 {
+            self.push_rect(
+                gutter_x,
+                0.0,
+                1.0,
+                editor_height,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
+            );
+        }
         // Правая граница гаттера (тонкая линия, как у Indent Guide)
         self.push_rect(
             self.left_padding - 1.0,

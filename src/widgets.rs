@@ -109,8 +109,14 @@ pub struct IconButton {
 }
 
 impl IconButton {
-    pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
-        mx >= self.x && mx <= self.x + self.size && my >= self.y && my <= self.y + self.size
+        pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
+        if let Some(sq_w) = self.active_square_width {
+            let icon_center = self.y + self.size / 2.0;
+            let sq_y = (icon_center - sq_w / 2.0).round();
+            mx >= 0.0 && mx <= sq_w && my >= sq_y && my <= sq_y + sq_w
+        } else {
+            mx >= self.x && mx <= self.x + self.size && my >= self.y && my <= self.y + self.size
+        }
     }
     pub fn render(
         &self,
@@ -155,7 +161,7 @@ impl IconButton {
         let mut draw_bg = false;
         let mut radius = 4.0 * scale;
 
-        if self.is_active {
+                if self.is_active {
             bg_color = renderer.theme.sel;
             draw_bg = true;
         } else if hovered {
@@ -170,7 +176,13 @@ impl IconButton {
         }
 
         if draw_bg {
-            renderer.push_rounded_rect(self.x, self.y, self.size, self.size, radius, bg_color);
+            if let Some(sq_w) = self.active_square_width {
+                let icon_center = self.y + self.size / 2.0;
+                let sq_y = (icon_center - sq_w / 2.0).round();
+                renderer.push_rect(0.0, sq_y, sq_w, sq_w, bg_color);
+            } else {
+                renderer.push_rounded_rect(self.x, self.y, self.size, self.size, radius, bg_color);
+            }
         }
 
         let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);

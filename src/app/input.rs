@@ -281,19 +281,54 @@ impl App {
                         let max_scroll = self.renderer.as_mut().unwrap().get_max_scroll(&self.editor, wh);
                         self.scroll_y.clamp_target(0.0, max_scroll);
                         self.scroll_y.clamp_current(0.0, max_scroll);
-                    } else {
-                        // DnD завершён — определяем новую группу по позиции
+                                        } else {
+                        // DnD завершён — определяем новую группу по позиции и сортируем
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                         let new_group = if drag.current_y < wh / 2.0 {
                             crate::app::PanelGroup::Top
                         } else {
                             crate::app::PanelGroup::Bottom
                         };
-                        if let Some(slot) = self.ide_panel.slots.iter_mut()
-                            .find(|sl| sl.id == drag.panel_id)
-                        {
-                            slot.group = new_group;
+
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let btn_size = 36.0 * s;
+                        let btn_gap = 8.0 * s;
+                        let top_start_y = 6.0 * s;
+
+                        let mut top_items = Vec::new();
+                        let mut bottom_items = Vec::new();
+                        let mut top_idx = 0;
+                        let mut bottom_idx = 0;
+
+                        // Назначаем виртуальные Y-координаты всем элементам для сортировки
+                        for mut slot in self.ide_panel.slots.drain(..) {
+                            if slot.id == drag.panel_id {
+                                slot.group = new_group.clone();
+                                if matches!(new_group, crate::app::PanelGroup::Top) {
+                                    top_items.push((drag.current_y, slot));
+                                } else {
+                                    bottom_items.push((drag.current_y, slot));
+                                }
+                            } else {
+                                if matches!(slot.group, crate::app::PanelGroup::Top) {
+                                    let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
+                                    top_items.push((y, slot));
+                                    top_idx += 1;
+                                } else {
+                                    let y = wh - 6.0 * s - btn_size - bottom_idx as f32 * (btn_size + btn_gap);
+                                    bottom_items.push((y, slot));
+                                    bottom_idx += 1;
+                                }
+                            }
                         }
+
+                        // Сортируем: для Top сверху вниз (по возрастанию Y), для Bottom снизу вверх (по убыванию Y)
+                        top_items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                        bottom_items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+                        // Собираем массив обратно
+                        self.ide_panel.slots.extend(top_items.into_iter().map(|(_, s)| s));
+                        self.ide_panel.slots.extend(bottom_items.into_iter().map(|(_, s)| s));
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
@@ -324,11 +359,9 @@ impl App {
                 let sb_w = 48.0 * s;
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                if last_mouse_x <= sb_w {
+                                if last_mouse_x <= sb_w {
                                         let btn_size = 36.0 * s;
                     let btn_gap = 8.0 * s;
-                    let btn_x_min = 6.0 * s;
-                    let btn_x_max = btn_x_min + btn_size;
                     let top_start_y = 6.0 * s;
                     let mut top_idx = 0usize;
                     let mut bottom_idx = 0usize;
@@ -345,8 +378,13 @@ impl App {
                             bottom_idx += 1;
                             y
                         };
-                        if last_mouse_x >= btn_x_min && last_mouse_x <= btn_x_max
-                            && last_mouse_y >= btn_y && last_mouse_y <= btn_y + btn_size
+
+                        let icon_center = btn_y + btn_size / 2.0;
+                        let sq_w = sb_w;
+                        let sq_y = (icon_center - sq_w / 2.0).round();
+
+                        if last_mouse_x >= 0.0 && last_mouse_x <= sq_w
+                            && last_mouse_y >= sq_y && last_mouse_y <= sq_y + sq_w
                         {
                             hit_id = Some(slot.id);
                             break;

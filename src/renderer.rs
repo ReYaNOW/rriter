@@ -875,15 +875,22 @@ impl Renderer {
                 // GPU Mipmaps аппаратно сожмут её до нужного размера без "мыла" и "лесенок".
                 let target_size = 256.0;
 
-                let scale = if size.width() > size.height() {
+                                let scale = if size.width() > size.height() {
                     target_size / size.width()
                 } else {
                     target_size / size.height()
                 };
-                let width = (size.width() * scale).ceil() as u32;
-                let height = (size.height() * scale).ceil() as u32;
+                let scaled_w = size.width() * scale;
+                let scaled_h = size.height() * scale;
+                let width = target_size as u32;
+                let height = target_size as u32;
                 if let Some(mut pixmap) = tiny_skia::Pixmap::new(width, height) {
-                    let transform = tiny_skia::Transform::from_scale(scale, scale);
+                    // Динамически центрируем SVG на основе его параметров ширины/высоты,
+                    // чтобы текстура всегда была идеальным квадратом. Это предотвратит
+                    // растягивание иконок и смещение фонового круга при наведении.
+                    let dx = (target_size - scaled_w) / 2.0;
+                    let dy = (target_size - scaled_h) / 2.0;
+                    let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
                     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
                     let mut data = pixmap.data().to_vec();
