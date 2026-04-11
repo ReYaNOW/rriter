@@ -951,11 +951,14 @@ impl App {
                 return;
             }
 
-            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                self.window
-                    .as_ref()
-                    .unwrap()
-                    .set_cursor(winit::window::CursorIcon::Pointer);
+                        if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+                if self.current_cursor != winit::window::CursorIcon::Pointer {
+                    self.current_cursor = winit::window::CursorIcon::Pointer;
+                    self.window
+                        .as_ref()
+                        .unwrap()
+                        .set_cursor(winit::window::CursorIcon::Pointer);
+                }
 
                 let scroll_x = rx + rw - 14.0 * s;
                 if px < scroll_x {

@@ -187,8 +187,9 @@ pub struct App {
     pub last_action: Instant,
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
-    pub is_dragging: bool,
+        pub is_dragging: bool,
     pub is_focused: bool,
+    pub current_cursor: winit::window::CursorIcon,
 
     pub show_fps: bool,
     pub window_width: f64,

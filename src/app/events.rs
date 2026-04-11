@@ -551,11 +551,14 @@ impl ApplicationHandler for App {
                     } else {
                         winit::window::CursorIcon::Default
                     }
-                } else {
+                                } else {
                     winit::window::CursorIcon::Default
                 };
 
-                self.window.as_ref().unwrap().set_cursor(cursor_icon);
+                if self.current_cursor != cursor_icon {
+                    self.current_cursor = cursor_icon;
+                    self.window.as_ref().unwrap().set_cursor(cursor_icon);
+                }
 
                 gl_surface.swap_buffers(gl_context).unwrap();
             }

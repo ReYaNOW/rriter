@@ -379,9 +379,10 @@ F8\tПоказать/скрыть счетчик FPS
         last_frame: Instant::now(),
         last_action: Instant::now(),
         last_blink_state: true,
-        modifiers: ModifiersState::empty(),
+                modifiers: ModifiersState::empty(),
         is_dragging: false,
         is_focused: true,
+        current_cursor: winit::window::CursorIcon::Default,
 
         show_fps: false,
         window_width: config.window_width,
