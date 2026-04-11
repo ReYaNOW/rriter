@@ -727,9 +727,9 @@ impl Renderer {
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
-        if active_tab == 0 {
+                if active_tab == 0 {
             self.draw_string_scaled(
-                "Рабочие области (Воркспэйсы)",
+                "Рабочие области",
                 content_x,
                 content_y,
                 [0.8, 0.8, 0.8, 1.0],
@@ -739,29 +739,46 @@ impl Renderer {
 
             for path in ide_workspaces {
                 let path_str = path.to_string_lossy();
-                self.draw_string_scaled(
-                    &path_str,
-                    content_x,
-                    content_y + 18.0 * s,
-                    [0.9, 0.9, 0.9, 1.0],
-                    1.0,
+                let item_w = 460.0 * s;
+                let item_h = 36.0 * s;
+
+                self.push_rounded_rect(
+                    content_x - 1.0,
+                    content_y - 1.0,
+                    item_w + 2.0,
+                    item_h + 2.0,
+                    6.0 * s,
+                    [0.306, 0.318, 0.341, 1.0],
                 );
                 self.push_rounded_rect(
-                    content_x + 300.0 * s,
+                    content_x,
                     content_y,
-                    30.0 * s,
-                    24.0 * s,
-                    4.0 * s,
-                    [0.8, 0.3, 0.3, 1.0],
+                    item_w,
+                    item_h,
+                    6.0 * s,
+                    [0.224, 0.231, 0.251, 1.0],
                 );
+
                 self.draw_string_scaled(
-                    "-",
-                    content_x + 310.0 * s,
-                    content_y + 18.0 * s,
-                    [1.0, 1.0, 1.0, 1.0],
-                    1.2,
+                    &path_str,
+                    content_x + 14.0 * s,
+                    content_y + 24.0 * s,
+                    [0.9, 0.9, 0.9, 1.0],
+                    0.95,
                 );
-                content_y += 34.0 * s;
+
+                let btn_del = crate::widgets::IconButton {
+                    x: content_x + item_w - 34.0 * s,
+                    y: content_y + 3.0 * s,
+                    size: 30.0 * s,
+                    icon: Some(crate::widgets::IconType::Discard),
+                    is_active: false,
+                    icon_size: Some(18.0 * s),
+                    active_square_width: None,
+                };
+                wants_pointer |= btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
+                content_y += 46.0 * s;
             }
 
             let btn_add = crate::widgets::Button {

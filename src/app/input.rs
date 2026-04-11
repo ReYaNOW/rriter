@@ -120,13 +120,18 @@ impl App {
                             }
                             tab_y += 40.0 * s;
                         }
-                    } else if self.settings_tab == 0 {
-                        let mut loop_btn_y = iy + 86.0 * s;
+                                                            } else if self.settings_tab == 0 {
+                        let mut current_y = iy + 126.0 * s;
                         for (idx, _path) in self.ide_workspaces.clone().iter().enumerate() {
-                            if mx >= ix + sidebar_w + 30.0 * s + 300.0 * s
-                                && mx <= ix + sidebar_w + 30.0 * s + 330.0 * s
-                                && my >= loop_btn_y
-                                && my <= loop_btn_y + 24.0 * s
+                            let item_w = 460.0 * s;
+                            let btn_x = ix + sidebar_w + 30.0 * s + item_w - 34.0 * s;
+                            let btn_y = current_y + 3.0 * s;
+                            let btn_size = 30.0 * s;
+
+                            if mx >= btn_x
+                                && mx <= btn_x + btn_size
+                                && my >= btn_y
+                                && my <= btn_y + btn_size
                             {
                                 self.ide_workspaces.remove(idx);
                                 let w = self.window.as_ref().unwrap();
@@ -139,10 +144,10 @@ impl App {
                                 });
                                 break;
                             }
-                            loop_btn_y += 34.0 * s;
+                            current_y += 46.0 * s;
                         }
 
-                        let add_btn_y = iy + 86.0 * s + self.ide_workspaces.len() as f32 * 34.0 * s;
+                        let add_btn_y = iy + 126.0 * s + self.ide_workspaces.len() as f32 * 46.0 * s;
                         if mx >= ix + sidebar_w + 30.0 * s
                             && mx <= ix + sidebar_w + 30.0 * s + 190.0 * s
                             && my >= add_btn_y
