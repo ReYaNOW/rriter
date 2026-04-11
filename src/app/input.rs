@@ -26,10 +26,10 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
-            if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
+                        if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
-                let row_h = 22.0 * s;
+                let row_h = 28.0 * s;
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let total_h = self.ide_panel.file_tree_nodes.len() as f32 * row_h;
                 let max_scroll = (total_h - (wh - title_h)).max(0.0);

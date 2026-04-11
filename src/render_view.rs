@@ -380,22 +380,23 @@ impl Renderer {
                         );
                     }
 
-                    let row_h = 22.0 * s;
+                    let row_h = 28.0 * s;
                     let indent_w = 12.0 * s;
                     let scroll = ide_panel.explorer_scroll.current.round();
                     let content_h = editor_height - title_h;
                     let total_nodes = ide_panel.file_tree_nodes.len();
 
+                    let tree_text_scale = 17.0 / 18.0;
                     if total_nodes == 0 {
                         let hint = "Нет папок в проекте";
-                        let tw = self.measure_ui_width(hint, 0.8);
+                        let tw = self.measure_ui_width(hint, tree_text_scale);
                         let tx = panel_x + (panel_left_w - tw) / 2.0;
                         self.draw_string_scaled(
                             hint,
                             tx,
                             title_h + 30.0 * s,
                             [0.45, 0.45, 0.45, 1.0],
-                            0.8,
+                            tree_text_scale,
                         );
                     } else {
                         let first_vis = (scroll / row_h).floor() as usize;
@@ -450,7 +451,7 @@ impl Renderer {
                                     indent_x + 12.0 * s,
                                     text_y,
                                     color,
-                                    0.85,
+                                    tree_text_scale,
                                 );
                             } else {
                                 self.draw_string_scaled(
@@ -458,7 +459,7 @@ impl Renderer {
                                     indent_x + 4.0 * s,
                                     text_y,
                                     color,
-                                    0.85,
+                                    tree_text_scale,
                                 );
                             }
                         }

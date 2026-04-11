@@ -242,11 +242,11 @@ impl App {
         if mx < sb_w || mx > sb_w + panel_left_w {
             return None;
         }
-        let title_h = 32.0 * s;
+                let title_h = 32.0 * s;
         if my < title_h {
             return None;
         }
-        let row_h = 22.0 * s;
+        let row_h = 28.0 * s;
         let content_y = my - title_h + self.ide_panel.explorer_scroll.current;
         if content_y < 0.0 {
             return None;
