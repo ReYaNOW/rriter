@@ -267,13 +267,13 @@ impl Renderer {
                 }
             }
 
-                        // Левая панель (для групп Top)
+                                                            // Левая панель (для групп Top)
             if panel_left_w > 0.0 {
                 let panel_x = sb_w;
                 let panel_bg = [
-                    (self.theme.bg[0] + 0.02).min(1.0),
-                    (self.theme.bg[1] + 0.02).min(1.0),
-                    (self.theme.bg[2] + 0.025).min(1.0),
+                    0.129, // #21
+                    0.133, // #22
+                    0.173, // #2c
                     1.0,
                 ];
                 // Левая панель не заходит под нижнюю — используем editor_height
@@ -924,14 +924,14 @@ impl Renderer {
 
         self.flush();
 
-                    let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
+                                        let gutter_x = if is_ide_mode { 48.0 * s } else { 0.0 };
     // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
     self.push_rect(
         gutter_x,
         0.0,
         self.left_padding - gutter_x,
         editor_height,
-        self.theme.bg,
+        solid_minimap_bg,
     );
     // Правая граница гаттера (тонкая линия, как у Indent Guide)
     self.push_rect(
