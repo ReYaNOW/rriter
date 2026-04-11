@@ -172,12 +172,12 @@ impl Renderer {
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
             self.gl.use_program(Some(self.program));
-                        self.gl.active_texture(glow::TEXTURE0);
+                                    self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             self.gl.clear_color(
-                (self.theme.bg[0] + 0.04).min(1.0),
-                (self.theme.bg[1] + 0.04).min(1.0),
-                (self.theme.bg[2] + 0.05).min(1.0),
+                0.173, // #2c
+                0.180, // #2e
+                0.224, // #39
                 1.0,
             );
             self.gl.clear(glow::COLOR_BUFFER_BIT);
@@ -188,15 +188,14 @@ impl Renderer {
         let (first, second) = editor.text_parts();
 
                         if is_ide_mode {
-            let sb_w = 48.0 * s;
+                        let sb_w = 48.0 * s;
             let sidebar_bg = [
-                (self.theme.bg[0] + 0.04).min(1.0),
-                (self.theme.bg[1] + 0.04).min(1.0),
-                (self.theme.bg[2] + 0.05).min(1.0),
+                0.173, // #2c
+                0.180, // #2e
+                0.224, // #39
                 1.0,
             ];
-            // Сайдбар рисуется на полную высоту окна (real_height)
-            self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
+            // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
             self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
             let btn_size = 36.0 * s;
