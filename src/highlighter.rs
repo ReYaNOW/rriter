@@ -187,9 +187,9 @@ impl Highlighter {
         )>();
 
         thread::spawn(move || {
-            let mut syntect_assets: Option<(
+                        let mut syntect_assets: Option<(
                 syntect::parsing::SyntaxSet,
-                syntect::highlighting::ThemeSet,
+                syntect::highlighting::Theme,
             )> = None;
 
             let mut parser = tree_sitter::Parser::new();
@@ -895,15 +895,16 @@ impl Highlighter {
                         }
                     }
 
-                    if !used_ts {
-                        if syntect_assets.is_none() {
+                                        if !used_ts && !lang_name.is_empty() {
+                                                if syntect_assets.is_none() {
                             let ps = syntect::parsing::SyntaxSet::load_defaults_newlines();
                             let ts = syntect::highlighting::ThemeSet::load_defaults();
-                            syntect_assets = Some((ps, ts));
+                            let mut theme = ts.themes["base16-ocean.dark"].clone();
+                            theme.scopes = dracula_syntect_scopes();
+                            syntect_assets = Some((ps, theme));
                         }
 
-                        if let Some((ps, ts)) = syntect_assets.as_ref() {
-                            let fallback_theme = &ts.themes["base16-ocean.dark"];
+                        if let Some((ps, theme)) = syntect_assets.as_ref() {
                             let syntax = ps.find_syntax_by_extension(&actual_ext).or_else(|| {
                                 if actual_ext == "toml" {
                                     ps.find_syntax_by_extension("ini")
@@ -912,9 +913,9 @@ impl Highlighter {
                                 }
                             });
 
-                            if let Some(syntax) = syntax {
+                                                        if let Some(syntax) = syntax {
                                 let mut h =
-                                    syntect::easy::HighlightLines::new(syntax, fallback_theme);
+                                    syntect::easy::HighlightLines::new(syntax, theme);
                                 let mut byte_offset = 0;
                                 for line in syntect::util::LinesWithEndings::from(text.as_str()) {
                                     if let Ok(ranges) = h.highlight_line(line, &ps) {
@@ -942,7 +943,7 @@ impl Highlighter {
                     }
                 }
 
-                let apply_rainbow_brackets = lang_name != "bash";
+                                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
                 let flat_spans = flatten_spans(
                     spans,
@@ -1288,6 +1289,64 @@ impl Highlighter {
         }
         self.spans.retain(|s| s.start < s.end);
     }
+}
+
+fn dracula_syntect_scopes() -> Vec<syntect::highlighting::ThemeItem> {
+    use std::str::FromStr;
+    use syntect::highlighting::{Color, ScopeSelectors, StyleModifier, ThemeItem};
+
+    fn c(r: u8, g: u8, b: u8) -> Color {
+        Color { r, g, b, a: 255 }
+    }
+    fn item(scope: &str, r: u8, g: u8, b: u8) -> ThemeItem {
+        ThemeItem {
+            scope: ScopeSelectors::from_str(scope).unwrap_or_default(),
+            style: StyleModifier {
+                foreground: Some(c(r, g, b)),
+                background: None,
+                font_style: None,
+            },
+        }
+    }
+
+    vec![
+        // comment → #6272a4
+        item("comment", 98, 114, 164),
+        // string → #f1fa8c
+        item("string", 241, 250, 140),
+        // constant (числа, true/false, nil/null) → #bd93f9
+        item("constant.numeric", 189, 147, 249),
+        item("constant.language", 189, 147, 249),
+        item("constant.character", 189, 147, 249),
+        item("constant", 189, 147, 249),
+        // keyword, storage → #ff79c6
+        item("keyword", 255, 121, 198),
+        item("storage.type", 255, 121, 198),
+        item("storage.modifier", 255, 121, 198),
+        item("storage", 255, 121, 198),
+        // функции → #50fa7b
+        item("entity.name.function", 80, 250, 123),
+        item("meta.function-call.generic", 80, 250, 123),
+        item("support.function", 80, 250, 123),
+        // типы, классы → #8be9fd
+        item("entity.name.class", 139, 233, 253),
+        item("entity.name.type", 139, 233, 253),
+        item("entity.name.struct", 139, 233, 253),
+        item("entity.name.trait", 139, 233, 253),
+        item("entity.name.enum", 139, 233, 253),
+        item("support.type", 139, 233, 253),
+        item("support.class", 139, 233, 253),
+        // параметры → #ffb86c
+        item("variable.parameter", 255, 184, 108),
+        // self/this → #bd93f9
+        item("variable.language", 189, 147, 249),
+        // остальные переменные и пунктуация → #f8f8f2
+        item("variable", 248, 248, 242),
+        item("punctuation", 248, 248, 242),
+        item("meta.brace", 248, 248, 242),
+        // invalid → #ff5555
+        item("invalid", 255, 85, 85),
+    ]
 }
 
 fn get_bracket_color(depth: usize) -> [f32; 4] {
