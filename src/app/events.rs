@@ -612,7 +612,14 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.scroll_x.update(dt) {
+                if self.scroll_x.update(dt) {
+            needs_redraw = true;
+        }
+
+        if self.poll_file_tree() {
+            needs_redraw = true;
+        }
+        if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
         }
 
@@ -716,8 +723,10 @@ impl ApplicationHandler for App {
         if let Some(rx) = &self.open_folder_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_folder_rx = None;
-                if let Some(path) = result {
-                    self.ide_workspaces.push(path);
+                                if let Some(path) = result {
+                    self.ide_workspaces.push(path.clone());
+                    self.ide_panel.file_tree_expanded.insert(path.clone());
+                    self.refresh_file_tree();
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {

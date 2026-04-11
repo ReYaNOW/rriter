@@ -366,7 +366,86 @@ impl Renderer {
                         editor_height,
                         [0.60, 0.35, 0.85, 0.4],
                     );
-                    // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
+                                        // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
+                }
+
+                // --- Дерево файлов проводника ---
+                if ide_panel.is_open(crate::app::PanelId::Explorer) {
+                    self.flush();
+                    unsafe {
+                        self.gl.enable(glow::SCISSOR_TEST);
+                        self.gl.scissor(
+                            panel_x as i32,
+                            0,
+                            panel_left_w as i32,
+                            (editor_height - title_h) as i32,
+                        );
+                    }
+
+                    let row_h = 22.0 * s;
+                    let indent_w = 12.0 * s;
+                    let scroll = ide_panel.explorer_scroll.current.round();
+                    let content_h = editor_height - title_h;
+                    let total_nodes = ide_panel.file_tree_nodes.len();
+
+                    if total_nodes == 0 {
+                        let hint = "Нет папок в проекте";
+                        let tw = self.measure_ui_width(hint, 0.8);
+                        let tx = panel_x + (panel_left_w - tw) / 2.0;
+                        self.draw_string_scaled(hint, tx, title_h + 30.0 * s, [0.45, 0.45, 0.45, 1.0], 0.8);
+                    } else {
+                        let first_vis = (scroll / row_h).floor() as usize;
+                        let last_vis = (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+
+                        for i in first_vis..last_vis {
+                            let node = &ide_panel.file_tree_nodes[i];
+                            let row_y = title_h + i as f32 * row_h - scroll;
+
+                            if ide_panel.file_tree_hovered_idx == Some(i) {
+                                self.push_rect(panel_x, row_y, panel_left_w, row_h, [1.0, 1.0, 1.0, 0.06]);
+                            }
+
+                            let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                            let text_y = row_y + row_h / 2.0 + 5.5 * s;
+                            let color: [f32; 4] = if node.is_dir { [0.78, 0.68, 1.0, 1.0] } else { self.theme.fg };
+
+                            if node.is_dir {
+                                // Индикатор раскрытия: горизонт — раскрыто, вертикаль — закрыто
+                                let arrow_cx = indent_x + 4.0 * s;
+                                let arrow_cy = row_y + row_h / 2.0;
+                                if node.is_expanded {
+                                    self.push_rect(arrow_cx - 3.5 * s, arrow_cy - 1.0, 7.0 * s, 2.0, [0.78, 0.68, 1.0, 0.75]);
+                                } else {
+                                    self.push_rect(arrow_cx - 1.0, arrow_cy - 3.5 * s, 2.0, 7.0 * s, [0.78, 0.68, 1.0, 0.75]);
+                                }
+                                self.draw_string_scaled(&node.name, indent_x + 12.0 * s, text_y, color, 0.85);
+                            } else {
+                                self.draw_string_scaled(&node.name, indent_x + 4.0 * s, text_y, color, 0.85);
+                            }
+                        }
+
+                        // Тонкий скроллбар
+                        let total_h = total_nodes as f32 * row_h;
+                        if total_h > content_h {
+                            let max_s = (total_h - content_h).max(1.0);
+                            let ratio = (scroll / max_s).clamp(0.0, 1.0);
+                            let thumb_h = (content_h / total_h * (content_h - 8.0 * s)).max(20.0 * s);
+                            let thumb_y = title_h + 4.0 * s + ratio * (content_h - 8.0 * s - thumb_h);
+                            self.push_rounded_rect(
+                                panel_x + panel_left_w - 5.0 * s,
+                                thumb_y,
+                                3.0 * s,
+                                thumb_h,
+                                1.5 * s,
+                                [1.0, 1.0, 1.0, 0.22],
+                            );
+                        }
+                    }
+
+                    self.flush();
+                    unsafe {
+                        self.gl.disable(glow::SCISSOR_TEST);
+                    }
                 }
             }
         }

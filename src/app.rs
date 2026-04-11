@@ -1,4 +1,5 @@
 pub mod events;
+pub mod file_tree;
 pub mod input;
 
 use crate::editor::Editor;
@@ -8,7 +9,7 @@ use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
 use glutin::display::GetGlDisplay;
 use glutin::surface::{Surface, WindowSurface};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
@@ -75,6 +76,10 @@ pub struct IdePanelState {
     pub drag: Option<PanelDragState>,
     pub is_resizing_left: bool,
     pub is_resizing_bottom: bool,
+    pub file_tree_nodes: Vec<crate::app::file_tree::FileNode>,
+    pub file_tree_expanded: FxHashSet<std::path::PathBuf>,
+    pub explorer_scroll: crate::scroll::ScrollState,
+    pub file_tree_hovered_idx: Option<usize>,
 }
 
 impl Default for IdePanelState {
@@ -85,11 +90,15 @@ impl Default for IdePanelState {
                 PanelSlot { id: PanelId::Terminal, group: PanelGroup::Bottom, open: false },
                 PanelSlot { id: PanelId::Problems, group: PanelGroup::Bottom, open: false },
             ],
-            left_width: 240.0,
+                        left_width: 240.0,
             bottom_height: 180.0,
             drag: None,
             is_resizing_left: false,
             is_resizing_bottom: false,
+            file_tree_nodes: Vec::new(),
+            file_tree_expanded: FxHashSet::default(),
+            explorer_scroll: crate::scroll::ScrollState::new(15.0),
+            file_tree_hovered_idx: None,
         }
     }
 }
@@ -211,12 +220,13 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-            pub show_settings: bool,
+                        pub show_settings: bool,
             pub settings_anim_progress: f32,
             pub settings_y: f32,
             pub settings_tab: usize,
 
             pub ide_panel: IdePanelState,
+            pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
         }
 
 impl App {

@@ -423,7 +423,8 @@ F8\tПоказать/скрыть счетчик FPS
         settings_y: 10000.0,
         settings_tab: 0,
 
-                ide_panel: crate::load_panel_state(),
+                                ide_panel: crate::load_panel_state(),
+        file_tree_rx: None,
     };
 
     app.highlighter.reset(

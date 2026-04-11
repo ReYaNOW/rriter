@@ -18,6 +18,27 @@ impl App {
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
 
+                // Скролл в области проводника файлов — перехватываем до всего остального
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let sb_w = 48.0 * s;
+            let panel_left_w = self.ide_panel.left_width * s;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let title_h = 32.0 * s;
+            if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
+                self.ide_panel.explorer_scroll.anim_speed = 7.0;
+                self.ide_panel.explorer_scroll.scroll_by(dy);
+                let row_h = 22.0 * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let total_h = self.ide_panel.file_tree_nodes.len() as f32 * row_h;
+                let max_scroll = (total_h - (wh - title_h)).max(0.0);
+                self.ide_panel.explorer_scroll.clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.autocomplete_active && self.autocomplete_rect.is_some() {
             let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
@@ -265,7 +286,11 @@ impl App {
                             let slot = self.ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id);
                             slot.map(|s| s.group.clone())
                         };
-                        self.ide_panel.toggle(drag.panel_id);
+                                                self.ide_panel.toggle(drag.panel_id);
+                        // При открытии Explorer — запускаем скан файлов
+                        if toggled_open && drag.panel_id == crate::app::PanelId::Explorer {
+                            self.refresh_file_tree();
+                        }
                         // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
                         if toggled_open {
                             if let Some(group) = toggled_group {
@@ -426,7 +451,7 @@ impl App {
                         return;
                     }
                 }
-                if panel_bottom_h > 0.0 {
+                                if panel_bottom_h > 0.0 {
                     let resize_y = wh - panel_bottom_h;
                     if (last_mouse_y - resize_y).abs() < 6.0 * s
                         && last_mouse_x >= sb_w
@@ -434,6 +459,22 @@ impl App {
                         self.ide_panel.is_resizing_bottom = true;
                         self.window.as_ref().unwrap().request_redraw();
                         return;
+                    }
+                }
+
+                // Клик в дереве файлов проводника
+                if self.ide_panel.is_open(crate::app::PanelId::Explorer) {
+                    let panel_left_w = if self.ide_panel.any_top_open() {
+                        self.ide_panel.left_width * s
+                    } else {
+                        0.0
+                    };
+                    if last_mouse_x >= sb_w && last_mouse_x <= sb_w + panel_left_w {
+                        if let Some(idx) = self.file_tree_node_at(last_mouse_x, last_mouse_y) {
+                            self.handle_file_tree_click(idx);
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
                     }
                 }
             }
@@ -937,12 +978,21 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.is_resizing_bottom {
+                        if self.ide_panel.is_resizing_bottom {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let new_h = ((wh - py) / s).max(60.0).min(500.0);
                 self.ide_panel.bottom_height = new_h;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
+            }
+        }
+
+        // Hover над узлами дерева файлов
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
+            let new_hover = self.file_tree_node_at(position.x as f32, position.y as f32);
+            if new_hover != self.ide_panel.file_tree_hovered_idx {
+                self.ide_panel.file_tree_hovered_idx = new_hover;
+                self.window.as_ref().unwrap().request_redraw();
             }
         }
 
