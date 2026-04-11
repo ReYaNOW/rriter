@@ -117,10 +117,10 @@ impl Renderer {
         } else {
             0.0
         };
-        let real_height = self.height;
-        // НЕ мутируем self.height глобально — это ломает матрицу проекции flush().
-        // Вместо этого используем editor_height как локальную "рабочую" высоту редактора.
-        let editor_height = real_height - panel_bottom_h;
+                let real_height = self.height;
+        // Нижняя панель полупрозрачная, поэтому текст, скролл и мини-карта
+        // рендерятся на всю высоту окна, проходя ПОД панелью без сжатия.
+        let editor_height = real_height;
 
         let target_minimap_w = 119.0 * s;
 
@@ -1035,10 +1035,8 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
+                        self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
 
-        // Временно подменяем self.height для draw_minimap (он использует self.height для расчётов)
-        self.height = editor_height;
         self.draw_minimap(
             editor,
             spans,
@@ -1047,7 +1045,6 @@ impl Renderer {
             total_lines,
             visible_cursor_line,
         );
-        self.height = real_height;
 
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
@@ -1223,12 +1220,12 @@ impl Renderer {
         (wants_pointer, target_sticky_lines)
     }
 
-    fn draw_minimap(
+        fn draw_minimap(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
         render_scroll_y: f32,
-        max_scroll: f32,
+                max_scroll: f32,
         total_lines: usize,
         visible_cursor_line: usize,
     ) {
@@ -1241,13 +1238,42 @@ impl Renderer {
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
-        let minimap_line_h = (self.height / (total_lines_f32 + 2.0))
+
+                let minimap_line_h = (self.height / (total_lines_f32 + 2.0).max(200.0))
             .max(self.height / 1250.0)
             .max(1.5);
+
         let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - self.height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
-        let map_bg = self.theme.minimap_bg;
+        let current_visible_top_line = render_scroll_y / self.line_height;
+        let viewport_y =
+            (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
+        let visible_lines = self.height / self.line_height;
+        let max_viewport_lines = visible_lines.min(total_lines_f32 + 2.0);
+        let viewport_h = (max_viewport_lines * minimap_line_h).max(4.0);
+
+        let view_bg = [
+            self.theme.sel[0],
+            self.theme.sel[1],
+            self.theme.sel[2],
+            0.15,
+        ];
+        let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+
+        self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
+        self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
+        self.push_rect(
+            minimap_x,
+            viewport_y + viewport_h - 2.0,
+            minimap_w,
+            2.0,
+            view_border,
+        );
+        self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
+        self.flush();
+
+                        let map_bg = self.theme.minimap_bg;
         let mut current_y: f32 = 0.0;
         let mut phys_line = 0;
         let rect_h = minimap_line_h.ceil().max(1.0);
@@ -1416,9 +1442,9 @@ impl Renderer {
             phys_line += 1;
         }
 
-        self.flush();
+                self.flush();
 
-        let y_cursor = visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll;
+        let y_cursor = (visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll).round();
         self.push_rect(
             minimap_x,
             y_cursor,
@@ -1426,31 +1452,6 @@ impl Renderer {
             2.0,
             self.theme.minimap_cursor,
         );
-
-        let current_visible_top_line = render_scroll_y / self.line_height;
-        let viewport_y =
-            (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
-        let visible_lines = self.height / self.line_height;
-        let viewport_h = (visible_lines * minimap_line_h).max(4.0);
-
-        let view_bg = [
-            self.theme.sel[0],
-            self.theme.sel[1],
-            self.theme.sel[2],
-            0.15,
-        ];
-        let view_border = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
-
-        self.push_rect(minimap_x, viewport_y, minimap_w, viewport_h, view_bg);
-        self.push_rect(minimap_x, viewport_y, minimap_w, 2.0, view_border);
-        self.push_rect(
-            minimap_x,
-            viewport_y + viewport_h - 2.0,
-            minimap_w,
-            2.0,
-            view_border,
-        );
-        self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
     }
 
     fn draw_sticky_lines(
