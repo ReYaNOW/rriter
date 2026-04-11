@@ -1096,25 +1096,24 @@ impl Renderer {
             let sb_w = 48.0 * s;
             let panel_x = sb_w;
             let panel_y = self.height - panel_bottom_h;
-            let panel_w = self.width - panel_x;
-                        let panel_bg = [
-                (self.theme.bg[0] + 0.02).min(1.0),
-                (self.theme.bg[1] + 0.02).min(1.0),
-                (self.theme.bg[2] + 0.025).min(1.0),
+                                    let panel_w = self.width - panel_x;
+            let panel_bg = [
+                0.129, // #21
+                0.133, // #22
+                0.173, // #2c
                 0.5,
             ];
-            // Ручка ресайза (1px линия вверху панели)
-            self.push_rect(panel_x, panel_y, panel_w, 1.0, [1.0, 1.0, 1.0, 0.15]);
+            // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0, [1.0, 1.0, 1.0, 0.15]);
             self.push_rect(panel_x, panel_y + 1.0, panel_w, panel_bottom_h - 1.0, panel_bg);
 
-            let tab_h = 32.0 * s;
-            let tab_bar_bg = [
-                (self.theme.bg[0] + 0.07).min(1.0),
-                (self.theme.bg[1] + 0.07).min(1.0),
-                (self.theme.bg[2] + 0.08).min(1.0),
-                0.5,
-            ];
-            self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
+                        let tab_h = 32.0 * s;
+                        let tab_bar_bg = [
+                            (self.theme.bg[0] + 0.07).min(1.0),
+                            (self.theme.bg[1] + 0.07).min(1.0),
+                            (self.theme.bg[2] + 0.08).min(1.0),
+                            0.5,
+                        ];
+                        self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
             let open_bottom: Vec<_> = ide_panel.slots.iter()
                 .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
