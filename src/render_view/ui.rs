@@ -669,7 +669,7 @@ impl Renderer {
         wants_pointer
     }
 
-                    pub fn draw_settings(
+                        pub fn draw_settings(
         &mut self,
         anim_progress: f32,
         active_tab: usize,
@@ -677,10 +677,9 @@ impl Renderer {
         scroll_y: f32,
         ide_workspaces: &[std::path::PathBuf],
         ide_ignore_patterns: &[String],
-        settings_ignore_input: &str,
+        settings_ignore_editor: &Editor,
         settings_ignore_focused: bool,
-        settings_ignore_cursor: usize,
-        settings_ignore_select_all: bool,
+        settings_ignore_scroll_x: &mut f32,
         ide_scroll_y: f32,
         blink_alpha: f32,
     ) -> u8 {
@@ -946,13 +945,11 @@ impl Renderer {
             
 
                         // ── Поле ввода + кнопка «Добавить» ───────────────────────────
-                        let input_w = 330.0 * s;
-            let input_h = 34.0 * s;
-            let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
-            let pad_input = 12.0 * s;
-            let max_text_w = input_w - pad_input * 2.0;
+                                                    let input_w = 330.0 * s;
+                                        let input_h = 34.0 * s;
+                                        let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
-                        let input_hovered = self.last_mouse_x >= content_x
+                                                    let input_hovered = self.last_mouse_x >= content_x
                 && self.last_mouse_x <= content_x + input_w
                 && self.last_mouse_y >= content_y
                 && self.last_mouse_y <= content_y + input_h;
@@ -976,105 +973,107 @@ impl Renderer {
                 6.0 * s, [0.11, 0.12, 0.16, 1.0],
             );
 
-                                    let text_y_mid = (content_y + input_h * 0.70).round();
-            let start_x = (content_x + pad_input).round();
+                                                let text_y_mid = (content_y + input_h * 0.70).round();
+            let start_x = (content_x + 8.0 * s).round();
+            let full_text = settings_ignore_editor.get_full_text();
 
-            if settings_ignore_input.is_empty() {
+            if full_text.is_empty() {
                 self.draw_string_scaled(
-                    "Паттерн или имя файла...",
+                                        "Паттерн или имя файла...",
                     start_x, text_y_mid,
                     [0.30, 0.32, 0.40, 1.0], text_scale_input,
                 );
-                // Мигающий курсор в пустом поле
-                if settings_ignore_focused {
+                if settings_ignore_focused && blink_alpha > 0.5 {
                     self.push_rect(
                         start_x, (content_y + 6.0 * s).round(),
                         (1.5 * s).max(1.0), input_h - 12.0 * s,
-                        [0.75, 0.45, 1.0, blink_alpha],
+                        [0.75, 0.45, 1.0, 1.0],
                     );
                 }
             } else {
-                // Вычисляем ширину текста до курсора
-                let cursor_byte = settings_ignore_cursor.min(settings_ignore_input.len());
-                let pre_cursor_str = &settings_ignore_input[..cursor_byte];
-                let pre_w = self.measure_ui_width(pre_cursor_str, text_scale_input);
-                let ellipsis_w = self.measure_ui_width("…", text_scale_input);
+                let mut cursor_total_x = 0.0;
+                let mut total_text_width = 0.0;
+                for (byte_idx, c) in full_text.char_indices() {
+                    let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * text_scale_input;
+                    if byte_idx < settings_ignore_editor.cursor {
+                        cursor_total_x += adv;
+                    }
+                    total_text_width += adv;
+                }
 
-                // Выделение «всё выделено» (Ctrl+A)
-                if settings_ignore_select_all {
-                    let sel_text_w = self.measure_ui_width(settings_ignore_input, text_scale_input).min(max_text_w);
-                    self.push_rounded_rect(
-                        start_x, (content_y + 4.0 * s).round(),
-                        sel_text_w, input_h - 8.0 * s,
-                        3.0 * s, [0.55, 0.35, 0.80, 0.30],
+                let max_text_w_exact = input_w - 16.0 * s;
+                if cursor_total_x - *settings_ignore_scroll_x > max_text_w_exact {
+                    *settings_ignore_scroll_x = cursor_total_x - max_text_w_exact;
+                }
+                if cursor_total_x - *settings_ignore_scroll_x < 0.0 {
+                    *settings_ignore_scroll_x = cursor_total_x;
+                }
+                *settings_ignore_scroll_x = (*settings_ignore_scroll_x).min((total_text_width - max_text_w_exact).max(0.0)).max(0.0);
+
+                self.flush();
+                unsafe {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    let scissor_y = self.height - (content_y + input_h);
+                    self.gl.scissor(
+                        content_x.round() as i32,
+                        scissor_y.round() as i32,
+                        input_w.round() as i32,
+                        input_h.round() as i32,
                     );
                 }
 
-                if pre_w <= max_text_w {
-                    // Курсор влезает слева — показываем от начала, обрезаем справа
-                    let mut show = settings_ignore_input;
-                    let mut right_trunc = false;
-                    while !show.is_empty() && self.measure_ui_width(show, text_scale_input) > max_text_w {
-                        let mut idx = show.len();
-                        while !show.is_char_boundary(idx) { idx -= 1; }
-                        idx -= 1;
-                        while !show.is_char_boundary(idx) { idx -= 1; }
-                        show = &show[..idx];
-                        right_trunc = true;
+                let sel_start = settings_ignore_editor.selection_anchor.unwrap_or(settings_ignore_editor.cursor).min(settings_ignore_editor.cursor);
+                let sel_end = settings_ignore_editor.selection_anchor.unwrap_or(settings_ignore_editor.cursor).max(settings_ignore_editor.cursor);
+
+                let mut current_x = start_x - *settings_ignore_scroll_x;
+                let mut byte_idx = 0;
+                let mut cursor_draw_x = current_x;
+
+                for c in full_text.chars() {
+                    if byte_idx == settings_ignore_editor.cursor {
+                        cursor_draw_x = current_x;
                     }
-                    let display = if right_trunc {
-                        format!("{}…", show)
-                    } else {
-                        show.to_string()
-                    };
-                    self.draw_string_scaled(
-                        &display,
-                        start_x, text_y_mid,
-                        [0.90, 0.88, 0.95, 1.0], text_scale_input,
-                    );
-                    if settings_ignore_focused && !settings_ignore_select_all {
-                        let cx = (start_x + pre_w).round();
-                        self.push_rect(cx, (content_y + 6.0 * s).round(), (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, blink_alpha]);
+                    let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * text_scale_input;
+
+                    if byte_idx >= sel_start && byte_idx < sel_end {
+                        self.push_rect(
+                            current_x, (content_y + 4.0 * s).round(),
+                            adv, input_h - 8.0 * s,
+                            [0.55, 0.35, 0.80, 0.50],
+                        );
                     }
-                } else {
-                    // Скроллируем влево: курсор у правого края, показываем "…" + текст
-                    let avail = max_text_w - ellipsis_w;
-                    let mut start_byte = cursor_byte;
-                    let mut w_acc = 0.0f32;
-                    let chars_before: Vec<(usize, char)> = settings_ignore_input[..cursor_byte].char_indices().collect();
-                    for &(bi, c) in chars_before.iter().rev() {
-                        let cw = self.measure_ui_width(&settings_ignore_input[bi..bi + c.len_utf8()], text_scale_input);
-                        if w_acc + cw > avail { break; }
-                        w_acc += cw;
-                        start_byte = bi;
+
+                    if let Some(g) = self.get_ui_glyph(c) {
+                        self.push_quad(
+                            current_x + g.offset_x * text_scale_input,
+                            text_y_mid - g.offset_y * text_scale_input,
+                            g.width * text_scale_input,
+                            g.height * text_scale_input,
+                            g.u, g.v, g.uw, g.vh,
+                            [0.90, 0.88, 0.95, 1.0], g.is_emoji,
+                        );
                     }
-                    let shown = &settings_ignore_input[start_byte..];
-                    let mut show_r = shown;
-                    let mut right_trunc = false;
-                    while !show_r.is_empty() && self.measure_ui_width(show_r, text_scale_input) > avail {
-                        let mut idx = show_r.len();
-                        while !show_r.is_char_boundary(idx) { idx -= 1; }
-                        idx -= 1;
-                        while !show_r.is_char_boundary(idx) { idx -= 1; }
-                        show_r = &show_r[..idx];
-                        right_trunc = true;
-                    }
-                    let display = format!("…{}{}", show_r, if right_trunc { "…" } else { "" });
-                    self.draw_string_scaled(
-                        &display,
-                        start_x, text_y_mid,
-                        [0.90, 0.88, 0.95, 1.0], text_scale_input,
-                    );
-                    if settings_ignore_focused && !settings_ignore_select_all {
-                        let shown_pre_w = self.measure_ui_width(&settings_ignore_input[start_byte..cursor_byte], text_scale_input);
-                        let cx = (start_x + ellipsis_w + shown_pre_w).round();
-                        self.push_rect(cx, (content_y + 6.0 * s).round(), (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, blink_alpha]);
-                    }
+                    current_x += adv;
+                    byte_idx += c.len_utf8();
                 }
+                                if byte_idx == settings_ignore_editor.cursor {
+                    cursor_draw_x = current_x;
+                }
+
+                if settings_ignore_focused && sel_start == sel_end && blink_alpha > 0.5 {
+                    self.push_rect(
+                        cursor_draw_x, (content_y + 6.0 * s).round(),
+                        (1.5 * s).max(1.0), input_h - 12.0 * s,
+                        [0.75, 0.45, 1.0, 1.0],
+                    );
+                }
+
+                self.flush();
+                unsafe { self.gl.disable(glow::SCISSOR_TEST); }
             }
 
             // Кнопка «Добавить» — неактивна если поле пустое или только пробелы
-            let trimmed_input = settings_ignore_input.trim();
+            let trimmed_input = full_text.trim();
             let btn_add_x = content_x + input_w + 10.0 * s;
             let btn_add_y = content_y;
             let btn_add_w = 110.0 * s;
@@ -1323,12 +1322,12 @@ impl Renderer {
                             1.05,
                         );
                         main_header_drawn = true;
-                    } else {
-                        let sep_y = text_y + 10.0 * s;
-                        let sep_x = start_x + 8.0 * s;
-                        let sep_w = (cw - 32.0 * s).max(0.0);
-                        self.draw_string_scaled(
-                            header_text,
+                                                            } else {
+                                                                let sep_y = text_y + 10.0 * s;
+                                                                let sep_x = main_header_x;
+                                                                let sep_w = (cw - 10.0 * s).max(0.0);
+                                                                self.draw_string_scaled(
+                                                                    header_text,
                             start_x,
                             text_y,
                             [0.875, 0.882, 0.902, 1.0],

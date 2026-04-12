@@ -357,11 +357,12 @@ impl ApplicationHandler for App {
                     self.search_case_sensitive,
                     self.show_welcome,
                     &self.recent_files,
-                    &self.current_sticky_lines,
+                                        &self.current_sticky_lines,
                     self.sticky_anim_progress,
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
                     &self.ide_panel,
+                    self.show_settings,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -432,17 +433,16 @@ impl ApplicationHandler for App {
 
                                                                 let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
-                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
+                                        settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
                         self.settings_scroll.current,
                         &self.ide_workspaces,
                         &self.ide_ignore_patterns,
-                        &self.settings_ignore_input,
+                        &self.settings_ignore_editor,
                         self.settings_ignore_focused,
-                        self.settings_ignore_cursor,
-                        self.settings_ignore_select_all,
+                        &mut self.settings_ignore_scroll_x,
                         self.settings_ide_scroll.current,
                         blink_alpha,
                     );
@@ -521,7 +521,22 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if self.scroll_x.is_dragging || self.scroll_y.is_dragging {
+                                        if self.scroll_x.is_dragging || self.scroll_y.is_dragging {
+                        is_text = false;
+                    }
+
+                    if let Some((rx, ry, rw, rh)) = self.autocomplete_rect {
+                        if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                            is_text = false;
+                        }
+                    }
+
+                    let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                        self.ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    if panel_bottom_h > 0.0 && my >= window_height - panel_bottom_h {
                         is_text = false;
                     }
 

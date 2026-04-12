@@ -34,10 +34,11 @@ impl Renderer {
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
         current_sticky_lines: &[(usize, usize)],
-        sticky_anim_progress: f32,
+                sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
         is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
+        show_settings: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -1080,8 +1081,8 @@ impl Renderer {
             }
         }
 
-        if let Some((cx_screen, cy)) = cursor_pos {
-            if sel_start == sel_end && blink_alpha > 0.5 && !dialog_window_open && !search_focused {
+                if let Some((cx_screen, cy)) = cursor_pos {
+            if sel_start == sel_end && blink_alpha > 0.5 && !dialog_window_open && !search_focused && !show_settings {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
                     && cx_screen < scrollbar_x

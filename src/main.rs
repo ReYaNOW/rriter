@@ -418,13 +418,13 @@ F8\tПоказать/скрыть счетчик FPS
         show_welcome,
         recent_files,
 
-                is_ide_mode: is_ide_cli,
+                        is_ide_mode: is_ide_cli,
         ide_workspaces: config.ide_workspaces.clone(),
         ide_ignore_patterns: config.ide_ignore_patterns.clone(),
-                settings_ignore_input: String::new(),
+        settings_ignore_editor: Editor::new(128),
         settings_ignore_focused: false,
-        settings_ignore_cursor: 0,
-        settings_ignore_select_all: false,
+        settings_ignore_scroll_x: 0.0,
+        is_dragging_settings_ignore: false,
         open_folder_rx: None,
 
         show_search: false,

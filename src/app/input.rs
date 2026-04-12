@@ -150,8 +150,10 @@ impl App {
             return;
         }
 
-        if self.show_settings {
-            if state == ElementState::Pressed {
+                if self.show_settings {
+            if state == ElementState::Released {
+                self.is_dragging_settings_ignore = false;
+            } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let w = (1000.0 * s)
                     .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
@@ -239,8 +241,26 @@ impl App {
                             && my >= input_section_y
                             && my <= input_section_y + input_h;
 
-                        if on_input {
+                                                if on_input {
                             self.settings_ignore_focused = true;
+                            self.is_dragging_settings_ignore = true;
+                            let text = self.settings_ignore_editor.get_full_text();
+                            let start_x = content_x + 8.0 * s;
+                            let x_offset = (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
+                            let mut current_x = 0.0;
+                            let mut target_idx = text.len();
+                            let mut byte_idx = 0;
+                            for c in text.chars() {
+                                let adv = self.renderer.as_mut().unwrap().get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.95;
+                                if x_offset <= current_x + adv / 2.0 {
+                                    target_idx = byte_idx;
+                                    break;
+                                }
+                                current_x += adv;
+                                byte_idx += c.len_utf8();
+                            }
+                            self.settings_ignore_editor.cursor = target_idx;
+                            self.settings_ignore_editor.selection_anchor = Some(target_idx);
                         }
 
                         // ── Кнопка «Добавить» паттерн ────────────────────
@@ -251,12 +271,11 @@ impl App {
                             && my <= input_section_y + input_h;
 
                                                 if on_add_btn {
-                            let trimmed = self.settings_ignore_input.trim().to_string();
+                            let trimmed = self.settings_ignore_editor.get_full_text().trim().to_string();
                             if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                                 self.ide_ignore_patterns.push(trimmed);
-                                self.settings_ignore_input.clear();
-                                self.settings_ignore_cursor = 0;
-                                self.settings_ignore_select_all = false;
+                                self.settings_ignore_editor.select_all();
+                                self.settings_ignore_editor.delete_selection();
                                 let w = self.window.as_ref().unwrap();
                                 let maximized = w.is_maximized();
                                 crate::save_config(&crate::Config {
@@ -531,9 +550,10 @@ impl App {
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
-            self.is_dragging = false;
+                        self.is_dragging = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
+            self.is_dragging_settings_ignore = false;
             self.autocomplete_scroll.is_dragging = false;
             self.scroll_x.is_dragging = false;
             self.scroll_y.target = self.scroll_y.target.round();
@@ -1095,15 +1115,7 @@ impl App {
                 return;
             }
 
-            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                if self.current_cursor != winit::window::CursorIcon::Pointer {
-                    self.current_cursor = winit::window::CursorIcon::Pointer;
-                    self.window
-                        .as_ref()
-                        .unwrap()
-                        .set_cursor(winit::window::CursorIcon::Pointer);
-                }
-
+                        if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
                 let scroll_x = rx + rw - 14.0 * s;
                 if px < scroll_x {
                     let item_h = 36.0 * s;
@@ -1180,7 +1192,27 @@ impl App {
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
-        if self.is_dragging_search {
+                if self.is_dragging_settings_ignore {
+            let w = (1000.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
+            let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
+            let content_x = x + 40.0 * s + 200.0 * s + 30.0 * s;
+            let start_x = content_x + 8.0 * s;
+            let text = self.settings_ignore_editor.get_full_text();
+            let x_offset = (position.x as f32 - start_x + self.settings_ignore_scroll_x).max(0.0);
+            let mut current_x = 0.0;
+            let mut target_idx = text.len();
+            let mut byte_idx = 0;
+            for c in text.chars() {
+                let adv = self.renderer.as_mut().unwrap().get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.95;
+                if x_offset <= current_x + adv / 2.0 {
+                    target_idx = byte_idx;
+                    break;
+                }
+                current_x += adv;
+                byte_idx += c.len_utf8();
+            }
+            self.settings_ignore_editor.cursor = target_idx;
+        } else if self.is_dragging_search {
             let search_w = 480.0 * s;
             let search_x = scrollbar_x - search_w - 20.0 * s;
             let input_x = search_x + 10.0 * s;
@@ -1918,23 +1950,23 @@ impl App {
         }
 
                 if key_event.state == ElementState::Pressed {
-                        // ── Ввод в поле игнора настроек ──────────────────────────────
-            if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+                                                // ── Ввод в поле игнора настроек ──────────────────────────────
+                        if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+                self.last_action = std::time::Instant::now();
                 let ctrl = self.modifiers.control_key();
+                let shift = self.modifiers.shift_key();
                 match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::Escape) => {
                         self.settings_ignore_focused = false;
-                        self.settings_ignore_select_all = false;
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-                        let trimmed = self.settings_ignore_input.trim().to_string();
+                        let trimmed = self.settings_ignore_editor.get_full_text().trim().to_string();
                         if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                             self.ide_ignore_patterns.push(trimmed);
-                            self.settings_ignore_input.clear();
-                            self.settings_ignore_cursor = 0;
-                            self.settings_ignore_select_all = false;
+                            self.settings_ignore_editor.select_all();
+                            self.settings_ignore_editor.delete_selection();
                             let w = self.window.as_ref().unwrap();
                             let maximized = w.is_maximized();
                             crate::save_config(&crate::Config {
@@ -1949,25 +1981,21 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                                        PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
-                        // Выделить всё
-                        self.settings_ignore_cursor = self.settings_ignore_input.len();
-                        self.settings_ignore_select_all = true;
+                    PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                        self.settings_ignore_editor.select_all();
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                        if self.settings_ignore_select_all {
-                            let _ = self.clipboard.set_text(self.settings_ignore_input.clone());
+                        if let Some(text) = self.settings_ignore_editor.get_selection() {
+                            let _ = self.clipboard.set_text(text);
                         }
                         return;
                     }
                     PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
-                        if self.settings_ignore_select_all {
-                            let _ = self.clipboard.set_text(self.settings_ignore_input.clone());
-                            self.settings_ignore_input.clear();
-                            self.settings_ignore_cursor = 0;
-                            self.settings_ignore_select_all = false;
+                        if let Some(text) = self.settings_ignore_editor.get_selection() {
+                            let _ = self.clipboard.set_text(text);
+                            self.settings_ignore_editor.delete_selection();
                             self.window.as_ref().unwrap().request_redraw();
                         }
                         return;
@@ -1976,107 +2004,64 @@ impl App {
                         if let Ok(text) = self.clipboard.get_text() {
                             let clean = text.replace('\n', "").replace('\r', "");
                             if !clean.is_empty() {
-                                if self.settings_ignore_select_all {
-                                    self.settings_ignore_input.clear();
-                                    self.settings_ignore_cursor = 0;
-                                    self.settings_ignore_select_all = false;
-                                }
-                                self.settings_ignore_input.insert_str(self.settings_ignore_cursor, &clean);
-                                self.settings_ignore_cursor += clean.len();
+                                self.settings_ignore_editor.insert_str(&clean);
                                 self.window.as_ref().unwrap().request_redraw();
                             }
                         }
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Backspace) => {
-                        if self.settings_ignore_select_all {
-                            self.settings_ignore_input.clear();
-                            self.settings_ignore_cursor = 0;
-                            self.settings_ignore_select_all = false;
+                        if ctrl {
+                            self.settings_ignore_editor.delete_word_backward();
                         } else {
-                                                        let inp = &mut self.settings_ignore_input;
-                            let cur = &mut self.settings_ignore_cursor;
-                            *cur = (*cur).min(inp.len());
-                            if *cur > 0 {
-                                let mut idx = *cur - 1;
-                                while idx > 0 && !inp.is_char_boundary(idx) { idx -= 1; }
-                                inp.remove(idx);
-                                *cur = idx;
-                            }
+                            self.settings_ignore_editor.backspace();
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Delete) => {
-                        if self.settings_ignore_select_all {
-                            self.settings_ignore_input.clear();
-                            self.settings_ignore_cursor = 0;
-                            self.settings_ignore_select_all = false;
+                        if ctrl {
+                            self.settings_ignore_editor.delete_word_forward();
                         } else {
-                                                        let inp = &mut self.settings_ignore_input;
-                            let mut cur = self.settings_ignore_cursor.min(inp.len());
-                            while cur > 0 && cur < inp.len() && !inp.is_char_boundary(cur) { cur -= 1; }
-                            self.settings_ignore_cursor = cur;
-                            if cur < inp.len() {
-                                inp.remove(cur);
-                            }
+                            self.settings_ignore_editor.delete_forward();
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                        self.settings_ignore_select_all = false;
-                        if self.settings_ignore_cursor > 0 {
-                            let mut idx = self.settings_ignore_cursor - 1;
-                            while idx > 0 && !self.settings_ignore_input.is_char_boundary(idx) { idx -= 1; }
-                            self.settings_ignore_cursor = idx;
+                        if ctrl {
+                            self.settings_ignore_editor.move_word_left(shift);
+                        } else {
+                            self.settings_ignore_editor.move_left(shift);
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::ArrowRight) => {
-                        self.settings_ignore_select_all = false;
-                        let len = self.settings_ignore_input.len();
-                        if self.settings_ignore_cursor < len {
-                            let mut idx = self.settings_ignore_cursor + 1;
-                            while idx < len && !self.settings_ignore_input.is_char_boundary(idx) { idx += 1; }
-                            self.settings_ignore_cursor = idx;
+                        if ctrl {
+                            self.settings_ignore_editor.move_word_right(shift);
+                        } else {
+                            self.settings_ignore_editor.move_right(shift);
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Home) => {
-                        self.settings_ignore_select_all = false;
-                        self.settings_ignore_cursor = 0;
+                        self.settings_ignore_editor.move_home(shift);
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
                     PhysicalKey::Code(KeyCode::End) => {
-                        self.settings_ignore_select_all = false;
-                        self.settings_ignore_cursor = self.settings_ignore_input.len();
+                        self.settings_ignore_editor.move_end(shift);
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                                        _ => {
+                    _ => {
                         if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
-                            if let Some(text) = &key_event.text {
-                                let has_printable = text.chars().any(|c| !c.is_control());
-                                if has_printable {
-                                    if self.settings_ignore_select_all {
-                                        self.settings_ignore_input.clear();
-                                        self.settings_ignore_cursor = 0;
-                                        self.settings_ignore_select_all = false;
-                                    }
-                                    for ch in text.chars() {
-                                        if !ch.is_control() {
-                                            self.settings_ignore_cursor = self.settings_ignore_cursor.min(self.settings_ignore_input.len());
-                                            while self.settings_ignore_cursor > 0 && !self.settings_ignore_input.is_char_boundary(self.settings_ignore_cursor) {
-                                                self.settings_ignore_cursor -= 1;
-                                            }
-                                            self.settings_ignore_input.insert(self.settings_ignore_cursor, ch);
-                                            self.settings_ignore_cursor += ch.len_utf8();
-                                        }
-                                    }
+                            if let Some(txt) = key_event.logical_key.to_text() {
+                                let clean_txt = txt.replace('\n', "");
+                                if !clean_txt.is_empty() {
+                                    self.settings_ignore_editor.insert_str(&clean_txt);
                                     self.window.as_ref().unwrap().request_redraw();
                                     return;
                                 }
@@ -2086,12 +2071,16 @@ impl App {
                 }
             }
 
-            if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
+                        if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                 if self.show_settings {
                     self.show_settings = false;
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
+            }
+
+            if self.show_settings {
+                return;
             }
 
             if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
