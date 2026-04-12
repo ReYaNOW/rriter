@@ -61,3 +61,6 @@ test:
 clean:
 	@echo "🧹 Очистка..."
 	cargo clean
+
+tree:
+	@tree --filelimit 25 -I 'target' || true

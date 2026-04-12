@@ -25,23 +25,61 @@ RRiter создается как "редактор здорового челов
 Проект разделен на несколько независимых, но тесно взаимодействующих подсистем.
 
 ```text
-src/
-├── main.rs                   # Точка входа, загрузка конфигов, инициализация
-├── app.rs                    # Глобальное состояние приложения (App)
-├── app/
-│   ├── events.rs             # Winit-цикл, перерисовка
-│   └── input.rs              # Обработка клавиатуры и мыши
-├── editor.rs                 # Текстовый движок (Gap Buffer, Undo/Redo)
-├── scroll.rs                 # Универсальная кинетическая физика скроллинга (ScrollState)
-├── renderer.rs               # Низкоуровневый OpenGL-рендер, шейдеры, шрифты
-├── render_view.rs            # Высокоуровневая отрисовка (сборка кадра)
-├── render_view/
-│   ├── core_text.rs          # Математика и геометрия текста (Word wrap, Folding)
-│   └── ui.rs                 # Отрисовка UI (Welcome, Dialogs, Autocomplete)
-├── highlighter.rs            # Фоновый поток Tree-sitter (Синтаксис, Completions)
-├── queries.rs                # Запросы Tree-sitter для разных языков
-└── widgets.rs                # IMGUI-компоненты (Кнопки)
-build.rs                      # Генерация кода для внедрения и использованя svg atom иконок
+.
+├── build.rs
+├── Cargo.lock
+├── Cargo.toml
+├── changes.txt
+├── CLAUDE.md
+├── Makefile
+└── src
+    ├── app
+    │   ├── events.rs
+    │   ├── file_icons.rs
+    │   ├── file_tree.rs
+    │   └── input.rs
+    ├── app.rs
+    ├── editor.rs
+    ├── fonts
+    │   ├── Inter-Regular.otf
+    │   ├── JetBrainsMonoNerdFont-Regular.ttf
+    │   └── JetBrainsMono-Regular.ttf
+    ├── highlighter.rs
+    ├── icons
+    │   ├── atom
+    │   │   ├── folder_associations.json
+    │   │   ├── icon_associations.json
+    │   │   └── icons
+    │   │       ├── files  [1759 entries exceeds filelimit, not opening dir]
+    │   │       ├── folders  [333 entries exceeds filelimit, not opening dir]
+    │   │       ├── foldersOpen  [333 entries exceeds filelimit, not opening dir]
+    │   │       └── ui  [505 entries exceeds filelimit, not opening dir]
+    │   ├── dialog-cancel.svg
+    │   ├── dialog-warning.svg
+    │   ├── document-save.svg
+    │   ├── edit-delete.png
+    │   ├── edit-delete.svg
+    │   ├── format-text-uppercase.svg
+    │   ├── go-down.svg
+    │   ├── go-up.svg
+    │   ├── icon.png
+    │   ├── plus.svg
+    │   └── window-close.svg
+    ├── main.rs
+    ├── queries.rs
+    ├── renderer.rs
+    ├── render_view
+    │   ├── core_text.rs
+    │   └── ui.rs
+    ├── render_view.rs
+    ├── scroll.rs
+    ├── widgets.rs
+    └── Безымянный.txt
+
+12 directories, 38 files
+
+~/projects/rriter (master)
+❯ 
 ```
 
 ---
