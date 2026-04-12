@@ -417,7 +417,7 @@ impl Renderer {
                                 );
                             }
 
-                            let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                                                        let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
                             let text_y = row_y + row_h / 2.0 + 5.5 * s;
                             let color: [f32; 4] = if node.is_dir {
                                 [0.78, 0.68, 1.0, 1.0]
@@ -425,38 +425,37 @@ impl Renderer {
                                 self.theme.fg
                             };
 
+                                                                                    let icon_size = 20.0 * s;
+                            let icon_y = row_y + (row_h - icon_size) / 2.0;
+
                             if node.is_dir {
-                                // Индикатор раскрытия: горизонт — раскрыто, вертикаль — закрыто
-                                let arrow_cx = indent_x + 4.0 * s;
-                                let arrow_cy = row_y + row_h / 2.0;
-                                if node.is_expanded {
-                                    self.push_rect(
-                                        arrow_cx - 3.5 * s,
-                                        arrow_cy - 1.0,
-                                        7.0 * s,
-                                        2.0,
-                                        [0.78, 0.68, 1.0, 0.75],
-                                    );
-                                } else {
-                                    self.push_rect(
-                                        arrow_cx - 1.0,
-                                        arrow_cy - 3.5 * s,
-                                        2.0,
-                                        7.0 * s,
-                                        [0.78, 0.68, 1.0, 0.75],
-                                    );
-                                }
+                                // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
+                                let arrow_str = if node.is_expanded { "▼" } else { "▶" };
+                                let arrow_x = indent_x + 2.0 * s;
+                                let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
+                                self.draw_string_scaled(
+                                    arrow_str,
+                                    arrow_x,
+                                    arrow_y,
+                                    [0.78, 0.68, 1.0, 0.7],
+                                    0.65,
+                                );
+                                // Иконка папки — правее стрелки
+                                let dir_icon_x = indent_x + 13.0 * s;
+                                self.draw_file_icon(node.icon_key, dir_icon_x, icon_y, icon_size);
                                 self.draw_string_scaled(
                                     &node.name,
-                                    indent_x + 12.0 * s,
+                                    dir_icon_x + icon_size + 4.0 * s,
                                     text_y,
                                     color,
                                     tree_text_scale,
                                 );
                             } else {
+                                let file_icon_x = indent_x + 4.0 * s;
+                                self.draw_file_icon(node.icon_key, file_icon_x, icon_y, icon_size);
                                 self.draw_string_scaled(
                                     &node.name,
-                                    indent_x + 4.0 * s,
+                                    file_icon_x + icon_size + 4.0 * s,
                                     text_y,
                                     color,
                                     tree_text_scale,

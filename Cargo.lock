@@ -2346,6 +2346,7 @@ dependencies = [
  "lexical-sort",
  "mimalloc",
  "notify-debouncer-mini",
+ "once_cell",
  "rayon",
  "regex",
  "resvg",

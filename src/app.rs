@@ -1,4 +1,5 @@
 pub mod events;
+pub mod file_icons;
 pub mod file_tree;
 pub mod input;
 

@@ -15,7 +15,7 @@ impl Renderer {
         }
     }
 
-    pub fn draw_atlas_icon(
+        pub fn draw_atlas_icon(
         &mut self,
         icon: crate::widgets::IconType,
         x: f32,
@@ -32,6 +32,117 @@ impl Renderer {
             self.flush();
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture)); // Возвращаем шрифтовой атлас
+            }
+        }
+    }
+
+    /// Рисует SVG-иконку из кэша file_icon_cache.
+    /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
+        pub fn draw_file_icon(&mut self, key: &'static str, x: f32, y: f32, size: f32) {
+        if !self.file_icon_cache.contains_key(key) {
+            let svg_bytes = crate::app::file_icons::svg_for_key(key);
+            if svg_bytes.is_empty() {
+                return;
+            }
+            let opt = resvg::usvg::Options::default();
+            let svg_str = String::from_utf8_lossy(svg_bytes);
+            // Заменяем currentColor и чёрный (#000, #000000) на белый для тёмной темы
+            let svg_str = svg_str
+                .replace("currentColor", "#ffffff")
+                .replace("\"#000000\"", "\"#ffffff\"")
+                .replace("\"#000\"", "\"#ffffff\"")
+                .replace("fill:rgb(0,0,0)", "fill:rgb(255,255,255)")
+                .replace("fill:#000000", "fill:#ffffff")
+                .replace("fill:#000", "fill:#ffffff")
+                .replace("stroke:#000000", "stroke:#ffffff")
+                .replace("stroke:#000", "stroke:#ffffff");
+
+            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
+                // 128px SSAA — достаточно резко для иконок до 24px на экране
+                let target = 128u32;
+                if let Some(mut pixmap) = tiny_skia::Pixmap::new(target, target) {
+                    let sz = tree.size();
+                    let scale = (target as f32) / sz.width().max(sz.height());
+                    let dx = (target as f32 - sz.width() * scale) / 2.0;
+                    let dy = (target as f32 - sz.height() * scale) / 2.0;
+                    let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
+                    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+                    // Инвертируем тёмные пиксели: если пиксель тёмный (R+G+B < 100) и непрозрачный —
+                    // делаем белым, чтобы иконки были видны на тёмном фоне
+                    let mut data = pixmap.data().to_vec();
+                    for px in data.chunks_exact_mut(4) {
+                        let a = px[3] as u32;
+                        if a == 0 {
+                            continue;
+                        }
+                        // Unpremultiply
+                        if a < 255 {
+                            px[0] = ((px[0] as u32 * 255) / a).min(255) as u8;
+                            px[1] = ((px[1] as u32 * 255) / a).min(255) as u8;
+                            px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
+                        }
+                        // Если пиксель очень тёмный — инвертируем в белый
+                        let brightness = px[0] as u32 + px[1] as u32 + px[2] as u32;
+                        if brightness < 60 {
+                            px[0] = 255;
+                            px[1] = 255;
+                            px[2] = 255;
+                        }
+                    }
+
+                    let tex = unsafe {
+                        let tex = self.gl.create_texture().unwrap();
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                        self.gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            glow::RGBA8 as i32,
+                            target as i32,
+                            target as i32,
+                            0,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(Some(&data)),
+                        );
+                        self.gl.generate_mipmap(glow::TEXTURE_2D);
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MIN_FILTER,
+                            glow::LINEAR_MIPMAP_LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MAG_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_S,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_T,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                        tex
+                    };
+                    self.file_icon_cache.insert(key, tex);
+                }
+            }
+        }
+
+        if let Some(&tex) = self.file_icon_cache.get(key) {
+            self.flush();
+            unsafe {
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            }
+            self.push_quad(x, y, size, size, 0.0, 0.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0], 5.0);
+            self.flush();
+            unsafe {
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             }
         }
     }

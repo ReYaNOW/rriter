@@ -17,6 +17,8 @@ pub struct FileNode {
     pub depth: usize,
     pub is_dir: bool,
     pub is_expanded: bool,
+    /// Ключ иконки из file_icons_map (вычисляется один раз при сборке дерева)
+    pub icon_key: &'static str,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,26 +71,30 @@ fn scan_recursive(
 
     let (dirs, files) = read_children(root);
 
-    for (name, path) in dirs {
+        for (name, path) in dirs {
         let is_expanded = expanded.contains(&path);
+        let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
         result.push(FileNode {
             path: path.clone(),
             name,
             depth,
             is_dir: true,
             is_expanded,
+            icon_key,
         });
         if is_expanded {
             scan_recursive(&path, depth + 1, expanded, result, max_depth);
         }
     }
     for (name, path) in files {
+        let icon_key = crate::app::file_icons::file_icon_key(&name.to_ascii_lowercase());
         result.push(FileNode {
             path,
             name,
             depth,
             is_dir: false,
             is_expanded: false,
+            icon_key,
         });
     }
 }
@@ -110,12 +116,20 @@ pub fn spawn_scan(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.to_string_lossy().into_owned());
             let is_expanded = expanded.contains(root);
+                        let root_icon_key = {
+                let n = root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                    .unwrap_or_default();
+                crate::app::file_icons::folder_icon_key(&n)
+            };
             nodes.push(FileNode {
                 path: root.clone(),
                 name,
                 depth: 0,
                 is_dir: true,
                 is_expanded,
+                icon_key: root_icon_key,
             });
             if is_expanded {
                 scan_recursive(root, 1, &expanded, &mut nodes, 10);

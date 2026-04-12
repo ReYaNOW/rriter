@@ -121,8 +121,10 @@ pub struct Renderer {
     pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
 
-    pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
+        pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
     pub icon_logo: Option<glow::Texture>,
+    /// Кэш SVG-иконок для дерева файлов. Ключ — &'static str из file_icons_map.
+    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
 }
@@ -393,7 +395,8 @@ impl Renderer {
                 search_res_string: String::new(),
                 last_search_idx: None,
                 last_search_len: 0,
-                icons: HashMap::new(),
+                            icons: HashMap::new(),
+            file_icon_cache: rustc_hash::FxHashMap::default(),
                 icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
