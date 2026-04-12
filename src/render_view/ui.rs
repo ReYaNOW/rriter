@@ -669,7 +669,7 @@ impl Renderer {
         wants_pointer
     }
 
-        pub fn draw_settings(
+                    pub fn draw_settings(
         &mut self,
         anim_progress: f32,
         active_tab: usize,
@@ -679,13 +679,17 @@ impl Renderer {
         ide_ignore_patterns: &[String],
         settings_ignore_input: &str,
         settings_ignore_focused: bool,
+        settings_ignore_cursor: usize,
+        settings_ignore_select_all: bool,
         ide_scroll_y: f32,
-    ) -> bool {
+        blink_alpha: f32,
+    ) -> u8 {
         if anim_progress <= 0.0 {
-            return false;
+            return 0;
         }
         let s = self.scale_factor;
         let mut wants_pointer = false;
+        let mut wants_text = false;
 
         let overlay_alpha = ((anim_progress - 0.04) * (0.4 / 0.96)).max(0.0);
         self.push_rect(
@@ -820,15 +824,16 @@ impl Renderer {
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
-                if active_tab == 0 {
+                                if active_tab == 0 {
             // ── Scissor для скролла вкладки IDE ──────────────────────────────
+            // Начало scissor = iy + 52.0 * s (ниже пилюли заголовка iy+18..iy+48)
             let ide_content_area_x = ix + sidebar_w;
             let ide_content_area_w = iw - sidebar_w;
-            let ide_content_area_h = ih - 40.0 * s;
+            let ide_content_area_h = ih - 52.0 * s;
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
-                let scissor_y = self.height - (iy + 40.0 * s + ide_content_area_h);
+                let scissor_y = self.height - (iy + 52.0 * s + ide_content_area_h);
                 self.gl.scissor(
                     ide_content_area_x.round() as i32,
                     scissor_y.round() as i32,
@@ -870,10 +875,10 @@ impl Renderer {
                     [0.224, 0.231, 0.251, 1.0],
                 );
 
-                self.draw_string_scaled(
+                                self.draw_string_scaled(
                     &path_str,
                     content_x + 14.0 * s,
-                    content_y + 24.0 * s,
+                    (content_y + 24.0 * s).round(),
                     [0.9, 0.9, 0.9, 1.0],
                     0.95,
                 );
@@ -910,11 +915,11 @@ impl Renderer {
             self.push_rect(content_x, content_y, 460.0 * s, 1.0, [1.0, 1.0, 1.0, 0.07]);
             content_y += 20.0 * s;
 
-            // ── Заголовок секции игноров ──────────────────────────────────
+                        // ── Заголовок секции игноров ──────────────────────────────────
             self.draw_string_scaled(
                 "Игнорируемые файлы и папки",
                 content_x,
-                content_y,
+                content_y.round(),
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
@@ -924,7 +929,7 @@ impl Renderer {
             self.draw_string_scaled(
                 "Эти файлы и папки не будут показаны в дереве проекта.",
                 content_x,
-                content_y,
+                content_y.round(),
                 [0.45, 0.47, 0.55, 1.0],
                 0.85,
             );
@@ -932,43 +937,26 @@ impl Renderer {
             self.draw_string_scaled(
                 "Примеры: *.log  temp/  .DS_Store  *.min.js  build  dist",
                 content_x,
-                content_y,
+                content_y.round(),
                 [0.35, 0.37, 0.44, 1.0],
                 0.82,
             );
             content_y += 20.0 * s;
 
-            // Плашка «скрытые дефолты»
-            let defaults_label = "Скрыты всегда: __pycache__  .idea  node_modules  venv  *.pyc  *.class  .DS_Store  ...";
-            let dlabel_w = self.measure_ui_width(defaults_label, 0.78) + 20.0 * s;
-            let dlabel_h = 22.0 * s;
-            self.push_rounded_rect(
-                content_x - 1.0,
-                content_y - 1.0,
-                dlabel_w + 2.0,
-                dlabel_h + 2.0,
-                4.0 * s,
-                [0.20, 0.14, 0.28, 1.0],
-            );
-            self.push_rounded_rect(content_x, content_y, dlabel_w, dlabel_h, 4.0 * s, [0.14, 0.10, 0.20, 1.0]);
-            self.draw_string_scaled(
-                defaults_label,
-                content_x + 10.0 * s,
-                content_y + dlabel_h * 0.72,
-                [0.40, 0.32, 0.55, 1.0],
-                0.78,
-            );
-            content_y += dlabel_h + 18.0 * s;
+            
 
-            // ── Поле ввода + кнопка «Добавить» ───────────────────────────
-            let input_w = 330.0 * s;
+                        // ── Поле ввода + кнопка «Добавить» ───────────────────────────
+                        let input_w = 330.0 * s;
             let input_h = 34.0 * s;
+            let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
+            let pad_input = 12.0 * s;
+            let max_text_w = input_w - pad_input * 2.0;
 
-            let input_hovered = self.last_mouse_x >= content_x
+                        let input_hovered = self.last_mouse_x >= content_x
                 && self.last_mouse_x <= content_x + input_w
                 && self.last_mouse_y >= content_y
                 && self.last_mouse_y <= content_y + input_h;
-            if input_hovered { wants_pointer = true; }
+            if input_hovered { wants_text = true; }
 
             let border_col = if settings_ignore_focused {
                 [0.55, 0.35, 0.80, 1.0]
@@ -988,48 +976,163 @@ impl Renderer {
                 6.0 * s, [0.11, 0.12, 0.16, 1.0],
             );
 
-            let text_y_mid = content_y + input_h * 0.70;
+                                    let text_y_mid = (content_y + input_h * 0.70).round();
+            let start_x = (content_x + pad_input).round();
+
             if settings_ignore_input.is_empty() {
                 self.draw_string_scaled(
                     "Паттерн или имя файла...",
-                    content_x + 12.0 * s, text_y_mid,
-                    [0.30, 0.32, 0.40, 1.0], 0.92,
+                    start_x, text_y_mid,
+                    [0.30, 0.32, 0.40, 1.0], text_scale_input,
                 );
-            } else {
-                // Обрезаем текст если не помещается
-                let max_text_w = input_w - 24.0 * s;
-                let mut display = settings_ignore_input;
-                let mut truncated = false;
-                while !display.is_empty() && self.measure_ui_width(display, 0.92) > max_text_w {
-                    let mut idx = display.len();
-                    while !display.is_char_boundary(idx) { idx -= 1; }
-                    idx -= 1;
-                    while !display.is_char_boundary(idx) { idx -= 1; }
-                    display = &display[..idx];
-                    truncated = true;
+                // Мигающий курсор в пустом поле
+                if settings_ignore_focused {
+                    self.push_rect(
+                        start_x, (content_y + 6.0 * s).round(),
+                        (1.5 * s).max(1.0), input_h - 12.0 * s,
+                        [0.75, 0.45, 1.0, blink_alpha],
+                    );
                 }
-                let prefix = if truncated { "…" } else { "" };
-                self.draw_string_scaled(
-                    &format!("{}{}", prefix, display),
-                    content_x + 12.0 * s, text_y_mid,
-                    [0.90, 0.88, 0.95, 1.0], 0.92,
-                );
-                // Курсор
-                let cx = content_x + 12.0 * s + self.measure_ui_width(&format!("{}{}", prefix, display), 0.92);
-                self.push_rect(cx, content_y + 6.0 * s, (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, 0.85]);
+            } else {
+                // Вычисляем ширину текста до курсора
+                let cursor_byte = settings_ignore_cursor.min(settings_ignore_input.len());
+                let pre_cursor_str = &settings_ignore_input[..cursor_byte];
+                let pre_w = self.measure_ui_width(pre_cursor_str, text_scale_input);
+                let ellipsis_w = self.measure_ui_width("…", text_scale_input);
+
+                // Выделение «всё выделено» (Ctrl+A)
+                if settings_ignore_select_all {
+                    let sel_text_w = self.measure_ui_width(settings_ignore_input, text_scale_input).min(max_text_w);
+                    self.push_rounded_rect(
+                        start_x, (content_y + 4.0 * s).round(),
+                        sel_text_w, input_h - 8.0 * s,
+                        3.0 * s, [0.55, 0.35, 0.80, 0.30],
+                    );
+                }
+
+                if pre_w <= max_text_w {
+                    // Курсор влезает слева — показываем от начала, обрезаем справа
+                    let mut show = settings_ignore_input;
+                    let mut right_trunc = false;
+                    while !show.is_empty() && self.measure_ui_width(show, text_scale_input) > max_text_w {
+                        let mut idx = show.len();
+                        while !show.is_char_boundary(idx) { idx -= 1; }
+                        idx -= 1;
+                        while !show.is_char_boundary(idx) { idx -= 1; }
+                        show = &show[..idx];
+                        right_trunc = true;
+                    }
+                    let display = if right_trunc {
+                        format!("{}…", show)
+                    } else {
+                        show.to_string()
+                    };
+                    self.draw_string_scaled(
+                        &display,
+                        start_x, text_y_mid,
+                        [0.90, 0.88, 0.95, 1.0], text_scale_input,
+                    );
+                    if settings_ignore_focused && !settings_ignore_select_all {
+                        let cx = (start_x + pre_w).round();
+                        self.push_rect(cx, (content_y + 6.0 * s).round(), (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, blink_alpha]);
+                    }
+                } else {
+                    // Скроллируем влево: курсор у правого края, показываем "…" + текст
+                    let avail = max_text_w - ellipsis_w;
+                    let mut start_byte = cursor_byte;
+                    let mut w_acc = 0.0f32;
+                    let chars_before: Vec<(usize, char)> = settings_ignore_input[..cursor_byte].char_indices().collect();
+                    for &(bi, c) in chars_before.iter().rev() {
+                        let cw = self.measure_ui_width(&settings_ignore_input[bi..bi + c.len_utf8()], text_scale_input);
+                        if w_acc + cw > avail { break; }
+                        w_acc += cw;
+                        start_byte = bi;
+                    }
+                    let shown = &settings_ignore_input[start_byte..];
+                    let mut show_r = shown;
+                    let mut right_trunc = false;
+                    while !show_r.is_empty() && self.measure_ui_width(show_r, text_scale_input) > avail {
+                        let mut idx = show_r.len();
+                        while !show_r.is_char_boundary(idx) { idx -= 1; }
+                        idx -= 1;
+                        while !show_r.is_char_boundary(idx) { idx -= 1; }
+                        show_r = &show_r[..idx];
+                        right_trunc = true;
+                    }
+                    let display = format!("…{}{}", show_r, if right_trunc { "…" } else { "" });
+                    self.draw_string_scaled(
+                        &display,
+                        start_x, text_y_mid,
+                        [0.90, 0.88, 0.95, 1.0], text_scale_input,
+                    );
+                    if settings_ignore_focused && !settings_ignore_select_all {
+                        let shown_pre_w = self.measure_ui_width(&settings_ignore_input[start_byte..cursor_byte], text_scale_input);
+                        let cx = (start_x + ellipsis_w + shown_pre_w).round();
+                        self.push_rect(cx, (content_y + 6.0 * s).round(), (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, blink_alpha]);
+                    }
+                }
             }
 
-            let btn_ignore_add = crate::widgets::Button {
-                x: content_x + input_w + 10.0 * s,
-                y: content_y,
-                w: 110.0 * s,
-                h: input_h,
-                text: "Добавить".to_string(),
-                icon: Some(crate::widgets::IconType::Plus),
-                text_scale: 0.88,
-                icon_size: 15.0 * s,
-            };
-            wants_pointer |= btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            // Кнопка «Добавить» — неактивна если поле пустое или только пробелы
+            let trimmed_input = settings_ignore_input.trim();
+            let btn_add_x = content_x + input_w + 10.0 * s;
+            let btn_add_y = content_y;
+            let btn_add_w = 110.0 * s;
+                        if trimmed_input.is_empty() {
+                // Строго копируем математику округления из widgets.rs (Button::render)
+                let bx = btn_add_x.round();
+                let by = btn_add_y.round();
+                let bw = btn_add_w.round();
+                let bh = input_h.round();
+
+                self.push_rounded_rect(
+                    bx - 1.0, by - 1.0,
+                    bw + 2.0, bh + 2.0,
+                    6.0 * s, [0.20, 0.21, 0.26, 1.0],
+                );
+                self.push_rounded_rect(
+                    bx, by,
+                    bw, bh,
+                    6.0 * s, [0.15, 0.16, 0.20, 1.0],
+                );
+
+                let icon_sz = 15.0 * s;
+                let text_scale = 0.88;
+                let text_w = self.measure_ui_width("Добавить", text_scale);
+                let content_w = text_w + icon_sz + 8.0 * s;
+
+                let mut content_x = bx + (bw - content_w) / 2.0;
+                let icon_y = by + (bh - icon_sz) / 2.0;
+                let text_y = by + bh / 2.0 + 5.0 * s;
+
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::Plus,
+                    content_x,
+                    icon_y,
+                    icon_sz,
+                    [0.35, 0.36, 0.42, 1.0]
+                );
+                content_x += icon_sz + 8.0 * s;
+
+                self.draw_string_scaled(
+                    "Добавить",
+                    content_x, 
+                    text_y,
+                    [0.35, 0.36, 0.42, 1.0], text_scale,
+                );
+            } else {
+                let btn_ignore_add = crate::widgets::Button {
+                    x: btn_add_x,
+                    y: btn_add_y,
+                    w: btn_add_w,
+                    h: input_h,
+                    text: "Добавить".to_string(),
+                    icon: Some(crate::widgets::IconType::Plus),
+                    text_scale: 0.88,
+                    icon_size: 15.0 * s,
+                };
+                wants_pointer |= btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            }
             content_y += input_h + 16.0 * s;
 
             // ── Чипы пользовательских паттернов ──────────────────────────
@@ -1069,26 +1172,26 @@ impl Renderer {
                 self.push_rounded_rect(chip_x - 1.0, content_y - 1.0, chip_w + 2.0, chip_h + 2.0, chip_r + 1.0, border);
                 self.push_rounded_rect(chip_x, content_y, chip_w, chip_h, chip_r, bg);
 
-                self.draw_string_scaled(
+                                self.draw_string_scaled(
                     pattern,
-                    chip_x + pad_x, content_y + chip_h * 0.70,
+                    chip_x + pad_x, (content_y + chip_h * 0.70).round(),
                     [0.82, 0.68, 1.0, 1.0], 0.88,
                 );
 
                 let cross_color = if close_hov { [1.0, 0.38, 0.58, 1.0] } else { [0.50, 0.40, 0.65, 1.0] };
                 self.draw_string_scaled(
                     "×",
-                    chip_x + chip_w - close_area + 1.0 * s, content_y + chip_h * 0.70,
+                    chip_x + chip_w - close_area + 1.0 * s, (content_y + chip_h * 0.70).round(),
                     cross_color, 0.95,
                 );
 
                 chip_x += chip_w + chip_gap_x;
             }
 
-            if ide_ignore_patterns.is_empty() {
+                        if ide_ignore_patterns.is_empty() {
                 self.draw_string_scaled(
                     "Нет пользовательских правил",
-                    content_x, content_y + chip_h * 0.70,
+                    content_x, (content_y + chip_h * 0.70).round(),
                     [0.28, 0.30, 0.36, 1.0], 0.88,
                 );
             }
@@ -1097,7 +1200,7 @@ impl Renderer {
             unsafe { self.gl.disable(glow::SCISSOR_TEST); }
 
             // ── Скроллбар для вкладки IDE ─────────────────────────────────
-            let ide_total_h = {
+                        let ide_total_h = {
                 let workspace_h = ide_workspaces.len() as f32 * 46.0 * s + 126.0 * s;
                 let ignore_h = {
                     let chip_rows = if ide_ignore_patterns.is_empty() { 1 }
@@ -1112,7 +1215,8 @@ impl Renderer {
                             }
                             rows
                         };
-                    200.0 * s + chip_rows as f32 * (chip_h + chip_gap_y)
+                    // Убрана плашка «Скрыты всегда» (-dlabel_h - 18.0 * s)
+                    160.0 * s + chip_rows as f32 * (chip_h + chip_gap_y)
                 };
                 workspace_h + ignore_h
             };
@@ -1121,7 +1225,7 @@ impl Renderer {
                 let ratio = (ide_scroll_y / max_scroll).clamp(0.0, 1.0);
                 let track_h = ide_content_area_h;
                 let thumb_h = (ide_content_area_h / ide_total_h * track_h).max(40.0 * s);
-                let thumb_y = (iy + 40.0 * s + ratio * (track_h - thumb_h)).round();
+                let thumb_y = (iy + 52.0 * s + ratio * (track_h - thumb_h)).round();
                 let sb_x = (ix + iw - 14.0 * s).round();
                 self.push_rounded_rect(sb_x, thumb_y, 6.0 * s, thumb_h, 3.0 * s, [0.7, 0.33, 0.54, 1.0]);
             }
@@ -1304,7 +1408,7 @@ impl Renderer {
                 let thumb_y = (text_area_y + scroll_ratio * (track_h - thumb_h)).round();
                 let scroll_x = (start_x + cw + 5.0 * s).round();
 
-                self.push_rounded_rect(
+                                self.push_rounded_rect(
                     scroll_x,
                     thumb_y,
                     6.0 * s,
@@ -1316,6 +1420,12 @@ impl Renderer {
         }
 
         self.flush();
-        wants_pointer
+        if wants_text {
+            2
+        } else if wants_pointer {
+            1
+        } else {
+            0
+        }
     }
 }

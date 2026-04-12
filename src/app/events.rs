@@ -430,8 +430,9 @@ impl ApplicationHandler for App {
                     self.autocomplete_rect = None;
                 }
 
-                                if self.show_settings || self.settings_anim_progress > 0.0 {
-                    if self.renderer.as_mut().unwrap().draw_settings(
+                                                                let mut settings_cursor_mode = 0;
+                if self.show_settings || self.settings_anim_progress > 0.0 {
+                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
@@ -440,8 +441,12 @@ impl ApplicationHandler for App {
                         &self.ide_ignore_patterns,
                         &self.settings_ignore_input,
                         self.settings_ignore_focused,
+                        self.settings_ignore_cursor,
+                        self.settings_ignore_select_all,
                         self.settings_ide_scroll.current,
-                    ) {
+                        blink_alpha,
+                    );
+                    if settings_cursor_mode == 1 {
                         wants_pointer = true;
                     }
                 }
@@ -520,11 +525,11 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
-                    if self.show_settings
+                                        if self.show_settings
                         || self.dialog_window.is_some()
                         || self.settings_anim_progress >= 1.5
                     {
-                        is_text = false;
+                        is_text = settings_cursor_mode == 2;
                     }
 
                     if self.show_search && self.search_anim_y > -10.0 {

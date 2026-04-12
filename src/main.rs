@@ -228,7 +228,12 @@ fn load_config() -> Config {
                 }
             }
         }
-    } else {
+        } else {
+        // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
+        config.ide_ignore_patterns = crate::app::file_tree::DEFAULT_IGNORE_PATTERNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         save_config(&config);
     }
 
@@ -416,8 +421,10 @@ F8\tПоказать/скрыть счетчик FPS
                 is_ide_mode: is_ide_cli,
         ide_workspaces: config.ide_workspaces.clone(),
         ide_ignore_patterns: config.ide_ignore_patterns.clone(),
-        settings_ignore_input: String::new(),
+                settings_ignore_input: String::new(),
         settings_ignore_focused: false,
+        settings_ignore_cursor: 0,
+        settings_ignore_select_all: false,
         open_folder_rx: None,
 
         show_search: false,

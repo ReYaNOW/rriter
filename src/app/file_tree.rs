@@ -185,10 +185,9 @@ fn scan_dir_parallel(
     let is_expanded = is_root || expanded.contains(&path);
     let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
 
-    // Собираем единый срез паттернов: дефолтные + пользовательские
-    let user_strs: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
-    let mut all_patterns: Vec<&str> = DEFAULT_IGNORE_PATTERNS.to_vec();
-    all_patterns.extend_from_slice(&user_strs);
+        // Используем только пользовательские паттерны.
+    // Дефолтные засеваются в конфиг при первом запуске (см. load_config в main.rs).
+    let all_patterns: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
 
     let is_ignored = if is_root {
         false

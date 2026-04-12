@@ -215,8 +215,12 @@ pub struct App {
     pub ide_ignore_patterns: Vec<String>,
     /// Текущий ввод в поле добавления нового паттерна игнора (настройки → IDE)
     pub settings_ignore_input: String,
-    /// Поле ввода игнора сфокусировано
+        /// Поле ввода игнора сфокусировано
     pub settings_ignore_focused: bool,
+    /// Позиция курсора (байт) в поле ввода игнора
+    pub settings_ignore_cursor: usize,
+    /// Весь текст выделен (Ctrl+A)
+    pub settings_ignore_select_all: bool,
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 
     pub show_search: bool,

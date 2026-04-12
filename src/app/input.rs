@@ -56,14 +56,43 @@ impl App {
             }
         }
 
-                if self.show_settings && self.settings_tab == 0 {
-            self.settings_ide_scroll.anim_speed = 7.0;
-            self.settings_ide_scroll.scroll_by(dy);
+                                if self.show_settings && self.settings_tab == 0 {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let h = self.window.as_ref().unwrap().inner_size().height as f32;
             let ide_h = (700.0 * s).min(h - 40.0 * s);
-            self.settings_ide_scroll.clamp_target(0.0, (3000.0 * s - ide_h).max(0.0));
-            self.window.as_ref().unwrap().request_redraw();
+            let ih = ide_h - 35.0 * s - 30.0 * s;
+            let ide_content_area_h = ih - 52.0 * s;
+
+            // Точный подсчёт высоты контента (как в draw_settings)
+            let workspace_h = self.ide_workspaces.len() as f32 * 46.0 * s + 126.0 * s;
+            let chip_h = 28.0 * s;
+            let chip_gap_y = 8.0 * s;
+            let chip_gap_x = 8.0 * s;
+            let pad_x = 12.0 * s;
+            let max_row_w = 460.0 * s;
+            let chip_rows = if self.ide_ignore_patterns.is_empty() {
+                1usize
+            } else {
+                let mut rows = 1usize;
+                let mut cx = 0.0f32;
+                for p in &self.ide_ignore_patterns {
+                    let tw = self.renderer.as_mut().unwrap().measure_ui_width(p, 0.88);
+                    let cw = tw + pad_x * 2.0 + 22.0 * s;
+                    if cx + cw > max_row_w && cx > 0.0 { rows += 1; cx = 0.0; }
+                    cx += cw + chip_gap_x;
+                }
+                rows
+            };
+            let ignore_h = 200.0 * s + chip_rows as f32 * (chip_h + chip_gap_y);
+            let ide_total_h = workspace_h + ignore_h;
+            let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
+
+            if max_scroll > 0.0 {
+                self.settings_ide_scroll.anim_speed = 7.0;
+                self.settings_ide_scroll.scroll_by(dy);
+                self.settings_ide_scroll.clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+            }
             return;
         }
         if self.show_settings && self.settings_tab == 4 {
@@ -195,14 +224,13 @@ impl App {
                             self.trigger_folder_picker();
                         }
 
-                        // ── Поле ввода игнора ────────────────────────────
-                        // Вычисляем Y поля: после рабочих областей + 56 + разделитель + заголовок + подсказки + плашка
+                                                // ── Поле ввода игнора ────────────────────────────
+                        // Вычисляем Y поля: после рабочих областей + 56 + 20 + 28 + 22 + 20
                         let input_section_y = add_btn_y + 56.0 * s // после кнопки
-                            + 1.0 * s + 20.0 * s   // разделитель
+                            + 20.0 * s             // разделитель
                             + 28.0 * s             // заголовок
                             + 22.0 * s             // пояснение 1
-                            + 20.0 * s             // пояснение 2
-                            + 22.0 * s + 18.0 * s; // плашка дефолтов
+                            + 20.0 * s;            // пояснение 2
                         let input_h = 34.0 * s;
                         let input_w = 330.0 * s;
 
@@ -222,11 +250,13 @@ impl App {
                             && my >= input_section_y
                             && my <= input_section_y + input_h;
 
-                        if on_add_btn {
+                                                if on_add_btn {
                             let trimmed = self.settings_ignore_input.trim().to_string();
                             if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                                 self.ide_ignore_patterns.push(trimmed);
                                 self.settings_ignore_input.clear();
+                                self.settings_ignore_cursor = 0;
+                                self.settings_ignore_select_all = false;
                                 let w = self.window.as_ref().unwrap();
                                 let maximized = w.is_maximized();
                                 crate::save_config(&crate::Config {
@@ -1888,11 +1918,13 @@ impl App {
         }
 
                 if key_event.state == ElementState::Pressed {
-            // ── Ввод в поле игнора настроек ──────────────────────────────
+                        // ── Ввод в поле игнора настроек ──────────────────────────────
             if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+                let ctrl = self.modifiers.control_key();
                 match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::Escape) => {
                         self.settings_ignore_focused = false;
+                        self.settings_ignore_select_all = false;
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
@@ -1901,6 +1933,8 @@ impl App {
                         if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                             self.ide_ignore_patterns.push(trimmed);
                             self.settings_ignore_input.clear();
+                            self.settings_ignore_cursor = 0;
+                            self.settings_ignore_select_all = false;
                             let w = self.window.as_ref().unwrap();
                             let maximized = w.is_maximized();
                             crate::save_config(&crate::Config {
@@ -1915,27 +1949,138 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
+                                        PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                        // Выделить всё
+                        self.settings_ignore_cursor = self.settings_ignore_input.len();
+                        self.settings_ignore_select_all = true;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                        if self.settings_ignore_select_all {
+                            let _ = self.clipboard.set_text(self.settings_ignore_input.clone());
+                        }
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
+                        if self.settings_ignore_select_all {
+                            let _ = self.clipboard.set_text(self.settings_ignore_input.clone());
+                            self.settings_ignore_input.clear();
+                            self.settings_ignore_cursor = 0;
+                            self.settings_ignore_select_all = false;
+                            self.window.as_ref().unwrap().request_redraw();
+                        }
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+                        if let Ok(text) = self.clipboard.get_text() {
+                            let clean = text.replace('\n', "").replace('\r', "");
+                            if !clean.is_empty() {
+                                if self.settings_ignore_select_all {
+                                    self.settings_ignore_input.clear();
+                                    self.settings_ignore_cursor = 0;
+                                    self.settings_ignore_select_all = false;
+                                }
+                                self.settings_ignore_input.insert_str(self.settings_ignore_cursor, &clean);
+                                self.settings_ignore_cursor += clean.len();
+                                self.window.as_ref().unwrap().request_redraw();
+                            }
+                        }
+                        return;
+                    }
                     PhysicalKey::Code(KeyCode::Backspace) => {
-                        let inp = &mut self.settings_ignore_input;
-                        if !inp.is_empty() {
-                            let mut idx = inp.len();
-                            while !inp.is_char_boundary(idx) { idx -= 1; }
-                            idx -= 1;
-                            while !inp.is_char_boundary(idx) { idx -= 1; }
-                            inp.truncate(idx);
+                        if self.settings_ignore_select_all {
+                            self.settings_ignore_input.clear();
+                            self.settings_ignore_cursor = 0;
+                            self.settings_ignore_select_all = false;
+                        } else {
+                                                        let inp = &mut self.settings_ignore_input;
+                            let cur = &mut self.settings_ignore_cursor;
+                            *cur = (*cur).min(inp.len());
+                            if *cur > 0 {
+                                let mut idx = *cur - 1;
+                                while idx > 0 && !inp.is_char_boundary(idx) { idx -= 1; }
+                                inp.remove(idx);
+                                *cur = idx;
+                            }
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                    _ => {
-                        if let Some(text) = &key_event.text {
-                            for ch in text.chars() {
-                                if !ch.is_control() {
-                                    self.settings_ignore_input.push(ch);
+                    PhysicalKey::Code(KeyCode::Delete) => {
+                        if self.settings_ignore_select_all {
+                            self.settings_ignore_input.clear();
+                            self.settings_ignore_cursor = 0;
+                            self.settings_ignore_select_all = false;
+                        } else {
+                                                        let inp = &mut self.settings_ignore_input;
+                            let mut cur = self.settings_ignore_cursor.min(inp.len());
+                            while cur > 0 && cur < inp.len() && !inp.is_char_boundary(cur) { cur -= 1; }
+                            self.settings_ignore_cursor = cur;
+                            if cur < inp.len() {
+                                inp.remove(cur);
+                            }
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                        self.settings_ignore_select_all = false;
+                        if self.settings_ignore_cursor > 0 {
+                            let mut idx = self.settings_ignore_cursor - 1;
+                            while idx > 0 && !self.settings_ignore_input.is_char_boundary(idx) { idx -= 1; }
+                            self.settings_ignore_cursor = idx;
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowRight) => {
+                        self.settings_ignore_select_all = false;
+                        let len = self.settings_ignore_input.len();
+                        if self.settings_ignore_cursor < len {
+                            let mut idx = self.settings_ignore_cursor + 1;
+                            while idx < len && !self.settings_ignore_input.is_char_boundary(idx) { idx += 1; }
+                            self.settings_ignore_cursor = idx;
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::Home) => {
+                        self.settings_ignore_select_all = false;
+                        self.settings_ignore_cursor = 0;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::End) => {
+                        self.settings_ignore_select_all = false;
+                        self.settings_ignore_cursor = self.settings_ignore_input.len();
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                                        _ => {
+                        if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                            if let Some(text) = &key_event.text {
+                                let has_printable = text.chars().any(|c| !c.is_control());
+                                if has_printable {
+                                    if self.settings_ignore_select_all {
+                                        self.settings_ignore_input.clear();
+                                        self.settings_ignore_cursor = 0;
+                                        self.settings_ignore_select_all = false;
+                                    }
+                                    for ch in text.chars() {
+                                        if !ch.is_control() {
+                                            self.settings_ignore_cursor = self.settings_ignore_cursor.min(self.settings_ignore_input.len());
+                                            while self.settings_ignore_cursor > 0 && !self.settings_ignore_input.is_char_boundary(self.settings_ignore_cursor) {
+                                                self.settings_ignore_cursor -= 1;
+                                            }
+                                            self.settings_ignore_input.insert(self.settings_ignore_cursor, ch);
+                                            self.settings_ignore_cursor += ch.len_utf8();
+                                        }
+                                    }
+                                    self.window.as_ref().unwrap().request_redraw();
+                                    return;
                                 }
                             }
-                            self.window.as_ref().unwrap().request_redraw();
-                            return;
                         }
                     }
                 }
