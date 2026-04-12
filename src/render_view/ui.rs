@@ -46,16 +46,9 @@ impl Renderer {
             }
             let opt = resvg::usvg::Options::default();
             let svg_str = String::from_utf8_lossy(svg_bytes);
-            // Заменяем currentColor и чёрный (#000, #000000) на белый для тёмной темы
-            let svg_str = svg_str
-                .replace("currentColor", "#ffffff")
-                .replace("\"#000000\"", "\"#ffffff\"")
-                .replace("\"#000\"", "\"#ffffff\"")
-                .replace("fill:rgb(0,0,0)", "fill:rgb(255,255,255)")
-                .replace("fill:#000000", "fill:#ffffff")
-                .replace("fill:#000", "fill:#ffffff")
-                .replace("stroke:#000000", "stroke:#ffffff")
-                .replace("stroke:#000", "stroke:#ffffff");
+            // Для иконок без _dark-варианта заменяем currentColor на белый.
+            // Иконки с _dark-вариантом уже имеют правильные светлые цвета (встроены build.rs).
+            let svg_str = svg_str.replace("currentColor", "#ffffff");
 
             if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
                 // 128px SSAA — достаточно резко для иконок до 24px на экране
@@ -68,26 +61,14 @@ impl Renderer {
                     let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
                     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-                    // Инвертируем тёмные пиксели: если пиксель тёмный (R+G+B < 100) и непрозрачный —
-                    // делаем белым, чтобы иконки были видны на тёмном фоне
+                    // Unpremultiply alpha
                     let mut data = pixmap.data().to_vec();
                     for px in data.chunks_exact_mut(4) {
                         let a = px[3] as u32;
-                        if a == 0 {
-                            continue;
-                        }
-                        // Unpremultiply
-                        if a < 255 {
+                        if a > 0 && a < 255 {
                             px[0] = ((px[0] as u32 * 255) / a).min(255) as u8;
                             px[1] = ((px[1] as u32 * 255) / a).min(255) as u8;
                             px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
-                        }
-                        // Если пиксель очень тёмный — инвертируем в белый
-                        let brightness = px[0] as u32 + px[1] as u32 + px[2] as u32;
-                        if brightness < 60 {
-                            px[0] = 255;
-                            px[1] = 255;
-                            px[2] = 255;
                         }
                     }
 

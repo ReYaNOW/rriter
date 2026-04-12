@@ -297,16 +297,28 @@ fn main() {
 
     writeln!(bytes_out, "pub fn file_svg(key: &str) -> &'static [u8] {{").unwrap();
     writeln!(bytes_out, "    match key {{").unwrap();
-    // Только те стемы, SVG которых реально лежат на диске
-    let mut file_stems: Vec<&String> = existing_files.iter().collect();
+    // Только те стемы, SVG которых реально лежат на диске.
+    // _dark-файлы не являются самостоятельными ключами — они используются как замена
+    // для базового стема, если существуют (предпочтительны для тёмной темы).
+    let mut file_stems: Vec<&String> = existing_files
+        .iter()
+        .filter(|s| !s.ends_with("_dark"))
+        .collect();
     file_stems.sort();
     for stem in &file_stems {
+        // Если есть _dark-вариант, встраиваем его байты вместо оригинала
+        let dark_stem = format!("{}_dark", stem);
+        let svg_file = if existing_files.contains(&dark_stem) {
+            dark_stem
+        } else {
+            stem.to_string()
+        };
         writeln!(
             bytes_out,
             "        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
             escape(stem),
             escape(&manifest),
-            escape(stem)
+            escape(&svg_file)
         )
         .unwrap();
     }
