@@ -93,8 +93,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/icons/atom/icons/files");
     println!("cargo:rerun-if-changed=src/icons/atom/icons/folders");
 
-    let gen_dir = base.join("src").join("generated");
-    fs::create_dir_all(&gen_dir).unwrap();
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let gen_dir = Path::new(&out_dir);
 
     let file_json_path = base.join("src/icons/atom/icon_associations.json");
     let folder_json_path = base.join("src/icons/atom/folder_associations.json");
@@ -279,14 +279,20 @@ fn main() {
 
     // Определяем fallback (если нет — пустой слайс)
     let file_fallback = if existing_files.contains("default_file") {
-        "include_bytes!(\"../icons/atom/icons/files/default_file.svg\")"
+        format!(
+            "include_bytes!(\"{}/src/icons/atom/icons/files/default_file.svg\")",
+            escape(&manifest)
+        )
     } else {
-        "b\"\""
+        "b\"\"".to_string()
     };
     let folder_fallback = if existing_folders.contains("folder_default") {
-        "include_bytes!(\"../icons/atom/icons/folders/folder_default.svg\")"
+        format!(
+            "include_bytes!(\"{}/src/icons/atom/icons/folders/folder_default.svg\")",
+            escape(&manifest)
+        )
     } else {
-        "b\"\""
+        "b\"\"".to_string()
     };
 
     writeln!(bytes_out, "pub fn file_svg(key: &str) -> &'static [u8] {{").unwrap();
@@ -297,8 +303,9 @@ fn main() {
     for stem in &file_stems {
         writeln!(
             bytes_out,
-            "        \"{}\" => include_bytes!(\"../icons/atom/icons/files/{}.svg\"),",
+            "        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
             escape(stem),
+            escape(&manifest),
             escape(stem)
         )
         .unwrap();
@@ -308,19 +315,16 @@ fn main() {
     writeln!(bytes_out, "}}").unwrap();
     writeln!(bytes_out).unwrap();
 
-    writeln!(
-        bytes_out,
-        "pub fn folder_svg(key: &str) -> &'static [u8] {{"
-    )
-    .unwrap();
+    writeln!(bytes_out, "pub fn folder_svg(key: &str) -> &'static[u8] {{").unwrap();
     writeln!(bytes_out, "    match key {{").unwrap();
     let mut folder_stems: Vec<&String> = existing_folders.iter().collect();
     folder_stems.sort();
     for stem in &folder_stems {
         writeln!(
             bytes_out,
-            "        \"{}\" => include_bytes!(\"../icons/atom/icons/folders/{}.svg\"),",
+            "        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/folders/{}.svg\"),",
             escape(stem),
+            escape(&manifest),
             escape(stem)
         )
         .unwrap();
@@ -332,9 +336,16 @@ fn main() {
     fs::write(gen_dir.join("file_icons_bytes.rs"), bytes_out.as_bytes()).unwrap();
 
     println!(
-        "cargo:warning=file_icons: {} file svgs, {} folder svgs, {} file patterns, {} folder patterns",
-        existing_files.len(), existing_folders.len(),
-        file_entries.iter().filter(|(_, _, p)| !p.is_empty()).count(),
-        folder_entries.iter().filter(|(_, _, p)| !p.is_empty()).count(),
+        "cargo:info=file_icons: {} file svgs, {} folder svgs, {} file patterns, {} folder patterns",
+        existing_files.len(),
+        existing_folders.len(),
+        file_entries
+            .iter()
+            .filter(|(_, _, p)| !p.is_empty())
+            .count(),
+        folder_entries
+            .iter()
+            .filter(|(_, _, p)| !p.is_empty())
+            .count(),
     );
 }
