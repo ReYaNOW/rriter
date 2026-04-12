@@ -38,7 +38,7 @@ impl Renderer {
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
     /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
-            pub fn draw_file_icon(&mut self, key: &'static str, is_folder: bool, x: f32, y: f32, size: f32) {
+            pub fn draw_file_icon(&mut self, key: &'static str, _is_folder: bool, x: f32, y: f32, size: f32) {
         if !self.file_icon_cache.contains_key(key) {
             let pre_rasterized = {
                 let cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();

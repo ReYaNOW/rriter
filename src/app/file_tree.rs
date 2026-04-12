@@ -34,7 +34,7 @@ pub static RASTERIZED_ICONS: once_cell::sync::Lazy<std::sync::Mutex<rustc_hash::
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
-    let mut cache = RASTERIZED_ICONS.lock().unwrap();
+    let cache = RASTERIZED_ICONS.lock().unwrap();
     if cache.contains_key(key) {
         return;
     }

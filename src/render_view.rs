@@ -1782,7 +1782,9 @@ impl Renderer {
                     );
                 }
 
-                let start_byte = editor.line_offsets[s_line];
+                let Some(&start_byte) = editor.line_offsets.get(s_line) else {
+                    continue;
+                };
                 let end_byte = *editor.line_offsets.get(s_line + 1).unwrap_or(&editor.len());
                 let mut x = self.left_padding - render_scroll_x;
 
