@@ -38,80 +38,58 @@ impl Renderer {
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
     /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
-        pub fn draw_file_icon(&mut self, key: &'static str, is_folder: bool, x: f32, y: f32, size: f32) {
+            pub fn draw_file_icon(&mut self, key: &'static str, is_folder: bool, x: f32, y: f32, size: f32) {
         if !self.file_icon_cache.contains_key(key) {
-            let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
-            if svg_bytes.is_empty() {
+            let pre_rasterized = {
+                let cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
+                cache.get(key).cloned()
+            };
+
+            if let Some(data) = pre_rasterized {
+                let target = 128i32;
+                let tex = unsafe {
+                    let tex = self.gl.create_texture().unwrap();
+                    self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                    self.gl.tex_image_2d(
+                        glow::TEXTURE_2D,
+                        0,
+                        glow::RGBA8 as i32,
+                        target,
+                        target,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelUnpackData::Slice(Some(&data)),
+                    );
+                    self.gl.generate_mipmap(glow::TEXTURE_2D);
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MIN_FILTER,
+                        glow::LINEAR_MIPMAP_LINEAR as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MAG_FILTER,
+                        glow::LINEAR as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_S,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_T,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                    tex
+                };
+                self.file_icon_cache.insert(key, tex);
+                        } else {
+                // Иконка еще не растеризована фоновым потоком. 
+                // Возвращаемся без блокировки UI! Фоновый поток пришлет сигнал, когда закончит.
                 return;
-            }
-            let opt = resvg::usvg::Options::default();
-            let svg_str = String::from_utf8_lossy(svg_bytes);
-            // Для иконок без _dark-варианта заменяем currentColor на белый.
-            // Иконки с _dark-вариантом уже имеют правильные светлые цвета (встроены build.rs).
-            let svg_str = svg_str.replace("currentColor", "#ffffff");
-
-            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
-                // 128px SSAA — достаточно резко для иконок до 24px на экране
-                let target = 128u32;
-                if let Some(mut pixmap) = tiny_skia::Pixmap::new(target, target) {
-                    let sz = tree.size();
-                    let scale = (target as f32) / sz.width().max(sz.height());
-                    let dx = (target as f32 - sz.width() * scale) / 2.0;
-                    let dy = (target as f32 - sz.height() * scale) / 2.0;
-                    let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
-                    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-                    // Unpremultiply alpha
-                    let mut data = pixmap.data().to_vec();
-                    for px in data.chunks_exact_mut(4) {
-                        let a = px[3] as u32;
-                        if a > 0 && a < 255 {
-                            px[0] = ((px[0] as u32 * 255) / a).min(255) as u8;
-                            px[1] = ((px[1] as u32 * 255) / a).min(255) as u8;
-                            px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
-                        }
-                    }
-
-                    let tex = unsafe {
-                        let tex = self.gl.create_texture().unwrap();
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                        self.gl.tex_image_2d(
-                            glow::TEXTURE_2D,
-                            0,
-                            glow::RGBA8 as i32,
-                            target as i32,
-                            target as i32,
-                            0,
-                            glow::RGBA,
-                            glow::UNSIGNED_BYTE,
-                            glow::PixelUnpackData::Slice(Some(&data)),
-                        );
-                        self.gl.generate_mipmap(glow::TEXTURE_2D);
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MIN_FILTER,
-                            glow::LINEAR_MIPMAP_LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MAG_FILTER,
-                            glow::LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_S,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_T,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                        tex
-                    };
-                    self.file_icon_cache.insert(key, tex);
-                }
             }
         }
 

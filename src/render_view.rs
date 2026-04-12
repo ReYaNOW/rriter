@@ -419,7 +419,9 @@ impl Renderer {
 
                                                         let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
                             let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                            let color: [f32; 4] = if node.is_dir {
+                                                        let color: [f32; 4] = if node.is_ignored {
+                                [0.973, 0.584, 0.502, 0.8] // DRACULA_ORANGE (dimmed)
+                            } else if node.is_dir {
                                 [0.78, 0.68, 1.0, 1.0]
                             } else {
                                 self.theme.fg
@@ -431,13 +433,18 @@ impl Renderer {
                             if node.is_dir {
                                 // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
                                 let arrow_str = if node.is_expanded { "▼" } else { "▶" };
-                                let arrow_x = indent_x + 2.0 * s;
+                                                                let arrow_x = indent_x + 2.0 * s;
                                 let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
+                                let arrow_color = if node.is_ignored {
+                                    [0.973, 0.584, 0.502, 0.6]
+                                } else {
+                                    [0.78, 0.68, 1.0, 0.7]
+                                };
                                 self.draw_string_scaled(
                                     arrow_str,
                                     arrow_x,
                                     arrow_y,
-                                    [0.78, 0.68, 1.0, 0.7],
+                                    arrow_color,
                                     0.65,
                                 );
                                 // Иконка папки — правее стрелки

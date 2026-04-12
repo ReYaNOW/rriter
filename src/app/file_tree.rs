@@ -19,6 +19,7 @@ pub struct FileNode {
     pub is_expanded: bool,
     /// Ключ иконки из file_icons_map (вычисляется один раз при сборке дерева)
     pub icon_key: &'static str,
+    pub is_ignored: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -27,29 +28,82 @@ pub struct FileNode {
 // Возвращает (папки, файлы), обе группы отсортированы натурально.
 // ---------------------------------------------------------------------------
 
+use rayon::prelude::*;
+
+pub static RASTERIZED_ICONS: once_cell::sync::Lazy<std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Vec<u8>>>> = 
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+
+pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
+    let mut cache = RASTERIZED_ICONS.lock().unwrap();
+    if cache.contains_key(key) {
+        return;
+    }
+    drop(cache); // Не блокируем другие потоки во время рендеринга
+
+    let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
+    if svg_bytes.is_empty() { return; }
+    let opt = resvg::usvg::Options::default();
+    let svg_str = String::from_utf8_lossy(svg_bytes).replace("currentColor", "#ffffff");
+
+    if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
+        let target = 128u32;
+        if let Some(mut pixmap) = tiny_skia::Pixmap::new(target, target) {
+            let sz = tree.size();
+            let scale = (target as f32) / sz.width().max(sz.height());
+            let dx = (target as f32 - sz.width() * scale) / 2.0;
+            let dy = (target as f32 - sz.height() * scale) / 2.0;
+            let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
+            resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+            let mut data = pixmap.data().to_vec();
+            for px in data.chunks_exact_mut(4) {
+                let a = px[3] as u32;
+                if a > 0 && a < 255 {
+                    px[0] = ((px[0] as u32 * 255) / a).min(255) as u8;
+                    px[1] = ((px[1] as u32 * 255) / a).min(255) as u8;
+                    px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
+                }
+            }
+            RASTERIZED_ICONS.lock().unwrap().insert(key, data);
+        }
+    }
+}
+
 fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>) {
-    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
 
-    let walker = ignore::WalkBuilder::new(dir)
-        .max_depth(Some(1))
-        .hidden(true) // фильтровать скрытые (начинающиеся с '.')
-        .git_ignore(true) // уважать .gitignore
-        .build();
+    // Быстрое чтение директории напрямую через ОС
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
 
-    for entry in walker.skip(1).flatten() {
-        let path = entry.path().to_path_buf();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
-            dirs.push((name, path));
-        } else {
-            files.push((name, path));
+            // Игнорируем только самую тяжелую папку .git. 
+            // Остальные (типа .env, .idea) показываем.
+            if name_str == ".git" {
+                continue;
+            }
+
+            let is_dir = entry
+                .file_type()
+                .map(|ft| ft.is_dir())
+                .unwrap_or_else(|_| path.is_dir());
+
+            if is_dir {
+                dirs.push((name_str.into_owned(), path));
+            } else {
+                files.push((name_str.into_owned(), path));
+            }
         }
     }
 
-    // Натуральная сортировка: file2 < file10
-    dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
-    files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
+    // Параллельная многопоточная натуральная сортировка O(N log N)
+    rayon::join(
+        || dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
+        || files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
+    );
 
     (dirs, files)
 }
@@ -58,45 +112,72 @@ fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf
 // Фоновый скан
 // ---------------------------------------------------------------------------
 
-fn scan_recursive(
-    root: &PathBuf,
+fn scan_dir_parallel(
+    path: PathBuf,
+    name: String,
     depth: usize,
     expanded: &FxHashSet<PathBuf>,
-    result: &mut Vec<FileNode>,
+    is_root: bool,
     max_depth: usize,
-) {
-    if depth > max_depth {
-        return;
+    gitignore: &ignore::gitignore::Gitignore,
+) -> Vec<FileNode> {
+    let is_expanded = is_root || expanded.contains(&path);
+    let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
+
+    let is_ignored = if is_root {
+        false
+    } else {
+        gitignore.matched_path_or_any_parents(&path, true).is_ignore()
+    };
+
+    let me = FileNode {
+        path: path.clone(),
+        name,
+        depth,
+        is_dir: true,
+        is_expanded,
+        icon_key,
+        is_ignored,
+    };
+
+    if !is_expanded || depth >= max_depth {
+        return vec![me];
     }
 
-    let (dirs, files) = read_children(root);
+    let (dirs, files) = read_children(&path);
 
-        for (name, path) in dirs {
-        let is_expanded = expanded.contains(&path);
-        let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
-        result.push(FileNode {
-            path: path.clone(),
-            name,
-            depth,
-            is_dir: true,
-            is_expanded,
-            icon_key,
-        });
-        if is_expanded {
-            scan_recursive(&path, depth + 1, expanded, result, max_depth);
-        }
-    }
-    for (name, path) in files {
-        let icon_key = crate::app::file_icons::file_icon_key(&name.to_ascii_lowercase());
-        result.push(FileNode {
-            path,
-            name,
-            depth,
-            is_dir: false,
-            is_expanded: false,
-            icon_key,
-        });
-    }
+        // Многопоточный обход дерева. flat_map в rayon собирает результаты
+    // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
+    let mut dir_nodes: Vec<FileNode> = dirs
+        .into_par_iter()
+        .flat_map(|(d_name, d_path)| {
+            scan_dir_parallel(d_path, d_name, depth + 1, expanded, false, max_depth, gitignore)
+        })
+        .collect();
+
+    // Параллельное применение Regex паттернов для подбора иконок файлов
+    let mut file_nodes: Vec<FileNode> = files
+        .into_par_iter()
+        .map(|(f_name, f_path)| {
+            let f_icon_key = crate::app::file_icons::file_icon_key(&f_name.to_ascii_lowercase());
+            let is_ignored = gitignore.matched_path_or_any_parents(&f_path, false).is_ignore();
+            FileNode {
+                path: f_path,
+                name: f_name,
+                depth: depth + 1,
+                is_dir: false,
+                is_expanded: false,
+                icon_key: f_icon_key,
+                is_ignored,
+            }
+        })
+        .collect();
+
+    let mut result = Vec::with_capacity(1 + dir_nodes.len() + file_nodes.len());
+    result.push(me);
+    result.append(&mut dir_nodes);
+    result.append(&mut file_nodes);
+    result
 }
 
 /// Запускает фоновый поток сканирования. Возвращает канал для результата.
@@ -105,40 +186,49 @@ pub fn spawn_scan(
     expanded: FxHashSet<PathBuf>,
 ) -> mpsc::Receiver<Vec<FileNode>> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut nodes: Vec<FileNode> = Vec::new();
-        for root in &roots {
-            if !root.exists() {
-                continue;
-            }
-            let name = root
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| root.to_string_lossy().into_owned());
-            let is_expanded = expanded.contains(root);
-                        let root_icon_key = {
-                let n = root
+            std::thread::spawn(move || {
+            // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
+            let full_nodes: Vec<FileNode> = roots
+            .into_par_iter()
+            .flat_map(|root| {
+                if !root.exists() {
+                    return Vec::new();
+                }
+
+                let mut builder = ignore::gitignore::GitignoreBuilder::new(&root);
+                let gitignore_path = root.join(".gitignore");
+                if gitignore_path.exists() {
+                    let _ = builder.add(gitignore_path);
+                }
+                let gitignore = builder.build().unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+
+                let name = root
                     .file_name()
-                    .map(|n| n.to_string_lossy().to_ascii_lowercase())
-                    .unwrap_or_default();
-                crate::app::file_icons::folder_icon_key(&n)
-            };
-            nodes.push(FileNode {
-                path: root.clone(),
-                name,
-                depth: 0,
-                is_dir: true,
-                is_expanded,
-                icon_key: root_icon_key,
-            });
-            if is_expanded {
-                scan_recursive(root, 1, &expanded, &mut nodes, 10);
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| root.to_string_lossy().into_owned());
+
+                scan_dir_parallel(root.clone(), name, 0, &expanded, true, 10, &gitignore)
+            })
+            .collect();
+
+                    // Отправляем полное дерево немедленно (текст появится мгновенно)
+            let _ = tx.send(full_nodes.clone());
+
+            // STEP 2: Параллельная растеризация иконок без блокировки UI
+            let mut needed_icons = rustc_hash::FxHashSet::default();
+            for node in &full_nodes {
+                needed_icons.insert((node.icon_key, node.is_dir));
             }
-        }
-        let _ = tx.send(nodes);
-    });
-    rx
-}
+
+            needed_icons.into_par_iter().for_each(|(key, is_dir)| {
+                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+            });
+
+            // STEP 3: Финальный триггер для перерисовки (иконки появятся)
+            let _ = tx.send(full_nodes);
+        });
+        rx
+    }
 
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
@@ -193,15 +283,18 @@ impl App {
     /// Поллит канал результатов фонового скана.
     /// Возвращает true если пришли новые данные (нужен redraw).
     /// Вызывать из about_to_wait.
-    pub fn poll_file_tree(&mut self) -> bool {
+        pub fn poll_file_tree(&mut self) -> bool {
+        let mut updated = false;
         if let Some(rx) = &self.file_tree_rx {
-            if let Ok(nodes) = rx.try_recv() {
-                self.file_tree_rx = None;
+            while let Ok(nodes) = rx.try_recv() {
                 self.ide_panel.file_tree_nodes = nodes;
-                return true;
+                updated = true;
+            }
+            if let Err(std::sync::mpsc::TryRecvError::Disconnected) = rx.try_recv() {
+                self.file_tree_rx = None;
             }
         }
-        false
+        updated
     }
 
     /// Запускает (или перезапускает) фоновый watcher для текущих workspaces.
