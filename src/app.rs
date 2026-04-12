@@ -42,9 +42,9 @@ impl PanelId {
     }
     pub fn icon(self) -> crate::widgets::IconType {
         match self {
-            PanelId::Explorer => crate::widgets::IconType::Plus,
-            PanelId::Terminal => crate::widgets::IconType::CaseMatch,
-            PanelId::Problems => crate::widgets::IconType::Warning,
+            PanelId::Explorer => crate::widgets::IconType::Explorer,
+            PanelId::Terminal => crate::widgets::IconType::Terminal,
+            PanelId::Problems => crate::widgets::IconType::Problems,
         }
     }
 }

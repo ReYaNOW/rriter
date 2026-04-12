@@ -415,12 +415,87 @@ impl Renderer {
         }
     }
 
+                pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+        let svg_str = match c {
+            '▶' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"4 2 16 20\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>",
+            '▼' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"2 4 20 16\"><g transform=\"rotate(90 12 12)\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></g></svg>",
+            _ => return None,
+        };
+
+        let opt = resvg::usvg::Options::default();
+        let tree = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt).ok()?;
+
+        let target_size = (self.font_size * 1.05).round().max(10.0);
+        let w = target_size as i32;
+        let h = target_size as i32;
+
+        if self.atlas_x + w + 2 > ATLAS_SIZE {
+            self.atlas_x = 2;
+            self.atlas_y += self.max_row_h + 2;
+            self.max_row_h = 0;
+        }
+
+        let mut pixmap = tiny_skia::Pixmap::new(w as u32, h as u32)?;
+        let scale = target_size / 24.0;
+        let transform = tiny_skia::Transform::from_scale(scale, scale);
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for (i, pixel) in pixmap.data().chunks_exact(4).enumerate() {
+            let a = pixel[3];
+            rgba[i * 4] = 255;
+            rgba[i * 4 + 1] = 255;
+            rgba[i * 4 + 2] = 255;
+            rgba[i * 4 + 3] = a;
+        }
+
+        unsafe {
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                self.atlas_x,
+                self.atlas_y,
+                w,
+                h,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(&rgba)),
+            );
+        }
+
+                let info = GlyphInfo {
+            u: self.atlas_x as f32 / ATLAS_SIZE as f32,
+            v: self.atlas_y as f32 / ATLAS_SIZE as f32,
+            uw: w as f32 / ATLAS_SIZE as f32,
+            vh: h as f32 / ATLAS_SIZE as f32,
+            width: w as f32,
+            height: h as f32,
+                        offset_x: 0.0,
+            offset_y: h as f32 * 0.82,
+            advance: target_size * 0.85,
+            is_emoji: 0.0,
+        };
+
+        self.atlas_x += w + 2;
+        if h > self.max_row_h {
+            self.max_row_h = h;
+        }
+        Some(info)
+    }
+
     pub fn get_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         if let Some(g) = self.glyphs.get(&c) {
             return Some(*g);
         }
         if c == '\n' || c == '\t' || c == '\r' {
             return None;
+        }
+        if c == '▶' || c == '▼' {
+            if let Some(info) = self.get_custom_svg_glyph(c) {
+                self.glyphs.insert(c, info);
+                return Some(info);
+            }
         }
 
         let mut rendered_image = None;
@@ -574,12 +649,18 @@ impl Renderer {
         Some(info)
     }
 
-    pub fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+        pub fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         if let Some(g) = self.ui_glyphs.get(&c) {
             return Some(*g);
         }
         if c == '\n' || c == '\t' || c == '\r' {
             return None;
+        }
+        if c == '▶' || c == '▼' {
+            if let Some(info) = self.get_custom_svg_glyph(c) {
+                self.ui_glyphs.insert(c, info);
+                return Some(info);
+            }
         }
 
         let mut rendered_image = None;
@@ -849,24 +930,39 @@ impl Renderer {
             (
                 crate::widgets::IconType::Down,
                 include_bytes!("icons/go-down.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Close,
-                include_bytes!("icons/window-close.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Plus,
-                include_bytes!("icons/plus.svg").as_slice(),
-            ),
-        ];
-        let opt = resvg::usvg::Options::default();
+            ),                        (
+                            crate::widgets::IconType::Close,
+                            include_bytes!("icons/window-close.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Plus,
+                            include_bytes!("icons/plus.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Terminal,
+                            include_bytes!("icons/atom/icons/ui/terminal.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Explorer,
+                            include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Problems,
+                            include_bytes!("icons/problems.svg").as_slice(),
+                        ),
+                    ];
+                    let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
             let svg_data_str = String::from_utf8_lossy(data);
-            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+                        let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
                 // Заменяем жестко прописанный белый цвет на старый розовый #da4453
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-            } else if icon_type == crate::widgets::IconType::Plus {
-                svg_data_str.replace("currentColor", "#ffffff")
+            } else if icon_type == crate::widgets::IconType::Plus
+                || icon_type == crate::widgets::IconType::Terminal
+                || icon_type == crate::widgets::IconType::Explorer
+                || icon_type == crate::widgets::IconType::Problems
+            {
+                svg_data_str.replace("currentColor", "#ffffff").replace("fill=\"#000000\"", "fill=\"#ffffff\"")
             } else {
                 svg_data_str.into_owned()
             };

@@ -11,6 +11,9 @@ pub enum IconType {
     Down,
     Close,
     Plus,
+    Terminal,
+    Explorer,
+    Problems,
 }
 
 pub struct Button {

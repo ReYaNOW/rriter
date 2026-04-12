@@ -34,7 +34,7 @@ impl Renderer {
         show_welcome: bool,
         recent_files: &[std::path::PathBuf],
         current_sticky_lines: &[(usize, usize)],
-                sticky_anim_progress: f32,
+        sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
         is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
@@ -195,10 +195,10 @@ impl Renderer {
             // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
             self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
-            let btn_size = 36.0 * s;
-            let btn_gap = 8.0 * s;
-            let btn_x = 6.0 * s;
-            let top_start_y = 6.0 * s;
+            let btn_size = sb_w;
+            let btn_gap = 0.0;
+            let btn_x = 0.0;
+            let top_start_y = 0.0;
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
 
@@ -226,19 +226,18 @@ impl Renderer {
                     y
                 } else {
                     // Кнопки нижней группы фиксированы у дна окна, независимо от панели
-                    let y =
-                        real_height - 6.0 * s - btn_size - bottom_idx as f32 * (btn_size + btn_gap);
+                    let y = real_height - btn_size - bottom_idx as f32 * btn_size;
                     bottom_idx += 1;
                     y
                 };
 
-                let btn = IconButton {
+                                let btn = IconButton {
                     x: btn_x,
                     y: btn_y,
                     size: btn_size,
                     icon: Some(slot.id.icon()),
                     is_active: slot.open,
-                    icon_size: Some(22.0 * s),
+                    icon_size: Some(36.0 * s),
                     active_square_width: Some(sb_w),
                 };
                 wants_pointer |= btn.render(self, mx, my, s, false);
@@ -250,13 +249,13 @@ impl Renderer {
                     if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
                         let ghost_y =
                             (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
-                        let ghost = IconButton {
+                                                let ghost = IconButton {
                             x: btn_x,
                             y: ghost_y,
                             size: btn_size,
                             icon: Some(slot.id.icon()),
                             is_active: false,
-                            icon_size: Some(22.0 * s),
+                            icon_size: Some(36.0 * s),
                             active_square_width: None,
                         };
                         ghost.render(self, -1.0, -1.0, s, false);
@@ -381,8 +380,8 @@ impl Renderer {
                         );
                     }
 
-                    let row_h = 28.0 * s;
-                    let indent_w = 12.0 * s;
+                                        let row_h = 28.0 * s;
+                    let indent_w = 18.0 * s;
                     let scroll = ide_panel.explorer_scroll.current.round();
                     let content_h = editor_height - title_h;
                     let total_nodes = ide_panel.file_tree_nodes.len();
@@ -434,7 +433,7 @@ impl Renderer {
                             if node.is_dir {
                                 // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
                                 let arrow_str = if node.is_expanded { "▼" } else { "▶" };
-                                let arrow_x = indent_x + 2.0 * s;
+                                let arrow_x = indent_x - 2.0 * s;
                                 let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
                                 let arrow_color = if node.is_ignored {
                                     [0.973, 0.584, 0.502, 0.6]
@@ -446,10 +445,10 @@ impl Renderer {
                                     arrow_x,
                                     arrow_y,
                                     arrow_color,
-                                    0.65,
+                                    1.0,
                                 );
-                                // Иконка папки — правее стрелки
-                                let dir_icon_x = indent_x + 13.0 * s;
+                                                                // Иконка папки — правее стрелки
+                                let dir_icon_x = indent_x + 18.0 * s;
                                 self.draw_file_icon(
                                     node.icon_key,
                                     true,
@@ -464,10 +463,9 @@ impl Renderer {
                                     color,
                                     tree_text_scale,
                                 );
-                            } else {
-                                let file_icon_x = indent_x + 4.0 * s;
-                                self.draw_file_icon(
-                                    node.icon_key,
+                                                        } else {
+                                let file_icon_x = indent_x + 10.0 * s;
+                                self.draw_file_icon(node.icon_key,
                                     false,
                                     file_icon_x,
                                     icon_y,
@@ -1081,8 +1079,13 @@ impl Renderer {
             }
         }
 
-                if let Some((cx_screen, cy)) = cursor_pos {
-            if sel_start == sel_end && blink_alpha > 0.5 && !dialog_window_open && !search_focused && !show_settings {
+        if let Some((cx_screen, cy)) = cursor_pos {
+            if sel_start == sel_end
+                && blink_alpha > 0.5
+                && !dialog_window_open
+                && !search_focused
+                && !show_settings
+            {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
                     && cx_screen < scrollbar_x
@@ -1139,10 +1142,10 @@ impl Renderer {
             let phys_idx = v_line.physical_line - 1;
 
             if editor.foldable_lines.contains_key(&phys_idx) {
-                let arrow_x = self.left_padding - 18.0 * s;
+                let arrow_x = self.left_padding - 20.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
-                self.draw_string_scaled(arrow_str, arrow_x, y - 2.0 * s, self.theme.line_num, 0.9);
+                self.draw_string_scaled(arrow_str, arrow_x, y - 1.0 * s, self.theme.line_num, 1.0);
             }
 
             let mut n = v_line.physical_line;
