@@ -442,7 +442,7 @@ impl Renderer {
                                 );
                                 // Иконка папки — правее стрелки
                                 let dir_icon_x = indent_x + 13.0 * s;
-                                self.draw_file_icon(node.icon_key, dir_icon_x, icon_y, icon_size);
+                                self.draw_file_icon(node.icon_key, true, dir_icon_x, icon_y, icon_size);
                                 self.draw_string_scaled(
                                     &node.name,
                                     dir_icon_x + icon_size + 4.0 * s,
@@ -452,7 +452,7 @@ impl Renderer {
                                 );
                             } else {
                                 let file_icon_x = indent_x + 4.0 * s;
-                                self.draw_file_icon(node.icon_key, file_icon_x, icon_y, icon_size);
+                                self.draw_file_icon(node.icon_key, false, file_icon_x, icon_y, icon_size);
                                 self.draw_string_scaled(
                                     &node.name,
                                     file_icon_x + icon_size + 4.0 * s,

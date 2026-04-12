@@ -38,9 +38,9 @@ impl Renderer {
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
     /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
-        pub fn draw_file_icon(&mut self, key: &'static str, x: f32, y: f32, size: f32) {
+        pub fn draw_file_icon(&mut self, key: &'static str, is_folder: bool, x: f32, y: f32, size: f32) {
         if !self.file_icon_cache.contains_key(key) {
-            let svg_bytes = crate::app::file_icons::svg_for_key(key);
+            let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
             if svg_bytes.is_empty() {
                 return;
             }

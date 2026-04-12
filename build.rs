@@ -278,17 +278,17 @@ fn main() {
     writeln!(bytes_out).unwrap();
 
     // Определяем fallback (если нет — пустой слайс)
-    let file_fallback = if existing_files.contains("default_file") {
+    let file_fallback = if existing_files.contains("default") {
         format!(
-            "include_bytes!(\"{}/src/icons/atom/icons/files/default_file.svg\")",
+            "include_bytes!(\"{}/src/icons/atom/icons/files/default.svg\")",
             escape(&manifest)
         )
     } else {
         "b\"\"".to_string()
     };
-    let folder_fallback = if existing_folders.contains("folder_default") {
+    let folder_fallback = if existing_folders.contains("default") {
         format!(
-            "include_bytes!(\"{}/src/icons/atom/icons/folders/folder_default.svg\")",
+            "include_bytes!(\"{}/src/icons/atom/icons/folders/default.svg\")",
             escape(&manifest)
         )
     } else {
