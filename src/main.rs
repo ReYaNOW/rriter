@@ -27,7 +27,8 @@ pub struct Config {
     pub window_width: f64,
     pub window_height: f64,
     pub maximized: bool,
-    pub ide_workspaces: Vec<PathBuf>,
+    pub ide_workspaces: Vec<std::path::PathBuf>,
+    pub ide_ignore_patterns: Vec<String>,
 }
 
 impl Default for Config {
@@ -37,6 +38,7 @@ impl Default for Config {
             window_height: 800.0,
             maximized: false,
             ide_workspaces: Vec::new(),
+            ide_ignore_patterns: Vec::new(),
         }
     }
 }
@@ -154,16 +156,17 @@ pub fn save_config(config: &Config) {
     path.push("RRiter");
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
-    let paths_str = config
-        .ide_workspaces
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("|");
-    let content = format!(
-        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\"\n}}\n",
-        config.window_width, config.window_height, config.maximized, paths_str
-    );
+        let paths_str = config
+            .ide_workspaces
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("|");
+        let ignore_str = config.ide_ignore_patterns.join("|");
+        let content = format!(
+            "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\"\n}}\n",
+            config.window_width, config.window_height, config.maximized, paths_str, ignore_str
+        );
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if existing == content {
             return;
@@ -207,11 +210,19 @@ fn load_config() -> Config {
                         }
                     }
                 }
-                if line.contains("\"ide_workspaces\"") {
+                                if line.contains("\"ide_workspaces\"") {
                     if let Some(val) = line.split("\": \"").nth(1) {
                         let paths = val.trim().trim_matches(',').trim_matches('"');
                         if !paths.is_empty() {
                             config.ide_workspaces = paths.split('|').map(PathBuf::from).collect();
+                        }
+                    }
+                }
+                if line.contains("\"ide_ignore_patterns\"") {
+                    if let Some(val) = line.split("\": \"").nth(1) {
+                        let pats = val.trim().trim_matches(',').trim_matches('"');
+                        if !pats.is_empty() {
+                            config.ide_ignore_patterns = pats.split('|').map(|s| s.to_string()).collect();
                         }
                     }
                 }
@@ -402,8 +413,11 @@ F8\tПоказать/скрыть счетчик FPS
         show_welcome,
         recent_files,
 
-        is_ide_mode: is_ide_cli,
+                is_ide_mode: is_ide_cli,
         ide_workspaces: config.ide_workspaces.clone(),
+        ide_ignore_patterns: config.ide_ignore_patterns.clone(),
+        settings_ignore_input: String::new(),
+        settings_ignore_focused: false,
         open_folder_rx: None,
 
         show_search: false,
@@ -435,10 +449,11 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-        show_settings: false,
+                show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,
+        settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
         ide_panel: crate::load_panel_state(),
         file_tree_rx: None,

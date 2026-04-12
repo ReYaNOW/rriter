@@ -210,7 +210,13 @@ pub struct App {
     pub recent_files: Vec<PathBuf>,
 
     pub is_ide_mode: bool,
-    pub ide_workspaces: Vec<PathBuf>,
+        pub ide_workspaces: Vec<PathBuf>,
+    /// Пользовательские паттерны игноров для дерева файлов
+    pub ide_ignore_patterns: Vec<String>,
+    /// Текущий ввод в поле добавления нового паттерна игнора (настройки → IDE)
+    pub settings_ignore_input: String,
+    /// Поле ввода игнора сфокусировано
+    pub settings_ignore_focused: bool,
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 
     pub show_search: bool,
@@ -242,10 +248,11 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-    pub show_settings: bool,
+        pub show_settings: bool,
     pub settings_anim_progress: f32,
     pub settings_y: f32,
     pub settings_tab: usize,
+    pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
     pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,

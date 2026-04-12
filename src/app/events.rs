@@ -145,11 +145,12 @@ impl ApplicationHandler for App {
                                         let size = w.inner_size().to_logical::<f64>(scale);
                                         (size.width, size.height)
                                     };
-                                    crate::save_config(&crate::Config {
+                                                                        crate::save_config(&crate::Config {
                                         window_width: width,
                                         window_height: height,
                                         maximized,
                                         ide_workspaces: self.ide_workspaces.clone(),
+                                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                                     });
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
@@ -171,11 +172,12 @@ impl ApplicationHandler for App {
                                     let size = w.inner_size().to_logical::<f64>(scale);
                                     (size.width, size.height)
                                 };
-                                crate::save_config(&crate::Config {
+                                                                crate::save_config(&crate::Config {
                                     window_width: width,
                                     window_height: height,
                                     maximized,
                                     ide_workspaces: self.ide_workspaces.clone(),
+                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                                 });
                                 event_loop.exit();
                             } else if action == PendingAction::OpenFile {
@@ -239,11 +241,12 @@ impl ApplicationHandler for App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                    crate::save_config(&crate::Config {
+                                        crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
+                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
                     event_loop.exit();
                 }
@@ -427,13 +430,17 @@ impl ApplicationHandler for App {
                     self.autocomplete_rect = None;
                 }
 
-                if self.show_settings || self.settings_anim_progress > 0.0 {
+                                if self.show_settings || self.settings_anim_progress > 0.0 {
                     if self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
                         self.settings_scroll.current,
                         &self.ide_workspaces,
+                        &self.ide_ignore_patterns,
+                        &self.settings_ignore_input,
+                        self.settings_ignore_focused,
+                        self.settings_ide_scroll.current,
                     ) {
                         wants_pointer = true;
                     }
@@ -608,6 +615,9 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
+                if self.show_settings && self.settings_tab == 0 && self.settings_ide_scroll.update(dt) {
+            self.window.as_ref().unwrap().request_redraw();
+        }
         if self.show_settings && self.settings_tab == 4 && self.settings_scroll.update(dt) {
             needs_redraw = true;
         }
@@ -759,11 +769,12 @@ impl ApplicationHandler for App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                    crate::save_config(&crate::Config {
+                                        crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
+                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
                 }
             }

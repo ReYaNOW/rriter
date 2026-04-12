@@ -5,6 +5,63 @@ use rustc_hash::FxHashSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+/// Паттерны-игноры по умолчанию (скрытые, всегда активны).
+/// Пользователь не видит их в списке, но они применяются поверх пользовательских.
+pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
+    "__pycache__",
+    ".idea",
+    ".vscode",
+    ".DS_Store",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".gradle",
+    ".dart_tool",
+    ".flutter-plugins",
+    ".flutter-plugins-dependencies",
+    "*.pyc",
+    "*.pyo",
+    "*.class",
+    "*.o",
+    "*.obj",
+    ".cache",
+    ".env",
+    "venv",
+    ".venv",
+    "Thumbs.db",
+    "*.swp",
+    "*.swo",
+];
+
+/// Проверяет, должен ли узел быть скрыт по паттернам.
+/// Поддерживает:
+///   - точные имена:   `node_modules`, `.DS_Store`
+///   - glob-wildcards: `*.pyc`, `foo*`
+pub fn matches_ignore_pattern(name: &str, patterns: &[&str]) -> bool {
+    for pattern in patterns {
+        let p = pattern.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if p.starts_with('*') {
+            let suffix = &p[1..];
+            if name.ends_with(suffix) {
+                return true;
+            }
+        } else if p.ends_with('*') {
+            let prefix = &p[..p.len() - 1];
+            if name.starts_with(prefix) {
+                return true;
+            }
+        } else if name == p {
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Структуры данных
 // ---------------------------------------------------------------------------
@@ -123,9 +180,15 @@ fn scan_dir_parallel(
     is_root: bool,
     max_depth: usize,
     gitignore: &ignore::gitignore::Gitignore,
+    user_patterns: &[String],
 ) -> Vec<FileNode> {
     let is_expanded = is_root || expanded.contains(&path);
     let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
+
+    // Собираем единый срез паттернов: дефолтные + пользовательские
+    let user_strs: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
+    let mut all_patterns: Vec<&str> = DEFAULT_IGNORE_PATTERNS.to_vec();
+    all_patterns.extend_from_slice(&user_strs);
 
     let is_ignored = if is_root {
         false
@@ -133,6 +196,7 @@ fn scan_dir_parallel(
         gitignore
             .matched_path_or_any_parents(&path, true)
             .is_ignore()
+            || matches_ignore_pattern(&name, &all_patterns)
     };
 
     let me = FileNode {
@@ -145,11 +209,22 @@ fn scan_dir_parallel(
         is_ignored,
     };
 
-    if !is_expanded || depth >= max_depth {
+        if !is_expanded || depth >= max_depth {
         return vec![me];
     }
 
     let (dirs, files) = read_children(&path);
+
+    // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
+    // это экономит поток-часы на игнорируемых поддеревьях.
+    let dirs: Vec<_> = dirs
+        .into_iter()
+        .filter(|(d_name, _)| !matches_ignore_pattern(d_name, &all_patterns))
+        .collect();
+    let files: Vec<_> = files
+        .into_iter()
+        .filter(|(f_name, _)| !matches_ignore_pattern(f_name, &all_patterns))
+        .collect();
 
     // Многопоточный обход дерева. flat_map в rayon собирает результаты
     // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
@@ -164,6 +239,7 @@ fn scan_dir_parallel(
                 false,
                 max_depth,
                 gitignore,
+                user_patterns,
             )
         })
         .collect();
@@ -175,7 +251,8 @@ fn scan_dir_parallel(
             let f_icon_key = crate::app::file_icons::file_icon_key(&f_name.to_ascii_lowercase());
             let is_ignored = gitignore
                 .matched_path_or_any_parents(&f_path, false)
-                .is_ignore();
+                .is_ignore()
+                || matches_ignore_pattern(&f_name, &all_patterns);
             FileNode {
                 path: f_path,
                 name: f_name,
@@ -199,6 +276,7 @@ fn scan_dir_parallel(
 pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
+    user_patterns: Vec<String>,
 ) -> mpsc::Receiver<Vec<FileNode>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -224,7 +302,7 @@ pub fn spawn_scan(
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| root.to_string_lossy().into_owned());
 
-                scan_dir_parallel(root.clone(), name, 0, &expanded, true, 10, &gitignore)
+                scan_dir_parallel(root.clone(), name, 0, &expanded, true, 10, &gitignore, &user_patterns)
             })
             .collect();
 
@@ -285,7 +363,7 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
 // ---------------------------------------------------------------------------
 
 impl App {
-    /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
+        /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
     /// добавлении workspace или разворачивании папки.
     pub fn refresh_file_tree(&mut self) {
         let roots = self.ide_workspaces.clone();
@@ -294,7 +372,8 @@ impl App {
             return;
         }
         let expanded = self.ide_panel.file_tree_expanded.clone();
-        self.file_tree_rx = Some(spawn_scan(roots, expanded));
+        let patterns = self.ide_ignore_patterns.clone();
+        self.file_tree_rx = Some(spawn_scan(roots, expanded, patterns));
     }
 
     /// Поллит канал результатов фонового скана.

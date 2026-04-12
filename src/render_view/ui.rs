@@ -669,13 +669,17 @@ impl Renderer {
         wants_pointer
     }
 
-    pub fn draw_settings(
+        pub fn draw_settings(
         &mut self,
         anim_progress: f32,
         active_tab: usize,
         faq_editor: &Editor,
         scroll_y: f32,
         ide_workspaces: &[std::path::PathBuf],
+        ide_ignore_patterns: &[String],
+        settings_ignore_input: &str,
+        settings_ignore_focused: bool,
+        ide_scroll_y: f32,
     ) -> bool {
         if anim_progress <= 0.0 {
             return false;
@@ -816,7 +820,25 @@ impl Renderer {
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
 
-        if active_tab == 0 {
+                if active_tab == 0 {
+            // ── Scissor для скролла вкладки IDE ──────────────────────────────
+            let ide_content_area_x = ix + sidebar_w;
+            let ide_content_area_w = iw - sidebar_w;
+            let ide_content_area_h = ih - 40.0 * s;
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                let scissor_y = self.height - (iy + 40.0 * s + ide_content_area_h);
+                self.gl.scissor(
+                    ide_content_area_x.round() as i32,
+                    scissor_y.round() as i32,
+                    ide_content_area_w.round() as i32,
+                    ide_content_area_h.round() as i32,
+                );
+            }
+
+            content_y -= ide_scroll_y.round();
+
             self.draw_string_scaled(
                 "Рабочие области",
                 content_x,
@@ -871,7 +893,7 @@ impl Renderer {
                 content_y += 46.0 * s;
             }
 
-            let btn_add = crate::widgets::Button {
+                        let btn_add = crate::widgets::Button {
                 x: content_x,
                 y: content_y.round(),
                 w: 190.0 * s,
@@ -882,6 +904,227 @@ impl Renderer {
                 icon_size: 20.0 * s,
             };
             wants_pointer |= btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            content_y += 56.0 * s;
+
+            // ── Разделитель ───────────────────────────────────────────────
+            self.push_rect(content_x, content_y, 460.0 * s, 1.0, [1.0, 1.0, 1.0, 0.07]);
+            content_y += 20.0 * s;
+
+            // ── Заголовок секции игноров ──────────────────────────────────
+            self.draw_string_scaled(
+                "Игнорируемые файлы и папки",
+                content_x,
+                content_y,
+                [0.8, 0.8, 0.8, 1.0],
+                1.0,
+            );
+            content_y += 28.0 * s;
+
+            // Пояснение
+            self.draw_string_scaled(
+                "Эти файлы и папки не будут показаны в дереве проекта.",
+                content_x,
+                content_y,
+                [0.45, 0.47, 0.55, 1.0],
+                0.85,
+            );
+            content_y += 22.0 * s;
+            self.draw_string_scaled(
+                "Примеры: *.log  temp/  .DS_Store  *.min.js  build  dist",
+                content_x,
+                content_y,
+                [0.35, 0.37, 0.44, 1.0],
+                0.82,
+            );
+            content_y += 20.0 * s;
+
+            // Плашка «скрытые дефолты»
+            let defaults_label = "Скрыты всегда: __pycache__  .idea  node_modules  venv  *.pyc  *.class  .DS_Store  ...";
+            let dlabel_w = self.measure_ui_width(defaults_label, 0.78) + 20.0 * s;
+            let dlabel_h = 22.0 * s;
+            self.push_rounded_rect(
+                content_x - 1.0,
+                content_y - 1.0,
+                dlabel_w + 2.0,
+                dlabel_h + 2.0,
+                4.0 * s,
+                [0.20, 0.14, 0.28, 1.0],
+            );
+            self.push_rounded_rect(content_x, content_y, dlabel_w, dlabel_h, 4.0 * s, [0.14, 0.10, 0.20, 1.0]);
+            self.draw_string_scaled(
+                defaults_label,
+                content_x + 10.0 * s,
+                content_y + dlabel_h * 0.72,
+                [0.40, 0.32, 0.55, 1.0],
+                0.78,
+            );
+            content_y += dlabel_h + 18.0 * s;
+
+            // ── Поле ввода + кнопка «Добавить» ───────────────────────────
+            let input_w = 330.0 * s;
+            let input_h = 34.0 * s;
+
+            let input_hovered = self.last_mouse_x >= content_x
+                && self.last_mouse_x <= content_x + input_w
+                && self.last_mouse_y >= content_y
+                && self.last_mouse_y <= content_y + input_h;
+            if input_hovered { wants_pointer = true; }
+
+            let border_col = if settings_ignore_focused {
+                [0.55, 0.35, 0.80, 1.0]
+            } else if input_hovered {
+                [0.40, 0.28, 0.60, 1.0]
+            } else {
+                [0.28, 0.29, 0.35, 1.0]
+            };
+            self.push_rounded_rect(
+                content_x - 1.0, content_y - 1.0,
+                input_w + 2.0, input_h + 2.0,
+                6.0 * s, border_col,
+            );
+            self.push_rounded_rect(
+                content_x, content_y,
+                input_w, input_h,
+                6.0 * s, [0.11, 0.12, 0.16, 1.0],
+            );
+
+            let text_y_mid = content_y + input_h * 0.70;
+            if settings_ignore_input.is_empty() {
+                self.draw_string_scaled(
+                    "Паттерн или имя файла...",
+                    content_x + 12.0 * s, text_y_mid,
+                    [0.30, 0.32, 0.40, 1.0], 0.92,
+                );
+            } else {
+                // Обрезаем текст если не помещается
+                let max_text_w = input_w - 24.0 * s;
+                let mut display = settings_ignore_input;
+                let mut truncated = false;
+                while !display.is_empty() && self.measure_ui_width(display, 0.92) > max_text_w {
+                    let mut idx = display.len();
+                    while !display.is_char_boundary(idx) { idx -= 1; }
+                    idx -= 1;
+                    while !display.is_char_boundary(idx) { idx -= 1; }
+                    display = &display[..idx];
+                    truncated = true;
+                }
+                let prefix = if truncated { "…" } else { "" };
+                self.draw_string_scaled(
+                    &format!("{}{}", prefix, display),
+                    content_x + 12.0 * s, text_y_mid,
+                    [0.90, 0.88, 0.95, 1.0], 0.92,
+                );
+                // Курсор
+                let cx = content_x + 12.0 * s + self.measure_ui_width(&format!("{}{}", prefix, display), 0.92);
+                self.push_rect(cx, content_y + 6.0 * s, (1.5 * s).max(1.0), input_h - 12.0 * s, [0.75, 0.45, 1.0, 0.85]);
+            }
+
+            let btn_ignore_add = crate::widgets::Button {
+                x: content_x + input_w + 10.0 * s,
+                y: content_y,
+                w: 110.0 * s,
+                h: input_h,
+                text: "Добавить".to_string(),
+                icon: Some(crate::widgets::IconType::Plus),
+                text_scale: 0.88,
+                icon_size: 15.0 * s,
+            };
+            wants_pointer |= btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            content_y += input_h + 16.0 * s;
+
+            // ── Чипы пользовательских паттернов ──────────────────────────
+            let chip_h = 28.0 * s;
+            let chip_r = chip_h / 2.0;
+            let pad_x = 12.0 * s;
+            let chip_gap_x = 8.0 * s;
+            let chip_gap_y = 8.0 * s;
+            let max_row_w = 460.0 * s;
+            let mut chip_x = content_x;
+
+            for pattern in ide_ignore_patterns.iter() {
+                let text_w = self.measure_ui_width(pattern, 0.88);
+                let close_area = 22.0 * s;
+                let chip_w = text_w + pad_x * 2.0 + close_area;
+
+                if chip_x + chip_w > content_x + max_row_w && chip_x > content_x {
+                    chip_x = content_x;
+                    content_y += chip_h + chip_gap_y;
+                }
+
+                let chip_hov = self.last_mouse_x >= chip_x
+                    && self.last_mouse_x <= chip_x + chip_w
+                    && self.last_mouse_y >= content_y
+                    && self.last_mouse_y <= content_y + chip_h;
+
+                let close_hov = self.last_mouse_x >= chip_x + chip_w - close_area - 2.0 * s
+                    && self.last_mouse_x <= chip_x + chip_w
+                    && self.last_mouse_y >= content_y
+                    && self.last_mouse_y <= content_y + chip_h;
+
+                if chip_hov { wants_pointer = true; }
+
+                let bg = if chip_hov { [0.30, 0.18, 0.44, 1.0] } else { [0.20, 0.13, 0.30, 1.0] };
+                let border = if chip_hov { [0.58, 0.34, 0.82, 1.0] } else { [0.35, 0.22, 0.52, 1.0] };
+
+                self.push_rounded_rect(chip_x - 1.0, content_y - 1.0, chip_w + 2.0, chip_h + 2.0, chip_r + 1.0, border);
+                self.push_rounded_rect(chip_x, content_y, chip_w, chip_h, chip_r, bg);
+
+                self.draw_string_scaled(
+                    pattern,
+                    chip_x + pad_x, content_y + chip_h * 0.70,
+                    [0.82, 0.68, 1.0, 1.0], 0.88,
+                );
+
+                let cross_color = if close_hov { [1.0, 0.38, 0.58, 1.0] } else { [0.50, 0.40, 0.65, 1.0] };
+                self.draw_string_scaled(
+                    "×",
+                    chip_x + chip_w - close_area + 1.0 * s, content_y + chip_h * 0.70,
+                    cross_color, 0.95,
+                );
+
+                chip_x += chip_w + chip_gap_x;
+            }
+
+            if ide_ignore_patterns.is_empty() {
+                self.draw_string_scaled(
+                    "Нет пользовательских правил",
+                    content_x, content_y + chip_h * 0.70,
+                    [0.28, 0.30, 0.36, 1.0], 0.88,
+                );
+            }
+
+            self.flush();
+            unsafe { self.gl.disable(glow::SCISSOR_TEST); }
+
+            // ── Скроллбар для вкладки IDE ─────────────────────────────────
+            let ide_total_h = {
+                let workspace_h = ide_workspaces.len() as f32 * 46.0 * s + 126.0 * s;
+                let ignore_h = {
+                    let chip_rows = if ide_ignore_patterns.is_empty() { 1 }
+                        else {
+                            let mut rows = 1usize;
+                            let mut cx2 = 0.0f32;
+                            for p in ide_ignore_patterns.iter() {
+                                let tw = self.measure_ui_width(p, 0.88);
+                                let cw2 = tw + pad_x * 2.0 + 22.0 * s;
+                                if cx2 + cw2 > max_row_w && cx2 > 0.0 { rows += 1; cx2 = 0.0; }
+                                cx2 += cw2 + chip_gap_x;
+                            }
+                            rows
+                        };
+                    200.0 * s + chip_rows as f32 * (chip_h + chip_gap_y)
+                };
+                workspace_h + ignore_h
+            };
+            let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
+            if max_scroll > 0.0 {
+                let ratio = (ide_scroll_y / max_scroll).clamp(0.0, 1.0);
+                let track_h = ide_content_area_h;
+                let thumb_h = (ide_content_area_h / ide_total_h * track_h).max(40.0 * s);
+                let thumb_y = (iy + 40.0 * s + ratio * (track_h - thumb_h)).round();
+                let sb_x = (ix + iw - 14.0 * s).round();
+                self.push_rounded_rect(sb_x, thumb_y, 6.0 * s, thumb_h, 3.0 * s, [0.7, 0.33, 0.54, 1.0]);
+            }
         } else if active_tab == 1 {
             self.draw_string_scaled(
                 "Скоро здесь появятся настройки...",

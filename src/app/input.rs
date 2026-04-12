@@ -56,6 +56,16 @@ impl App {
             }
         }
 
+                if self.show_settings && self.settings_tab == 0 {
+            self.settings_ide_scroll.anim_speed = 7.0;
+            self.settings_ide_scroll.scroll_by(dy);
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let h = self.window.as_ref().unwrap().inner_size().height as f32;
+            let ide_h = (700.0 * s).min(h - 40.0 * s);
+            self.settings_ide_scroll.clamp_target(0.0, (3000.0 * s - ide_h).max(0.0));
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if self.show_settings && self.settings_tab == 4 {
             self.settings_scroll.anim_speed = 7.0;
             self.settings_scroll.scroll_by(dy);
@@ -141,11 +151,15 @@ impl App {
                             }
                             tab_y += 40.0 * s;
                         }
-                    } else if self.settings_tab == 0 {
-                        let mut current_y = iy + 126.0 * s;
+                                        } else if self.settings_tab == 0 {
+                        let scroll_y = self.settings_ide_scroll.current;
+                        let content_x = ix + sidebar_w + 30.0 * s;
+
+                        // ── Удаление рабочей области ──────────────────────
+                        let mut current_y = iy + 126.0 * s - scroll_y;
                         for (idx, _path) in self.ide_workspaces.clone().iter().enumerate() {
                             let item_w = 460.0 * s;
-                            let btn_x = ix + sidebar_w + 30.0 * s + item_w - 34.0 * s;
+                            let btn_x = content_x + item_w - 34.0 * s;
                             let btn_y = current_y + 3.0 * s;
                             let btn_size = 30.0 * s;
 
@@ -162,20 +176,116 @@ impl App {
                                     window_height: self.window_height,
                                     maximized,
                                     ide_workspaces: self.ide_workspaces.clone(),
+                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                                 });
+                                self.refresh_file_tree();
                                 break;
                             }
                             current_y += 46.0 * s;
                         }
 
+                        // ── Кнопка «Добавить папку» ───────────────────────
                         let add_btn_y =
-                            iy + 126.0 * s + self.ide_workspaces.len() as f32 * 46.0 * s;
-                        if mx >= ix + sidebar_w + 30.0 * s
-                            && mx <= ix + sidebar_w + 30.0 * s + 190.0 * s
+                            iy + 126.0 * s - scroll_y + self.ide_workspaces.len() as f32 * 46.0 * s;
+                        if mx >= content_x
+                            && mx <= content_x + 190.0 * s
                             && my >= add_btn_y
                             && my <= add_btn_y + 36.0 * s
                         {
                             self.trigger_folder_picker();
+                        }
+
+                        // ── Поле ввода игнора ────────────────────────────
+                        // Вычисляем Y поля: после рабочих областей + 56 + разделитель + заголовок + подсказки + плашка
+                        let input_section_y = add_btn_y + 56.0 * s // после кнопки
+                            + 1.0 * s + 20.0 * s   // разделитель
+                            + 28.0 * s             // заголовок
+                            + 22.0 * s             // пояснение 1
+                            + 20.0 * s             // пояснение 2
+                            + 22.0 * s + 18.0 * s; // плашка дефолтов
+                        let input_h = 34.0 * s;
+                        let input_w = 330.0 * s;
+
+                        let on_input = mx >= content_x
+                            && mx <= content_x + input_w
+                            && my >= input_section_y
+                            && my <= input_section_y + input_h;
+
+                        if on_input {
+                            self.settings_ignore_focused = true;
+                        }
+
+                        // ── Кнопка «Добавить» паттерн ────────────────────
+                        let btn_add_x = content_x + input_w + 10.0 * s;
+                        let on_add_btn = mx >= btn_add_x
+                            && mx <= btn_add_x + 110.0 * s
+                            && my >= input_section_y
+                            && my <= input_section_y + input_h;
+
+                        if on_add_btn {
+                            let trimmed = self.settings_ignore_input.trim().to_string();
+                            if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
+                                self.ide_ignore_patterns.push(trimmed);
+                                self.settings_ignore_input.clear();
+                                let w = self.window.as_ref().unwrap();
+                                let maximized = w.is_maximized();
+                                crate::save_config(&crate::Config {
+                                    window_width: self.window_width,
+                                    window_height: self.window_height,
+                                    maximized,
+                                    ide_workspaces: self.ide_workspaces.clone(),
+                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                                });
+                                self.refresh_file_tree();
+                            }
+                        }
+
+                        // ── Удаление чипа паттерна ────────────────────────
+                        let chip_h = 28.0 * s;
+                        let pad_x = 12.0 * s;
+                        let chip_gap_x = 8.0 * s;
+                        let chip_gap_y = 8.0 * s;
+                        let max_row_w = 460.0 * s;
+                        let mut chip_cx = content_x;
+                        let mut chip_cy = input_section_y + input_h + 16.0 * s;
+
+                        for (cidx, pattern) in self.ide_ignore_patterns.clone().iter().enumerate() {
+                            // Пересчитываем ширину чипа так же как в draw_settings
+                                                        let text_w = self.renderer.as_mut().unwrap().measure_ui_width(pattern, 0.88);
+                            let close_area = 22.0 * s;
+                            let chip_w = text_w + pad_x * 2.0 + close_area;
+
+                            if chip_cx + chip_w > content_x + max_row_w && chip_cx > content_x {
+                                chip_cx = content_x;
+                                chip_cy += chip_h + chip_gap_y;
+                            }
+
+                            let close_x = chip_cx + chip_w - close_area - 2.0 * s;
+                            let on_close = mx >= close_x
+                                && mx <= chip_cx + chip_w
+                                && my >= chip_cy
+                                && my <= chip_cy + chip_h;
+
+                            if on_close {
+                                self.ide_ignore_patterns.remove(cidx);
+                                let w = self.window.as_ref().unwrap();
+                                let maximized = w.is_maximized();
+                                crate::save_config(&crate::Config {
+                                    window_width: self.window_width,
+                                    window_height: self.window_height,
+                                    maximized,
+                                    ide_workspaces: self.ide_workspaces.clone(),
+                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                                });
+                                self.refresh_file_tree();
+                                break;
+                            }
+                            chip_cx += chip_w + chip_gap_x;
+                        }
+
+                        // Клик вне поля — снимаем фокус
+                        if !on_input {
+                            self.settings_ignore_focused = false;
                         }
                     }
                 }
@@ -1257,11 +1367,12 @@ impl App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                    crate::save_config(&crate::Config {
+                                        crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
+                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
                     event_loop.exit();
                 }
@@ -1332,11 +1443,12 @@ impl App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                    crate::save_config(&crate::Config {
+                                        crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
+                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
                     self.close_current_file();
                 }
@@ -1775,7 +1887,60 @@ impl App {
             return;
         }
 
-        if key_event.state == ElementState::Pressed {
+                if key_event.state == ElementState::Pressed {
+            // ── Ввод в поле игнора настроек ──────────────────────────────
+            if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::Escape) => {
+                        self.settings_ignore_focused = false;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                        let trimmed = self.settings_ignore_input.trim().to_string();
+                        if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
+                            self.ide_ignore_patterns.push(trimmed);
+                            self.settings_ignore_input.clear();
+                            let w = self.window.as_ref().unwrap();
+                            let maximized = w.is_maximized();
+                            crate::save_config(&crate::Config {
+                                window_width: self.window_width,
+                                window_height: self.window_height,
+                                maximized,
+                                ide_workspaces: self.ide_workspaces.clone(),
+                                ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                            });
+                            self.refresh_file_tree();
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::Backspace) => {
+                        let inp = &mut self.settings_ignore_input;
+                        if !inp.is_empty() {
+                            let mut idx = inp.len();
+                            while !inp.is_char_boundary(idx) { idx -= 1; }
+                            idx -= 1;
+                            while !inp.is_char_boundary(idx) { idx -= 1; }
+                            inp.truncate(idx);
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    _ => {
+                        if let Some(text) = &key_event.text {
+                            for ch in text.chars() {
+                                if !ch.is_control() {
+                                    self.settings_ignore_input.push(ch);
+                                }
+                            }
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                    }
+                }
+            }
+
             if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                 if self.show_settings {
                     self.show_settings = false;
