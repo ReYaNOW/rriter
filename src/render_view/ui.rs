@@ -595,12 +595,13 @@ impl Renderer {
         let s = self.scale_factor;
         let mut wants_pointer = false;
 
+                let overlay_alpha = ((anim_progress - 0.04) * (0.4 / 0.96)).max(0.0);
         self.push_rect(
             0.0,
             0.0,
             self.width,
             self.height,
-            [0.0, 0.0, 0.0, 0.4 * anim_progress],
+            [0.0, 0.0, 0.0, overlay_alpha],
         );
 
         let w = (1000.0 * s).min(self.width - 40.0 * s);

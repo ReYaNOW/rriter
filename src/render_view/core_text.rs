@@ -594,7 +594,7 @@ impl Renderer {
         }
     }
 
-    pub fn draw_string_scaled(
+        pub fn draw_string_scaled(
         &mut self,
         text: &str,
         mut x: f32,
@@ -622,6 +622,47 @@ impl Renderer {
                 x += g.advance * scale;
             }
         }
+    }
+
+    pub fn draw_string_mono_scaled(
+        &mut self,
+        text: &str,
+        mut x: f32,
+        y: f32,
+        color: [f32; 4],
+        scale: f32,
+    ) {
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(g) = self.get_glyph(c) {
+                self.push_quad(
+                    (x + g.offset_x * scale).round(),
+                    (y - g.offset_y * scale).round(),
+                    g.width * scale,
+                    g.height * scale,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    color,
+                    g.is_emoji,
+                );
+                x += g.advance * scale;
+            }
+        }
+    }
+
+    pub fn measure_mono_width(&mut self, text: &str, scale: f32) -> f32 {
+        let mut w = 0.0;
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            w += self.char_advance(c) * scale;
+        }
+        w
     }
 
     pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) {

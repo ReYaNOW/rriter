@@ -513,9 +513,9 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
-                    if self.show_settings
+                                        if self.show_settings
                         || self.dialog_window.is_some()
-                        || self.settings_anim_progress > 0.0
+                        || self.settings_anim_progress >= 1.5
                     {
                         is_text = false;
                     }
@@ -660,12 +660,16 @@ impl ApplicationHandler for App {
         let open_y = (window_height - h) / 2.0;
         let target_y = if self.show_settings { open_y } else { start_y };
 
-        let diff = target_y - self.settings_y;
+                let diff = target_y - self.settings_y;
         if diff.abs() > 1.5 {
             self.settings_y += diff * 10.0 * dt;
             let total_distance = (start_y - open_y).max(1.0);
             self.settings_anim_progress =
                 ((start_y - self.settings_y) / total_distance).clamp(0.0, 1.0);
+            needs_redraw = true;
+        } else if !self.show_settings && self.settings_anim_progress > 0.0 {
+            self.settings_y = start_y;
+            self.settings_anim_progress = 0.0;
             needs_redraw = true;
         }
 

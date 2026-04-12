@@ -1140,9 +1140,9 @@ impl Renderer {
                 }
             }
             if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
-                let num_w = self.measure_ui_width(num_str, 1.0);
+                let num_w = self.measure_mono_width(num_str, 1.0);
                 let draw_x = self.left_padding - 24.0 * s - num_w;
-                self.draw_string_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
+                self.draw_string_mono_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
             }
         }
 
