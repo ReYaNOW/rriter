@@ -15,7 +15,7 @@ impl Renderer {
         }
     }
 
-        pub fn draw_atlas_icon(
+    pub fn draw_atlas_icon(
         &mut self,
         icon: crate::widgets::IconType,
         x: f32,
@@ -38,7 +38,14 @@ impl Renderer {
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
     /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
-            pub fn draw_file_icon(&mut self, key: &'static str, _is_folder: bool, x: f32, y: f32, size: f32) {
+    pub fn draw_file_icon(
+        &mut self,
+        key: &'static str,
+        _is_folder: bool,
+        x: f32,
+        y: f32,
+        size: f32,
+    ) {
         if !self.file_icon_cache.contains_key(key) {
             let pre_rasterized = {
                 let cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
@@ -86,8 +93,8 @@ impl Renderer {
                     tex
                 };
                 self.file_icon_cache.insert(key, tex);
-                        } else {
-                // Иконка еще не растеризована фоновым потоком. 
+            } else {
+                // Иконка еще не растеризована фоновым потоком.
                 // Возвращаемся без блокировки UI! Фоновый поток пришлет сигнал, когда закончит.
                 return;
             }
@@ -98,7 +105,18 @@ impl Renderer {
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             }
-            self.push_quad(x, y, size, size, 0.0, 0.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0], 5.0);
+            self.push_quad(
+                x,
+                y,
+                size,
+                size,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                [1.0, 1.0, 1.0, 1.0],
+                5.0,
+            );
             self.flush();
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
@@ -665,7 +683,7 @@ impl Renderer {
         let s = self.scale_factor;
         let mut wants_pointer = false;
 
-                let overlay_alpha = ((anim_progress - 0.04) * (0.4 / 0.96)).max(0.0);
+        let overlay_alpha = ((anim_progress - 0.04) * (0.4 / 0.96)).max(0.0);
         self.push_rect(
             0.0,
             0.0,

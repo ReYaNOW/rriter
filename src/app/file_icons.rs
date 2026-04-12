@@ -12,11 +12,10 @@ pub mod file_icons_bytes {
     include!(concat!(env!("OUT_DIR"), "/file_icons_bytes.rs"));
 }
 
-use file_icons_map::{
-    file_icon_key_exact, folder_icon_key_exact,
-    FILE_ICON_PATTERNS, FOLDER_ICON_PATTERNS,
-};
 use file_icons_bytes::{file_svg, folder_svg};
+use file_icons_map::{
+    file_icon_key_exact, folder_icon_key_exact, FILE_ICON_PATTERNS, FOLDER_ICON_PATTERNS,
+};
 
 struct PatternEntry {
     re: Regex,

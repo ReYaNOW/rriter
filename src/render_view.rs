@@ -417,9 +417,9 @@ impl Renderer {
                                 );
                             }
 
-                                                        let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                            let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
                             let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                                                        let color: [f32; 4] = if node.is_ignored {
+                            let color: [f32; 4] = if node.is_ignored {
                                 [0.973, 0.584, 0.502, 0.8] // DRACULA_ORANGE (dimmed)
                             } else if node.is_dir {
                                 [0.78, 0.68, 1.0, 1.0]
@@ -427,13 +427,13 @@ impl Renderer {
                                 self.theme.fg
                             };
 
-                                                                                    let icon_size = 20.0 * s;
+                            let icon_size = 20.0 * s;
                             let icon_y = row_y + (row_h - icon_size) / 2.0;
 
                             if node.is_dir {
                                 // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
                                 let arrow_str = if node.is_expanded { "▼" } else { "▶" };
-                                                                let arrow_x = indent_x + 2.0 * s;
+                                let arrow_x = indent_x + 2.0 * s;
                                 let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
                                 let arrow_color = if node.is_ignored {
                                     [0.973, 0.584, 0.502, 0.6]
@@ -449,7 +449,13 @@ impl Renderer {
                                 );
                                 // Иконка папки — правее стрелки
                                 let dir_icon_x = indent_x + 13.0 * s;
-                                self.draw_file_icon(node.icon_key, true, dir_icon_x, icon_y, icon_size);
+                                self.draw_file_icon(
+                                    node.icon_key,
+                                    true,
+                                    dir_icon_x,
+                                    icon_y,
+                                    icon_size,
+                                );
                                 self.draw_string_scaled(
                                     &node.name,
                                     dir_icon_x + icon_size + 4.0 * s,
@@ -459,7 +465,13 @@ impl Renderer {
                                 );
                             } else {
                                 let file_icon_x = indent_x + 4.0 * s;
-                                self.draw_file_icon(node.icon_key, false, file_icon_x, icon_y, icon_size);
+                                self.draw_file_icon(
+                                    node.icon_key,
+                                    false,
+                                    file_icon_x,
+                                    icon_y,
+                                    icon_size,
+                                );
                                 self.draw_string_scaled(
                                     &node.name,
                                     file_icon_x + icon_size + 4.0 * s,

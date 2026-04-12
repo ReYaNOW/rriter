@@ -594,7 +594,7 @@ impl Renderer {
         }
     }
 
-        pub fn draw_string_scaled(
+    pub fn draw_string_scaled(
         &mut self,
         text: &str,
         mut x: f32,

@@ -30,8 +30,9 @@ pub struct FileNode {
 
 use rayon::prelude::*;
 
-pub static RASTERIZED_ICONS: once_cell::sync::Lazy<std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Vec<u8>>>> = 
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
+    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Vec<u8>>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
     let cache = RASTERIZED_ICONS.lock().unwrap();
@@ -41,7 +42,9 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
     drop(cache); // Не блокируем другие потоки во время рендеринга
 
     let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
-    if svg_bytes.is_empty() { return; }
+    if svg_bytes.is_empty() {
+        return;
+    }
     let opt = resvg::usvg::Options::default();
     let svg_str = String::from_utf8_lossy(svg_bytes).replace("currentColor", "#ffffff");
 
@@ -80,7 +83,7 @@ fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
 
-            // Игнорируем только самую тяжелую папку .git. 
+            // Игнорируем только самую тяжелую папку .git.
             // Остальные (типа .env, .idea) показываем.
             if name_str == ".git" {
                 continue;
@@ -127,7 +130,9 @@ fn scan_dir_parallel(
     let is_ignored = if is_root {
         false
     } else {
-        gitignore.matched_path_or_any_parents(&path, true).is_ignore()
+        gitignore
+            .matched_path_or_any_parents(&path, true)
+            .is_ignore()
     };
 
     let me = FileNode {
@@ -146,12 +151,20 @@ fn scan_dir_parallel(
 
     let (dirs, files) = read_children(&path);
 
-        // Многопоточный обход дерева. flat_map в rayon собирает результаты
+    // Многопоточный обход дерева. flat_map в rayon собирает результаты
     // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
     let mut dir_nodes: Vec<FileNode> = dirs
         .into_par_iter()
         .flat_map(|(d_name, d_path)| {
-            scan_dir_parallel(d_path, d_name, depth + 1, expanded, false, max_depth, gitignore)
+            scan_dir_parallel(
+                d_path,
+                d_name,
+                depth + 1,
+                expanded,
+                false,
+                max_depth,
+                gitignore,
+            )
         })
         .collect();
 
@@ -160,7 +173,9 @@ fn scan_dir_parallel(
         .into_par_iter()
         .map(|(f_name, f_path)| {
             let f_icon_key = crate::app::file_icons::file_icon_key(&f_name.to_ascii_lowercase());
-            let is_ignored = gitignore.matched_path_or_any_parents(&f_path, false).is_ignore();
+            let is_ignored = gitignore
+                .matched_path_or_any_parents(&f_path, false)
+                .is_ignore();
             FileNode {
                 path: f_path,
                 name: f_name,
@@ -186,9 +201,9 @@ pub fn spawn_scan(
     expanded: FxHashSet<PathBuf>,
 ) -> mpsc::Receiver<Vec<FileNode>> {
     let (tx, rx) = mpsc::channel();
-            std::thread::spawn(move || {
-            // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
-            let full_nodes: Vec<FileNode> = roots
+    std::thread::spawn(move || {
+        // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
+        let full_nodes: Vec<FileNode> = roots
             .into_par_iter()
             .flat_map(|root| {
                 if !root.exists() {
@@ -200,7 +215,9 @@ pub fn spawn_scan(
                 if gitignore_path.exists() {
                     let _ = builder.add(gitignore_path);
                 }
-                let gitignore = builder.build().unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+                let gitignore = builder
+                    .build()
+                    .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
 
                 let name = root
                     .file_name()
@@ -211,24 +228,24 @@ pub fn spawn_scan(
             })
             .collect();
 
-                    // Отправляем полное дерево немедленно (текст появится мгновенно)
-            let _ = tx.send(full_nodes.clone());
+        // Отправляем полное дерево немедленно (текст появится мгновенно)
+        let _ = tx.send(full_nodes.clone());
 
-            // STEP 2: Параллельная растеризация иконок без блокировки UI
-            let mut needed_icons = rustc_hash::FxHashSet::default();
-            for node in &full_nodes {
-                needed_icons.insert((node.icon_key, node.is_dir));
-            }
+        // STEP 2: Параллельная растеризация иконок без блокировки UI
+        let mut needed_icons = rustc_hash::FxHashSet::default();
+        for node in &full_nodes {
+            needed_icons.insert((node.icon_key, node.is_dir));
+        }
 
-            needed_icons.into_par_iter().for_each(|(key, is_dir)| {
-                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
-            });
-
-            // STEP 3: Финальный триггер для перерисовки (иконки появятся)
-            let _ = tx.send(full_nodes);
+        needed_icons.into_par_iter().for_each(|(key, is_dir)| {
+            crate::app::file_tree::pre_rasterize_icon(key, is_dir);
         });
-        rx
-    }
+
+        // STEP 3: Финальный триггер для перерисовки (иконки появятся)
+        let _ = tx.send(full_nodes);
+    });
+    rx
+}
 
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
@@ -283,7 +300,7 @@ impl App {
     /// Поллит канал результатов фонового скана.
     /// Возвращает true если пришли новые данные (нужен redraw).
     /// Вызывать из about_to_wait.
-        pub fn poll_file_tree(&mut self) -> bool {
+    pub fn poll_file_tree(&mut self) -> bool {
         let mut updated = false;
         if let Some(rx) = &self.file_tree_rx {
             while let Ok(nodes) = rx.try_recv() {
