@@ -88,7 +88,7 @@ pub struct FileNode {
 use rayon::prelude::*;
 
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
-    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Vec<u8>>>,
+    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
@@ -100,13 +100,14 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
 
     let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
     if svg_bytes.is_empty() {
+        RASTERIZED_ICONS.lock().unwrap().insert(key, None);
         return;
     }
     let opt = resvg::usvg::Options::default();
     let svg_str = String::from_utf8_lossy(svg_bytes).replace("currentColor", "#ffffff");
 
     if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
-        let target = 128u32;
+        let target = 64u32;
         if let Some(mut pixmap) = tiny_skia::Pixmap::new(target, target) {
             let sz = tree.size();
             let scale = (target as f32) / sz.width().max(sz.height());
@@ -124,8 +125,10 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
                     px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
                 }
             }
-            RASTERIZED_ICONS.lock().unwrap().insert(key, data);
+            RASTERIZED_ICONS.lock().unwrap().insert(key, Some(data));
         }
+    } else {
+        RASTERIZED_ICONS.lock().unwrap().insert(key, None);
     }
 }
 

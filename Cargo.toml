@@ -13,7 +13,7 @@ arboard = { version = "3.3", default-features = false, features = [
     "wayland-data-control",
 ] }
 bytemuck = "1.14"
-mimalloc = "0.1"
+mimalloc = "0.1.48"
 rustc-hash = "2.1.2"
 image = "0.25.1"
 resvg = "0.47.0"

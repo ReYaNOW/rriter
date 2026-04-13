@@ -3,7 +3,7 @@
 //! Вызывается только при построении дерева, не в draw-цикле.
 
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::RegexSet;
 
 pub mod file_icons_map {
     include!(concat!(env!("OUT_DIR"), "/file_icons_map.rs"));
@@ -14,26 +14,26 @@ pub mod file_icons_bytes {
 
 use file_icons_bytes::{file_svg, folder_svg};
 use file_icons_map::{
-    file_icon_key_exact, folder_icon_key_exact, FILE_ICON_PATTERNS, FOLDER_ICON_PATTERNS,
+    file_icon_key_exact, folder_icon_key_exact, FILE_ICON_FALLBACKS, FOLDER_ICON_FALLBACKS, match_file_pattern, match_folder_pattern
 };
 
-struct PatternEntry {
-    re: Regex,
-    key: &'static str,
+struct FallbackMatcher {
+    set: RegexSet,
+    keys: Vec<&'static str>,
 }
 
-static FILE_REGEXES: Lazy<Vec<PatternEntry>> = Lazy::new(|| {
-    FILE_ICON_PATTERNS
-        .iter()
-        .filter_map(|(pat, key)| Regex::new(pat).ok().map(|re| PatternEntry { re, key }))
-        .collect()
+static FILE_REGEXES: Lazy<FallbackMatcher> = Lazy::new(|| {
+    let patterns: Vec<&str> = FILE_ICON_FALLBACKS.iter().map(|(p, _)| *p).collect();
+    let keys: Vec<&'static str> = FILE_ICON_FALLBACKS.iter().map(|(_, k)| *k).collect();
+    let set = RegexSet::new(patterns).unwrap_or_else(|_| RegexSet::empty());
+    FallbackMatcher { set, keys }
 });
 
-static FOLDER_REGEXES: Lazy<Vec<PatternEntry>> = Lazy::new(|| {
-    FOLDER_ICON_PATTERNS
-        .iter()
-        .filter_map(|(pat, key)| Regex::new(pat).ok().map(|re| PatternEntry { re, key }))
-        .collect()
+static FOLDER_REGEXES: Lazy<FallbackMatcher> = Lazy::new(|| {
+    let patterns: Vec<&str> = FOLDER_ICON_FALLBACKS.iter().map(|(p, _)| *p).collect();
+    let keys: Vec<&'static str> = FOLDER_ICON_FALLBACKS.iter().map(|(_, k)| *k).collect();
+    let set = RegexSet::new(patterns).unwrap_or_else(|_| RegexSet::empty());
+    FallbackMatcher { set, keys }
 });
 
 /// `name` — имя файла в нижнем регистре. Возвращает ключ иконки.
@@ -64,11 +64,14 @@ pub fn file_icon_key(name: &str) -> &'static str {
             return k;
         }
     }
-    // 3. Regex-паттерны (для составных имён типа "*.test.ts", "dockerfile.*")
-    for entry in FILE_REGEXES.iter() {
-        if entry.re.is_match(name) {
-            return entry.key;
-        }
+        // 3. Быстрые статические паттерны из build.rs
+    if let Some(k) = match_file_pattern(name) {
+        return k;
+    }
+
+        // 4. Оставшиеся сложные regex проверяются за ОДИН проход!
+    if let Some(idx) = FILE_REGEXES.set.matches(name).into_iter().next() {
+        return FILE_REGEXES.keys[idx];
     }
     "default_file"
 }
@@ -79,10 +82,11 @@ pub fn folder_icon_key(name: &str) -> &'static str {
     if let Some(k) = folder_icon_key_exact(name) {
         return k;
     }
-    for entry in FOLDER_REGEXES.iter() {
-        if entry.re.is_match(name) {
-            return entry.key;
-        }
+    if let Some(k) = match_folder_pattern(name) {
+        return k;
+    }
+        if let Some(idx) = FOLDER_REGEXES.set.matches(name).into_iter().next() {
+        return FOLDER_REGEXES.keys[idx];
     }
     "default"
 }

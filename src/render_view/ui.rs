@@ -46,14 +46,18 @@ impl Renderer {
         y: f32,
         size: f32,
     ) {
-        if !self.file_icon_cache.contains_key(key) {
+                if !self.file_icon_cache.contains_key(key) {
             let pre_rasterized = {
-                let cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
-                cache.get(key).cloned()
+                let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
+                if let Some(opt_data) = cache.get_mut(key) {
+                    opt_data.take()
+                } else {
+                    None
+                }
             };
 
             if let Some(data) = pre_rasterized {
-                let target = 128i32;
+                let target = 64i32;
                 let tex = unsafe {
                     let tex = self.gl.create_texture().unwrap();
                     self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
