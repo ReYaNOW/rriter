@@ -182,10 +182,10 @@ fn scan_dir_parallel(
     gitignore: &ignore::gitignore::Gitignore,
     user_patterns: &[String],
 ) -> Vec<FileNode> {
-    let is_expanded = is_root || expanded.contains(&path);
+    let is_expanded = expanded.contains(&path);
     let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
 
-        // Используем только пользовательские паттерны.
+    // Используем только пользовательские паттерны.
     // Дефолтные засеваются в конфиг при первом запуске (см. load_config в main.rs).
     let all_patterns: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
 
@@ -208,7 +208,7 @@ fn scan_dir_parallel(
         is_ignored,
     };
 
-        if !is_expanded || depth >= max_depth {
+    if !is_expanded || depth >= max_depth {
         return vec![me];
     }
 
@@ -301,7 +301,16 @@ pub fn spawn_scan(
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| root.to_string_lossy().into_owned());
 
-                scan_dir_parallel(root.clone(), name, 0, &expanded, true, 10, &gitignore, &user_patterns)
+                scan_dir_parallel(
+                    root.clone(),
+                    name,
+                    0,
+                    &expanded,
+                    true,
+                    10,
+                    &gitignore,
+                    &user_patterns,
+                )
             })
             .collect();
 
@@ -362,13 +371,27 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
 // ---------------------------------------------------------------------------
 
 impl App {
-        /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
+    /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
     /// добавлении workspace или разворачивании папки.
     pub fn refresh_file_tree(&mut self) {
         let roots = self.ide_workspaces.clone();
         if roots.is_empty() {
             self.ide_panel.file_tree_nodes.clear();
             return;
+        }
+        // Новые корни (которых ещё нет в дереве) автоматически раскрываем.
+        // Уже существующие корни не трогаем — пользователь мог их свернуть.
+        let existing_roots: rustc_hash::FxHashSet<std::path::PathBuf> = self
+            .ide_panel
+            .file_tree_nodes
+            .iter()
+            .filter(|n| n.depth == 0)
+            .map(|n| n.path.clone())
+            .collect();
+        for root in &roots {
+            if !existing_roots.contains(root) {
+                self.ide_panel.file_tree_expanded.insert(root.clone());
+            }
         }
         let expanded = self.ide_panel.file_tree_expanded.clone();
         let patterns = self.ide_ignore_patterns.clone();

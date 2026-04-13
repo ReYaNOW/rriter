@@ -231,7 +231,7 @@ impl Renderer {
                     y
                 };
 
-                                let btn = IconButton {
+                let btn = IconButton {
                     x: btn_x,
                     y: btn_y,
                     size: btn_size,
@@ -249,7 +249,7 @@ impl Renderer {
                     if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
                         let ghost_y =
                             (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
-                                                let ghost = IconButton {
+                        let ghost = IconButton {
                             x: btn_x,
                             y: ghost_y,
                             size: btn_size,
@@ -380,7 +380,7 @@ impl Renderer {
                         );
                     }
 
-                                        let row_h = 28.0 * s;
+                    let row_h = 28.0 * s;
                     let indent_w = 18.0 * s;
                     let scroll = ide_panel.explorer_scroll.current.round();
                     let content_h = editor_height - title_h;
@@ -424,7 +424,7 @@ impl Renderer {
                             } else if node.is_dir {
                                 [0.78, 0.68, 1.0, 1.0]
                             } else {
-                                self.theme.fg
+                                [0.651, 0.686, 0.918, 1.0] // #a6afea
                             };
 
                             let icon_size = 20.0 * s;
@@ -447,7 +447,7 @@ impl Renderer {
                                     arrow_color,
                                     1.0,
                                 );
-                                                                // Иконка папки — правее стрелки
+                                // Иконка папки — правее стрелки
                                 let dir_icon_x = indent_x + 18.0 * s;
                                 self.draw_file_icon(
                                     node.icon_key,
@@ -463,9 +463,10 @@ impl Renderer {
                                     color,
                                     tree_text_scale,
                                 );
-                                                        } else {
+                            } else {
                                 let file_icon_x = indent_x + 10.0 * s;
-                                self.draw_file_icon(node.icon_key,
+                                self.draw_file_icon(
+                                    node.icon_key,
                                     false,
                                     file_icon_x,
                                     icon_y,
@@ -1809,6 +1810,19 @@ impl Renderer {
                     Err(idx) => idx.saturating_sub(1),
                 };
 
+                // Ограничиваем текст зоной редактора — не выходим за гаттер слева
+                self.flush();
+                unsafe {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    let sc_y = (self.height - (rect_y + self.line_height)).round() as i32;
+                    self.gl.scissor(
+                        self.left_padding.round() as i32,
+                        sc_y,
+                        (self.width - self.left_padding - minimap_w).round() as i32,
+                        self.line_height.round() as i32,
+                    );
+                }
+
                 let mut current_offset = start_byte;
                 while current_offset < end_byte {
                     let chunk = if current_offset < first_len {
@@ -1862,6 +1876,11 @@ impl Renderer {
                     if x > self.width - minimap_w - 20.0 {
                         break;
                     }
+                }
+
+                self.flush();
+                unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
                 }
 
                 self.sticky_scroll_rects

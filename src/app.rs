@@ -210,12 +210,12 @@ pub struct App {
     pub recent_files: Vec<PathBuf>,
 
     pub is_ide_mode: bool,
-        pub ide_workspaces: Vec<PathBuf>,
-        /// Пользовательские паттерны игноров для дерева файлов
+    pub ide_workspaces: Vec<PathBuf>,
+    /// Пользовательские паттерны игноров для дерева файлов
     pub ide_ignore_patterns: Vec<String>,
     /// Текущий ввод в поле добавления нового паттерна игнора (настройки → IDE)
     pub settings_ignore_editor: Editor,
-        /// Поле ввода игнора сфокусировано
+    /// Поле ввода игнора сфокусировано
     pub settings_ignore_focused: bool,
     pub settings_ignore_scroll_x: f32,
     pub is_dragging_settings_ignore: bool,
@@ -250,7 +250,7 @@ pub struct App {
     pub sticky_anim_progress: f32,
     pub sticky_anim_is_adding: bool,
 
-        pub show_settings: bool,
+    pub show_settings: bool,
     pub settings_anim_progress: f32,
     pub settings_y: f32,
     pub settings_tab: usize,

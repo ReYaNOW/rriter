@@ -415,7 +415,7 @@ impl Renderer {
         }
     }
 
-                pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+    pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         let svg_str = match c {
             '▶' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"4 2 16 20\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>",
             '▼' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"2 4 20 16\"><g transform=\"rotate(90 12 12)\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></g></svg>",
@@ -464,14 +464,14 @@ impl Renderer {
             );
         }
 
-                let info = GlyphInfo {
+        let info = GlyphInfo {
             u: self.atlas_x as f32 / ATLAS_SIZE as f32,
             v: self.atlas_y as f32 / ATLAS_SIZE as f32,
             uw: w as f32 / ATLAS_SIZE as f32,
             vh: h as f32 / ATLAS_SIZE as f32,
             width: w as f32,
             height: h as f32,
-                        offset_x: 0.0,
+            offset_x: 0.0,
             offset_y: h as f32 * 0.82,
             advance: target_size * 0.85,
             is_emoji: 0.0,
@@ -649,7 +649,7 @@ impl Renderer {
         Some(info)
     }
 
-        pub fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+    pub fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         if let Some(g) = self.ui_glyphs.get(&c) {
             return Some(*g);
         }
@@ -930,39 +930,43 @@ impl Renderer {
             (
                 crate::widgets::IconType::Down,
                 include_bytes!("icons/go-down.svg").as_slice(),
-            ),                        (
-                            crate::widgets::IconType::Close,
-                            include_bytes!("icons/window-close.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Plus,
-                            include_bytes!("icons/plus.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Terminal,
-                            include_bytes!("icons/atom/icons/ui/terminal.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Explorer,
-                            include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Problems,
-                            include_bytes!("icons/problems.svg").as_slice(),
-                        ),
-                    ];
-                    let opt = resvg::usvg::Options::default();
+            ),
+            (
+                crate::widgets::IconType::Close,
+                include_bytes!("icons/window-close.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Plus,
+                include_bytes!("icons/plus.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Terminal,
+                include_bytes!("icons/atom/icons/ui/terminal.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Explorer,
+                include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Problems,
+                include_bytes!("icons/problems.svg").as_slice(),
+            ),
+        ];
+        let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
             let svg_data_str = String::from_utf8_lossy(data);
-                        let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
                 // Заменяем жестко прописанный белый цвет на старый розовый #da4453
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
+            } else if icon_type == crate::widgets::IconType::Problems {
+                svg_data_str.replace("#D81B60", "#b0bec5")
             } else if icon_type == crate::widgets::IconType::Plus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
-                || icon_type == crate::widgets::IconType::Problems
             {
-                svg_data_str.replace("currentColor", "#ffffff").replace("fill=\"#000000\"", "fill=\"#ffffff\"")
+                svg_data_str
+                    .replace("currentColor", "#ffffff")
+                    .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
             } else {
                 svg_data_str.into_owned()
             };

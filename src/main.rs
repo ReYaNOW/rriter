@@ -156,14 +156,14 @@ pub fn save_config(config: &Config) {
     path.push("RRiter");
     let _ = std::fs::create_dir_all(&path);
     path.push("config.json");
-        let paths_str = config
-            .ide_workspaces
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("|");
-        let ignore_str = config.ide_ignore_patterns.join("|");
-        let content = format!(
+    let paths_str = config
+        .ide_workspaces
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("|");
+    let ignore_str = config.ide_ignore_patterns.join("|");
+    let content = format!(
             "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\"\n}}\n",
             config.window_width, config.window_height, config.maximized, paths_str, ignore_str
         );
@@ -210,7 +210,7 @@ fn load_config() -> Config {
                         }
                     }
                 }
-                                if line.contains("\"ide_workspaces\"") {
+                if line.contains("\"ide_workspaces\"") {
                     if let Some(val) = line.split("\": \"").nth(1) {
                         let paths = val.trim().trim_matches(',').trim_matches('"');
                         if !paths.is_empty() {
@@ -222,13 +222,14 @@ fn load_config() -> Config {
                     if let Some(val) = line.split("\": \"").nth(1) {
                         let pats = val.trim().trim_matches(',').trim_matches('"');
                         if !pats.is_empty() {
-                            config.ide_ignore_patterns = pats.split('|').map(|s| s.to_string()).collect();
+                            config.ide_ignore_patterns =
+                                pats.split('|').map(|s| s.to_string()).collect();
                         }
                     }
                 }
             }
         }
-        } else {
+    } else {
         // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
         config.ide_ignore_patterns = crate::app::file_tree::DEFAULT_IGNORE_PATTERNS
             .iter()
@@ -418,7 +419,7 @@ F8\tПоказать/скрыть счетчик FPS
         show_welcome,
         recent_files,
 
-                        is_ide_mode: is_ide_cli,
+        is_ide_mode: is_ide_cli,
         ide_workspaces: config.ide_workspaces.clone(),
         ide_ignore_patterns: config.ide_ignore_patterns.clone(),
         settings_ignore_editor: Editor::new(128),
@@ -456,7 +457,7 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-                show_settings: false,
+        show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,

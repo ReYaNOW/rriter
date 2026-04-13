@@ -145,7 +145,7 @@ impl ApplicationHandler for App {
                                         let size = w.inner_size().to_logical::<f64>(scale);
                                         (size.width, size.height)
                                     };
-                                                                        crate::save_config(&crate::Config {
+                                    crate::save_config(&crate::Config {
                                         window_width: width,
                                         window_height: height,
                                         maximized,
@@ -172,7 +172,7 @@ impl ApplicationHandler for App {
                                     let size = w.inner_size().to_logical::<f64>(scale);
                                     (size.width, size.height)
                                 };
-                                                                crate::save_config(&crate::Config {
+                                crate::save_config(&crate::Config {
                                     window_width: width,
                                     window_height: height,
                                     maximized,
@@ -241,7 +241,7 @@ impl ApplicationHandler for App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                                        crate::save_config(&crate::Config {
+                    crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
@@ -357,7 +357,7 @@ impl ApplicationHandler for App {
                     self.search_case_sensitive,
                     self.show_welcome,
                     &self.recent_files,
-                                        &self.current_sticky_lines,
+                    &self.current_sticky_lines,
                     self.sticky_anim_progress,
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
@@ -431,9 +431,9 @@ impl ApplicationHandler for App {
                     self.autocomplete_rect = None;
                 }
 
-                                                                let mut settings_cursor_mode = 0;
+                let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
-                                        settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
+                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
@@ -521,7 +521,7 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                                        if self.scroll_x.is_dragging || self.scroll_y.is_dragging {
+                    if self.scroll_x.is_dragging || self.scroll_y.is_dragging {
                         is_text = false;
                     }
 
@@ -540,7 +540,7 @@ impl ApplicationHandler for App {
                         is_text = false;
                     }
 
-                                        if self.show_settings
+                    if self.show_settings
                         || self.dialog_window.is_some()
                         || self.settings_anim_progress >= 1.5
                     {
@@ -635,7 +635,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                if self.show_settings && self.settings_tab == 0 && self.settings_ide_scroll.update(dt) {
+        if self.show_settings && self.settings_tab == 0 && self.settings_ide_scroll.update(dt) {
             self.window.as_ref().unwrap().request_redraw();
         }
         if self.show_settings && self.settings_tab == 4 && self.settings_scroll.update(dt) {
@@ -789,7 +789,7 @@ impl ApplicationHandler for App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                                        crate::save_config(&crate::Config {
+                    crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,

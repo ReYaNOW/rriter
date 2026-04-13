@@ -56,7 +56,7 @@ impl App {
             }
         }
 
-                                if self.show_settings && self.settings_tab == 0 {
+        if self.show_settings && self.settings_tab == 0 {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let h = self.window.as_ref().unwrap().inner_size().height as f32;
             let ide_h = (700.0 * s).min(h - 40.0 * s);
@@ -78,7 +78,10 @@ impl App {
                 for p in &self.ide_ignore_patterns {
                     let tw = self.renderer.as_mut().unwrap().measure_ui_width(p, 0.88);
                     let cw = tw + pad_x * 2.0 + 22.0 * s;
-                    if cx + cw > max_row_w && cx > 0.0 { rows += 1; cx = 0.0; }
+                    if cx + cw > max_row_w && cx > 0.0 {
+                        rows += 1;
+                        cx = 0.0;
+                    }
                     cx += cw + chip_gap_x;
                 }
                 rows
@@ -150,7 +153,7 @@ impl App {
             return;
         }
 
-                if self.show_settings {
+        if self.show_settings {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;
             } else if state == ElementState::Pressed {
@@ -182,7 +185,7 @@ impl App {
                             }
                             tab_y += 40.0 * s;
                         }
-                                        } else if self.settings_tab == 0 {
+                    } else if self.settings_tab == 0 {
                         let scroll_y = self.settings_ide_scroll.current;
                         let content_x = ix + sidebar_w + 30.0 * s;
 
@@ -226,13 +229,13 @@ impl App {
                             self.trigger_folder_picker();
                         }
 
-                                                // ── Поле ввода игнора ────────────────────────────
+                        // ── Поле ввода игнора ────────────────────────────
                         // Вычисляем Y поля: после рабочих областей + 56 + 20 + 28 + 22 + 20
                         let input_section_y = add_btn_y + 56.0 * s // после кнопки
                             + 20.0 * s             // разделитель
                             + 28.0 * s             // заголовок
                             + 22.0 * s             // пояснение 1
-                            + 20.0 * s;            // пояснение 2
+                            + 20.0 * s; // пояснение 2
                         let input_h = 34.0 * s;
                         let input_w = 330.0 * s;
 
@@ -241,7 +244,7 @@ impl App {
                             && my >= input_section_y
                             && my <= input_section_y + input_h;
 
-                                                if on_input {
+                        if on_input {
                             self.settings_ignore_focused = true;
                             self.is_dragging_settings_ignore = true;
                             let text = self.settings_ignore_editor.get_full_text();
@@ -251,7 +254,14 @@ impl App {
                             let mut target_idx = text.len();
                             let mut byte_idx = 0;
                             for c in text.chars() {
-                                let adv = self.renderer.as_mut().unwrap().get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.95;
+                                let adv = self
+                                    .renderer
+                                    .as_mut()
+                                    .unwrap()
+                                    .get_ui_glyph(c)
+                                    .map(|g| g.advance)
+                                    .unwrap_or(10.0)
+                                    * 0.95;
                                 if x_offset <= current_x + adv / 2.0 {
                                     target_idx = byte_idx;
                                     break;
@@ -270,8 +280,12 @@ impl App {
                             && my >= input_section_y
                             && my <= input_section_y + input_h;
 
-                                                if on_add_btn {
-                            let trimmed = self.settings_ignore_editor.get_full_text().trim().to_string();
+                        if on_add_btn {
+                            let trimmed = self
+                                .settings_ignore_editor
+                                .get_full_text()
+                                .trim()
+                                .to_string();
                             if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                                 self.ide_ignore_patterns.push(trimmed);
                                 self.settings_ignore_editor.select_all();
@@ -300,7 +314,11 @@ impl App {
 
                         for (cidx, pattern) in self.ide_ignore_patterns.clone().iter().enumerate() {
                             // Пересчитываем ширину чипа так же как в draw_settings
-                                                        let text_w = self.renderer.as_mut().unwrap().measure_ui_width(pattern, 0.88);
+                            let text_w = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(pattern, 0.88);
                             let close_area = 22.0 * s;
                             let chip_w = text_w + pad_x * 2.0 + close_area;
 
@@ -550,7 +568,7 @@ impl App {
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
-                        self.is_dragging = false;
+            self.is_dragging = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
@@ -1115,7 +1133,7 @@ impl App {
                 return;
             }
 
-                        if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
                 let scroll_x = rx + rw - 14.0 * s;
                 if px < scroll_x {
                     let item_h = 36.0 * s;
@@ -1192,8 +1210,9 @@ impl App {
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
-                if self.is_dragging_settings_ignore {
-            let w = (1000.0 * s).min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
+        if self.is_dragging_settings_ignore {
+            let w = (1000.0 * s)
+                .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
             let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
             let content_x = x + 40.0 * s + 200.0 * s + 30.0 * s;
             let start_x = content_x + 8.0 * s;
@@ -1203,7 +1222,14 @@ impl App {
             let mut target_idx = text.len();
             let mut byte_idx = 0;
             for c in text.chars() {
-                let adv = self.renderer.as_mut().unwrap().get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.95;
+                let adv = self
+                    .renderer
+                    .as_mut()
+                    .unwrap()
+                    .get_ui_glyph(c)
+                    .map(|g| g.advance)
+                    .unwrap_or(10.0)
+                    * 0.95;
                 if x_offset <= current_x + adv / 2.0 {
                     target_idx = byte_idx;
                     break;
@@ -1429,7 +1455,7 @@ impl App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                                        crate::save_config(&crate::Config {
+                    crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
@@ -1505,7 +1531,7 @@ impl App {
                         let size = w.inner_size().to_logical::<f64>(scale);
                         (size.width, size.height)
                     };
-                                        crate::save_config(&crate::Config {
+                    crate::save_config(&crate::Config {
                         window_width: width,
                         window_height: height,
                         maximized,
@@ -1949,9 +1975,9 @@ impl App {
             return;
         }
 
-                if key_event.state == ElementState::Pressed {
-                                                // ── Ввод в поле игнора настроек ──────────────────────────────
-                        if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+        if key_event.state == ElementState::Pressed {
+            // ── Ввод в поле игнора настроек ──────────────────────────────
+            if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
                 self.last_action = std::time::Instant::now();
                 let ctrl = self.modifiers.control_key();
                 let shift = self.modifiers.shift_key();
@@ -1962,7 +1988,11 @@ impl App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-                        let trimmed = self.settings_ignore_editor.get_full_text().trim().to_string();
+                        let trimmed = self
+                            .settings_ignore_editor
+                            .get_full_text()
+                            .trim()
+                            .to_string();
                         if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
                             self.ide_ignore_patterns.push(trimmed);
                             self.settings_ignore_editor.select_all();
@@ -2071,7 +2101,7 @@ impl App {
                 }
             }
 
-                        if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
+            if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                 if self.show_settings {
                     self.show_settings = false;
                     self.window.as_ref().unwrap().request_redraw();
