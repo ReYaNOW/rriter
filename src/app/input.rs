@@ -39,8 +39,7 @@ impl App {
             }
         }
 
-        if self.autocomplete_active && self.autocomplete_rect.is_some() {
-            let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
+                if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
@@ -1110,8 +1109,7 @@ impl App {
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
 
-        if self.autocomplete_active && self.autocomplete_rect.is_some() {
-            let (rx, ry, rw, rh) = self.autocomplete_rect.unwrap();
+                if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
             let px = position.x as f32;
             let py = position.y as f32;
 

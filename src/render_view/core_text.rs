@@ -211,10 +211,10 @@ impl Renderer {
         let mut phys_line = 0;
 
         while phys_line < editor.line_offsets.len() {
-            let is_folded = editor.folded_lines.contains(&phys_line)
+                        let is_folded = editor.folded_lines.contains(&phys_line)
                 && editor.foldable_lines.contains_key(&phys_line);
             let fold_end_line = if is_folded {
-                editor.foldable_lines.get(&phys_line).copied().unwrap()
+                editor.foldable_lines.get(&phys_line).copied().unwrap_or(phys_line)
             } else {
                 phys_line
             };

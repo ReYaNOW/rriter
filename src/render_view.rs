@@ -567,12 +567,11 @@ impl Renderer {
         // --- Одинаковые слова (Word Highlighting) ---
         let mut identical_words = Vec::new();
         let mut target_word = None;
-        let is_valid_word = |s: &str| -> bool {
-            !s.is_empty()
+                let is_valid_word = |s: &str| -> bool {
+            s.chars().next().map_or(false, |c| !c.is_ascii_digit())
                 && s.as_bytes()
                     .iter()
                     .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
-                && !s.chars().next().unwrap().is_ascii_digit()
         };
 
         if sel_start != sel_end {
