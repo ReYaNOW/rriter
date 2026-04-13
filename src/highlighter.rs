@@ -187,11 +187,6 @@ impl Highlighter {
         )>();
 
         thread::spawn(move || {
-            let mut syntect_assets: Option<(
-                syntect::parsing::SyntaxSet,
-                syntect::highlighting::Theme,
-            )> = None;
-
             let mut parser = tree_sitter::Parser::new();
             let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
                 HashMap::new();
@@ -344,7 +339,6 @@ impl Highlighter {
                 let mut completions_map: HashMap<(String, usize, usize), SymbolKind> =
                     HashMap::new();
                 let mut foldable_ranges = Vec::new();
-                let mut used_ts = false;
                 let mut error_ranges = Vec::new();
 
                 if !is_log_or_huge {
@@ -621,7 +615,7 @@ impl Highlighter {
                                     }
                                 }
 
-                                let mut param_scopes = Vec::new();
+                                                                let mut param_scopes = Vec::new();
                                 if let Some(q_str) = get_params_query(lang_name) {
                                     if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
@@ -694,9 +688,8 @@ impl Highlighter {
                                             }
                                         }
                                     }
-                                }
+                                                                }
 
-                                let mut success_count = 0;
                                 for q_str in queries {
                                     let cache_key = (lang_name, q_str);
                                     if !query_cache.contains_key(&cache_key) {
@@ -706,7 +699,6 @@ impl Highlighter {
                                     }
 
                                     if let Some(query) = query_cache.get(&cache_key) {
-                                        success_count += 1;
                                         let mut cursor = tree_sitter::QueryCursor::new();
                                         let mut matches = cursor.matches(
                                             query,
@@ -887,56 +879,6 @@ impl Highlighter {
                                     }
                                 }
                                 // ---------------------------------------------------------
-
-                                if success_count > 0 {
-                                    used_ts = true;
-                                }
-                            }
-                        }
-                    }
-
-                    if !used_ts && !lang_name.is_empty() {
-                        if syntect_assets.is_none() {
-                            let ps = syntect::parsing::SyntaxSet::load_defaults_newlines();
-                            let ts = syntect::highlighting::ThemeSet::load_defaults();
-                            let mut theme = ts.themes["base16-ocean.dark"].clone();
-                            theme.scopes = dracula_syntect_scopes();
-                            syntect_assets = Some((ps, theme));
-                        }
-
-                        if let Some((ps, theme)) = syntect_assets.as_ref() {
-                            let syntax = ps.find_syntax_by_extension(&actual_ext).or_else(|| {
-                                if actual_ext == "toml" {
-                                    ps.find_syntax_by_extension("ini")
-                                } else {
-                                    None
-                                }
-                            });
-
-                            if let Some(syntax) = syntax {
-                                let mut h = syntect::easy::HighlightLines::new(syntax, theme);
-                                let mut byte_offset = 0;
-                                for line in syntect::util::LinesWithEndings::from(text.as_str()) {
-                                    if let Ok(ranges) = h.highlight_line(line, &ps) {
-                                        for (style, s) in ranges {
-                                            let start = byte_offset;
-                                            let end = start + s.len();
-                                            spans.push(ColorSpan {
-                                                start,
-                                                end,
-                                                color: [
-                                                    style.foreground.r as f32 / 255.0,
-                                                    style.foreground.g as f32 / 255.0,
-                                                    style.foreground.b as f32 / 255.0,
-                                                    1.0,
-                                                ],
-                                            });
-                                            byte_offset = end;
-                                        }
-                                    } else {
-                                        byte_offset += line.len();
-                                    }
-                                }
                             }
                         }
                     }
@@ -1288,64 +1230,6 @@ impl Highlighter {
         }
         self.spans.retain(|s| s.start < s.end);
     }
-}
-
-fn dracula_syntect_scopes() -> Vec<syntect::highlighting::ThemeItem> {
-    use std::str::FromStr;
-    use syntect::highlighting::{Color, ScopeSelectors, StyleModifier, ThemeItem};
-
-    fn c(r: u8, g: u8, b: u8) -> Color {
-        Color { r, g, b, a: 255 }
-    }
-    fn item(scope: &str, r: u8, g: u8, b: u8) -> ThemeItem {
-        ThemeItem {
-            scope: ScopeSelectors::from_str(scope).unwrap_or_default(),
-            style: StyleModifier {
-                foreground: Some(c(r, g, b)),
-                background: None,
-                font_style: None,
-            },
-        }
-    }
-
-    vec![
-        // comment → #6272a4
-        item("comment", 98, 114, 164),
-        // string → #f1fa8c
-        item("string", 241, 250, 140),
-        // constant (числа, true/false, nil/null) → #bd93f9
-        item("constant.numeric", 189, 147, 249),
-        item("constant.language", 189, 147, 249),
-        item("constant.character", 189, 147, 249),
-        item("constant", 189, 147, 249),
-        // keyword, storage → #ff79c6
-        item("keyword", 255, 121, 198),
-        item("storage.type", 255, 121, 198),
-        item("storage.modifier", 255, 121, 198),
-        item("storage", 255, 121, 198),
-        // функции → #50fa7b
-        item("entity.name.function", 80, 250, 123),
-        item("meta.function-call.generic", 80, 250, 123),
-        item("support.function", 80, 250, 123),
-        // типы, классы → #8be9fd
-        item("entity.name.class", 139, 233, 253),
-        item("entity.name.type", 139, 233, 253),
-        item("entity.name.struct", 139, 233, 253),
-        item("entity.name.trait", 139, 233, 253),
-        item("entity.name.enum", 139, 233, 253),
-        item("support.type", 139, 233, 253),
-        item("support.class", 139, 233, 253),
-        // параметры → #ffb86c
-        item("variable.parameter", 255, 184, 108),
-        // self/this → #bd93f9
-        item("variable.language", 189, 147, 249),
-        // остальные переменные и пунктуация → #f8f8f2
-        item("variable", 248, 248, 242),
-        item("punctuation", 248, 248, 242),
-        item("meta.brace", 248, 248, 242),
-        // invalid → #ff5555
-        item("invalid", 255, 85, 85),
-    ]
 }
 
 fn get_bracket_color(depth: usize) -> [f32; 4] {

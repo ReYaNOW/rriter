@@ -13,15 +13,11 @@ use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
 use arboard::Clipboard;
-use mimalloc::MiMalloc;
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
-
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
 
 pub struct Config {
     pub window_width: f64,
@@ -268,21 +264,18 @@ fn load_dracula() -> Theme {
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
 
     Theme {
-        bg: [0.156, 0.164, 0.211, 1.0],
-        fg: [0.972, 0.972, 0.949, 1.0],
+        bg:[0.156, 0.164, 0.211, 1.0],
+        fg:[0.972, 0.972, 0.949, 1.0],
         sel: sel_color,
-        minimap_bg: [0.129, 0.133, 0.172, 1.0],
-        line_num: [0.384, 0.447, 0.643, 1.0],
+        minimap_bg:[0.129, 0.133, 0.172, 1.0],
+        line_num:[0.384, 0.447, 0.643, 1.0],
         minimap_cursor: sel_color,
-        modified_unsaved: [1.0, 0.474, 0.776, 1.0],
-        modified_saved: [0.313, 0.980, 0.482, 1.0],
+        modified_unsaved:[1.0, 0.474, 0.776, 1.0],
+        modified_saved:[0.313, 0.980, 0.482, 1.0],
     }
 }
 
 fn main() {
-    std::env::set_var("MIMALLOC_PURGE_DELAY", "100");
-    std::env::set_var("MIMALLOC_ARENA_CAPACITY", "4");
-
     let args: Vec<String> = env::args().collect();
     let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
     let mut initial_text = String::new();

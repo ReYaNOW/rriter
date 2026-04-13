@@ -8,8 +8,11 @@ COMMON_RUSTFLAGS = -C target-cpu=native -C llvm-args=-fp-contract=fast -C link-a
 BUILD_STD = -Z build-std=core,alloc,std,panic_abort
 TARGET = x86_64-unknown-linux-gnu
 
-# Настройки для быстрой сборки: ИНКРЕМЕНТАЛЬНАЯ сборка и без урезания бинарника (strip)
-FAST_PROFILE_OPTS = CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=256 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none
+# Настройки для быстрой сборки (DEBUG=2 дает трейсбеки, PANIC=abort работает с RUST_BACKTRACE)
+FAST_PROFILE_OPTS = CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=256 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
+
+# Ультимативные флаги (Fat LTO, v0 mangling, Identical Code Folding, Linker O3)
+MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C lto=fat -C symbol-mangling-version=v0 -C link-arg=-Wl,--icf=all -C link-arg=-Wl,-O3
 
 .PHONY: all fast max test clean
 
@@ -34,10 +37,10 @@ run:
 # 2. Версия MAX (Ультимативная)
 # Для финального использования. Медленная сборка, максимальный FPS
 max:
-	@echo "🔥 Сборка ультимативной версии (Fat LTO, CGU=1)..."
-	CARGO_PROFILE_RELEASE_LTO=fat \
+	@echo "🔥 Сборка ультимативной версии (Fat LTO, Immediate Abort)..."
 	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
+	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
+	RUSTFLAGS="$(MAX_RUSTFLAGS)" \
 	cargo +nightly build \
 	$(BUILD_STD) \
 	--target $(TARGET) \
