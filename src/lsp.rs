@@ -44,6 +44,7 @@ pub enum LspServerStatus {
 pub struct LspServerInfo {
     pub name: &'static str,
     pub status: LspServerStatus,
+    pub logs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +89,10 @@ pub struct WorkspaceEdit {
 /// Событие от LSP-сервера → главный поток
 #[derive(Debug)]
 pub enum LspEvent {
+    Log {
+        name: &'static str,
+        message: String,
+    },
     /// Диагностика для файла (ошибки/предупреждения от ruff)
     Diagnostics {
         path: PathBuf,
@@ -604,7 +609,7 @@ fn parse_code_action_obj(obj: &str) -> Option<CodeAction> {
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
-fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>) {
+fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str) {
     let json = match std::str::from_utf8(body) {
         Ok(s) => s,
         Err(_) => return,
@@ -682,6 +687,15 @@ fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>) {
         }
 
         // ── Сервер шлёт запросы (например window/showMessage) ───────────
+                Some("window/logMessage") => {
+            if let Some(params) = get_object_field(json, "params") {
+                if let Some(msg) = get_str_field(params, "message") {
+                    let unescaped = unescape_json_str(msg);
+                    let _ = event_tx.send(LspEvent::Log { name: server_name, message: unescaped });
+                }
+            }
+        }
+
         Some(_) => {
             // Игнорируем незнакомые уведомления
         }
@@ -721,17 +735,32 @@ fn spawn_server(
     for arg in def.args {
         cmd.arg(arg);
     }
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+            let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .ok()?;
 
-    let stdin = child.stdin.take()?;
-    let stdout = child.stdout.take()?;
+        let stdin = child.stdin.take()?;
+        let stdout = child.stdout.take()?;
+        let stderr = child.stderr.take()?;
 
-    let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+
+        let err_tx = event_tx.clone();
+        let srv_name = def.program;
+        thread::Builder::new()
+            .name(format!("lsp-stderr-{}", srv_name))
+            .spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    if let Ok(msg) = line {
+                        let _ = err_tx.send(LspEvent::Log { name: srv_name, message: msg });
+                    }
+                }
+            })
+            .ok()?;
 
     // Тред-писатель: получает байты, оборачивает в Content-Length фрейм
     thread::Builder::new()
@@ -787,12 +816,11 @@ fn spawn_server(
                         Err(_) => { break; }
                     }
                 }
-                if read < content_len { break; }
+                                if read < content_len { break; }
 
-                dispatch_frame(&body, &event_tx);
+                dispatch_frame(&body, &event_tx, def.program);
             }
-        })
-        .ok()?;
+        }).ok()?;
 
     Some(SpawnedProcess { child, out_tx })
 }
@@ -1082,6 +1110,7 @@ pub struct LspManager {
     pub python_status: LspServerStatus,
     /// Отключён ли ruff вручную
     pub python_disabled: bool,
+    pub server_logs: HashMap<&'static str, Vec<String>>,
 }
 
 impl LspManager {
@@ -1093,6 +1122,7 @@ impl LspManager {
             current_path: None,
             python_status: LspServerStatus::Disabled,
             python_disabled: false,
+            server_logs: HashMap::new(),
         }
     }
 
@@ -1116,13 +1146,14 @@ impl LspManager {
     }
 
     /// Отключить ruff (остановить и не перезапускать)
-    pub fn disable_python(&mut self) {
+        pub fn disable_python(&mut self) {
         self.python_disabled = true;
         self.python_status = LspServerStatus::Disabled;
         if let Some(p) = self.python.take() {
             p.shutdown();
         }
         self.diagnostics.clear();
+        self.server_logs.clear();
     }
 
     /// Включить ruff обратно
@@ -1141,10 +1172,12 @@ impl LspManager {
     }
 
     /// Информация о серверах для UI
-    pub fn servers_info(&self) -> Vec<LspServerInfo> {
+        pub fn servers_info(&self) -> Vec<LspServerInfo> {
+        let logs = self.server_logs.get(RUFF_SERVER.program).cloned().unwrap_or_default();
         vec![LspServerInfo {
             name: RUFF_SERVER.program,
             status: self.python_status.clone(),
+            logs,
         }]
     }
 
@@ -1211,7 +1244,7 @@ impl LspManager {
 
         // Обновляем кешированные диагностики и статусы
         for ev in &all {
-            match ev {
+                        match ev {
                 LspEvent::Diagnostics { path, items, .. } => {
                     if self.current_path.as_deref() == Some(path.as_path()) {
                         self.diagnostics = items.clone();
@@ -1219,6 +1252,13 @@ impl LspManager {
                 }
                 LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
+                }
+                LspEvent::Log { name, message } => {
+                    let logs = self.server_logs.entry(name).or_insert_with(Vec::new);
+                    logs.push(message.clone());
+                    if logs.len() > 100 {
+                        logs.remove(0);
+                    }
                 }
                 _ => {}
             }
@@ -1246,7 +1286,8 @@ impl LspManager {
         Some(id)
     }
 
-        pub fn shutdown(mut self) {
+            #[allow(dead_code)]
+    pub fn shutdown(mut self) {
         self.python_disabled = true;
         if let Some(p) = self.python.take() { p.shutdown(); }
     }

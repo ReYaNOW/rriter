@@ -436,7 +436,9 @@ F8\tПоказать/скрыть счетчик FPS
         search_case_sensitive: false,
         search_results: Vec::new(),
         search_current_idx: None,
-        is_dragging_search: false,
+                is_dragging_search: false,
+
+        is_dragging_lsp_log: false,
 
         faq_editor,
 
@@ -474,7 +476,8 @@ F8\tПоказать/скрыть счетчик FPS
         } else {
             None
         },
-        lsp_actions_menu: None,
+                lsp_actions_menu: None,
+        pending_fix_all_id: None,
     };
 
     app.highlighter.reset(

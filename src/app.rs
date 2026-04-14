@@ -34,12 +34,12 @@ pub enum PanelId {
 }
 
 impl PanelId {
-        pub fn label(self) -> &'static str {
+            pub fn label(self) -> &'static str {
         match self {
             PanelId::Explorer => "Проводник",
             PanelId::Terminal => "Терминал",
             PanelId::Problems => "Ляпы",
-            PanelId::LspServers => "LSP Серверы",
+            PanelId::LspServers => "Языковые серверы",
         }
     }
     pub fn icon(self) -> crate::widgets::IconType {
@@ -107,10 +107,17 @@ pub struct IdePanelState {
     pub is_resizing_bottom: bool,
     pub file_tree_nodes: Vec<crate::app::file_tree::FileNode>,
     pub file_tree_expanded: FxHashSet<std::path::PathBuf>,
-    pub explorer_scroll: crate::scroll::ScrollState,
+            pub explorer_scroll: crate::scroll::ScrollState,
     pub file_tree_hovered_idx: Option<usize>,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
+    pub lsp_logs_expanded: FxHashSet<String>,
+    pub lsp_scroll_y: crate::scroll::ScrollState,
+    pub lsp_scroll_x: crate::scroll::ScrollState,
+    pub lsp_log_editors: FxHashMap<String, Editor>,
+    pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
+    pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
+    pub lsp_logs_focused: Option<String>,
 }
 
 impl Default for IdePanelState {
@@ -144,10 +151,17 @@ impl Default for IdePanelState {
             is_resizing_left: false,
             is_resizing_bottom: false,
             file_tree_nodes: Vec::new(),
-            file_tree_expanded: FxHashSet::default(),
+                                    file_tree_expanded: FxHashSet::default(),
             explorer_scroll: crate::scroll::ScrollState::new(15.0),
             file_tree_hovered_idx: None,
-            lsp_servers: Vec::new(),
+                        lsp_servers: Vec::new(),
+            lsp_logs_expanded: FxHashSet::default(),
+            lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
+            lsp_scroll_x: crate::scroll::ScrollState::new(15.0),
+            lsp_log_editors: FxHashMap::default(),
+            lsp_logs_scroll_y: FxHashMap::default(),
+            lsp_logs_scroll_x: FxHashMap::default(),
+            lsp_logs_focused: None,
         }
     }
 }
@@ -263,8 +277,10 @@ pub struct App {
     pub search_focused: bool,
     pub search_case_sensitive: bool,
     pub search_results: Vec<(usize, usize)>,
-    pub search_current_idx: Option<usize>,
+        pub search_current_idx: Option<usize>,
     pub is_dragging_search: bool,
+
+    pub is_dragging_lsp_log: bool,
 
     pub faq_editor: Editor,
 
@@ -298,8 +314,10 @@ pub struct App {
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
         /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
-    /// Меню быстрых действий LSP (Alt+Enter)
+        /// Меню быстрых действий LSP (Alt+Enter)
     pub lsp_actions_menu: Option<LspActionsMenu>,
+    /// Ожидаем ответа на Fix All запрос
+    pub pending_fix_all_id: Option<i32>,
 }
 
 impl App {

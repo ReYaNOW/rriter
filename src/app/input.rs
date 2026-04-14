@@ -39,7 +39,94 @@ impl App {
             }
         }
 
-                if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+
+            let mut lsp_bounds = None;
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
+            });
+            if is_top {
+                let sb_w = 48.0 * s;
+                let title_h = 32.0 * s;
+                let panel_left_w = self.ide_panel.left_width * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+            } else {
+                let open_bottom: Vec<_> = self
+                    .ide_panel
+                    .slots
+                    .iter()
+                    .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                    .collect();
+                if let Some(first) = open_bottom.first() {
+                    if first.id == crate::app::PanelId::LspServers {
+                        let sb_w = 48.0 * s;
+                        let tab_h = 32.0 * s;
+                        let panel_bottom_h = self.ide_panel.bottom_height * s;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                        lsp_bounds = Some((
+                            sb_w,
+                            wh - panel_bottom_h + 1.0 + tab_h,
+                            ww - sb_w,
+                            panel_bottom_h - 1.0 - tab_h,
+                        ));
+                    }
+                }
+            }
+
+            if let Some((cx, cy, cw, ch)) = lsp_bounds {
+                if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                    self.ide_panel.lsp_scroll_y.anim_speed = 7.0;
+                    self.ide_panel.lsp_scroll_x.anim_speed = 7.0;
+
+                    if shift {
+                        self.ide_panel.lsp_scroll_x.scroll_by(dy);
+                    } else {
+                        self.ide_panel.lsp_scroll_y.scroll_by(dy);
+                        self.ide_panel.lsp_scroll_x.scroll_by(dx);
+                    }
+
+                    let mut total_h = 8.0 * s;
+                    let mut max_log_w = 0.0f32;
+                    for info in &self.ide_panel.lsp_servers {
+                        let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                        total_h += 100.0 * s + logs_h + 12.0 * s;
+                        if is_expanded {
+                            for line in &info.logs {
+                                let mut draw_str = line.as_str();
+                                if draw_str.len() > 250 {
+                                    draw_str = &draw_str[..250];
+                                }
+                                let lw = self
+                                    .renderer
+                                    .as_mut()
+                                    .unwrap()
+                                    .measure_mono_width(draw_str, 0.7);
+                                if lw > max_log_w {
+                                    max_log_w = lw;
+                                }
+                            }
+                        }
+                    }
+
+                    let max_scroll_y = (total_h - ch).max(0.0);
+                    self.ide_panel.lsp_scroll_y.clamp_target(0.0, max_scroll_y);
+
+                    let max_scroll_x = (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0);
+                    self.ide_panel.lsp_scroll_x.clamp_target(0.0, max_scroll_x);
+
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+        }
+
+        if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
@@ -141,18 +228,20 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+    pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
         // Клик вне меню LSP — закрываем меню
         if state == ElementState::Pressed && self.lsp_actions_menu.is_some() {
-                    let s = self.renderer.as_ref().unwrap().scale_factor;
-        let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-        let my = self.renderer.as_ref().unwrap().last_mouse_y;
-        if let Some(menu) = &self.lsp_actions_menu {
-            let item_h = 36.0 * s;
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            if let Some(menu) = &self.lsp_actions_menu {
+                let item_h = 36.0 * s;
                 let menu_w = 320.0 * s;
                 let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                let in_menu = mx >= menu.menu_x && mx <= menu.menu_x + menu_w
-                    && my >= menu.menu_y && my <= menu.menu_y + menu_h;
+                let in_menu = mx >= menu.menu_x
+                    && mx <= menu.menu_x + menu_w
+                    && my >= menu.menu_y
+                    && my <= menu.menu_y + menu_h;
                 if in_menu {
                     // Клик внутри меню — выбираем элемент
                     let rel_y = my - menu.menu_y - 4.0 * s;
@@ -164,9 +253,13 @@ impl App {
                         drop(menu_clone);
                         match item {
                             LspActionItem::CodeAction(action) => {
-                                if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
+                                if let (Some(edit), Some(path)) =
+                                    (action.edit, self.file_path.clone())
+                                {
                                     let new_text = crate::lsp::apply_workspace_edit_to_text(
-                                        &self.editor.get_full_text(), &edit, &path,
+                                        &self.editor.get_full_text(),
+                                        &edit,
+                                        &path,
                                     );
                                     if new_text != self.editor.get_full_text() {
                                         self.apply_full_text_replacement(new_text);
@@ -191,76 +284,294 @@ impl App {
         }
 
         // Клики по кнопкам LSP-панели
-        if state == ElementState::Pressed && self.is_ide_mode
-            && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+        if state == ElementState::Pressed
+            && self.is_ide_mode
+            && self.ide_panel.is_open(crate::app::PanelId::LspServers)
+        {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let sb_w = 48.0 * s;
-            let title_h = 32.0 * s;
-            let _panel_left_w = self.ide_panel.left_width * s;
-            let row_h = 52.0 * s;
-            let pad_x = 12.0 * s;
-            let btn_h = 22.0 * s;
 
-            let servers_copy = self.ide_panel.lsp_servers.clone();
-            for (i, info) in servers_copy.iter().enumerate() {
-                let row_y = title_h + i as f32 * row_h;
-                let btn_y = row_y + row_h - btn_h - 6.0 * s;
-
-                let label_restart = "Restart";
-                let label_toggle = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) { "Enable" } else { "Disable" };
-                let label_fix_all = "Fix All";
-                let label_stop = "Stop";
-                let btn_pad = 10.0 * s;
-
-                let bw_restart  = self.renderer.as_mut().unwrap().measure_ui_width(label_restart,  0.8) + btn_pad * 2.0;
-                let bw_toggle   = self.renderer.as_mut().unwrap().measure_ui_width(label_toggle,   0.8) + btn_pad * 2.0;
-                let bw_fix_all  = self.renderer.as_mut().unwrap().measure_ui_width(label_fix_all,  0.8) + btn_pad * 2.0;
-                let bw_stop     = self.renderer.as_mut().unwrap().measure_ui_width(label_stop,     0.8) + btn_pad * 2.0;
-
-                let btn_x_restart  = sb_w + pad_x;
-                let btn_x_toggle   = btn_x_restart + bw_restart + 6.0 * s;
-                let btn_x_fix_all  = btn_x_toggle  + bw_toggle  + 6.0 * s;
-                let btn_x_stop     = btn_x_fix_all + bw_fix_all + 6.0 * s;
-
-                if mx >= btn_x_restart && mx <= btn_x_restart + bw_restart && my >= btn_y && my <= btn_y + btn_h {
-                    // Restart
-                    if let Some(lsp) = &mut self.lsp {
-                        lsp.restart_python();
-                        self.ide_panel.lsp_servers = lsp.servers_info();
+            let mut lsp_bounds = None;
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
+            });
+            if is_top {
+                let sb_w = 48.0 * s;
+                let title_h = 32.0 * s;
+                let panel_left_w = self.ide_panel.left_width * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+            } else {
+                let open_bottom: Vec<_> = self
+                    .ide_panel
+                    .slots
+                    .iter()
+                    .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                    .collect();
+                if let Some(first) = open_bottom.first() {
+                    if first.id == crate::app::PanelId::LspServers {
+                        let sb_w = 48.0 * s;
+                        let tab_h = 32.0 * s;
+                        let panel_bottom_h = self.ide_panel.bottom_height * s;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                        lsp_bounds = Some((
+                            sb_w,
+                            wh - panel_bottom_h + 1.0 + tab_h,
+                            ww - sb_w,
+                            panel_bottom_h - 1.0 - tab_h,
+                        ));
                     }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
                 }
-                if mx >= btn_x_toggle && mx <= btn_x_toggle + bw_toggle && my >= btn_y && my <= btn_y + btn_h {
-                    if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
-                        if let Some(lsp) = &mut self.lsp {
-                            lsp.enable_python();
-                            self.ide_panel.lsp_servers = lsp.servers_info();
+            }
+
+            if let Some((cx, cy, cw, ch)) = lsp_bounds {
+                if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                    let pad_x = 12.0 * s;
+                    let btn_h = 24.0 * s;
+                    let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
+
+                    let servers_copy = self.ide_panel.lsp_servers.clone();
+                    let mut current_y = cy + 8.0 * s - scroll_y;
+
+                    for info in servers_copy.iter() {
+                        let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                        let base_h = 100.0 * s;
+                        let row_h = base_h + logs_h;
+
+                        // Only process clicks if visible
+                        if current_y + row_h > cy && current_y < cy + ch {
+                            let card_x = cx + 8.0 * s;
+                            let card_w = cw - 16.0 * s;
+
+                            let btn_y1 = current_y + 56.0 * s;
+                            let btn_pad = 10.0 * s;
+
+                            let label_restart = "Перезапуск";
+                            let label_toggle =
+                                if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
+                                    "Включить"
+                                } else {
+                                    "Отключить"
+                                };
+                            let label_stop = "Остановить";
+                            let label_logs = if is_expanded {
+                                "Скрыть логи"
+                            } else {
+                                "Логи"
+                            };
+
+                            let bw_restart = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(label_restart, 0.8)
+                                + btn_pad * 2.0;
+                            let bw_toggle = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(label_toggle, 0.8)
+                                + btn_pad * 2.0;
+                            let bw_stop = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(label_stop, 0.8)
+                                + btn_pad * 2.0;
+                            let bw_logs = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(label_logs, 0.8)
+                                + btn_pad * 2.0;
+
+                            let btn_x_restart = card_x + pad_x;
+                            let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
+                            let btn_x_stop = btn_x_toggle + bw_toggle + 6.0 * s;
+                            let btn_x_logs = card_x + card_w - bw_logs - pad_x;
+
+                            if mx >= btn_x_restart
+                                && mx <= btn_x_restart + bw_restart
+                                && my >= btn_y1
+                                && my <= btn_y1 + btn_h
+                            {
+                                if let Some(lsp) = &mut self.lsp {
+                                    lsp.restart_python();
+                                    self.ide_panel.lsp_servers = lsp.servers_info();
+                                }
+                                self.window.as_ref().unwrap().request_redraw();
+                                return;
+                            }
+                            if mx >= btn_x_toggle
+                                && mx <= btn_x_toggle + bw_toggle
+                                && my >= btn_y1
+                                && my <= btn_y1 + btn_h
+                            {
+                                if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        lsp.enable_python();
+                                        self.ide_panel.lsp_servers = lsp.servers_info();
+                                    }
+                                } else {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        lsp.disable_python();
+                                        self.ide_panel.lsp_servers = lsp.servers_info();
+                                    }
+                                }
+                                self.window.as_ref().unwrap().request_redraw();
+                                return;
+                            }
+
+                            let is_stopped = matches!(
+                                info.status,
+                                crate::lsp::LspServerStatus::Disabled
+                                    | crate::lsp::LspServerStatus::Crashed
+                            );
+                            if !is_stopped
+                                && mx >= btn_x_stop
+                                && mx <= btn_x_stop + bw_stop
+                                && my >= btn_y1
+                                && my <= btn_y1 + btn_h
+                            {
+                                if let Some(lsp) = &mut self.lsp {
+                                    lsp.disable_python();
+                                    self.ide_panel.lsp_servers = lsp.servers_info();
+                                }
+                                self.window.as_ref().unwrap().request_redraw();
+                                return;
+                            }
+
+                            if mx >= btn_x_logs
+                                && mx <= btn_x_logs + bw_logs
+                                && my >= btn_y1
+                                && my <= btn_y1 + btn_h
+                            {
+                                if is_expanded {
+                                    self.ide_panel.lsp_logs_expanded.remove(info.name);
+                                } else {
+                                    self.ide_panel
+                                        .lsp_logs_expanded
+                                        .insert(info.name.to_string());
+                                }
+                                self.window.as_ref().unwrap().request_redraw();
+                                return;
+                            }
+
+                            // Fix All
+                            let bw_fix_all = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width("Fix All", 0.8)
+                                + btn_pad * 2.0;
+                            let btn_x_fix_all = card_x + card_w
+                                - bw_fix_all
+                                - self.renderer.as_mut().unwrap().measure_ui_width(
+                                    if is_expanded {
+                                        "Скрыть логи"
+                                    } else {
+                                        "Логи"
+                                    },
+                                    0.8,
+                                )
+                                - btn_pad * 2.0
+                                - 6.0 * s
+                                - pad_x;
+                            let is_stopped = matches!(
+                                info.status,
+                                crate::lsp::LspServerStatus::Disabled
+                                    | crate::lsp::LspServerStatus::Crashed
+                            );
+                            let has_diags = self
+                                .lsp
+                                .as_ref()
+                                .map(|l| !l.diagnostics.is_empty())
+                                .unwrap_or(false);
+                            if !is_stopped
+                                && has_diags
+                                && mx >= btn_x_fix_all
+                                && mx <= btn_x_fix_all + bw_fix_all
+                                && my >= btn_y1
+                                && my <= btn_y1 + btn_h
+                            {
+                                if let Some(lsp) = &mut self.lsp {
+                                    if let Some(id) = lsp.request_fix_all(&self.file_extension) {
+                                        self.pending_fix_all_id = Some(id);
+                                    }
+                                }
+                                self.window.as_ref().unwrap().request_redraw();
+                                return;
+                            }
+
+                            // Клик по области логов — фокус + позиция курсора
+                            if is_expanded {
+                                let log_bg_y = btn_y1 + btn_h + 10.0 * s;
+                                let log_bg_h = logs_h - 18.0 * s;
+                                let log_bg_x = card_x + pad_x;
+                                let log_bg_w = card_w - pad_x * 2.0;
+                                if mx >= log_bg_x
+                                    && mx <= log_bg_x + log_bg_w
+                                    && my >= log_bg_y
+                                    && my <= log_bg_y + log_bg_h
+                                {
+                                    self.ide_panel.lsp_logs_focused = Some(info.name.to_string());
+                                    // Вычислить позицию курсора в тексте
+                                    let line_h = 16.0 * s;
+                                    let max_lines = (log_bg_h / line_h) as usize + 1;
+                                    let start_idx = info.logs.len().saturating_sub(max_lines);
+                                    let clicked_rel = ((my - log_bg_y) / line_h) as usize;
+                                    let clicked_line = (start_idx + clicked_rel)
+                                        .min(info.logs.len().saturating_sub(1));
+                                                                        let mut byte_off: usize =
+                                        info.logs[..clicked_line].iter().map(|l| l.len() + 1).sum();
+                                    let scroll_x = self.ide_panel.lsp_scroll_x.current;
+                                    if let Some(line_str) = info.logs.get(clicked_line) {
+                                        let click_x_in_line =
+                                            (mx - log_bg_x - 6.0 * s + scroll_x).max(0.0);
+                                        let r = self.renderer.as_mut().unwrap();
+                                        let mut best_pos = 0usize;
+                                        let mut best_dist = f32::MAX;
+                                        let mut ci = 0usize;
+                                        for c in line_str.chars() {
+                                            let x = r.measure_mono_width(&line_str[..ci], 0.7);
+                                            if (x - click_x_in_line).abs() < best_dist {
+                                                best_dist = (x - click_x_in_line).abs();
+                                                best_pos = ci;
+                                            }
+                                            ci += c.len_utf8();
+                                        }
+                                        // Проверить и правый край
+                                        let x_end = r.measure_mono_width(line_str, 0.7);
+                                                                                if (x_end - click_x_in_line).abs() < best_dist {
+                                            best_pos = line_str.len();
+                                        }
+                                        byte_off += best_pos;
+                                    }
+                                    if let Some(ed) =
+                                        self.ide_panel.lsp_log_editors.get_mut(info.name){
+                                        let shift = self.modifiers.shift_key();
+                                        if shift {
+                                            if ed.selection_anchor.is_none() {
+                                                ed.selection_anchor = Some(ed.cursor);
+                                            }
+                                        } else {
+                                            ed.selection_anchor = None;
+                                        }
+                                        ed.cursor = byte_off;
+                                        self.is_dragging_lsp_log = true;
+                                    }
+                                    self.window.as_ref().unwrap().request_redraw();
+                                    return;
+                                }
+                            }
                         }
-                    } else {
-                        if let Some(lsp) = &mut self.lsp {
-                            lsp.disable_python();
-                            self.ide_panel.lsp_servers = lsp.servers_info();
-                        }
+
+                        current_y += row_h + 12.0 * s;
                     }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-                if mx >= btn_x_fix_all && mx <= btn_x_fix_all + bw_fix_all && my >= btn_y && my <= btn_y + btn_h {
-                    if let Some(lsp) = &mut self.lsp {
-                        lsp.request_fix_all(&self.file_extension);
-                    }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-                if mx >= btn_x_stop && mx <= btn_x_stop + bw_stop && my >= btn_y && my <= btn_y + btn_h {
-                    if let Some(lsp) = self.lsp.take() {
-                        lsp.shutdown();
-                    }
-                    self.ide_panel.lsp_servers.clear();
-                    self.window.as_ref().unwrap().request_redraw();
+
                     return;
                 }
             }
@@ -279,6 +590,7 @@ impl App {
         if self.show_settings {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;
+                self.is_dragging_lsp_log = false;
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let w = (1000.0 * s)
@@ -539,13 +851,15 @@ impl App {
                     self.editor.sync_edits.clear();
                     self.highlighter
                         .reset(self.editor.version, "".to_string(), "".to_string());
-                                        App::update_window_title(
+                    App::update_window_title(
                         self.window.as_ref().unwrap(),
                         &self.base_title,
                         false,
                     );
                     if self.lsp.is_none() {
-                        self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.first().cloned()));
+                        self.lsp = Some(crate::lsp::LspManager::new(
+                            self.ide_workspaces.first().cloned(),
+                        ));
                     }
                     if self.ide_panel.is_open(crate::app::PanelId::Explorer) {
                         self.refresh_file_tree();
@@ -1236,7 +1550,7 @@ impl App {
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
 
-                if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
+        if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
             let px = position.x as f32;
             let py = position.y as f32;
 
@@ -1363,6 +1677,120 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.settings_ignore_editor.cursor = target_idx;
+                } else if self.is_dragging_lsp_log {
+            // Drag-selection в логах LSP
+            if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
+                if let Some(_info) = self
+                    .ide_panel
+                    .lsp_servers
+                    .iter()
+                    .find(|i| i.name == focused_name.as_str())
+                {
+                    let s = self.renderer.as_ref().unwrap().scale_factor;
+                    // Пересчитать lsp_bounds
+                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+                        sl.id == crate::app::PanelId::LspServers
+                            && sl.group == crate::app::PanelGroup::Top
+                    });
+                    let lsp_bounds = if is_top {
+                        let sb_w = 48.0 * s;
+                        let title_h = 32.0 * s;
+                        let panel_left_w = self.ide_panel.left_width * s;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        Some((sb_w, title_h, panel_left_w, wh - title_h))
+                    } else {
+                        let open_bottom: Vec<_> = self
+                            .ide_panel
+                            .slots
+                            .iter()
+                            .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                            .collect();
+                        if open_bottom
+                            .first()
+                            .map(|f| f.id == crate::app::PanelId::LspServers)
+                            .unwrap_or(false)
+                        {
+                            let sb_w = 48.0 * s;
+                            let tab_h = 32.0 * s;
+                            let panel_bottom_h = self.ide_panel.bottom_height * s;
+                            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                            Some((
+                                sb_w,
+                                wh - panel_bottom_h + 1.0 + tab_h,
+                                ww - sb_w,
+                                panel_bottom_h - 1.0 - tab_h,
+                            ))
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some((cx, cy, _cw, _ch)) = lsp_bounds {
+                        let pad_x = 12.0 * s;
+                        let btn_h = 24.0 * s;
+                        let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
+                        let scroll_x = self.ide_panel.lsp_scroll_x.current;
+                        let mut cur_y = cy + 8.0 * s - scroll_y;
+                        for srv in self.ide_panel.lsp_servers.clone().iter() {
+                            let is_exp = self.ide_panel.lsp_logs_expanded.contains(srv.name);
+                            let logs_h = if is_exp { 150.0 * s } else { 0.0 };
+                            let row_h = 100.0 * s + logs_h;
+                                                        if srv.name == focused_name.as_str() && is_exp {
+                                let card_x = cx + 8.0 * s;
+                                let _card_w = _cw - 16.0 * s;
+                                let btn_y1 = cur_y + 56.0 * s;
+                                let log_bg_x = card_x + pad_x;
+                                let log_bg_y = btn_y1 + btn_h + 10.0 * s;
+                                let log_bg_h = logs_h - 18.0 * s;
+                                let line_h = 16.0 * s;
+                                let max_lines = (log_bg_h / line_h) as usize + 1;
+                                let start_idx = srv.logs.len().saturating_sub(max_lines);
+                                let my_drag = position.y as f32;
+                                let clicked_rel = (((my_drag - log_bg_y) / line_h) as usize)
+                                    .min(max_lines.saturating_sub(1));
+                                let clicked_line =
+                                    (start_idx + clicked_rel).min(srv.logs.len().saturating_sub(1));
+                                let mut byte_off: usize =
+                                    srv.logs[..clicked_line].iter().map(|l| l.len() + 1).sum();
+                                if let Some(line_str) = srv.logs.get(clicked_line) {
+                                    let click_x_in_line = (position.x as f32 - log_bg_x - 6.0 * s
+                                        + scroll_x)
+                                        .max(0.0);
+                                    let r = self.renderer.as_mut().unwrap();
+                                    let mut best_pos = 0usize;
+                                    let mut best_dist = f32::MAX;
+                                    let mut ci = 0usize;
+                                    for c in line_str.chars() {
+                                        let x = r.measure_mono_width(&line_str[..ci], 0.7);
+                                        if (x - click_x_in_line).abs() < best_dist {
+                                            best_dist = (x - click_x_in_line).abs();
+                                            best_pos = ci;
+                                        }
+                                        ci += c.len_utf8();
+                                    }
+                                    let x_end = r.measure_mono_width(line_str, 0.7);
+                                    if (x_end - click_x_in_line).abs() < best_dist {
+                                        best_pos = line_str.len();
+                                    }
+                                    byte_off += best_pos;
+                                }
+                                if let Some(ed) = self
+                                    .ide_panel
+                                    .lsp_log_editors
+                                    .get_mut(focused_name.as_str())
+                                {
+                                    if ed.selection_anchor.is_none() {
+                                        ed.selection_anchor = Some(ed.cursor);
+                                    }
+                                    ed.cursor = byte_off;
+                                }
+                                break;
+                            }
+                            cur_y += row_h + 12.0 * s;
+                        }
+                    }
+                }
+            }
         } else if self.is_dragging_search {
             let search_w = 480.0 * s;
             let search_x = scrollbar_x - search_w - 20.0 * s;
@@ -1631,7 +2059,7 @@ impl App {
             }
         }
 
-                // Alt+Enter — меню быстрых действий LSP
+        // Alt+Enter — меню быстрых действий LSP
         if self.modifiers.alt_key() {
             if let PhysicalKey::Code(KeyCode::Enter) = key_event.physical_key {
                 self.open_lsp_actions_menu();
@@ -2001,7 +2429,7 @@ impl App {
                 self.search_results.clear();
             }
 
-                        if !self.editor.sync_edits.is_empty() {
+            if !self.editor.sync_edits.is_empty() {
                 let edits = std::mem::take(&mut self.editor.sync_edits);
                 // LSP didChange — отправляем полный текст только если файл Python и IDE режим
                 if self.is_ide_mode {
@@ -2130,7 +2558,7 @@ impl App {
             }
         }
 
-                self.last_action = Instant::now();
+        self.last_action = Instant::now();
         self.window.as_ref().unwrap().request_redraw();
     }
 
@@ -2140,7 +2568,9 @@ impl App {
             return;
         }
         let cursor = self.editor.cursor;
-        let cursor_line = self.editor.line_offsets
+        let cursor_line = self
+            .editor
+            .line_offsets
             .partition_point(|&o| o <= cursor)
             .saturating_sub(1) as u32;
 
@@ -2165,11 +2595,11 @@ impl App {
 
         if !diags.is_empty() {
             // Сначала "Добавить # noqa: CODES" для конкретных кодов
-            let codes: Vec<String> = diags.iter()
-                .filter_map(|d| d.code.clone())
-                .collect();
+            let codes: Vec<String> = diags.iter().filter_map(|d| d.code.clone()).collect();
             if !codes.is_empty() {
-                items.push(crate::app::LspActionItem::AddNoqa { codes: codes.clone() });
+                items.push(crate::app::LspActionItem::AddNoqa {
+                    codes: codes.clone(),
+                });
             }
             // Затем "Добавить # noqa" (всё отключить)
             items.push(crate::app::LspActionItem::AddNoqaAll);
@@ -2222,7 +2652,9 @@ impl App {
             crate::app::LspActionItem::CodeAction(action) => {
                 if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
                     let new_text = crate::lsp::apply_workspace_edit_to_text(
-                        &self.editor.get_full_text(), &edit, &path,
+                        &self.editor.get_full_text(),
+                        &edit,
+                        &path,
                     );
                     if new_text != self.editor.get_full_text() {
                         self.apply_full_text_replacement(new_text);
@@ -2295,8 +2727,11 @@ impl App {
             // Вставляем новый
             let ins_start = self.editor.cursor;
             let (del_info, ins_len) = self.editor.insert_str(&new_noqa);
-            if let Some((off, len)) = del_info { self.highlighter.shift_delete(off, len); }
-            self.highlighter.shift_insert(ins_start, ins_len, Some(&new_noqa));
+            if let Some((off, len)) = del_info {
+                self.highlighter.shift_delete(off, len);
+            }
+            self.highlighter
+                .shift_insert(ins_start, ins_len, Some(&new_noqa));
         } else {
             // Нет noqa — добавляем в конец строки
             self.editor.cursor = line_end;
@@ -2307,8 +2742,11 @@ impl App {
             };
             let ins_start = self.editor.cursor;
             let (del_info, ins_len) = self.editor.insert_str(&noqa);
-            if let Some((off, len)) = del_info { self.highlighter.shift_delete(off, len); }
-            self.highlighter.shift_insert(ins_start, ins_len, Some(&noqa));
+            if let Some((off, len)) = del_info {
+                self.highlighter.shift_delete(off, len);
+            }
+            self.highlighter
+                .shift_insert(ins_start, ins_len, Some(&noqa));
         }
 
         // Синхронизируем с LSP и подсветчиком
@@ -2333,25 +2771,28 @@ impl App {
     }
 
     /// Заменяет весь текст редактора новым (для workspace edit)
-    fn apply_full_text_replacement(&mut self, new_text: String) {
+    pub(crate) fn apply_full_text_replacement(&mut self, new_text: String) {
         let version = self.editor.version + 1;
         self.editor = crate::editor::Editor::new(new_text.len() + 8192);
         self.editor.version = version;
         let _ = self.editor.insert_str(&new_text);
         self.editor.cursor = 0;
         self.editor.set_original_text();
-        self.highlighter.reset(version, new_text.clone(), self.file_extension.clone());
+        self.highlighter
+            .reset(version, new_text.clone(), self.file_extension.clone());
         if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-            lsp.notify_change(path, &self.file_extension.clone(), &new_text, version as i32);
+            lsp.notify_change(
+                path,
+                &self.file_extension.clone(),
+                &new_text,
+                version as i32,
+            );
         }
-        App::update_window_title(
-            self.window.as_ref().unwrap(),
-            &self.base_title,
-            true,
-        );
+        App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, true);
     }
 
-    pub fn handle_main_keyboard_input(&mut self,
+    pub fn handle_main_keyboard_input(
+        &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
@@ -2511,6 +2952,50 @@ impl App {
                 self.show_fps = !self.show_fps;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
+            }
+
+            if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
+                if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(&focused_name) {
+                    let ctrl = self.modifiers.control_key();
+                    let shift = self.modifiers.shift_key();
+                    match key_event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                            if let Some(text) = ed.get_selection() {
+                                let _ = self.clipboard.set_text(text);
+                            }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                            ed.select_all();
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                            if ctrl {
+                                ed.move_word_left(shift);
+                            } else {
+                                ed.move_left(shift);
+                            }
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowRight) => {
+                            if ctrl {
+                                ed.move_word_right(shift);
+                            } else {
+                                ed.move_right(shift);
+                            }
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::Escape) => {
+                            self.ide_panel.lsp_logs_focused = None;
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             if self.search_focused {

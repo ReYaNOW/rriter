@@ -368,16 +368,25 @@ impl Renderer {
                     // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
                 }
 
-                                // --- LSP серверы ---
+                                                                // --- LSP серверы ---
                 if ide_panel.is_open(crate::app::PanelId::LspServers) {
-                    self.draw_lsp_servers_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        editor_height,
-                        s,
-                        &ide_panel.lsp_servers,
-                    );
+                    let is_top = ide_panel.slots.iter().any(|s| s.id == crate::app::PanelId::LspServers && s.group == crate::app::PanelGroup::Top);
+                    if is_top {
+                                                self.draw_lsp_servers_panel(
+                            panel_x,
+                            title_h,
+                            panel_left_w,
+                            editor_height - title_h,
+                            s,
+                            &ide_panel.lsp_servers,
+                            &ide_panel.lsp_logs_expanded,
+                            ide_panel.lsp_scroll_y.current,
+                            ide_panel.lsp_scroll_x.current,
+                            &ide_panel.lsp_log_editors,
+                            &ide_panel.lsp_logs_focused,
+                            !lsp_diagnostics.is_empty(),
+                        );
+                    }
                 }
 
                 // --- Дерево файлов проводника ---
@@ -1355,13 +1364,13 @@ impl Renderer {
             let panel_x = sb_w;
             let panel_y = self.height - panel_bottom_h;
             let panel_w = self.width - panel_x;
-            let panel_bg = [
+                        let panel_bg =[
                 0.129, // #21
                 0.133, // #22
                 0.173, // #2c
-                0.5,
+                0.85,
             ];
-            // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0, [1.0, 1.0, 1.0, 0.15]);
+            // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
             self.push_rect(
                 panel_x,
                 panel_y + 1.0,
@@ -1371,11 +1380,11 @@ impl Renderer {
             );
 
             let tab_h = 32.0 * s;
-            let tab_bar_bg = [
+                        let tab_bar_bg =[
                 (self.theme.bg[0] + 0.07).min(1.0),
                 (self.theme.bg[1] + 0.07).min(1.0),
                 (self.theme.bg[2] + 0.08).min(1.0),
-                0.5,
+                0.85,
             ];
             self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
@@ -1416,21 +1425,38 @@ impl Renderer {
                 // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
             }
 
-            // Плейсхолдер контента
+                        // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
             let content_h = panel_bottom_h - 1.0 - tab_h;
             if content_h > 8.0 * s {
                 if let Some(slot) = open_bottom.first() {
-                    let label = slot.id.label();
-                    let lw = self.measure_ui_width(label, 0.85);
-                    let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
-                    self.draw_string_scaled(
-                        label,
-                        panel_x + (panel_w - lw) / 2.0,
-                        content_y + content_h / 2.0 + 6.0 * s,
-                        col,
-                        0.85,
-                    );
+                    if slot.id == crate::app::PanelId::LspServers {
+                                                self.draw_lsp_servers_panel(
+                            panel_x,
+                            content_y,
+                            panel_w,
+                            content_h,
+                            s,
+                            &ide_panel.lsp_servers,
+                            &ide_panel.lsp_logs_expanded,
+                            ide_panel.lsp_scroll_y.current,
+                            ide_panel.lsp_scroll_x.current,
+                            &ide_panel.lsp_log_editors,
+                            &ide_panel.lsp_logs_focused,
+                            !lsp_diagnostics.is_empty(),
+                        );
+                    } else {
+                        let label = slot.id.label();
+                        let lw = self.measure_ui_width(label, 0.85);
+                        let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
+                        self.draw_string_scaled(
+                            label,
+                            panel_x + (panel_w - lw) / 2.0,
+                            content_y + content_h / 2.0 + 6.0 * s,
+                            col,
+                            0.85,
+                        );
+                    }
                 }
             }
         }
