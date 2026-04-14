@@ -326,11 +326,70 @@ impl App {
                 }
             }
 
-            if let Some((cx, cy, cw, ch)) = lsp_bounds {
+                        if let Some((cx, cy, cw, ch)) = lsp_bounds {
                 if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                     let pad_x = 12.0 * s;
                     let btn_h = 24.0 * s;
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
+                    let scroll_x = self.ide_panel.lsp_scroll_x.current;
+
+                    let mut total_h = 8.0 * s;
+                    let mut max_log_w = 0.0f32;
+                    for info in self.ide_panel.lsp_servers.iter() {
+                        let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                        total_h += 100.0 * s + logs_h + 12.0 * s;
+                        if is_expanded {
+                            for line in &info.logs {
+                                let mut draw_str = line.as_str();
+                                if draw_str.len() > 250 {
+                                    draw_str = &draw_str[..250];
+                                }
+                                let lw = self.renderer.as_mut().unwrap().measure_mono_width(draw_str, 0.7);
+                                if lw > max_log_w { max_log_w = lw; }
+                            }
+                        }
+                    }
+
+                    let max_scroll_x = (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0);
+                    if max_scroll_x > 0.0 && my >= cy + ch - 16.0 * s {
+                        self.ide_panel.lsp_scroll_x.is_dragging = true;
+                        let track_w = cw - 30.0 * s;
+                        let thumb_w = (cw / (max_log_w + 20.0 * s) * track_w).max(40.0 * s);
+                        let ratio = (scroll_x / max_scroll_x).clamp(0.0, 1.0);
+                        let thumb_x = cx + 10.0 * s + ratio * (track_w - thumb_w);
+
+                        if mx >= thumb_x && mx <= thumb_x + thumb_w {
+                            self.ide_panel.lsp_scroll_x.drag_offset = mx - thumb_x;
+                        } else {
+                            self.ide_panel.lsp_scroll_x.drag_offset = thumb_w / 2.0;
+                            let new_ratio = (mx - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset) / (track_w - thumb_w).max(0.0001);
+                            self.ide_panel.lsp_scroll_x.target = (new_ratio * max_scroll_x).clamp(0.0, max_scroll_x);
+                            self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+
+                    let max_scroll_y = (total_h - ch).max(0.0);
+                    if max_scroll_y > 0.0 && mx >= cx + cw - 16.0 * s {
+                        self.ide_panel.lsp_scroll_y.is_dragging = true;
+                        let track_h = ch - 10.0 * s;
+                        let thumb_h = (ch / total_h * track_h).max(40.0 * s);
+                        let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
+                        let thumb_y = cy + 5.0 * s + ratio * (track_h - thumb_h);
+
+                        if my >= thumb_y && my <= thumb_y + thumb_h {
+                            self.ide_panel.lsp_scroll_y.drag_offset = my - thumb_y;
+                        } else {
+                            self.ide_panel.lsp_scroll_y.drag_offset = thumb_h / 2.0;
+                            let new_ratio = (my - cy - 5.0 * s - self.ide_panel.lsp_scroll_y.drag_offset) / (track_h - thumb_h).max(0.0001);
+                            self.ide_panel.lsp_scroll_y.target = (new_ratio * max_scroll_y).clamp(0.0, max_scroll_y);
+                            self.ide_panel.lsp_scroll_y.current = self.ide_panel.lsp_scroll_y.target;
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
 
                     let servers_copy = self.ide_panel.lsp_servers.clone();
                     let mut current_y = cy + 8.0 * s - scroll_y;
@@ -550,9 +609,24 @@ impl App {
                                         }
                                         byte_off += best_pos;
                                     }
-                                    if let Some(ed) =
+                                                                        if let Some(ed) =
                                         self.ide_panel.lsp_log_editors.get_mut(info.name){
                                         let shift = self.modifiers.shift_key();
+
+                                        let now = std::time::Instant::now();
+                                        let dx = mx - self.last_click_pos.0;
+                                        let dy = my - self.last_click_pos.1;
+                                        let dist_sq = dx * dx + dy * dy;
+
+                                        if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0 {
+                                            self.click_count += 1;
+                                        } else {
+                                            self.click_count = 1;
+                                        }
+
+                                        self.last_click_time = now;
+                                        self.last_click_pos = (mx, my);
+
                                         if shift {
                                             if ed.selection_anchor.is_none() {
                                                 ed.selection_anchor = Some(ed.cursor);
@@ -562,6 +636,13 @@ impl App {
                                         }
                                         ed.cursor = byte_off;
                                         self.is_dragging_lsp_log = true;
+
+                                        if self.click_count == 2 {
+                                            ed.select_word();
+                                        } else if self.click_count >= 3 {
+                                            ed.select_line();
+                                            self.click_count = 3;
+                                        }
                                     }
                                     self.window.as_ref().unwrap().request_redraw();
                                     return;
@@ -1008,12 +1089,15 @@ impl App {
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
-            self.is_dragging = false;
+                                    self.is_dragging = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
+            self.is_dragging_lsp_log = false;
             self.autocomplete_scroll.is_dragging = false;
             self.scroll_x.is_dragging = false;
+            self.ide_panel.lsp_scroll_x.is_dragging = false;
+            self.ide_panel.lsp_scroll_y.is_dragging = false;
             self.scroll_y.target = self.scroll_y.target.round();
             self.scroll_x.target = self.scroll_x.target.round();
             self.window.as_ref().unwrap().request_redraw();
@@ -1789,7 +1873,93 @@ impl App {
                             cur_y += row_h + 12.0 * s;
                         }
                     }
+                                }
+            }
+        } else if self.ide_panel.lsp_scroll_x.is_dragging {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mut lsp_bounds = None;
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
+            });
+            if is_top {
+                let sb_w = 48.0 * s;
+                let title_h = 32.0 * s;
+                let panel_left_w = self.ide_panel.left_width * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+            } else {
+                let open_bottom: Vec<_> = self.ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).collect();
+                if let Some(first) = open_bottom.first() {
+                    if first.id == crate::app::PanelId::LspServers {
+                        let sb_w = 48.0 * s;
+                        let tab_h = 32.0 * s;
+                        let panel_bottom_h = self.ide_panel.bottom_height * s;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                        lsp_bounds = Some((sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h));
+                    }
                 }
+            }
+            if let Some((cx, _, cw, _)) = lsp_bounds {
+                let mut max_log_w = 0.0f32;
+                for info in self.ide_panel.lsp_servers.iter() {
+                    let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                    if is_expanded {
+                        for line in &info.logs {
+                            let mut draw_str = line.as_str();
+                            if draw_str.len() > 250 {
+                                draw_str = &draw_str[..250];
+                            }
+                            let lw = self.renderer.as_mut().unwrap().measure_mono_width(draw_str, 0.7);
+                            if lw > max_log_w { max_log_w = lw; }
+                        }
+                    }
+                }
+                let track_w = cw - 30.0 * s;
+                let max_x = (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0);
+                let thumb_w = (cw / (max_log_w + 20.0 * s) * track_w).max(40.0 * s);
+                let ratio = (position.x as f32 - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset) / (track_w - thumb_w).max(0.0001);
+                self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
+                self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
+            }
+        } else if self.ide_panel.lsp_scroll_y.is_dragging {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mut lsp_bounds = None;
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
+            });
+            if is_top {
+                let sb_w = 48.0 * s;
+                let title_h = 32.0 * s;
+                let panel_left_w = self.ide_panel.left_width * s;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+            } else {
+                let open_bottom: Vec<_> = self.ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).collect();
+                if let Some(first) = open_bottom.first() {
+                    if first.id == crate::app::PanelId::LspServers {
+                        let sb_w = 48.0 * s;
+                        let tab_h = 32.0 * s;
+                        let panel_bottom_h = self.ide_panel.bottom_height * s;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                        lsp_bounds = Some((sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h));
+                    }
+                }
+            }
+            if let Some((_, cy, _, ch)) = lsp_bounds {
+                let mut total_h = 8.0 * s;
+                for info in self.ide_panel.lsp_servers.iter() {
+                    let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                    let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                    total_h += 100.0 * s + logs_h + 12.0 * s;
+                }
+                let track_h = ch - 10.0 * s;
+                let max_y = (total_h - ch).max(0.0);
+                let thumb_h = (ch / total_h * track_h).max(40.0 * s);
+                let ratio = (position.y as f32 - cy - 5.0 * s - self.ide_panel.lsp_scroll_y.drag_offset) / (track_h - thumb_h).max(0.0001);
+                self.ide_panel.lsp_scroll_y.target = (ratio * max_y).clamp(0.0, max_y);
+                self.ide_panel.lsp_scroll_y.current = self.ide_panel.lsp_scroll_y.target;
             }
         } else if self.is_dragging_search {
             let search_w = 480.0 * s;

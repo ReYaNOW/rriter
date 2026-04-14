@@ -175,13 +175,12 @@ impl Renderer {
                 let log_bg_w = card_w - pad_x * 2.0;
                 let log_bg_h = logs_h - 18.0 * s;
 
-                self.push_rounded_rect(log_bg_x - 1.0, log_bg_y - 1.0, log_bg_w + 2.0, log_bg_h + 2.0, 4.0 * s,[0.1, 0.1, 0.12, 1.0]);
-                self.push_rounded_rect(log_bg_x, log_bg_y, log_bg_w, log_bg_h, 4.0 * s,[0.08, 0.08, 0.10, 1.0]);
+                                let border_color = if lsp_logs_focused.as_deref() == Some(info.name) {[0.44, 0.28, 0.75, 0.8]
+                } else {[0.1, 0.1, 0.12, 1.0]
+                };
 
-                // Рамка фокуса
-                if lsp_logs_focused.as_deref() == Some(info.name) {
-                    self.push_rounded_rect(log_bg_x - 1.0, log_bg_y - 1.0, log_bg_w + 2.0, log_bg_h + 2.0, 4.0 * s,[0.44, 0.28, 0.75, 0.40]);
-                }
+                self.push_rounded_rect(log_bg_x - 1.0, log_bg_y - 1.0, log_bg_w + 2.0, log_bg_h + 2.0, 4.0 * s, border_color);
+                self.push_rounded_rect(log_bg_x, log_bg_y, log_bg_w, log_bg_h, 4.0 * s,[0.08, 0.08, 0.10, 1.0]);
 
                 self.flush();
                 let inter_y1 = log_bg_y.max(content_y);
@@ -269,18 +268,18 @@ impl Renderer {
             current_y += row_h + 12.0 * s;
         }
 
-        let max_scroll_y = (total_h - content_h).max(0.0);
+                let max_scroll_y = (total_h - content_h).max(0.0);
         if max_scroll_y > 0.0 {
             let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
             let track_h = content_h - 10.0 * s;
-            let thumb_h = (content_h / total_h * track_h).max(20.0 * s);
+            let thumb_h = (content_h / total_h * track_h).max(40.0 * s);
             let thumb_y = content_y + 5.0 * s + ratio * (track_h - thumb_h);
             self.push_rounded_rect(
-                content_x + content_w - 6.0 * s,
+                content_x + content_w - 12.0 * s,
                 thumb_y,
-                4.0 * s,
+                10.0 * s,
                 thumb_h,
-                2.0 * s,[1.0, 1.0, 1.0, 0.22],
+                5.0 * s,[1.0, 1.0, 1.0, 0.22],
             );
         }
 
@@ -288,14 +287,14 @@ impl Renderer {
         if max_scroll_x > 0.0 {
             let ratio = (scroll_x / max_scroll_x).clamp(0.0, 1.0);
             let track_w = content_w - 30.0 * s;
-            let thumb_w = (content_w / (max_log_w + 20.0 * s) * track_w).max(20.0 * s);
+            let thumb_w = (content_w / (max_log_w + 20.0 * s) * track_w).max(40.0 * s);
             let thumb_x = content_x + 10.0 * s + ratio * (track_w - thumb_w);
             self.push_rounded_rect(
                 thumb_x,
-                content_y + content_h - 6.0 * s,
+                content_y + content_h - 12.0 * s,
                 thumb_w,
-                4.0 * s,
-                2.0 * s,[1.0, 1.0, 1.0, 0.22],
+                10.0 * s,
+                5.0 * s,[1.0, 1.0, 1.0, 0.22],
             );
         }
 
