@@ -853,7 +853,7 @@ impl Renderer {
         self.get_glyph(c).map(|g| g.advance).unwrap_or(10.0)
     }
 
-    pub fn push_quad(
+        pub fn push_quad(
         &mut self,
         x: f32,
         y: f32,
@@ -863,15 +863,15 @@ impl Renderer {
         v: f32,
         uw: f32,
         vh: f32,
-        color: [f32; 4],
+        color:[f32; 4],
         mode: f32,
     ) {
         let x1 = x.round();
         let y1 = y.round();
-        let x2 = (x + w).round();
-        let y2 = (y + h).round();
+        let x2 = x1 + w.round();
+        let y2 = y1 + h.round();
 
-        let sdf_params = [0.0, 0.0, 0.0];
+        let sdf_params =[0.0, 0.0, 0.0];
 
         let v1 = Vertex {
             pos: [x1, y1],
@@ -1093,7 +1093,7 @@ impl Renderer {
         self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
     }
 
-    pub fn push_rounded_rect_gradient(
+        pub fn push_rounded_rect_gradient(
         &mut self,
         x: f32,
         y: f32,
@@ -1103,14 +1103,16 @@ impl Renderer {
         top_color: [f32; 4],
         bottom_color: [f32; 4],
     ) {
+        let w_round = w.round();
+        let h_round = h.round();
         let x1 = x.round();
         let y1 = y.round();
-        let x2 = (x + w).round();
-        let y2 = (y + h).round();
+        let x2 = x1 + w_round;
+        let y2 = y1 + h_round;
 
-        let hw = w / 2.0;
-        let hh = h / 2.0;
-        let sdf_params = [hw, hh, r];
+        let hw = w_round / 2.0;
+        let hh = h_round / 2.0;
+        let sdf_params =[hw, hh, r];
 
         let v1 = Vertex {
             pos: [x1, y1],
