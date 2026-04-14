@@ -1,8 +1,10 @@
 pub mod events;
 pub mod file_icons;
-pub mod file_tree;
-pub mod input;
-pub mod ui_handlers;
+    pub mod file_tree;
+    pub mod keyboard;
+    pub mod lsp_actions;
+    pub mod mouse;
+    pub mod ui_handlers;
 
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
