@@ -359,9 +359,11 @@ impl Renderer {
                     );
 
                     self.flush();
-                    let inter_y1 = log_bg_y.max(content_y);
+                                        let inter_y1 = log_bg_y.max(content_y);
                     let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
                     let inter_h = (inter_y2 - inter_y1).max(0.0);
+
+                    ui_registry.register_rect(crate::ui_system::UiId::LspLogArea(server_idx), log_bg_x, log_bg_y, log_bg_w, log_bg_h, mx, my);
 
                     if inter_h > 0.0 {
                         unsafe {
@@ -508,7 +510,7 @@ impl Renderer {
             current_y += row_h + 16.0 * s;
         }
 
-        let max_scroll_y = (total_h - content_h).max(0.0);
+                let max_scroll_y = (total_h - content_h).max(0.0);
         if max_scroll_y > 0.0 {
             let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
             let track_h = content_h - 10.0 * s;
@@ -519,9 +521,9 @@ impl Renderer {
                 thumb_y,
                 10.0 * s,
                 thumb_h,
-                5.0 * s,
-                [1.0, 1.0, 1.0, 0.22],
+                5.0 * s,[1.0, 1.0, 1.0, 0.22],
             );
+            ui_registry.register_rect(crate::ui_system::UiId::LspScrollY, content_x + content_w - 12.0 * s, content_y, 10.0 * s, content_h, mx, my);
         }
 
         let max_scroll_x = (max_log_w + 20.0 * s - (content_w - 32.0 * s)).max(0.0);
@@ -535,9 +537,9 @@ impl Renderer {
                 content_y + content_h - 12.0 * s,
                 thumb_w,
                 10.0 * s,
-                5.0 * s,
-                [1.0, 1.0, 1.0, 0.22],
+                5.0 * s,[1.0, 1.0, 1.0, 0.22],
             );
+            ui_registry.register_rect(crate::ui_system::UiId::LspScrollX, content_x, content_y + content_h - 12.0 * s, content_w, 10.0 * s, mx, my);
         }
 
         self.flush();

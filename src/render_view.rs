@@ -352,7 +352,7 @@ impl Renderer {
                     }
                 }
 
-                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
                 if mx >= resize_x - 4.0 * s
                     && mx <= resize_x + 4.0 * s
@@ -363,11 +363,10 @@ impl Renderer {
                         resize_x - 2.0,
                         0.0,
                         2.0,
-                        editor_height,
-                        [0.60, 0.35, 0.85, 0.4],
+                        editor_height,[0.60, 0.35, 0.85, 0.4],
                     );
-                    // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
                 }
+                ui_registry.register_rect(crate::ui_system::UiId::ResizeLeft, resize_x - 4.0 * s, 0.0, 8.0 * s, editor_height, mx, my);
 
                                                                 // --- LSP серверы ---
                 if ide_panel.is_open(crate::app::PanelId::LspServers) {
@@ -1039,18 +1038,12 @@ impl Renderer {
                     final_x += self.char_advance(v_line_info.fold_suffix[i as usize]);
                 }
 
-                let hit_y_top = y - self.line_height;
+                                let hit_y_top = y - self.line_height;
                 let hit_y_bottom = y + 5.0 * s;
-                if self.last_mouse_x >= box_x - 2.0 * s
-                    && self.last_mouse_x <= next_x + 10.0 * s
-                    && self.last_mouse_y >= hit_y_top
-                    && self.last_mouse_y <= hit_y_bottom
-                {
-                    wants_pointer = true;
-                }
+                let hit_w = next_x + 10.0 * s - (box_x - 2.0 * s);
+                ui_registry.register_rect(crate::ui_system::UiId::EditorFoldDots(phys_idx), box_x - 2.0 * s, hit_y_top, hit_w, hit_y_bottom - hit_y_top, self.last_mouse_x, self.last_mouse_y);
 
-                if cursor_pos.is_none()
-                    && editor.cursor >= end_byte
+                if cursor_pos.is_none()&& editor.cursor >= end_byte
                     && editor.cursor <= actual_end_byte
                 {
                     cursor_pos = Some((final_x, y));
@@ -1219,11 +1212,12 @@ impl Renderer {
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
             let phys_idx = v_line.physical_line - 1;
 
-            if editor.foldable_lines.contains_key(&phys_idx) {
+                        if editor.foldable_lines.contains_key(&phys_idx) {
                 let arrow_x = self.left_padding - 20.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
                 self.draw_string_scaled(arrow_str, arrow_x, y - 1.0 * s, self.theme.line_num, 1.0);
+                ui_registry.register_rect(crate::ui_system::UiId::EditorFoldArrow(phys_idx), arrow_x - 5.0 * s, y - self.line_height, 20.0 * s, self.line_height + 5.0 * s, self.last_mouse_x, self.last_mouse_y);
             }
 
             let mut n = v_line.physical_line;
@@ -1312,7 +1306,7 @@ impl Renderer {
             );
         }
 
-        let target_sticky_lines = self.draw_sticky_lines(
+                let target_sticky_lines = self.draw_sticky_lines(
             editor,
             spans,
             current_sticky_lines,
@@ -1320,9 +1314,10 @@ impl Renderer {
             render_scroll_x,
             sticky_anim_progress,
             sticky_anim_is_adding,
+            ui_registry,
         );
 
-        if scrollbar_width > 0.0 {
+                if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height)
@@ -1333,10 +1328,17 @@ impl Renderer {
                 thumb_y,
                 scrollbar_width - 2.0 * s,
                 thumb_h,
-                (scrollbar_width - 2.0 * s) / 2.0,
-                [0.7, 0.33, 0.54, 0.8],
+                (scrollbar_width - 2.0 * s) / 2.0,[0.7, 0.33, 0.54, 0.8],
             );
+            ui_registry.register_rect(crate::ui_system::UiId::EditorScrollbarY, scrollbar_x, 0.0, scrollbar_width, editor_height, self.last_mouse_x, self.last_mouse_y);
         }
+
+        if self.max_scroll_x > 0.0 {
+            let track_w = scrollbar_x - self.left_padding;
+            ui_registry.register_rect(crate::ui_system::UiId::EditorScrollbarX, self.left_padding, editor_height - 14.0 * s, track_w, 14.0 * s, self.last_mouse_x, self.last_mouse_y);
+        }
+
+        ui_registry.register_rect(crate::ui_system::UiId::EditorTextBody, self.left_padding, 0.0, scrollbar_x - self.left_padding, editor_height, self.last_mouse_x, self.last_mouse_y);
 
         if show_fps {
             let center_x = (self.width - minimap_w) / 2.0;
@@ -1421,13 +1423,13 @@ impl Renderer {
                 tx += tw;
             }
 
-            // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
             if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
-                self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
-                // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
+                self.push_rect(panel_x, panel_y, panel_w, 2.0,[0.60, 0.35, 0.85, 0.4]);
             }
+            ui_registry.register_rect(crate::ui_system::UiId::ResizeBottom, panel_x, panel_y - 4.0 * s, panel_w, 8.0 * s, mx, my);
 
                         // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
@@ -1709,7 +1711,7 @@ impl Renderer {
         );
     }
 
-    fn draw_sticky_lines(
+        fn draw_sticky_lines(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
@@ -1718,6 +1720,7 @@ impl Renderer {
         render_scroll_x: f32,
         anim_progress: f32,
         anim_is_adding: bool,
+        ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
         let mut active_ranges = Vec::new();
@@ -1974,10 +1977,12 @@ impl Renderer {
                     }
                 }
 
-                self.flush();
+                                self.flush();
                 unsafe {
                     self.gl.disable(glow::SCISSOR_TEST);
                 }
+
+                ui_registry.register_rect(crate::ui_system::UiId::StickyLine(start_byte, i), 0.0, rect_y, rect_w, self.line_height, self.last_mouse_x, self.last_mouse_y);
 
                 self.sticky_scroll_rects
                     .push((0.0, rect_y, rect_w, self.line_height, start_byte));
@@ -2050,7 +2055,7 @@ impl Renderer {
         } else {
             [0.3, 0.3, 0.3, 1.0]
         };
-        self.push_rounded_rect(
+                self.push_rounded_rect(
             input_x - 1.0,
             input_y - 1.0,
             input_w + 2.0,
@@ -2059,6 +2064,8 @@ impl Renderer {
             input_border,
         );
         self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
+
+        ui_registry.register_text_input(crate::ui_system::UiId::SearchInput, input_x, input_y, input_w, input_h, self.last_mouse_x, self.last_mouse_y);
 
         self.flush();
         unsafe {

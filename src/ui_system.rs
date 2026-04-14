@@ -39,7 +39,7 @@ pub enum UiId {
     // Sidebar
     SidebarSlot(crate::app::PanelId),
 
-        // File tree
+            // File tree
     FileTreeNode(usize),
 
     // Search
@@ -47,6 +47,22 @@ pub enum UiId {
     SearchNext,
     SearchPrev,
     SearchCaseToggle,
+    SearchInput,
+
+    // Editor
+    EditorFoldArrow(usize),
+    EditorFoldDots(usize),
+    StickyLine(usize, usize),
+    EditorScrollbarY,
+    EditorScrollbarX,
+    EditorTextBody,
+
+    // Panels
+    ResizeLeft,
+    ResizeBottom,
+    LspLogArea(usize),
+    LspScrollY,
+    LspScrollX,
 }
 
 /// Тип UI элемента с его геометрией
