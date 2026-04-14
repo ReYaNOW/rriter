@@ -49,12 +49,12 @@ impl Renderer {
 
         let mut current_y = content_y + 8.0 * s - scroll_y.round();
 
-        let mut total_h = 8.0 * s;
+                let mut total_h = 8.0 * s;
         let mut max_log_w = 0.0f32;
         for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
             let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-            total_h += 100.0 * s + logs_h + 12.0 * s;
+            total_h += 136.0 * s + logs_h + 16.0 * s;
             if is_expanded {
                 for line in &info.logs {
                     let mut draw_str = line.as_str();
@@ -67,15 +67,15 @@ impl Renderer {
             }
         }
 
-        for info in servers.iter() {
+                for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
             let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-            let base_h = 100.0 * s;
+            let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
 
             if current_y + row_h > content_y && current_y < content_y + content_h {
-                let card_x = content_x + 8.0 * s;
-                let card_w = content_w - 16.0 * s;
+                let card_x = content_x + 12.0 * s;
+                let card_w = content_w - 24.0 * s;
 
                 // Тень и бордер карточки
                 self.push_rounded_rect(card_x - 1.0, current_y - 1.0, card_w + 2.0, row_h + 2.0, 7.0 * s,[0.35, 0.30, 0.45, 0.4]);
@@ -110,11 +110,12 @@ impl Renderer {
                 0.78,
             );
 
-            let btn_h = 24.0 * s;
+                        let btn_h = 24.0 * s;
             let btn_y1 = current_y + 56.0 * s;
+            let btn_y2 = btn_y1 + btn_h + 8.0 * s;
             let btn_pad = 10.0 * s;
 
-                        let label_restart  = "Перезапуск";
+            let label_restart  = "Перезапуск";
             let label_toggle   = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) { "Включить" } else { "Отключить" };
             let label_stop     = "Остановить";
             let label_logs     = if is_expanded { "Скрыть логи" } else { "Логи" };
@@ -126,22 +127,21 @@ impl Renderer {
             let bw_logs     = self.measure_ui_width(label_logs,     0.8) + btn_pad * 2.0;
             let bw_fix_all  = self.measure_ui_width(label_fix_all,  0.8) + btn_pad * 2.0;
 
-            let btn_x_restart  = card_x + pad_x;
+                        let btn_x_restart  = card_x + pad_x;
             let btn_x_toggle   = btn_x_restart + bw_restart + 6.0 * s;
             let btn_x_stop     = btn_x_toggle + bw_toggle + 6.0 * s;
 
-            // Fix All и Логи — выравниваем по правому краю
-            let btn_x_logs    = card_x + card_w - bw_logs - pad_x;
-            let btn_x_fix_all = btn_x_logs - bw_fix_all - 6.0 * s;
+            let btn_x_fix_all = card_x + pad_x;
+            let btn_x_logs    = btn_x_fix_all + bw_fix_all + 6.0 * s;
 
             let hover_restart  = mx >= btn_x_restart  && mx <= btn_x_restart  + bw_restart  && my >= btn_y1 && my <= btn_y1 + btn_h;
             let hover_toggle   = mx >= btn_x_toggle   && mx <= btn_x_toggle   + bw_toggle   && my >= btn_y1 && my <= btn_y1 + btn_h;
-            let hover_logs     = mx >= btn_x_logs     && mx <= btn_x_logs     + bw_logs     && my >= btn_y1 && my <= btn_y1 + btn_h;
-
             let is_stopped = matches!(info.status, crate::lsp::LspServerStatus::Disabled | crate::lsp::LspServerStatus::Crashed);
             let hover_stop    = !is_stopped && mx >= btn_x_stop    && mx <= btn_x_stop    + bw_stop    && my >= btn_y1 && my <= btn_y1 + btn_h;
+
+            let hover_logs     = mx >= btn_x_logs     && mx <= btn_x_logs     + bw_logs     && my >= btn_y2 && my <= btn_y2 + btn_h;
             let fix_enabled   = !is_stopped && fix_all_active;
-            let hover_fix_all = fix_enabled  && mx >= btn_x_fix_all && mx <= btn_x_fix_all + bw_fix_all && my >= btn_y1 && my <= btn_y1 + btn_h;
+            let hover_fix_all = fix_enabled  && mx >= btn_x_fix_all && mx <= btn_x_fix_all + bw_fix_all && my >= btn_y2 && my <= btn_y2 + btn_h;
 
             let btn_bg_restart = if hover_restart  {[0.35, 0.35, 0.40, 1.0] } else {[0.26, 0.26, 0.32, 1.0] };
             let btn_bg_toggle  = if hover_toggle   {[0.35, 0.35, 0.40, 1.0] } else {[0.26, 0.26, 0.32, 1.0] };
@@ -153,6 +153,7 @@ impl Renderer {
             let text_color_fix_all = if !fix_enabled {[0.40, 0.40, 0.44, 1.0] } else {[0.55, 0.95, 0.65, 1.0] };
 
             let text_y1 = (btn_y1 + btn_h / 2.0 + 4.0 * s).round();
+            let text_y2 = (btn_y2 + btn_h / 2.0 + 4.0 * s).round();
 
             self.push_rounded_rect(btn_x_restart, btn_y1, bw_restart, btn_h, 3.0 * s, btn_bg_restart);
             self.draw_string_scaled(label_restart, (btn_x_restart + btn_pad).round(), text_y1, self.theme.fg, 0.8);
@@ -163,15 +164,15 @@ impl Renderer {
             self.push_rounded_rect(btn_x_stop, btn_y1, bw_stop, btn_h, 3.0 * s, btn_bg_stop);
             self.draw_string_scaled(label_stop, (btn_x_stop + btn_pad).round(), text_y1, text_color_stop, 0.8);
 
-            self.push_rounded_rect(btn_x_fix_all, btn_y1, bw_fix_all, btn_h, 3.0 * s, btn_bg_fix_all);
-            self.draw_string_scaled(label_fix_all, (btn_x_fix_all + btn_pad).round(), text_y1, text_color_fix_all, 0.8);
+            self.push_rounded_rect(btn_x_fix_all, btn_y2, bw_fix_all, btn_h, 3.0 * s, btn_bg_fix_all);
+            self.draw_string_scaled(label_fix_all, (btn_x_fix_all + btn_pad).round(), text_y2, text_color_fix_all, 0.8);
 
-            self.push_rounded_rect(btn_x_logs, btn_y1, bw_logs, btn_h, 3.0 * s, btn_bg_logs);
-            self.draw_string_scaled(label_logs, (btn_x_logs + btn_pad).round(), text_y1,[0.8, 0.85, 1.0, 1.0], 0.8);
+            self.push_rounded_rect(btn_x_logs, btn_y2, bw_logs, btn_h, 3.0 * s, btn_bg_logs);
+            self.draw_string_scaled(label_logs, (btn_x_logs + btn_pad).round(), text_y2,[0.8, 0.85, 1.0, 1.0], 0.8);
 
                                                 if is_expanded {
                 let log_bg_x = card_x + pad_x;
-                let log_bg_y = btn_y1 + btn_h + 10.0 * s;
+                let log_bg_y = btn_y2 + btn_h + 10.0 * s;
                 let log_bg_w = card_w - pad_x * 2.0;
                 let log_bg_h = logs_h - 18.0 * s;
 
@@ -264,11 +265,11 @@ impl Renderer {
                     }
                 }
             }
-            }
-            current_y += row_h + 12.0 * s;
+                        }
+            current_y += row_h + 16.0 * s;
         }
 
-                let max_scroll_y = (total_h - content_h).max(0.0);
+        let max_scroll_y = (total_h - content_h).max(0.0);
         if max_scroll_y > 0.0 {
             let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
             let track_h = content_h - 10.0 * s;

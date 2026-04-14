@@ -90,12 +90,12 @@ impl App {
                         self.ide_panel.lsp_scroll_x.scroll_by(dx);
                     }
 
-                    let mut total_h = 8.0 * s;
+                                        let mut total_h = 8.0 * s;
                     let mut max_log_w = 0.0f32;
                     for info in &self.ide_panel.lsp_servers {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
                         let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                        total_h += 100.0 * s + logs_h + 12.0 * s;
+                        total_h += 136.0 * s + logs_h + 16.0 * s;
                         if is_expanded {
                             for line in &info.logs {
                                 let mut draw_str = line.as_str();
@@ -333,12 +333,12 @@ impl App {
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
 
-                    let mut total_h = 8.0 * s;
+                                        let mut total_h = 8.0 * s;
                     let mut max_log_w = 0.0f32;
                     for info in self.ide_panel.lsp_servers.iter() {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
                         let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                        total_h += 100.0 * s + logs_h + 12.0 * s;
+                        total_h += 136.0 * s + logs_h + 16.0 * s;
                         if is_expanded {
                             for line in &info.logs {
                                 let mut draw_str = line.as_str();
@@ -394,18 +394,19 @@ impl App {
                     let servers_copy = self.ide_panel.lsp_servers.clone();
                     let mut current_y = cy + 8.0 * s - scroll_y;
 
-                    for info in servers_copy.iter() {
+                                        for info in servers_copy.iter() {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
                         let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                        let base_h = 100.0 * s;
+                        let base_h = 136.0 * s;
                         let row_h = base_h + logs_h;
 
                         // Only process clicks if visible
                         if current_y + row_h > cy && current_y < cy + ch {
-                            let card_x = cx + 8.0 * s;
-                            let card_w = cw - 16.0 * s;
+                            let card_x = cx + 12.0 * s;
+                            let card_w = cw - 24.0 * s;
 
                             let btn_y1 = current_y + 56.0 * s;
+                            let btn_y2 = btn_y1 + btn_h + 8.0 * s;
                             let btn_pad = 10.0 * s;
 
                             let label_restart = "Перезапуск";
@@ -434,7 +435,7 @@ impl App {
                                 .unwrap()
                                 .measure_ui_width(label_toggle, 0.8)
                                 + btn_pad * 2.0;
-                            let bw_stop = self
+                                                        let bw_stop = self
                                 .renderer
                                 .as_mut()
                                 .unwrap()
@@ -446,11 +447,18 @@ impl App {
                                 .unwrap()
                                 .measure_ui_width(label_logs, 0.8)
                                 + btn_pad * 2.0;
+                            let bw_fix_all = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width("Fix All", 0.8)
+                                + btn_pad * 2.0;
 
                             let btn_x_restart = card_x + pad_x;
                             let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
                             let btn_x_stop = btn_x_toggle + bw_toggle + 6.0 * s;
-                            let btn_x_logs = card_x + card_w - bw_logs - pad_x;
+                            let btn_x_fix_all = card_x + pad_x;
+                            let btn_x_logs = btn_x_fix_all + bw_fix_all + 6.0 * s;
 
                             if mx >= btn_x_restart
                                 && mx <= btn_x_restart + bw_restart
@@ -503,10 +511,10 @@ impl App {
                                 return;
                             }
 
-                            if mx >= btn_x_logs
+                                                        if mx >= btn_x_logs
                                 && mx <= btn_x_logs + bw_logs
-                                && my >= btn_y1
-                                && my <= btn_y1 + btn_h
+                                && my >= btn_y2
+                                && my <= btn_y2 + btn_h
                             {
                                 if is_expanded {
                                     self.ide_panel.lsp_logs_expanded.remove(info.name);
@@ -519,26 +527,7 @@ impl App {
                                 return;
                             }
 
-                            // Fix All
-                            let bw_fix_all = self
-                                .renderer
-                                .as_mut()
-                                .unwrap()
-                                .measure_ui_width("Fix All", 0.8)
-                                + btn_pad * 2.0;
-                            let btn_x_fix_all = card_x + card_w
-                                - bw_fix_all
-                                - self.renderer.as_mut().unwrap().measure_ui_width(
-                                    if is_expanded {
-                                        "Скрыть логи"
-                                    } else {
-                                        "Логи"
-                                    },
-                                    0.8,
-                                )
-                                - btn_pad * 2.0
-                                - 6.0 * s
-                                - pad_x;
+                                                        // Fix All
                             let is_stopped = matches!(
                                 info.status,
                                 crate::lsp::LspServerStatus::Disabled
@@ -553,8 +542,8 @@ impl App {
                                 && has_diags
                                 && mx >= btn_x_fix_all
                                 && mx <= btn_x_fix_all + bw_fix_all
-                                && my >= btn_y1
-                                && my <= btn_y1 + btn_h
+                                && my >= btn_y2
+                                && my <= btn_y2 + btn_h
                             {
                                 if let Some(lsp) = &mut self.lsp {
                                     if let Some(id) = lsp.request_fix_all(&self.file_extension) {
@@ -565,9 +554,9 @@ impl App {
                                 return;
                             }
 
-                            // Клик по области логов — фокус + позиция курсора
+                                                        // Клик по области логов — фокус + позиция курсора
                             if is_expanded {
-                                let log_bg_y = btn_y1 + btn_h + 10.0 * s;
+                                let log_bg_y = btn_y2 + btn_h + 10.0 * s;
                                 let log_bg_h = logs_h - 18.0 * s;
                                 let log_bg_x = card_x + pad_x;
                                 let log_bg_w = card_w - pad_x * 2.0;
@@ -648,9 +637,9 @@ impl App {
                                     return;
                                 }
                             }
-                        }
+                                                }
 
-                        current_y += row_h + 12.0 * s;
+                        current_y += row_h + 16.0 * s;
                     }
 
                     return;
@@ -1813,18 +1802,19 @@ impl App {
                         let pad_x = 12.0 * s;
                         let btn_h = 24.0 * s;
                         let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
-                        let scroll_x = self.ide_panel.lsp_scroll_x.current;
+                                                let scroll_x = self.ide_panel.lsp_scroll_x.current;
                         let mut cur_y = cy + 8.0 * s - scroll_y;
                         for srv in self.ide_panel.lsp_servers.clone().iter() {
                             let is_exp = self.ide_panel.lsp_logs_expanded.contains(srv.name);
                             let logs_h = if is_exp { 150.0 * s } else { 0.0 };
-                            let row_h = 100.0 * s + logs_h;
+                            let row_h = 136.0 * s + logs_h;
                                                         if srv.name == focused_name.as_str() && is_exp {
-                                let card_x = cx + 8.0 * s;
-                                let _card_w = _cw - 16.0 * s;
+                                let card_x = cx + 12.0 * s;
+                                                                let _card_w = _cw - 24.0 * s;
                                 let btn_y1 = cur_y + 56.0 * s;
+                                let btn_y2 = btn_y1 + btn_h + 8.0 * s;
                                 let log_bg_x = card_x + pad_x;
-                                let log_bg_y = btn_y1 + btn_h + 10.0 * s;
+                                let log_bg_y = btn_y2 + btn_h + 10.0 * s;
                                 let log_bg_h = logs_h - 18.0 * s;
                                 let line_h = 16.0 * s;
                                 let max_lines = (log_bg_h / line_h) as usize + 1;
@@ -1867,13 +1857,13 @@ impl App {
                                         ed.selection_anchor = Some(ed.cursor);
                                     }
                                     ed.cursor = byte_off;
-                                }
+                                                                }
                                 break;
                             }
-                            cur_y += row_h + 12.0 * s;
+                            cur_y += row_h + 16.0 * s;
                         }
                     }
-                                }
+                }
             }
         } else if self.ide_panel.lsp_scroll_x.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -1947,12 +1937,12 @@ impl App {
                     }
                 }
             }
-            if let Some((_, cy, _, ch)) = lsp_bounds {
+                        if let Some((_, cy, _, ch)) = lsp_bounds {
                 let mut total_h = 8.0 * s;
                 for info in self.ide_panel.lsp_servers.iter() {
                     let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
                     let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                    total_h += 100.0 * s + logs_h + 12.0 * s;
+                    total_h += 136.0 * s + logs_h + 16.0 * s;
                 }
                 let track_h = ch - 10.0 * s;
                 let max_y = (total_h - ch).max(0.0);
