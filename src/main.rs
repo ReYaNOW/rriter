@@ -7,6 +7,7 @@ mod queries;
 mod render_view;
 mod renderer;
 mod scroll;
+mod ui_system;
 mod widgets;
 
 use crate::app::{App, PendingAction};
@@ -478,6 +479,7 @@ F8\tПоказать/скрыть счетчик FPS
         },
                 lsp_actions_menu: None,
         pending_fix_all_id: None,
+        ui_registry: crate::ui_system::UiRegistry::new(),
     };
 
     app.highlighter.reset(

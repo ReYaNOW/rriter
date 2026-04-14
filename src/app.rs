@@ -2,6 +2,7 @@ pub mod events;
 pub mod file_icons;
 pub mod file_tree;
 pub mod input;
+pub mod ui_handlers;
 
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
@@ -25,7 +26,7 @@ pub enum PendingAction {
     CloseFile,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PanelId {
     Explorer,
     Terminal,
@@ -318,6 +319,9 @@ pub struct App {
     pub lsp_actions_menu: Option<LspActionsMenu>,
     /// Ожидаем ответа на Fix All запрос
     pub pending_fix_all_id: Option<i32>,
+
+    /// Декларативная система UI для автоматической обработки кликов
+    pub ui_registry: crate::ui_system::UiRegistry,
 }
 
 impl App {

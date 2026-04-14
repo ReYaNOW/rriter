@@ -959,96 +959,12 @@ impl App {
 
         if self.show_welcome {
             if state == ElementState::Pressed {
-                let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
-                let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                let content_x = 40.0 * s;
-                let content_y = 40.0 * s;
-                let title_x = content_x + 40.0 * s;
-                let cw = self.window.as_ref().unwrap().inner_size().width as f32 - 80.0 * s;
-
-                let mut y = content_y + 60.0 * s;
-                y += 40.0 * s;
-                y += 60.0 * s;
-
-                let (btn_new, btn_open, btn_ide) = crate::widgets::get_welcome_buttons(
-                    cw,
-                    title_x,
-                    y,
-                    s,
-                    self.renderer.as_mut().unwrap(),
-                );
-
-                if btn_new.is_hovered(last_mouse_x, last_mouse_y) {
-                    self.show_welcome = false;
-                    self.is_ide_mode = false;
-                    self.file_path = None;
-                    self.base_title = "Безымянный".to_string();
-                    let old_version = self.editor.version;
-                    self.editor = Editor::new(8192);
-                    self.editor.version = old_version + 1;
-                    self.editor.set_original_text();
-                    self.editor.sync_edits.clear();
-                    self.highlighter
-                        .reset(self.editor.version, "".to_string(), "".to_string());
-                    App::update_window_title(
-                        self.window.as_ref().unwrap(),
-                        &self.base_title,
-                        false,
-                    );
-                } else if btn_open.is_hovered(last_mouse_x, last_mouse_y) {
-                    self.is_ide_mode = false;
-                    self.trigger_file_picker();
-                } else if btn_ide.is_hovered(last_mouse_x, last_mouse_y) {
-                    self.show_welcome = false;
-                    self.is_ide_mode = true;
-                    self.file_path = None;
-                    self.base_title = "Режим IDE".to_string();
-                    let old_version = self.editor.version;
-                    self.editor = Editor::new(8192);
-                    self.editor.version = old_version + 1;
-                    self.editor.set_original_text();
-                    self.editor.sync_edits.clear();
-                    self.highlighter
-                        .reset(self.editor.version, "".to_string(), "".to_string());
-                    App::update_window_title(
-                        self.window.as_ref().unwrap(),
-                        &self.base_title,
-                        false,
-                    );
-                    if self.lsp.is_none() {
-                        self.lsp = Some(crate::lsp::LspManager::new(
-                            self.ide_workspaces.first().cloned(),
-                        ));
-                    }
-                    if self.ide_panel.is_open(crate::app::PanelId::Explorer) {
-                        self.refresh_file_tree();
-                        self.start_file_watcher();
-                    }
-                } else {
-                    y += 80.0 * s;
-                    y += 35.0 * s;
-
-                    let mut current_y = y;
-                    let item_h = 44.0 * s;
-                    let mut selected_path = None;
-
-                    for path in &self.recent_files {
-                        if last_mouse_x >= title_x - 10.0 * s
-                            && last_mouse_x <= title_x + cw - 70.0 * s
-                            && last_mouse_y >= current_y
-                            && last_mouse_y < current_y + item_h
-                        {
-                            selected_path = Some(path.clone());
-                            break;
-                        }
-                        current_y += item_h;
-                    }
-                    if let Some(p) = selected_path {
-                        self.is_ide_mode = false;
-                        self.load_file(p, true);
-                    }
+                // Используем UI registry для обработки кликов
+                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    self.handle_ui_click(clicked_id);
                 }
             }
             self.window.as_ref().unwrap().request_redraw();

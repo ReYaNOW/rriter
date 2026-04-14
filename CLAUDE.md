@@ -41,7 +41,8 @@ RRiter создается как "редактор здорового челов
     │   ├── events.rs
     │   ├── file_icons.rs
     │   ├── file_tree.rs
-    │   └── input.rs
+    │   ├── input.rs
+    │   └── ui_handlers.rs      ← НОВОЕ: Централизованная обработка UI событий
     ├── app.rs
     ├── editor.rs
     ├── fonts
@@ -77,14 +78,163 @@ RRiter создается как "редактор здорового челов
     │   └── ui.rs
     ├── render_view.rs
     ├── scroll.rs
+    ├── ui_system.rs            ← НОВОЕ: Декларативная система UI
     ├── widgets.rs
     └── Безымянный.txt
 
-12 directories, 38 files
-
-~/projects/rriter (master)
-❯ 
+12 directories, 40 files
 ```
+
+---
+
+## 🎯 Подсистема 0: Декларативная UI система (`ui_system.rs` + `app/ui_handlers.rs`)
+
+**ВАЖНО:** Это новая архитектурная подсистема, добавленная для устранения дублирования кода между `input.rs` и `render_view/ui.rs`.
+
+### Проблема, которую решает система
+
+До внедрения этой системы каждая кнопка требовала:
+1. Вручную прописывать координаты в `render_view/ui.rs`
+2. Вручную прописывать обработку клика в `app/input.rs`
+3. Дублировать логику проверки hover-состояния
+4. Синхронизировать изменения между двумя файлами
+
+Это приводило к:
+- Огромным файлам (input.rs > 3000 строк)
+- Ошибкам рассинхронизации (кнопка рисуется, но не кликается)
+- Дублированию кода для каждой кнопки
+
+### Как работает новая система
+
+#### 1. Регистрация UI элементов (`ui_system.rs`)
+
+Структура `UiRegistry` — это реестр всех UI элементов на текущем кадре.
+
+```rust
+pub struct UiRegistry {
+    elements: Vec<UiElement>,
+    hovered: Option<UiId>,
+    wants_pointer: bool,
+    wants_text: bool,
+}
+```
+
+**Жизненный цикл:**
+1. В начале кадра вызывается `ui_registry.clear()`
+2. При отрисовке каждой кнопки вызывается `ui_registry.register_button(id, &button, ...)`
+3. Система автоматически:
+   - Отрисовывает кнопку через `button.render()`
+   - Проверяет hover
+   - Сохраняет геометрию для обработки кликов
+   - Устанавливает нужный курсор (pointer/text/arrow)
+
+#### 2. Уникальные идентификаторы (`UiId`)
+
+Каждый UI элемент имеет уникальный ID:
+
+```rust
+pub enum UiId {
+    WelcomeNewFile,
+    WelcomeOpenFile,
+    DialogSave,
+    SettingsTab(usize),
+    LspServerRestart(usize),
+    FileTreeNode(usize),
+    // ...
+}
+```
+
+#### 3. Централизованная обработка (`app/ui_handlers.rs`)
+
+Вся логика кликов живет в одном месте:
+
+```rust
+impl App {
+    pub fn handle_ui_click(&mut self, id: UiId) {
+        match id {
+            UiId::WelcomeNewFile => {
+                self.show_welcome = false;
+                // ... логика создания нового файла
+            }
+            UiId::DialogSave => {
+                // ... логика сохранения
+            }
+            // ...
+        }
+    }
+}
+```
+
+### Как добавить новую кнопку
+
+**Старый способ (НЕ ИСПОЛЬЗУЙ):**
+1. Открыть `render_view/ui.rs`, найти нужное место
+2. Вручную вычислить координаты кнопки
+3. Вызвать `button.render()` и сохранить результат hover
+4. Открыть `app/input.rs`, найти обработчик кликов
+5. Добавить проверку `if mx >= x && mx <= x+w && my >= y && my <= y+h`
+6. Написать логику действия
+
+**Новый способ (ИСПОЛЬЗУЙ ВСЕГДА):**
+
+1. **Добавить ID в `ui_system.rs`:**
+```rust
+pub enum UiId {
+    // ...
+    MyNewButton,
+}
+```
+
+2. **Зарегистрировать кнопку при отрисовке:**
+```rust
+// В render_view/ui.rs или где рисуется UI
+let button = Button { x, y, w, h, text: "Моя кнопка".to_string(), ... };
+self.ui_registry.register_button(
+    UiId::MyNewButton,
+    &button,
+    renderer,
+    mx, my, scale, pressed
+);
+```
+
+3. **Добавить обработчик в `app/ui_handlers.rs`:**
+```rust
+impl App {
+    pub fn handle_ui_click(&mut self, id: UiId) {
+        match id {
+            // ...
+            UiId::MyNewButton => {
+                // Твоя логика
+                self.window.as_ref().unwrap().request_redraw();
+            }
+        }
+    }
+}
+```
+
+4. **Обработать клик в `app/input.rs`:**
+```rust
+if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+    self.handle_ui_click(clicked_id);
+}
+```
+
+**Всё!** Координаты, hover, курсор — всё обрабатывается автоматически.
+
+### Преимущества системы
+
+1. **DRY (Don't Repeat Yourself):** Логика кнопки описывается один раз
+2. **Автоматический курсор:** Система сама определяет, когда показывать pointer/text
+3. **Безопасность:** Невозможно забыть обработать клик (компилятор заставит добавить ветку в match)
+4. **Читаемость:** Вся логика UI в одном месте (`ui_handlers.rs`)
+5. **Производительность:** Нет overhead, всё inline в release-сборке
+
+### Важные замечания
+
+- `UiRegistry` очищается каждый кадр (`clear()`)
+- Регистрация элементов происходит в порядке отрисовки (последние — поверх)
+- `find_at()` ищет с конца массива (верхние элементы имеют приоритет)
+- Система работает в IMGUI-стиле: нет сохраненного состояния между кадрами
 
 ---
 

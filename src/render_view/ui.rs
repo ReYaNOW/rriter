@@ -1168,7 +1168,7 @@ impl Renderer {
         (total_h - content_h).max(0.0)
     }
 
-    pub fn draw_welcome(&mut self, recent_files: &[std::path::PathBuf]) -> bool {
+    pub fn draw_welcome(&mut self, recent_files: &[std::path::PathBuf], ui_registry: &mut crate::ui_system::UiRegistry) -> bool {
         let scale = self.scale_factor;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
@@ -1247,10 +1247,13 @@ impl Renderer {
         let (btn_new, btn_open, btn_ide) =
             crate::widgets::get_welcome_buttons(content_w, title_x, y, scale, self);
 
-        let mut wants_pointer = false;
-        wants_pointer |= btn_new.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
-        wants_pointer |= btn_open.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
-        wants_pointer |= btn_ide.render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
+
+        // Регистрируем кнопки через UI систему
+        ui_registry.register_button(crate::ui_system::UiId::WelcomeNewFile, &btn_new, self, mx, my, scale, false);
+        ui_registry.register_button(crate::ui_system::UiId::WelcomeOpenFile, &btn_open, self, mx, my, scale, false);
+        ui_registry.register_button(crate::ui_system::UiId::WelcomeIdeMode, &btn_ide, self, mx, my, scale, false);
 
         y += 80.0 * scale;
         self.draw_string_scaled(
@@ -1273,18 +1276,28 @@ impl Renderer {
         y += 35.0 * scale;
 
         let item_h = 44.0 * scale;
-        for path in recent_files {
+        for (idx, path) in recent_files.iter().enumerate() {
             if y + item_h > content_y + content_h - 60.0 * scale {
                 break;
             }
 
-            let is_hovered = self.last_mouse_x >= title_x - 10.0 * scale
-                && self.last_mouse_x <= title_x + content_w - 70.0 * scale
-                && self.last_mouse_y >= y
-                && self.last_mouse_y < y + item_h;
+            // Регистрируем кликабельную область для недавнего файла
+            ui_registry.register_rect(
+                crate::ui_system::UiId::WelcomeRecentFile(idx),
+                title_x - 10.0 * scale,
+                y,
+                content_w - 60.0 * scale,
+                item_h,
+                mx,
+                my,
+            );
+
+            let is_hovered = mx >= title_x - 10.0 * scale
+                && mx <= title_x + content_w - 70.0 * scale
+                && my >= y
+                && my < y + item_h;
 
             if is_hovered {
-                wants_pointer = true;
                 self.push_rounded_rect(
                     title_x - 10.0 * scale,
                     y,
@@ -1367,7 +1380,7 @@ impl Renderer {
         );
 
         self.flush();
-        wants_pointer
+        ui_registry.wants_pointer()
     }
 
     pub fn draw_settings(

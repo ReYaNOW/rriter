@@ -343,6 +343,10 @@ impl ApplicationHandler for App {
                                 let lsp_diags = self.lsp.as_ref()
                     .map(|l| l.diagnostics.as_slice())
                     .unwrap_or(&[]);
+
+                // Очищаем UI registry перед новым кадром
+                self.ui_registry.clear();
+
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     self.scroll_x.current,
@@ -367,6 +371,7 @@ impl ApplicationHandler for App {
                     &self.ide_panel,
                     self.show_settings,
                     lsp_diags,
+                    &mut self.ui_registry,
                 );
 
                 self.target_sticky_lines = target_sticky;

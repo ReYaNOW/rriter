@@ -40,9 +40,10 @@ impl Renderer {
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
         lsp_diagnostics: &[crate::lsp::Diagnostic],
+        ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
-            return (self.draw_welcome(recent_files), Vec::new());
+            return (self.draw_welcome(recent_files, ui_registry), Vec::new());
         }
 
         let mut wants_pointer = false;
