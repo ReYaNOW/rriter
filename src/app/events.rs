@@ -935,7 +935,7 @@ impl ApplicationHandler for App {
                     self.ide_panel.lsp_servers = lsp.servers_info();
                     // Синхронизируем Editor для логов (для выделения и копирования)
                     for info in &self.ide_panel.lsp_servers {
-                        let new_text = info.logs.join("\n");
+                                                let new_text = info.logs.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
                         let focused = self.ide_panel.lsp_logs_focused.as_deref() == Some(info.name);
                         let entry = self.ide_panel.lsp_log_editors
                             .entry(info.name.to_string())

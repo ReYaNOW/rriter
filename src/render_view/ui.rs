@@ -48,28 +48,25 @@ impl Renderer {
         }
 
         let mut current_y = content_y + 8.0 * s - scroll_y.round();
+                                let mut total_h = 8.0 * s;
+                                let mut max_log_w = 0.0f32;
+                                for info in servers.iter() {
+                                    let is_expanded = expanded_logs.contains(info.name);
+                                    let logs_h = if is_expanded { 350.0 * s } else { 0.0 };
+                                    total_h += 136.0 * s + logs_h + 16.0 * s;
+                                    if is_expanded {
+                                        for entry in &info.logs {
+                                            for line in entry.text.split('\n') {
+                                                let lw = self.measure_mono_width(line, 0.7);
+                                                if lw > max_log_w { max_log_w = lw; }
+                                            }
+                                        }
+                                    }
+                                }
 
-                let mut total_h = 8.0 * s;
-        let mut max_log_w = 0.0f32;
-        for info in servers.iter() {
-            let is_expanded = expanded_logs.contains(info.name);
-            let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-            total_h += 136.0 * s + logs_h + 16.0 * s;
-            if is_expanded {
-                for line in &info.logs {
-                    let mut draw_str = line.as_str();
-                    if draw_str.len() > 250 {
-                        draw_str = &draw_str[..250];
-                    }
-                    let lw = self.measure_mono_width(draw_str, 0.7);
-                    if lw > max_log_w { max_log_w = lw; }
-                }
-            }
-        }
-
-                for info in servers.iter() {
-            let is_expanded = expanded_logs.contains(info.name);
-            let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                                        for info in servers.iter() {
+                                    let is_expanded = expanded_logs.contains(info.name);
+                                    let logs_h = if is_expanded { 350.0 * s } else { 0.0 };
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
 
@@ -188,7 +185,7 @@ impl Renderer {
                 let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
                 let inter_h = (inter_y2 - inter_y1).max(0.0);
 
-                if inter_h > 0.0 {
+                                if inter_h > 0.0 {
                     unsafe {
                         self.gl.enable(glow::SCISSOR_TEST);
                         let sy = (self.height - inter_y2).round() as i32;
@@ -201,56 +198,98 @@ impl Renderer {
                     }
 
                     let line_h = 16.0 * s;
-                    let max_lines = (log_bg_h / line_h) as usize + 1;
-                    let start_idx = info.logs.len().saturating_sub(max_lines);
+                    let max_lines_vis = (log_bg_h / line_h) as usize + 1;
 
-                    // Подсветка выделения (под текстом)
+                    let mut total_lines = 0;
+                    let mut lines_per_entry = Vec::with_capacity(info.logs.len());
+                    for entry in &info.logs {
+                        let cnt = entry.text.split('\n').count();
+                        total_lines += cnt;
+                        lines_per_entry.push(cnt);
+                    }
+                    let start_line = total_lines.saturating_sub(max_lines_vis);
+
+                    let mut entry_idx = 0;
+                    let mut lines_skipped = 0;
+                    while entry_idx < info.logs.len() {
+                        if lines_skipped + lines_per_entry[entry_idx] > start_line {
+                            break;
+                        }
+                        lines_skipped += lines_per_entry[entry_idx];
+                        entry_idx += 1;
+                    }
+
+                    let mut sel_lo = 0;
+                    let mut sel_hi = 0;
                     if let Some(log_ed) = lsp_log_editors.get(info.name) {
-                        let (sel_lo, sel_hi) = match log_ed.selection_anchor {
+                        let (lo, hi) = match log_ed.selection_anchor {
                             Some(anchor) => (anchor.min(log_ed.cursor), anchor.max(log_ed.cursor)),
                             None => (log_ed.cursor, log_ed.cursor),
                         };
-                        if sel_lo < sel_hi {
-                            let mut byte_off: usize = info.logs[..start_idx]
-                                .iter().map(|l| l.len() + 1).sum();
-                            for (vi, log_line) in info.logs[start_idx..].iter().enumerate() {
-                                let line_start = byte_off;
-                                let line_end = byte_off + log_line.len();
-                                if sel_lo <= line_end && sel_hi > line_start {
-                                    let in_s = sel_lo.saturating_sub(line_start).min(log_line.len());
-                                    let in_e = sel_hi.saturating_sub(line_start).min(log_line.len());
+                        sel_lo = lo;
+                        sel_hi = hi;
+                    }
+
+                    let mut text_y = log_bg_y + 16.0 * s;
+                    let mut current_global_line = lines_skipped;
+                    let mut global_byte_off: usize = info.logs[..entry_idx].iter().map(|e| e.text.len() + 1).sum();
+
+                    for entry in &info.logs[entry_idx..] {
+                        let mut line_byte_off = 0;
+                        for line in entry.text.split('\n') {
+                            if current_global_line >= start_line {
+                                let abs_line_start = global_byte_off + line_byte_off;
+                                let abs_line_end = abs_line_start + line.len();
+
+                                if sel_lo < sel_hi && sel_lo <= abs_line_end && sel_hi > abs_line_start {
+                                    let in_s = sel_lo.saturating_sub(abs_line_start).min(line.len());
+                                    let in_e = sel_hi.saturating_sub(abs_line_start).min(line.len());
                                     let in_s = (0..=in_s).rev()
-                                        .find(|&i| log_line.is_char_boundary(i)).unwrap_or(0);
-                                    let in_e = (in_e..=log_line.len())
-                                        .find(|&i| log_line.is_char_boundary(i)).unwrap_or(log_line.len());
+                                        .find(|&i| line.is_char_boundary(i)).unwrap_or(0);
+                                    let in_e = (in_e..=line.len())
+                                        .find(|&i| line.is_char_boundary(i)).unwrap_or(line.len());
                                     let x1 = log_bg_x + 6.0 * s
-                                        + self.measure_mono_width(&log_line[..in_s], 0.7)
+                                        + self.measure_mono_width(&line[..in_s], 0.7)
                                         - scroll_x.round();
                                     let x2 = log_bg_x + 6.0 * s
-                                        + self.measure_mono_width(&log_line[..in_e], 0.7)
+                                        + self.measure_mono_width(&line[..in_e], 0.7)
                                         - scroll_x.round();
-                                    let ry = log_bg_y + vi as f32 * line_h;
+                                    let ry = text_y - 14.0 * s;
                                     let x1c = x1.max(log_bg_x);
                                     let x2c = x2.min(log_bg_x + log_bg_w);
                                     if x2c > x1c {
-                                        self.push_rounded_rect(x1c, ry, x2c - x1c, line_h, 0.0,
-                                            [0.40, 0.28, 0.72, 0.45]);
+                                        self.push_rounded_rect(x1c, ry, x2c - x1c, line_h, 0.0,[0.40, 0.28, 0.72, 0.45]);
                                     }
                                 }
-                                byte_off += log_line.len() + 1;
-                            }
-                        }
-                    }
 
-                    // Текст логов
-                    let mut text_y = log_bg_y + 16.0 * s;
-                    for line in &info.logs[start_idx..] {
-                        let mut draw_str = line.as_str();
-                        if draw_str.len() > 250 {
-                            draw_str = &draw_str[..250];
+                                let mut current_x = log_bg_x + 6.0 * s - scroll_x.round();
+                                let mut i = 0;
+                                while i < line.len() {
+                                    let abs_byte = line_byte_off + i;
+                                    let mut color =[0.875, 0.882, 0.902, 1.0];
+                                    let mut chunk_end = line.len();
+
+                                    for span in &entry.spans {
+                                        if abs_byte >= span.start && abs_byte < span.end {
+                                            color = span.color;
+                                            chunk_end = chunk_end.min(span.end - line_byte_off);
+                                            break;
+                                        } else if span.start > abs_byte {
+                                            chunk_end = chunk_end.min(span.start - line_byte_off);
+                                        }
+                                    }
+
+                                    let text_chunk = &line[i..chunk_end];
+                                    self.draw_string_mono_scaled(text_chunk, current_x, text_y, color, 0.7);
+                                    current_x += self.measure_mono_width(text_chunk, 0.7);
+                                    i = chunk_end;
+                                }
+                                text_y += line_h;
+                            }
+                            line_byte_off += line.len() + 1;
+                            current_global_line += 1;
                         }
-                        self.draw_string_mono_scaled(draw_str, log_bg_x + 6.0 * s - scroll_x.round(), text_y,[0.7, 0.75, 0.8, 1.0], 0.7);
-                        text_y += line_h;
+                        global_byte_off += entry.text.len() + 1;
                     }
 
                     self.flush();

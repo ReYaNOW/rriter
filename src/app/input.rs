@@ -98,7 +98,7 @@ impl App {
                         total_h += 136.0 * s + logs_h + 16.0 * s;
                         if is_expanded {
                             for line in &info.logs {
-                                let mut draw_str = line.as_str();
+                                let mut draw_str = line.text.as_str();
                                 if draw_str.len() > 250 {
                                     draw_str = &draw_str[..250];
                                 }
@@ -335,13 +335,13 @@ impl App {
 
                                         let mut total_h = 8.0 * s;
                     let mut max_log_w = 0.0f32;
-                    for info in self.ide_panel.lsp_servers.iter() {
+                                        for info in self.ide_panel.lsp_servers.iter() {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
                         let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
                         total_h += 136.0 * s + logs_h + 16.0 * s;
                         if is_expanded {
                             for line in &info.logs {
-                                let mut draw_str = line.as_str();
+                                let mut draw_str = line.text.as_str();
                                 if draw_str.len() > 250 {
                                     draw_str = &draw_str[..250];
                                 }
@@ -574,17 +574,18 @@ impl App {
                                     let clicked_line = (start_idx + clicked_rel)
                                         .min(info.logs.len().saturating_sub(1));
                                                                         let mut byte_off: usize =
-                                        info.logs[..clicked_line].iter().map(|l| l.len() + 1).sum();
+                                                                                info.logs[..clicked_line].iter().map(|l| l.text.len() + 1).sum();
                                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
                                     if let Some(line_str) = info.logs.get(clicked_line) {
+                                        let line_text = line_str.text.as_str();
                                         let click_x_in_line =
                                             (mx - log_bg_x - 6.0 * s + scroll_x).max(0.0);
                                         let r = self.renderer.as_mut().unwrap();
                                         let mut best_pos = 0usize;
                                         let mut best_dist = f32::MAX;
                                         let mut ci = 0usize;
-                                        for c in line_str.chars() {
-                                            let x = r.measure_mono_width(&line_str[..ci], 0.7);
+                                        for c in line_text.chars() {
+                                            let x = r.measure_mono_width(&line_text[..ci], 0.7);
                                             if (x - click_x_in_line).abs() < best_dist {
                                                 best_dist = (x - click_x_in_line).abs();
                                                 best_pos = ci;
@@ -592,9 +593,9 @@ impl App {
                                             ci += c.len_utf8();
                                         }
                                         // Проверить и правый край
-                                        let x_end = r.measure_mono_width(line_str, 0.7);
+                                        let x_end = r.measure_mono_width(line_text, 0.7);
                                                                                 if (x_end - click_x_in_line).abs() < best_dist {
-                                            best_pos = line_str.len();
+                                            best_pos = line_text.len();
                                         }
                                         byte_off += best_pos;
                                     }
@@ -1829,8 +1830,9 @@ impl App {
                                 let clicked_line =
                                     (start_idx + clicked_rel).min(srv.logs.len().saturating_sub(1));
                                 let mut byte_off: usize =
-                                    srv.logs[..clicked_line].iter().map(|l| l.len() + 1).sum();
+                                                                        srv.logs[..clicked_line].iter().map(|l| l.text.len() + 1).sum();
                                 if let Some(line_str) = srv.logs.get(clicked_line) {
+                                    let line_text = line_str.text.as_str();
                                     let click_x_in_line = (position.x as f32 - log_bg_x - 6.0 * s
                                         + scroll_x)
                                         .max(0.0);
@@ -1838,17 +1840,17 @@ impl App {
                                     let mut best_pos = 0usize;
                                     let mut best_dist = f32::MAX;
                                     let mut ci = 0usize;
-                                    for c in line_str.chars() {
-                                        let x = r.measure_mono_width(&line_str[..ci], 0.7);
+                                    for c in line_text.chars() {
+                                        let x = r.measure_mono_width(&line_text[..ci], 0.7);
                                         if (x - click_x_in_line).abs() < best_dist {
                                             best_dist = (x - click_x_in_line).abs();
                                             best_pos = ci;
                                         }
                                         ci += c.len_utf8();
                                     }
-                                    let x_end = r.measure_mono_width(line_str, 0.7);
+                                    let x_end = r.measure_mono_width(line_text, 0.7);
                                     if (x_end - click_x_in_line).abs() < best_dist {
-                                        best_pos = line_str.len();
+                                        best_pos = line_text.len();
                                     }
                                     byte_off += best_pos;
                                 }
@@ -1898,9 +1900,9 @@ impl App {
                 let mut max_log_w = 0.0f32;
                 for info in self.ide_panel.lsp_servers.iter() {
                     let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                    if is_expanded {
+                                        if is_expanded {
                         for line in &info.logs {
-                            let mut draw_str = line.as_str();
+                            let mut draw_str = line.text.as_str();
                             if draw_str.len() > 250 {
                                 draw_str = &draw_str[..250];
                             }

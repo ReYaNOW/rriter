@@ -12,6 +12,7 @@
 //   initialize + didOpen для текущего файла.
 
 use std::collections::HashMap;
+use tree_sitter::StreamingIterator;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -41,10 +42,16 @@ pub enum LspServerStatus {
 }
 
 #[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub text: String,
+    pub spans: Vec<crate::highlighter::ColorSpan>,
+}
+
+#[derive(Debug, Clone)]
 pub struct LspServerInfo {
     pub name: &'static str,
     pub status: LspServerStatus,
-    pub logs: Vec<String>,
+    pub logs: Vec<LogEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,7 +434,7 @@ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
-            fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
+                        fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
                 let msg: serde_json::Value = match serde_json::from_slice(body) {
                     Ok(v) => v,
                     Err(e) => {
@@ -437,7 +444,7 @@ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
                     }
                 };
 
-                let log_msg = format!("[LSP RECV] {}", serde_json::to_string(&msg).unwrap_or_default());
+                                let log_msg = format!("[LSP RECV] {}", String::from_utf8_lossy(body));
                 let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
 
                 let method = msg.get("method").and_then(|v| v.as_str());
@@ -936,9 +943,9 @@ pub struct LspManager {
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     /// Отключён ли ruff вручную
-    pub python_disabled: bool,
-    pub server_logs: HashMap<&'static str, Vec<String>>,
-}
+            pub python_disabled: bool,
+        pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
+    }
 
 impl LspManager {
         pub fn new(workspace: Option<PathBuf>) -> Self {
@@ -1084,7 +1091,7 @@ impl LspManager {
         }
 
         // Обновляем кешированные диагностики и статусы
-        for ev in &all {
+                for ev in &mut all {
                         match ev {
                                                                                                                 LspEvent::Diagnostics { path, items, .. } => {
                                                                                                                     let incoming_uri = path_to_uri(&path.to_string_lossy());
@@ -1093,12 +1100,14 @@ impl LspManager {
                                                                                                                         self.diagnostics = items.clone();
                                                                                                                     }
                                                                                                                 }
-                LspEvent::StatusChanged { status, .. } => {
+                                LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
-                LspEvent::Log { name, message } => {
-                    let logs = self.server_logs.entry(name).or_insert_with(Vec::new);
-                    logs.push(message.clone());
+                                LspEvent::Log { name, message } => {
+                    let (final_text, spans) = format_and_highlight_json(message);
+                    *message = final_text.clone();
+                    let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
+                    logs.push(LogEntry { text: final_text, spans });
                     if logs.len() > 100 {
                         logs.remove(0);
                     }
@@ -1185,7 +1194,128 @@ pub fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &Pat
             result.replace_range(start..end, &change.new_text);
         }
     }
-    result
+            result
+}
+
+pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
+    let (prefix, content) = if raw_text.starts_with("[LSP RECV] ") {
+        ("[LSP RECV]\n", &raw_text[11..])
+    } else if raw_text.starts_with("[LSP SEND] ") {
+        ("[LSP SEND]\n", &raw_text[11..])
+    } else {
+        ("", raw_text)
+    };
+
+    let is_json = content.trim().starts_with('{') || content.trim().starts_with('[');
+    let pretty = if is_json {
+        match serde_json::from_str::<serde_json::Value>(content) {
+            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_else(|_| content.to_string()),
+            Err(_) => content.to_string(),
+        }
+    } else {
+        content.to_string()
+    };
+
+    let mut parser = tree_sitter::Parser::new();
+    let lang = if is_json { tree_sitter_json::LANGUAGE.into() } else { tree_sitter_bash::LANGUAGE.into() };
+    let _ = parser.set_language(&lang);
+
+    let mut final_string = String::from(prefix);
+    let mut spans = vec![crate::highlighter::ColorSpan {
+        start: 0,
+        end: prefix.len(),
+        color: if prefix.contains("RECV") {[0.313, 0.980, 0.482, 1.0] } else {[0.545, 0.913, 0.992, 1.0] },
+    }];
+
+    if is_json {
+        let tree = parser.parse(&pretty, None).unwrap();
+
+        // AUTO FOLD через Tree-Sitter
+        let mut folds = Vec::new();
+        if let Some(fold_q) = crate::queries::get_folding_query("json") {
+            if let Ok(query) = tree_sitter::Query::new(&lang, fold_q) {
+                let mut cursor = tree_sitter::QueryCursor::new();
+                let mut matches = cursor.matches(&query, tree.root_node(), pretty.as_bytes());
+                while let Some(m) = matches.next() {
+                    for cap in m.captures {
+                        let node = cap.node;
+                        // Сворачиваем блоки длиннее 10 строк
+                        if node.end_position().row > node.start_position().row + 10 {
+                            folds.push((node.start_byte(), node.end_byte()));
+                        }
+                    }
+                }
+            }
+        }
+
+        folds.sort_by_key(|f| f.0);
+        let mut merged_folds = Vec::new();
+        let mut current_end = 0;
+        for (s, e) in folds {
+            if s >= current_end {
+                merged_folds.push((s, e));
+                current_end = e;
+            }
+        }
+
+        let mut pretty_folded = String::new();
+        let mut last_idx = 0;
+        for (s, e) in &merged_folds {
+            if *s > last_idx {
+                pretty_folded.push_str(&pretty[last_idx..*s]);
+            }
+            if pretty[*s..*e].starts_with('{') {
+                pretty_folded.push_str("{ ... [folded] }");
+            } else {
+                pretty_folded.push_str("[ ...[folded] ]");
+            }
+            last_idx = *e;
+        }
+        if last_idx < pretty.len() {
+            pretty_folded.push_str(&pretty[last_idx..]);
+        }
+
+        // РЕ-ПАРСИНГ усеченного JSON для 100% точной подсветки синтаксиса
+        let tree2 = parser.parse(&pretty_folded, None).unwrap();
+        if let Some((_, queries)) = crate::queries::get_ts_config("json") {
+            for q in queries {
+                if let Ok(query) = tree_sitter::Query::new(&lang, q) {
+                    let mut cursor = tree_sitter::QueryCursor::new();
+                    let mut matches = cursor.matches(&query, tree2.root_node(), pretty_folded.as_bytes());
+                    while let Some(m) = matches.next() {
+                        for cap in m.captures {
+                            let name = query.capture_names()[cap.index as usize];
+                            let color = match name {
+                                "property" =>[0.545, 0.913, 0.992, 1.0],
+                                "string" =>[0.945, 0.980, 0.549, 1.0],
+                                "number" =>[0.741, 0.576, 0.976, 1.0],
+                                "boolean" =>[1.0, 0.474, 0.776, 1.0],
+                                "keyword.control" =>[1.0, 0.474, 0.776, 1.0],
+                                "comment" =>[0.384, 0.447, 0.643, 1.0],
+                                _ => continue,
+                            };
+                            spans.push(crate::highlighter::ColorSpan {
+                                start: cap.node.start_byte() + prefix.len(),
+                                end: cap.node.end_byte() + prefix.len(),
+                                color,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        final_string.push_str(&pretty_folded);
+    } else {
+        final_string.push_str(&pretty);
+        spans.push(crate::highlighter::ColorSpan {
+            start: prefix.len(),
+            end: final_string.len(),
+            color:[0.875, 0.882, 0.902, 1.0],
+        });
+    }
+
+        spans.sort_by_key(|s| s.start);
+    (final_string, spans)
 }
 
 
