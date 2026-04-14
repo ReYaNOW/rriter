@@ -1388,29 +1388,26 @@ impl Renderer {
         ui_registry.wants_pointer()
     }
 
-                pub fn draw_settings(
-        &mut self,
-        anim_progress: f32,
-        active_tab: usize,
-        faq_editor: &Editor,
-        scroll_y: f32,
-        ide_workspaces: &[std::path::PathBuf],
-        ide_ignore_patterns: &[String],
-        settings_ignore_editor: &Editor,
-        settings_ignore_focused: bool,
-        settings_ignore_scroll_x: &mut f32,
-        ide_scroll_y: f32,
-        blink_alpha: f32,
-        ui_registry: &mut crate::ui_system::UiRegistry,
-    ) -> u8 {
-        if anim_progress <= 0.0 {
-            return 0;
-        }
-        let s = self.scale_factor;
-        let mut wants_pointer = false;
-        let mut wants_text = false;
-
-        let overlay_alpha = ((anim_progress - 0.04) * (0.4 / 0.96)).max(0.0);
+                    pub fn draw_settings(
+                        &mut self,
+                        anim_progress: f32,
+                        active_tab: usize,
+                        faq_editor: &Editor,
+                        scroll_y: f32,
+                        ide_workspaces: &[std::path::PathBuf],
+                        ide_ignore_patterns: &[String],
+                        settings_ignore_editor: &Editor,
+                        settings_ignore_focused: bool,
+                        settings_ignore_scroll_x: &mut f32,
+                        ide_scroll_y: f32,
+                        blink_alpha: f32,
+                        ui_registry: &mut crate::ui_system::UiRegistry,
+                    ) -> u8 {
+                                                if anim_progress <= 0.0 {
+                            return 0;
+                        }
+                        let s = self.scale_factor;
+                        let overlay_alpha = (anim_progress * 0.6).clamp(0.0, 1.0);
         self.push_rect(
             0.0,
             0.0,
@@ -1478,11 +1475,7 @@ impl Renderer {
                                 self.last_mouse_x, self.last_mouse_y,
                             );
 
-                            if is_hovered {
-                                wants_pointer = true;
-                            }
-
-            if i == active_tab {
+                                        if i == active_tab {
                 self.push_rounded_rect(
                     ix + 10.0 * s,
                     tab_rect_y,
@@ -1595,54 +1588,61 @@ impl Renderer {
                     [0.224, 0.231, 0.251, 1.0],
                 );
 
-                self.draw_string_scaled(
+                                self.draw_string_scaled(
                     &path_str,
-                    content_x + 14.0 * s,
-                    (content_y + 24.0 * s).round(),
-                    [0.9, 0.9, 0.9, 1.0],
-                    0.95,
+                    (content_x + 10.0 * s).round(),
+                    (content_y + item_h * 0.70).round(),
+                    self.theme.fg,
+                    0.85,
                 );
 
-                                                let del_btn_x = content_x + item_w - 34.0 * s;
-                let del_btn_y = content_y + 3.0 * s;
-                let del_btn_size = 30.0 * s;
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::SettingsIdeRemoveWorkspace(ws_idx),
-                    del_btn_x, del_btn_y, del_btn_size, del_btn_size,
-                    self.last_mouse_x, self.last_mouse_y,
-                );
-                let btn_del = crate::widgets::IconButton {
-                    x: del_btn_x,
-                    y: del_btn_y,
-                    size: del_btn_size,
-                    icon: Some(crate::widgets::IconType::Discard),
-                    is_active: false,
-                    icon_size: Some(18.0 * s),
-                    active_square_width: None,
-                };
-                wants_pointer |= btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-                content_y += 46.0 * s;
-            }
+                                self.draw_string_scaled(
+                                    &path_str,
+                                    (content_x + 10.0 * s).round(),
+                                    (content_y + item_h * 0.70).round(),
+                                    self.theme.fg,
+                                    0.85,
+                                );
 
-            let add_btn_y_reg = content_y.round();
-            ui_registry.register_rect(
-                crate::ui_system::UiId::SettingsIdeAddWorkspace,
-                content_x, add_btn_y_reg, 190.0 * s, 36.0 * s,
-                self.last_mouse_x, self.last_mouse_y,
-            );
-            let btn_add = crate::widgets::Button {
-                x: content_x,
-                y: add_btn_y_reg,
-                w: 190.0 * s,
-                h: 36.0 * s,
-                text: "Добавить папку".to_string(),
-                icon: Some(crate::widgets::IconType::Plus),
-                text_scale: 1.0,
-                icon_size: 20.0 * s,
-            };
-            wants_pointer |= btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            content_y += 56.0 * s;
+                                let del_btn_x = content_x + item_w - 34.0 * s;
+                                let del_btn_y = content_y + 3.0 * s;
+                                let del_btn_size = 30.0 * s;
+                                ui_registry.register_rect(
+                                    crate::ui_system::UiId::SettingsIdeRemoveWorkspace(ws_idx),
+                                    del_btn_x, del_btn_y, del_btn_size, del_btn_size,
+                                    self.last_mouse_x, self.last_mouse_y,
+                                );
+                                let btn_del = crate::widgets::IconButton {
+                                    x: del_btn_x,
+                                    y: del_btn_y,
+                                    size: del_btn_size,
+                                    icon: Some(crate::widgets::IconType::Discard),
+                                    is_active: false,
+                                    icon_size: Some(18.0 * s),
+                                    active_square_width: None,
+                                };
+                                btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                                content_y += 46.0 * s;
+                            }
 
+                                let add_btn_y_reg = content_y.round();
+                                ui_registry.register_rect(
+                                    crate::ui_system::UiId::SettingsIdeAddWorkspace,
+                                    content_x, add_btn_y_reg, 190.0 * s, 36.0 * s,
+                                    self.last_mouse_x, self.last_mouse_y,
+                                );
+                                let btn_add = crate::widgets::Button {
+                                    x: content_x,
+                                    y: add_btn_y_reg,
+                                    w: 190.0 * s,
+                                    h: 36.0 * s,
+                                    text: "Добавить папку".to_string(),
+                                    icon: Some(crate::widgets::IconType::Plus),
+                                    text_scale: 1.0,
+                                    icon_size: 20.0 * s,
+                                };
+                                btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                                content_y += 56.0 * s;
             // ── Разделитель ───────────────────────────────────────────────
             self.push_rect(content_x, content_y, 460.0 * s, 1.0, [1.0, 1.0, 1.0, 0.07]);
             content_y += 20.0 * s;
@@ -1680,13 +1680,11 @@ impl Renderer {
             let input_h = 34.0 * s;
             let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
-            let input_hovered = self.last_mouse_x >= content_x
-                && self.last_mouse_x <= content_x + input_w
-                && self.last_mouse_y >= content_y
-                && self.last_mouse_y <= content_y + input_h;
-            if input_hovered {
-                wants_text = true;
-            }
+                        let input_hovered = ui_registry.register_text_input(
+                crate::ui_system::UiId::SettingsIdeIgnoreInput,
+                content_x, content_y, input_w, input_h,
+                self.last_mouse_x, self.last_mouse_y,
+            );
 
             let border_col = if settings_ignore_focused {
                 [0.55, 0.35, 0.80, 1.0]
@@ -1898,7 +1896,7 @@ impl Renderer {
                     text_scale,
                 );
             } else {
-                let btn_ignore_add = crate::widgets::Button {
+                                let btn_ignore_add = crate::widgets::Button {
                     x: btn_add_x,
                     y: btn_add_y,
                     w: btn_add_w,
@@ -1908,8 +1906,7 @@ impl Renderer {
                     text_scale: 0.88,
                     icon_size: 15.0 * s,
                 };
-                wants_pointer |=
-                    btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             }
             content_y += input_h + 16.0 * s;
 
@@ -1943,11 +1940,7 @@ impl Renderer {
                     self.last_mouse_x, self.last_mouse_y,
                 );
 
-                if chip_hov {
-                    wants_pointer = true;
-                }
-
-                let bg = if chip_hov {
+                                let bg = if chip_hov {
                     [0.30, 0.18, 0.44, 1.0]
                 } else {
                     [0.20, 0.13, 0.30, 1.0]
@@ -2238,10 +2231,10 @@ impl Renderer {
             }
         }
 
-        self.flush();
-        if wants_text {
+                self.flush();
+        if ui_registry.wants_text() {
             2
-        } else if wants_pointer {
+        } else if ui_registry.wants_pointer() {
             1
         } else {
             0
