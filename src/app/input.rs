@@ -539,11 +539,14 @@ impl App {
                     self.editor.sync_edits.clear();
                     self.highlighter
                         .reset(self.editor.version, "".to_string(), "".to_string());
-                    App::update_window_title(
+                                        App::update_window_title(
                         self.window.as_ref().unwrap(),
                         &self.base_title,
                         false,
                     );
+                    if self.lsp.is_none() {
+                        self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.first().cloned()));
+                    }
                     if self.ide_panel.is_open(crate::app::PanelId::Explorer) {
                         self.refresh_file_tree();
                         self.start_file_watcher();

@@ -858,7 +858,7 @@ impl ApplicationHandler for App {
             }
         }
 
-                // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
+                                                // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 for event in lsp.poll() {
@@ -890,15 +890,19 @@ impl ApplicationHandler for App {
                                 if let Some(w) = self.window.as_ref() { w.request_redraw(); }
                             }
                         }
-                        crate::lsp::LspEvent::ServerReady => {}
-                        crate::lsp::LspEvent::StatusChanged { .. } => {
-                            // Обновляем lsp_servers в ide_panel
-                            if let Some(lsp) = &self.lsp {
-                                self.ide_panel.lsp_servers = lsp.servers_info();
-                            }
-                            if let Some(w) = self.window.as_ref() { w.request_redraw(); }
-                        }
+                                                                        crate::lsp::LspEvent::ServerReady => {}
+                        crate::lsp::LspEvent::StatusChanged { .. } => {}
                     }
+                }
+
+                // Умная синхронизация без аллокаций каждый кадр.
+                // Обновляем UI только если статус реально изменился.
+                let needs_update = self.ide_panel.lsp_servers.is_empty() 
+                    || self.ide_panel.lsp_servers[0].status != lsp.python_status;
+
+                if needs_update {
+                    self.ide_panel.lsp_servers = lsp.servers_info();
+                    if let Some(w) = self.window.as_ref() { w.request_redraw(); }
                 }
             }
         }

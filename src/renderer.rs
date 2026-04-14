@@ -946,13 +946,16 @@ impl Renderer {
             (
                 crate::widgets::IconType::Explorer,
                 include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Problems,
-                include_bytes!("icons/problems.svg").as_slice(),
-            ),
-        ];
-        let opt = resvg::usvg::Options::default();
+            ),                        (
+                            crate::widgets::IconType::Problems,
+                            include_bytes!("icons/problems.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::LspServers,
+                            include_bytes!("icons/atom/icons/ui/server.svg").as_slice(),
+                        ),
+                    ];
+                    let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
             let svg_data_str = String::from_utf8_lossy(data);
             let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
@@ -960,14 +963,15 @@ impl Renderer {
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
             } else if icon_type == crate::widgets::IconType::Problems {
                 svg_data_str.replace("#D81B60", "#b0bec5")
-            } else if icon_type == crate::widgets::IconType::Plus
-                || icon_type == crate::widgets::IconType::Terminal
-                || icon_type == crate::widgets::IconType::Explorer
-            {
-                svg_data_str
-                    .replace("currentColor", "#ffffff")
-                    .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
-            } else {
+                    } else if icon_type == crate::widgets::IconType::Plus
+            || icon_type == crate::widgets::IconType::Terminal
+            || icon_type == crate::widgets::IconType::Explorer
+            || icon_type == crate::widgets::IconType::LspServers
+        {
+            svg_data_str
+                .replace("currentColor", "#ffffff")
+                .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
+        } else {
                 svg_data_str.into_owned()
             };
 

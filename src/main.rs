@@ -142,8 +142,13 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
                 }
             }
         }
-    }
+        }
     if !loaded.is_empty() {
+        for default_slot in state.slots {
+            if !loaded.iter().any(|s| s.id == default_slot.id) {
+                loaded.push(default_slot);
+            }
+        }
         state.slots = loaded;
     }
     state
