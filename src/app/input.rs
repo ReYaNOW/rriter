@@ -367,9 +367,7 @@ impl App {
             }
 
                         if let Some((cx, cy, cw, ch)) = lsp_bounds {
-                if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
-                    let pad_x = 12.0 * s;
-                    let btn_h = 24.0 * s;
+                                if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
 

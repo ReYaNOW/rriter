@@ -1347,7 +1347,7 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
-        if search_anim_y > -100.0 * self.scale_factor {
+                if search_anim_y > -100.0 * self.scale_factor {
             wants_pointer |= self.draw_search_panel(
                 search_anim_y,
                 search_editor,
@@ -1357,6 +1357,7 @@ impl Renderer {
                 search_current_idx,
                 blink_alpha,
                 scrollbar_width,
+                ui_registry,
             );
         }
 
@@ -1987,7 +1988,7 @@ impl Renderer {
         target_sticky_lines
     }
 
-    #[allow(clippy::too_many_arguments)]
+        #[allow(clippy::too_many_arguments)]
     fn draw_search_panel(
         &mut self,
         search_anim_y: f32,
@@ -1998,6 +1999,7 @@ impl Renderer {
         search_current_idx: Option<usize>,
         blink_alpha: f32,
         scrollbar_width: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> bool {
         let mut wants_pointer = false;
         let s = self.scale_factor;
@@ -2261,11 +2263,11 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
-        wants_pointer |= btn_case.render(self, mx, my, s, false);
-        wants_pointer |= btn_up.render(self, mx, my, s, false);
-        wants_pointer |= btn_down.render(self, mx, my, s, false);
-        wants_pointer |= btn_close.render(self, mx, my, s, false);
+                ui_registry.register_icon_button(crate::ui_system::UiId::SearchCaseToggle, &btn_case, self, mx, my, s, false);
+        ui_registry.register_icon_button(crate::ui_system::UiId::SearchPrev, &btn_up, self, mx, my, s, false);
+        ui_registry.register_icon_button(crate::ui_system::UiId::SearchNext, &btn_down, self, mx, my, s, false);
+        ui_registry.register_icon_button(crate::ui_system::UiId::SearchClose, &btn_close, self, mx, my, s, false);
 
-        wants_pointer
+        wants_pointer || ui_registry.wants_pointer()
     }
 }

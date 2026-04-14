@@ -39,8 +39,14 @@ pub enum UiId {
     // Sidebar
     SidebarSlot(crate::app::PanelId),
 
-    // File tree
+        // File tree
     FileTreeNode(usize),
+
+    // Search
+    SearchClose,
+    SearchNext,
+    SearchPrev,
+    SearchCaseToggle,
 }
 
 /// Тип UI элемента с его геометрией

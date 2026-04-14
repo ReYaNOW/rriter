@@ -260,9 +260,46 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-                        // File tree
+                                    // File tree
             UiId::FileTreeNode(idx) => {
                 self.handle_file_tree_click(idx);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+
+            // Search panel
+            UiId::SearchClose => {
+                self.show_search = false;
+                self.search_focused = false;
+                self.search_results.clear();
+                self.search_current_idx = None;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::SearchNext => {
+                if !self.search_results.is_empty() {
+                    if let Some(idx) = self.search_current_idx {
+                        self.search_current_idx = Some((idx + 1) % self.search_results.len());
+                    }
+                    self.jump_to_search_result();
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+            UiId::SearchPrev => {
+                if !self.search_results.is_empty() {
+                    if let Some(idx) = self.search_current_idx {
+                        self.search_current_idx = Some(if idx == 0 {
+                            self.search_results.len() - 1
+                        } else {
+                            idx - 1
+                        });
+                    }
+                    self.jump_to_search_result();
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+            UiId::SearchCaseToggle => {
+                self.search_case_sensitive = !self.search_case_sensitive;
+                self.update_search();
+                self.jump_to_search_result();
                 self.window.as_ref().unwrap().request_redraw();
             }
         }
