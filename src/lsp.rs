@@ -45,6 +45,7 @@ pub enum LspServerStatus {
 pub struct LogEntry {
     pub text: String,
     pub spans: Vec<crate::highlighter::ColorSpan>,
+    pub folds: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -1103,11 +1104,11 @@ impl LspManager {
                                 LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
-                                LspEvent::Log { name, message } => {
-                    let (final_text, spans) = format_and_highlight_json(message);
+                                                                LspEvent::Log { name, message } => {
+                    let (final_text, spans, folds) = format_and_highlight_json(message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
-                    logs.push(LogEntry { text: final_text, spans });
+                    logs.push(LogEntry { text: final_text, spans, folds });
                     if logs.len() > 100 {
                         logs.remove(0);
                     }
@@ -1197,7 +1198,7 @@ pub fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &Pat
             result
 }
 
-pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
+pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>) {
     let (prefix, content) = if raw_text.starts_with("[LSP RECV] ") {
         ("[LSP RECV]\n", &raw_text[11..])
     } else if raw_text.starts_with("[LSP SEND] ") {
@@ -1217,21 +1218,26 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
     };
 
     let mut parser = tree_sitter::Parser::new();
-    let lang = if is_json { tree_sitter_json::LANGUAGE.into() } else { tree_sitter_bash::LANGUAGE.into() };
+    let lang = if is_json {
+        tree_sitter_json::LANGUAGE.into()
+    } else {
+        tree_sitter_bash::LANGUAGE.into()
+    };
     let _ = parser.set_language(&lang);
 
     let mut final_string = String::from(prefix);
     let mut spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: prefix.len(),
-        color: if prefix.contains("RECV") {[0.313, 0.980, 0.482, 1.0] } else {[0.545, 0.913, 0.992, 1.0] },
+        color: if prefix.contains("RECV") {[0.313, 0.980, 0.482, 1.0]
+        } else {[0.545, 0.913, 0.992, 1.0]
+        },
     }];
+    let mut folds = Vec::new();
 
     if is_json {
         let tree = parser.parse(&pretty, None).unwrap();
 
-        // AUTO FOLD через Tree-Sitter
-        let mut folds = Vec::new();
         if let Some(fold_q) = crate::queries::get_folding_query("json") {
             if let Ok(query) = tree_sitter::Query::new(&lang, fold_q) {
                 let mut cursor = tree_sitter::QueryCursor::new();
@@ -1239,49 +1245,19 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
                 while let Some(m) = matches.next() {
                     for cap in m.captures {
                         let node = cap.node;
-                        // Сворачиваем блоки длиннее 10 строк
-                        if node.end_position().row > node.start_position().row + 10 {
-                            folds.push((node.start_byte(), node.end_byte()));
+                        if node.end_position().row > node.start_position().row + 1 {
+                            folds.push((node.start_byte() + prefix.len(), node.end_byte() + prefix.len()));
                         }
                     }
                 }
             }
         }
 
-        folds.sort_by_key(|f| f.0);
-        let mut merged_folds = Vec::new();
-        let mut current_end = 0;
-        for (s, e) in folds {
-            if s >= current_end {
-                merged_folds.push((s, e));
-                current_end = e;
-            }
-        }
-
-        let mut pretty_folded = String::new();
-        let mut last_idx = 0;
-        for (s, e) in &merged_folds {
-            if *s > last_idx {
-                pretty_folded.push_str(&pretty[last_idx..*s]);
-            }
-            if pretty[*s..*e].starts_with('{') {
-                pretty_folded.push_str("{ ... [folded] }");
-            } else {
-                pretty_folded.push_str("[ ...[folded] ]");
-            }
-            last_idx = *e;
-        }
-        if last_idx < pretty.len() {
-            pretty_folded.push_str(&pretty[last_idx..]);
-        }
-
-        // РЕ-ПАРСИНГ усеченного JSON для 100% точной подсветки синтаксиса
-        let tree2 = parser.parse(&pretty_folded, None).unwrap();
         if let Some((_, queries)) = crate::queries::get_ts_config("json") {
             for q in queries {
                 if let Ok(query) = tree_sitter::Query::new(&lang, q) {
                     let mut cursor = tree_sitter::QueryCursor::new();
-                    let mut matches = cursor.matches(&query, tree2.root_node(), pretty_folded.as_bytes());
+                    let mut matches = cursor.matches(&query, tree.root_node(), pretty.as_bytes());
                     while let Some(m) = matches.next() {
                         for cap in m.captures {
                             let name = query.capture_names()[cap.index as usize];
@@ -1304,7 +1280,7 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
                 }
             }
         }
-        final_string.push_str(&pretty_folded);
+        final_string.push_str(&pretty);
     } else {
         final_string.push_str(&pretty);
         spans.push(crate::highlighter::ColorSpan {
@@ -1314,8 +1290,8 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
         });
     }
 
-        spans.sort_by_key(|s| s.start);
-    (final_string, spans)
+    spans.sort_by_key(|s| s.start);
+    (final_string, spans, folds)
 }
 
 

@@ -197,13 +197,13 @@ impl Editor {
             if range.0 >= offset {
                 range.0 += len;
             }
-            // ИСПРАВЛЕНИЕ: строго больше (>), а не (>=).
-            // Это гарантирует, что вставка после закрывающей скобки фолда не захватится им.
-            if range.1 > offset {
-                range.1 += len;
-            }
-        }
-    }
+                        // ИСПРАВЛЕНИЕ: строго больше (>), а не (>=).
+                        // Это гарантирует, что вставка после закрывающей скобки фолда не захватится им.
+                        if range.1 > offset {
+                            range.1 += len;
+                        }
+                    }
+                }
 
     pub fn shift_folds_delete(&mut self, offset: usize, len: usize) {
         let mut new_folded = std::collections::HashSet::new();
@@ -1216,7 +1216,7 @@ impl Editor {
         }
     }
 
-    /// ИСПРАВЛЕНИЕ: Новая универсальная логика обработки курсора, попадающего внутрь фолда.
+        /// ИСПРАВЛЕНИЕ: Новая универсальная логика обработки курсора, попадающего внутрь фолда.
     pub fn snap_cursor_out_of_fold(&mut self, old_cursor: usize) {
         let mut current_line = 0;
         while current_line < self.line_offsets.len() {
@@ -1225,33 +1225,31 @@ impl Editor {
             {
                 let fold_end = self.foldable_lines[&current_line];
                 let first_line_end = if current_line + 1 < self.line_offsets.len() {
-                    self.line_offsets[current_line + 1].saturating_sub(1)
+                    self.line_offsets[current_line + 1]
                 } else {
                     self.len()
                 };
                 let block_end = if fold_end + 1 < self.line_offsets.len() {
-                    self.line_offsets[fold_end + 1].saturating_sub(1)
+                    self.line_offsets[fold_end + 1]
                 } else {
                     self.len()
                 };
 
-                // Если курсор оказался внутри свернутого кода (включая саму невидимую \n)
-                if self.cursor >= first_line_end && self.cursor < block_end {
-                    if old_cursor >= block_end {
-                        // Идем влево (Left) - перепрыгиваем до видимой части первой строки
-                        self.cursor = first_line_end.saturating_sub(1);
-                    } else if old_cursor < first_line_end {
-                        // Идем вправо (Right) - перепрыгиваем в конец блока
-                        self.cursor = block_end;
-                    } else {
-                        // Fallback
-                        if self.cursor > old_cursor {
-                            self.cursor = block_end;
+                // Если курсор оказался внутри свернутого кода
+                if self.cursor > self.line_offsets[current_line] && self.cursor < block_end {
+                    let cursor_on_first_line = self.cursor < first_line_end;
+
+                    if !cursor_on_first_line {
+                        if old_cursor >= block_end {
+                            // Идем влево (Left) - перепрыгиваем до видимой части первой строки
+                            self.cursor = self.line_offsets[current_line];
+                            self.move_end(false); // до конца видимой строки
                         } else {
-                            self.cursor = first_line_end.saturating_sub(1);
+                            // Идем вправо (Right) или откуда-то еще - перепрыгиваем в конец блока
+                            self.cursor = block_end;
                         }
+                        return;
                     }
-                    return;
                 }
                 current_line = fold_end;
             }

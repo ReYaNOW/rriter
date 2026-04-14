@@ -940,12 +940,32 @@ impl ApplicationHandler for App {
                         let entry = self.ide_panel.lsp_log_editors
                             .entry(info.name.to_string())
                             .or_insert_with(|| crate::editor::Editor::new(new_text.len().max(512)));
-                        // Пересоздаём только если текст изменился (иначе сбросим выделение)
+                                                // Пересоздаём только если текст изменился (иначе сбросим выделение)
                         if entry.get_full_text() != new_text {
                             let saved_cursor = if focused { Some(entry.cursor) } else { None };
                             let saved_anchor = if focused { entry.selection_anchor } else { None };
                             *entry = crate::editor::Editor::new(new_text.len().max(512));
                             let _ = entry.insert_str(&new_text);
+
+                            entry.foldable_ranges_bytes.clear();
+                            let mut byte_offset = 0;
+                            for log in &info.logs {
+                                for &(s, e) in &log.folds {
+                                    entry.foldable_ranges_bytes.push((byte_offset + s, byte_offset + e, false));
+                                }
+                                byte_offset += log.text.len() + 1;
+                            }
+                            entry.rebuild_line_offsets();
+
+                            for &(s, e, _) in &entry.foldable_ranges_bytes {
+                                let sl = entry.line_offsets.partition_point(|&x| x <= s).saturating_sub(1);
+                                let el = entry.line_offsets.partition_point(|&x| x <= e).saturating_sub(1);
+                                if el > sl {
+                                    entry.folded_lines.insert(sl);
+                                    entry.folded_start_bytes.insert(entry.line_offsets[sl]);
+                                }
+                            }
+
                             if let Some(c) = saved_cursor {
                                 entry.cursor = c.min(new_text.len());
                                 entry.selection_anchor = saved_anchor.map(|a| a.min(new_text.len()));

@@ -3,7 +3,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-            /// Рисует содержимое панели LSP серверов (левая панель)
+    /// Рисует содержимое панели LSP серверов (левая панель)
     pub fn draw_lsp_servers_panel(
         &mut self,
         content_x: f32,
@@ -42,31 +42,73 @@ impl Renderer {
             self.draw_string_scaled(
                 hint,
                 (content_x + (content_w - tw) / 2.0).round(),
-                (content_y + 32.0 * s).round(),[0.45, 0.45, 0.45, 1.0],
+                (content_y + 32.0 * s).round(),
+                [0.45, 0.45, 0.45, 1.0],
                 text_scale,
             );
         }
 
         let mut current_y = content_y + 8.0 * s - scroll_y.round();
-                                let mut total_h = 8.0 * s;
-                                let mut max_log_w = 0.0f32;
-                                for info in servers.iter() {
-                                    let is_expanded = expanded_logs.contains(info.name);
-                                    let logs_h = if is_expanded { 350.0 * s } else { 0.0 };
-                                    total_h += 136.0 * s + logs_h + 16.0 * s;
-                                    if is_expanded {
-                                        for entry in &info.logs {
-                                            for line in entry.text.split('\n') {
-                                                let lw = self.measure_mono_width(line, 0.7);
-                                                if lw > max_log_w { max_log_w = lw; }
-                                            }
-                                        }
-                                    }
-                                }
-
+                                        let mut total_h = 8.0 * s;
+                                        let mut max_log_w = 0.0f32;
                                         for info in servers.iter() {
-                                    let is_expanded = expanded_logs.contains(info.name);
-                                    let logs_h = if is_expanded { 350.0 * s } else { 0.0 };
+                                            let is_expanded = expanded_logs.contains(info.name);
+                                            let mut logs_h = 0.0;
+                                            if is_expanded {
+                                                let mut lines = 0;
+                                                let mut skip_until = None;
+                                                if let Some(ed) = lsp_log_editors.get(info.name) {
+                                                    for i in 0..ed.line_offsets.len() {
+                                                        if let Some(tgt) = skip_until {
+                                                            if i < tgt { continue; }
+                                                            skip_until = None;
+                                                        }
+                                                        lines += 1;
+                                                        if ed.folded_lines.contains(&i) {
+                                                            skip_until = Some(ed.foldable_lines[&i]);
+                                                        }
+                                                    }
+                                                } else {
+                                                    for entry in &info.logs {
+                                                        lines += entry.text.split('\n').count();
+                                                    }
+                                                }
+                                                logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+
+                                                for entry in &info.logs {
+                                                    for line in entry.text.split('\n') {
+                                                        let lw = self.measure_mono_width(line, 0.7);
+                                                        if lw > max_log_w { max_log_w = lw; }
+                                                    }
+                                                }
+                                            }
+                                            total_h += 136.0 * s + logs_h + 16.0 * s;
+                                        }
+
+                                                for info in servers.iter() {
+                                            let is_expanded = expanded_logs.contains(info.name);
+                                            let mut logs_h = 0.0;
+                                            if is_expanded {
+                                                let mut lines = 0;
+                                                let mut skip_until = None;
+                                                if let Some(ed) = lsp_log_editors.get(info.name) {
+                                                    for i in 0..ed.line_offsets.len() {
+                                                        if let Some(tgt) = skip_until {
+                                                            if i < tgt { continue; }
+                                                            skip_until = None;
+                                                        }
+                                                        lines += 1;
+                                                        if ed.folded_lines.contains(&i) {
+                                                            skip_until = Some(ed.foldable_lines[&i]);
+                                                        }
+                                                    }
+                                                } else {
+                                                    for entry in &info.logs {
+                                                        lines += entry.text.split('\n').count();
+                                                    }
+                                                }
+                                                logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                                            }
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
 
@@ -75,236 +117,390 @@ impl Renderer {
                 let card_w = content_w - 24.0 * s;
 
                 // Тень и бордер карточки
-                self.push_rounded_rect(card_x - 1.0, current_y - 1.0, card_w + 2.0, row_h + 2.0, 7.0 * s,[0.35, 0.30, 0.45, 0.4]);
-                self.push_rounded_rect(card_x, current_y, card_w, row_h, 6.0 * s,[0.18, 0.19, 0.24, 1.0]);
+                self.push_rounded_rect(
+                    card_x - 1.0,
+                    current_y - 1.0,
+                    card_w + 2.0,
+                    row_h + 2.0,
+                    7.0 * s,
+                    [0.35, 0.30, 0.45, 0.4],
+                );
+                self.push_rounded_rect(
+                    card_x,
+                    current_y,
+                    card_w,
+                    row_h,
+                    6.0 * s,
+                    [0.18, 0.19, 0.24, 1.0],
+                );
 
-            let dot_r = 5.0 * s;
-            let dot_x = card_x + pad_x + dot_r;
-            let dot_y = current_y + 16.0 * s;
+                let dot_r = 5.0 * s;
+                let dot_x = card_x + pad_x + dot_r;
+                let dot_y = current_y + 16.0 * s;
 
-            let (dot_color, status_text) = match info.status {
-                crate::lsp::LspServerStatus::Running  => ([0.28, 0.85, 0.45, 1.0], "Работает"),
-                crate::lsp::LspServerStatus::Starting => ([0.85, 0.75, 0.25, 1.0], "Запуск..."),
-                crate::lsp::LspServerStatus::Crashed  => ([0.90, 0.30, 0.30, 1.0], "Упал"),
-                crate::lsp::LspServerStatus::Disabled => ([0.45, 0.45, 0.45, 1.0], "Отключён"),
-            };
-            self.push_rounded_rect(dot_x - dot_r, dot_y - dot_r, dot_r * 2.0, dot_r * 2.0, dot_r, dot_color);
+                let (dot_color, status_text) = match info.status {
+                    crate::lsp::LspServerStatus::Running => ([0.28, 0.85, 0.45, 1.0], "Работает"),
+                    crate::lsp::LspServerStatus::Starting => ([0.85, 0.75, 0.25, 1.0], "Запуск..."),
+                    crate::lsp::LspServerStatus::Crashed => ([0.90, 0.30, 0.30, 1.0], "Упал"),
+                    crate::lsp::LspServerStatus::Disabled => ([0.45, 0.45, 0.45, 1.0], "Отключён"),
+                };
+                self.push_rounded_rect(
+                    dot_x - dot_r,
+                    dot_y - dot_r,
+                    dot_r * 2.0,
+                    dot_r * 2.0,
+                    dot_r,
+                    dot_color,
+                );
 
-            self.draw_string_scaled(
-                info.name,
-                (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
-                (dot_y + dot_r).round(),
-                self.theme.fg,
-                text_scale,
-            );
+                self.draw_string_scaled(
+                    info.name,
+                    (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
+                    (dot_y + dot_r).round(),
+                    self.theme.fg,
+                    text_scale,
+                );
 
-            let status_color = dot_color;
-            self.draw_string_scaled(
-                status_text,
-                (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
-                (dot_y + dot_r + 18.0 * s).round(),
-                status_color,
-                0.78,
-            );
+                let status_color = dot_color;
+                self.draw_string_scaled(
+                    status_text,
+                    (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
+                    (dot_y + dot_r + 18.0 * s).round(),
+                    status_color,
+                    0.78,
+                );
 
-                        let btn_h = 24.0 * s;
-            let btn_y1 = current_y + 56.0 * s;
-            let btn_y2 = btn_y1 + btn_h + 8.0 * s;
-            let btn_pad = 10.0 * s;
+                let btn_h = 24.0 * s;
+                let btn_y1 = current_y + 56.0 * s;
+                let btn_y2 = btn_y1 + btn_h + 8.0 * s;
+                let btn_pad = 10.0 * s;
 
-            let label_restart  = "Перезапуск";
-            let label_toggle   = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) { "Включить" } else { "Отключить" };
-            let label_stop     = "Остановить";
-            let label_logs     = if is_expanded { "Скрыть логи" } else { "Логи" };
-            let label_fix_all  = "Fix All";
+                let label_restart = "Перезапуск";
+                let label_toggle = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
+                    "Включить"
+                } else {
+                    "Отключить"
+                };
+                let label_stop = "Остановить";
+                let label_logs = if is_expanded {
+                    "Скрыть логи"
+                } else {
+                    "Логи"
+                };
+                let label_fix_all = "Fix All";
 
-            let bw_restart  = self.measure_ui_width(label_restart,  0.8) + btn_pad * 2.0;
-            let bw_toggle   = self.measure_ui_width(label_toggle,   0.8) + btn_pad * 2.0;
-            let bw_stop     = self.measure_ui_width(label_stop,     0.8) + btn_pad * 2.0;
-            let bw_logs     = self.measure_ui_width(label_logs,     0.8) + btn_pad * 2.0;
-            let bw_fix_all  = self.measure_ui_width(label_fix_all,  0.8) + btn_pad * 2.0;
+                let bw_restart = self.measure_ui_width(label_restart, 0.8) + btn_pad * 2.0;
+                let bw_toggle = self.measure_ui_width(label_toggle, 0.8) + btn_pad * 2.0;
+                let bw_stop = self.measure_ui_width(label_stop, 0.8) + btn_pad * 2.0;
+                let bw_logs = self.measure_ui_width(label_logs, 0.8) + btn_pad * 2.0;
+                let bw_fix_all = self.measure_ui_width(label_fix_all, 0.8) + btn_pad * 2.0;
 
-                        let btn_x_restart  = card_x + pad_x;
-            let btn_x_toggle   = btn_x_restart + bw_restart + 6.0 * s;
-            let btn_x_stop     = btn_x_toggle + bw_toggle + 6.0 * s;
+                let btn_x_restart = card_x + pad_x;
+                let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
+                let btn_x_stop = btn_x_toggle + bw_toggle + 6.0 * s;
 
-            let btn_x_fix_all = card_x + pad_x;
-            let btn_x_logs    = btn_x_fix_all + bw_fix_all + 6.0 * s;
+                let btn_x_fix_all = card_x + pad_x;
+                let btn_x_logs = btn_x_fix_all + bw_fix_all + 6.0 * s;
 
-            let hover_restart  = mx >= btn_x_restart  && mx <= btn_x_restart  + bw_restart  && my >= btn_y1 && my <= btn_y1 + btn_h;
-            let hover_toggle   = mx >= btn_x_toggle   && mx <= btn_x_toggle   + bw_toggle   && my >= btn_y1 && my <= btn_y1 + btn_h;
-            let is_stopped = matches!(info.status, crate::lsp::LspServerStatus::Disabled | crate::lsp::LspServerStatus::Crashed);
-            let hover_stop    = !is_stopped && mx >= btn_x_stop    && mx <= btn_x_stop    + bw_stop    && my >= btn_y1 && my <= btn_y1 + btn_h;
+                let hover_restart = mx >= btn_x_restart
+                    && mx <= btn_x_restart + bw_restart
+                    && my >= btn_y1
+                    && my <= btn_y1 + btn_h;
+                let hover_toggle = mx >= btn_x_toggle
+                    && mx <= btn_x_toggle + bw_toggle
+                    && my >= btn_y1
+                    && my <= btn_y1 + btn_h;
+                let is_stopped = matches!(
+                    info.status,
+                    crate::lsp::LspServerStatus::Disabled | crate::lsp::LspServerStatus::Crashed
+                );
+                let hover_stop = !is_stopped
+                    && mx >= btn_x_stop
+                    && mx <= btn_x_stop + bw_stop
+                    && my >= btn_y1
+                    && my <= btn_y1 + btn_h;
 
-            let hover_logs     = mx >= btn_x_logs     && mx <= btn_x_logs     + bw_logs     && my >= btn_y2 && my <= btn_y2 + btn_h;
-            let fix_enabled   = !is_stopped && fix_all_active;
-            let hover_fix_all = fix_enabled  && mx >= btn_x_fix_all && mx <= btn_x_fix_all + bw_fix_all && my >= btn_y2 && my <= btn_y2 + btn_h;
+                let hover_logs = mx >= btn_x_logs
+                    && mx <= btn_x_logs + bw_logs
+                    && my >= btn_y2
+                    && my <= btn_y2 + btn_h;
+                let fix_enabled = !is_stopped && fix_all_active;
+                let hover_fix_all = fix_enabled
+                    && mx >= btn_x_fix_all
+                    && mx <= btn_x_fix_all + bw_fix_all
+                    && my >= btn_y2
+                    && my <= btn_y2 + btn_h;
 
-            let btn_bg_restart = if hover_restart  {[0.35, 0.35, 0.40, 1.0] } else {[0.26, 0.26, 0.32, 1.0] };
-            let btn_bg_toggle  = if hover_toggle   {[0.35, 0.35, 0.40, 1.0] } else {[0.26, 0.26, 0.32, 1.0] };
-            let btn_bg_logs    = if hover_logs     {[0.35, 0.35, 0.40, 1.0] } else {[0.26, 0.26, 0.32, 1.0] };
-            let btn_bg_stop    = if is_stopped     {[0.20, 0.20, 0.25, 0.6] } else if hover_stop    {[0.45, 0.22, 0.22, 1.0] } else {[0.32, 0.15, 0.15, 1.0] };
-            let btn_bg_fix_all = if !fix_enabled   {[0.18, 0.18, 0.22, 0.6] } else if hover_fix_all {[0.22, 0.42, 0.28, 1.0] } else {[0.15, 0.30, 0.20, 1.0] };
-
-            let text_color_stop    = if is_stopped   {[0.55, 0.55, 0.60, 1.0] } else {[0.95, 0.55, 0.55, 1.0] };
-            let text_color_fix_all = if !fix_enabled {[0.40, 0.40, 0.44, 1.0] } else {[0.55, 0.95, 0.65, 1.0] };
-
-            let text_y1 = (btn_y1 + btn_h / 2.0 + 4.0 * s).round();
-            let text_y2 = (btn_y2 + btn_h / 2.0 + 4.0 * s).round();
-
-            self.push_rounded_rect(btn_x_restart, btn_y1, bw_restart, btn_h, 3.0 * s, btn_bg_restart);
-            self.draw_string_scaled(label_restart, (btn_x_restart + btn_pad).round(), text_y1, self.theme.fg, 0.8);
-
-            self.push_rounded_rect(btn_x_toggle, btn_y1, bw_toggle, btn_h, 3.0 * s, btn_bg_toggle);
-            self.draw_string_scaled(label_toggle, (btn_x_toggle + btn_pad).round(), text_y1, self.theme.fg, 0.8);
-
-            self.push_rounded_rect(btn_x_stop, btn_y1, bw_stop, btn_h, 3.0 * s, btn_bg_stop);
-            self.draw_string_scaled(label_stop, (btn_x_stop + btn_pad).round(), text_y1, text_color_stop, 0.8);
-
-            self.push_rounded_rect(btn_x_fix_all, btn_y2, bw_fix_all, btn_h, 3.0 * s, btn_bg_fix_all);
-            self.draw_string_scaled(label_fix_all, (btn_x_fix_all + btn_pad).round(), text_y2, text_color_fix_all, 0.8);
-
-            self.push_rounded_rect(btn_x_logs, btn_y2, bw_logs, btn_h, 3.0 * s, btn_bg_logs);
-            self.draw_string_scaled(label_logs, (btn_x_logs + btn_pad).round(), text_y2,[0.8, 0.85, 1.0, 1.0], 0.8);
-
-                                                if is_expanded {
-                let log_bg_x = card_x + pad_x;
-                let log_bg_y = btn_y2 + btn_h + 10.0 * s;
-                let log_bg_w = card_w - pad_x * 2.0;
-                let log_bg_h = logs_h - 18.0 * s;
-
-                                let border_color = if lsp_logs_focused.as_deref() == Some(info.name) {[0.44, 0.28, 0.75, 0.8]
-                } else {[0.1, 0.1, 0.12, 1.0]
+                let btn_bg_restart = if hover_restart {
+                    [0.35, 0.35, 0.40, 1.0]
+                } else {
+                    [0.26, 0.26, 0.32, 1.0]
+                };
+                let btn_bg_toggle = if hover_toggle {
+                    [0.35, 0.35, 0.40, 1.0]
+                } else {
+                    [0.26, 0.26, 0.32, 1.0]
+                };
+                let btn_bg_logs = if hover_logs {
+                    [0.35, 0.35, 0.40, 1.0]
+                } else {
+                    [0.26, 0.26, 0.32, 1.0]
+                };
+                let btn_bg_stop = if is_stopped {
+                    [0.20, 0.20, 0.25, 0.6]
+                } else if hover_stop {
+                    [0.45, 0.22, 0.22, 1.0]
+                } else {
+                    [0.32, 0.15, 0.15, 1.0]
+                };
+                let btn_bg_fix_all = if !fix_enabled {
+                    [0.18, 0.18, 0.22, 0.6]
+                } else if hover_fix_all {
+                    [0.22, 0.42, 0.28, 1.0]
+                } else {
+                    [0.15, 0.30, 0.20, 1.0]
                 };
 
-                self.push_rounded_rect(log_bg_x - 1.0, log_bg_y - 1.0, log_bg_w + 2.0, log_bg_h + 2.0, 4.0 * s, border_color);
-                self.push_rounded_rect(log_bg_x, log_bg_y, log_bg_w, log_bg_h, 4.0 * s,[0.08, 0.08, 0.10, 1.0]);
+                let text_color_stop = if is_stopped {
+                    [0.55, 0.55, 0.60, 1.0]
+                } else {
+                    [0.95, 0.55, 0.55, 1.0]
+                };
+                let text_color_fix_all = if !fix_enabled {
+                    [0.40, 0.40, 0.44, 1.0]
+                } else {
+                    [0.55, 0.95, 0.65, 1.0]
+                };
 
-                self.flush();
-                let inter_y1 = log_bg_y.max(content_y);
-                let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
-                let inter_h = (inter_y2 - inter_y1).max(0.0);
+                let text_y1 = (btn_y1 + btn_h / 2.0 + 4.0 * s).round();
+                let text_y2 = (btn_y2 + btn_h / 2.0 + 4.0 * s).round();
 
-                                if inter_h > 0.0 {
-                    unsafe {
-                        self.gl.enable(glow::SCISSOR_TEST);
-                        let sy = (self.height - inter_y2).round() as i32;
-                        self.gl.scissor(
-                            log_bg_x.round() as i32,
-                            sy,
-                            log_bg_w.round() as i32,
-                            inter_h.round() as i32,
-                        );
-                    }
+                self.push_rounded_rect(
+                    btn_x_restart,
+                    btn_y1,
+                    bw_restart,
+                    btn_h,
+                    3.0 * s,
+                    btn_bg_restart,
+                );
+                self.draw_string_scaled(
+                    label_restart,
+                    (btn_x_restart + btn_pad).round(),
+                    text_y1,
+                    self.theme.fg,
+                    0.8,
+                );
 
-                    let line_h = 16.0 * s;
-                    let max_lines_vis = (log_bg_h / line_h) as usize + 1;
+                self.push_rounded_rect(
+                    btn_x_toggle,
+                    btn_y1,
+                    bw_toggle,
+                    btn_h,
+                    3.0 * s,
+                    btn_bg_toggle,
+                );
+                self.draw_string_scaled(
+                    label_toggle,
+                    (btn_x_toggle + btn_pad).round(),
+                    text_y1,
+                    self.theme.fg,
+                    0.8,
+                );
 
-                    let mut total_lines = 0;
-                    let mut lines_per_entry = Vec::with_capacity(info.logs.len());
-                    for entry in &info.logs {
-                        let cnt = entry.text.split('\n').count();
-                        total_lines += cnt;
-                        lines_per_entry.push(cnt);
-                    }
-                    let start_line = total_lines.saturating_sub(max_lines_vis);
+                self.push_rounded_rect(btn_x_stop, btn_y1, bw_stop, btn_h, 3.0 * s, btn_bg_stop);
+                self.draw_string_scaled(
+                    label_stop,
+                    (btn_x_stop + btn_pad).round(),
+                    text_y1,
+                    text_color_stop,
+                    0.8,
+                );
 
-                    let mut entry_idx = 0;
-                    let mut lines_skipped = 0;
-                    while entry_idx < info.logs.len() {
-                        if lines_skipped + lines_per_entry[entry_idx] > start_line {
-                            break;
+                self.push_rounded_rect(
+                    btn_x_fix_all,
+                    btn_y2,
+                    bw_fix_all,
+                    btn_h,
+                    3.0 * s,
+                    btn_bg_fix_all,
+                );
+                self.draw_string_scaled(
+                    label_fix_all,
+                    (btn_x_fix_all + btn_pad).round(),
+                    text_y2,
+                    text_color_fix_all,
+                    0.8,
+                );
+
+                self.push_rounded_rect(btn_x_logs, btn_y2, bw_logs, btn_h, 3.0 * s, btn_bg_logs);
+                self.draw_string_scaled(
+                    label_logs,
+                    (btn_x_logs + btn_pad).round(),
+                    text_y2,
+                    [0.8, 0.85, 1.0, 1.0],
+                    0.8,
+                );
+
+                if is_expanded {
+                    let log_bg_x = card_x + pad_x;
+                    let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+                    let log_bg_w = card_w - pad_x * 2.0;
+                    let log_bg_h = logs_h - 18.0 * s;
+
+                    let border_color = if lsp_logs_focused.as_deref() == Some(info.name) {
+                        [0.44, 0.28, 0.75, 0.8]
+                    } else {
+                        [0.1, 0.1, 0.12, 1.0]
+                    };
+
+                    self.push_rounded_rect(
+                        log_bg_x - 1.0,
+                        log_bg_y - 1.0,
+                        log_bg_w + 2.0,
+                        log_bg_h + 2.0,
+                        4.0 * s,
+                        border_color,
+                    );
+                    self.push_rounded_rect(
+                        log_bg_x,
+                        log_bg_y,
+                        log_bg_w,
+                        log_bg_h,
+                        4.0 * s,
+                        [0.08, 0.08, 0.10, 1.0],
+                    );
+
+                    self.flush();
+                    let inter_y1 = log_bg_y.max(content_y);
+                    let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
+                    let inter_h = (inter_y2 - inter_y1).max(0.0);
+
+                    if inter_h > 0.0 {
+                        unsafe {
+                            self.gl.enable(glow::SCISSOR_TEST);
+                            let sy = (self.height - inter_y2).round() as i32;
+                            self.gl.scissor(
+                                log_bg_x.round() as i32,
+                                sy,
+                                log_bg_w.round() as i32,
+                                inter_h.round() as i32,
+                            );
                         }
-                        lines_skipped += lines_per_entry[entry_idx];
-                        entry_idx += 1;
-                    }
 
-                    let mut sel_lo = 0;
-                    let mut sel_hi = 0;
-                    if let Some(log_ed) = lsp_log_editors.get(info.name) {
-                        let (lo, hi) = match log_ed.selection_anchor {
-                            Some(anchor) => (anchor.min(log_ed.cursor), anchor.max(log_ed.cursor)),
-                            None => (log_ed.cursor, log_ed.cursor),
-                        };
-                        sel_lo = lo;
-                        sel_hi = hi;
-                    }
+                        let line_h = 16.0 * s;
+                        let _first_visible_line = (scroll_y / line_h).floor() as usize;
 
-                    let mut text_y = log_bg_y + 16.0 * s;
-                    let mut current_global_line = lines_skipped;
-                    let mut global_byte_off: usize = info.logs[..entry_idx].iter().map(|e| e.text.len() + 1).sum();
+                        let mut sel_lo = 0;
+                        let mut sel_hi = 0;
+                        if let Some(log_ed) = lsp_log_editors.get(info.name) {
+                            let (lo, hi) = match log_ed.selection_anchor {
+                                Some(anchor) => (anchor.min(log_ed.cursor), anchor.max(log_ed.cursor)),
+                                None => (log_ed.cursor, log_ed.cursor),
+                            };
+                            sel_lo = lo;
+                            sel_hi = hi;
+                        }
 
-                    for entry in &info.logs[entry_idx..] {
-                        let mut line_byte_off = 0;
-                        for line in entry.text.split('\n') {
-                            if current_global_line >= start_line {
-                                let abs_line_start = global_byte_off + line_byte_off;
-                                let abs_line_end = abs_line_start + line.len();
+                        let mut text_y = log_bg_y + 16.0 * s;
+                        let mut global_line_count = 0;
+                        let mut global_byte_off: usize = 0;
+                        let mut skip_until = None;
 
-                                if sel_lo < sel_hi && sel_lo <= abs_line_end && sel_hi > abs_line_start {
-                                    let in_s = sel_lo.saturating_sub(abs_line_start).min(line.len());
-                                    let in_e = sel_hi.saturating_sub(abs_line_start).min(line.len());
-                                    let in_s = (0..=in_s).rev()
-                                        .find(|&i| line.is_char_boundary(i)).unwrap_or(0);
-                                    let in_e = (in_e..=line.len())
-                                        .find(|&i| line.is_char_boundary(i)).unwrap_or(line.len());
-                                    let x1 = log_bg_x + 6.0 * s
-                                        + self.measure_mono_width(&line[..in_s], 0.7)
-                                        - scroll_x.round();
-                                    let x2 = log_bg_x + 6.0 * s
-                                        + self.measure_mono_width(&line[..in_e], 0.7)
-                                        - scroll_x.round();
-                                    let ry = text_y - 14.0 * s;
-                                    let x1c = x1.max(log_bg_x);
-                                    let x2c = x2.min(log_bg_x + log_bg_w);
-                                    if x2c > x1c {
-                                        self.push_rounded_rect(x1c, ry, x2c - x1c, line_h, 0.0,[0.40, 0.28, 0.72, 0.45]);
+                        'entry_loop: for entry in &info.logs {
+                            let mut line_byte_off_in_entry = 0;
+                            for line in entry.text.split('\n') {
+                                if let Some(tgt) = skip_until {
+                                    if global_line_count < tgt {
+                                        global_line_count += 1;
+                                        line_byte_off_in_entry += line.len() + 1;
+                                        continue;
+                                    } else {
+                                        skip_until = None;
                                     }
                                 }
 
-                                let mut current_x = log_bg_x + 6.0 * s - scroll_x.round();
-                                let mut i = 0;
-                                while i < line.len() {
-                                    let abs_byte = line_byte_off + i;
-                                    let mut color =[0.875, 0.882, 0.902, 1.0];
-                                    let mut chunk_end = line.len();
+                                if text_y > inter_y2 + line_h {
+                                    break 'entry_loop;
+                                }
 
-                                    for span in &entry.spans {
-                                        if abs_byte >= span.start && abs_byte < span.end {
-                                            color = span.color;
-                                            chunk_end = chunk_end.min(span.end - line_byte_off);
-                                            break;
-                                        } else if span.start > abs_byte {
-                                            chunk_end = chunk_end.min(span.start - line_byte_off);
+                                if text_y + line_h > inter_y1 {
+                                    let abs_line_start = global_byte_off + line_byte_off_in_entry;
+                                    let abs_line_end = abs_line_start + line.len();
+
+                                    if sel_lo < sel_hi && sel_lo <= abs_line_end && sel_hi > abs_line_start {
+                                        let in_s = sel_lo.saturating_sub(abs_line_start).min(line.len());
+                                        let in_e = sel_hi.saturating_sub(abs_line_start).min(line.len());
+                                        let in_s = (0..=in_s).rev().find(|&i| line.is_char_boundary(i)).unwrap_or(0);
+                                        let in_e = (in_e..=line.len()).find(|&i| line.is_char_boundary(i)).unwrap_or(line.len());
+                                        let x1 = log_bg_x + 20.0 * s + self.measure_mono_width(&line[..in_s], 0.7) - scroll_x.round();
+                                        let x2 = log_bg_x + 20.0 * s + self.measure_mono_width(&line[..in_e], 0.7) - scroll_x.round();
+                                        let ry = text_y - 14.0 * s;
+                                        let x1c = x1.max(log_bg_x);
+                                        let x2c = x2.min(log_bg_x + log_bg_w);
+                                        if x2c > x1c {
+                                            self.push_rounded_rect(x1c, ry, x2c - x1c, line_h, 0.0, [0.40, 0.28, 0.72, 0.45]);
                                         }
                                     }
 
-                                    let text_chunk = &line[i..chunk_end];
-                                    self.draw_string_mono_scaled(text_chunk, current_x, text_y, color, 0.7);
-                                    current_x += self.measure_mono_width(text_chunk, 0.7);
-                                    i = chunk_end;
+                                    let mut current_x = log_bg_x + 20.0 * s - scroll_x.round();
+                                    let mut i = 0;
+                                    while i < line.len() {
+                                        let abs_byte = line_byte_off_in_entry + i;
+                                        let mut color = [0.875, 0.882, 0.902, 1.0];
+                                        let mut chunk_end = line.len();
+
+                                        for span in &entry.spans {
+                                            if abs_byte >= span.start && abs_byte < span.end {
+                                                color = span.color;
+                                                chunk_end = chunk_end.min(span.end - (global_byte_off + line_byte_off_in_entry));
+                                                break;
+                                            } else if span.start > abs_byte {
+                                                chunk_end = chunk_end.min(span.start - (global_byte_off + line_byte_off_in_entry));
+                                            }
+                                        }
+                                        chunk_end = chunk_end.min(line.len());
+
+                                        let text_chunk = &line[i..chunk_end];
+                                        self.draw_string_mono_scaled(text_chunk, current_x, text_y, color, 0.7);
+                                        current_x += self.measure_mono_width(text_chunk, 0.7);
+                                        i = chunk_end;
+                                    }
+
+                                    if let Some(log_ed) = lsp_log_editors.get(info.name) {
+                                        let is_folded = log_ed.folded_lines.contains(&global_line_count);
+                                        let is_foldable = log_ed.foldable_lines.contains_key(&global_line_count);
+                                        if is_foldable {
+                                            let icon = if is_folded { "\u{f0115}" } else { "\u{f0114}" };
+                                            self.draw_string_scaled(icon, log_bg_x + 4.0 * s - scroll_x.round(), text_y, [0.6, 0.6, 0.7, 1.0], 0.75);
+                                        }
+                                        if is_folded {
+                                            let btn_w = self.measure_ui_width("...", 0.8) + 10.0 * s;
+                                            self.push_rounded_rect(current_x + 5.0 * s, text_y - 12.0 * s, btn_w, line_h - 2.0 * s, 3.0 * s, [1.0, 1.0, 1.0, 0.1]);
+                                            self.draw_string_scaled("...", current_x + 10.0 * s, text_y, [0.8, 0.8, 0.8, 1.0], 0.8);
+                                            skip_until = Some(log_ed.foldable_lines[&global_line_count]);
+                                        }
+                                    }
                                 }
                                 text_y += line_h;
+                                line_byte_off_in_entry += line.len() + 1;
+                                global_line_count += 1;
                             }
-                            line_byte_off += line.len() + 1;
-                            current_global_line += 1;
+                            global_byte_off += entry.text.len() + 1;
                         }
-                        global_byte_off += entry.text.len() + 1;
-                    }
 
-                    self.flush();
-                    unsafe {
-                        let sy = (self.height - (content_y + content_h)).round() as i32;
-                        self.gl.scissor(
-                            content_x.round() as i32,
-                            sy,
-                            content_w.round() as i32,
-                            content_h.round() as i32,
-                        );
+                        self.flush();
+                        unsafe {
+                            let sy = (self.height - (content_y + content_h)).round() as i32;
+                            self.gl.scissor(
+                                content_x.round() as i32,
+                                sy,
+                                content_w.round() as i32,
+                                content_h.round() as i32,
+                            );
+                        }
                     }
                 }
             }
-                        }
             current_y += row_h + 16.0 * s;
         }
 
@@ -319,7 +515,8 @@ impl Renderer {
                 thumb_y,
                 10.0 * s,
                 thumb_h,
-                5.0 * s,[1.0, 1.0, 1.0, 0.22],
+                5.0 * s,
+                [1.0, 1.0, 1.0, 0.22],
             );
         }
 
@@ -334,7 +531,8 @@ impl Renderer {
                 content_y + content_h - 12.0 * s,
                 thumb_w,
                 10.0 * s,
-                5.0 * s,[1.0, 1.0, 1.0, 0.22],
+                5.0 * s,
+                [1.0, 1.0, 1.0, 0.22],
             );
         }
 
@@ -359,9 +557,22 @@ impl Renderer {
                 let h = 36.0 * s;
                 let x = menu.menu_x;
                 let y = menu.menu_y;
-                self.push_rounded_rect(x - 2.0, y - 2.0, w + 4.0, h + 4.0, 5.0 * s, [0.20, 0.20, 0.25, 1.0]);
+                self.push_rounded_rect(
+                    x - 2.0,
+                    y - 2.0,
+                    w + 4.0,
+                    h + 4.0,
+                    5.0 * s,
+                    [0.20, 0.20, 0.25, 1.0],
+                );
                 self.push_rounded_rect(x, y, w, h, 4.0 * s, [0.14, 0.15, 0.19, 1.0]);
-                self.draw_string_scaled("Загрузка...", x + 12.0 * s, y + h / 2.0 + 6.0 * s, [0.5, 0.5, 0.5, 1.0], 0.9);
+                self.draw_string_scaled(
+                    "Загрузка...",
+                    x + 12.0 * s,
+                    y + h / 2.0 + 6.0 * s,
+                    [0.5, 0.5, 0.5, 1.0],
+                    0.9,
+                );
             }
             return false;
         }
@@ -380,19 +591,42 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
-        let hovered = mx >= mx_pos && mx <= mx_pos + menu_w && my >= my_pos && my <= my_pos + menu_h;
+        let hovered =
+            mx >= mx_pos && mx <= mx_pos + menu_w && my >= my_pos && my <= my_pos + menu_h;
 
         // Тень
-        self.push_rounded_rect(mx_pos + 4.0 * s, my_pos + 4.0 * s, menu_w, menu_h, 6.0 * s, [0.0, 0.0, 0.0, 0.45]);
+        self.push_rounded_rect(
+            mx_pos + 4.0 * s,
+            my_pos + 4.0 * s,
+            menu_w,
+            menu_h,
+            6.0 * s,
+            [0.0, 0.0, 0.0, 0.45],
+        );
         // Фон меню + рамка
-        self.push_rounded_rect(mx_pos - 1.0, my_pos - 1.0, menu_w + 2.0, menu_h + 2.0, 6.0 * s, [0.35, 0.25, 0.50, 0.6]);
-        self.push_rounded_rect(mx_pos, my_pos, menu_w, menu_h, 5.0 * s, [0.12, 0.13, 0.17, 1.0]);
+        self.push_rounded_rect(
+            mx_pos - 1.0,
+            my_pos - 1.0,
+            menu_w + 2.0,
+            menu_h + 2.0,
+            6.0 * s,
+            [0.35, 0.25, 0.50, 0.6],
+        );
+        self.push_rounded_rect(
+            mx_pos,
+            my_pos,
+            menu_w,
+            menu_h,
+            5.0 * s,
+            [0.12, 0.13, 0.17, 1.0],
+        );
 
         for (i, item) in menu.items.iter().enumerate() {
             let item_y = my_pos + 4.0 * s + i as f32 * item_h;
 
             let is_selected = i == menu.selected;
-            let is_hovered = mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
+            let is_hovered =
+                mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
 
             if is_selected || is_hovered {
                 let hi_color = if is_selected {
@@ -400,7 +634,14 @@ impl Renderer {
                 } else {
                     [0.20, 0.20, 0.28, 1.0]
                 };
-                self.push_rounded_rect(mx_pos + 3.0 * s, item_y + 1.0, menu_w - 6.0 * s, item_h - 2.0, 4.0 * s, hi_color);
+                self.push_rounded_rect(
+                    mx_pos + 3.0 * s,
+                    item_y + 1.0,
+                    menu_w - 6.0 * s,
+                    item_h - 2.0,
+                    4.0 * s,
+                    hi_color,
+                );
             }
 
             let (icon_str, label, label_color) = match item {
@@ -413,9 +654,11 @@ impl Renderer {
                     let _ = codes;
                     ("🔇", "Добавить # noqa: …", [0.80, 0.75, 0.55, 1.0])
                 }
-                crate::app::LspActionItem::AddNoqaAll => {
-                    ("🔕", "Добавить # noqa (отключить все)", [0.65, 0.60, 0.50, 1.0])
-                }
+                crate::app::LspActionItem::AddNoqaAll => (
+                    "🔕",
+                    "Добавить # noqa (отключить все)",
+                    [0.65, 0.60, 0.50, 1.0],
+                ),
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;
@@ -434,9 +677,13 @@ impl Renderer {
             // Подсказка по типу действия (quickfix/source)
             if let crate::app::LspActionItem::CodeAction(action) = item {
                 if let Some(kind) = &action.kind {
-                    let kind_short = if kind.contains("fixAll") { "fix all" }
-                        else if kind.contains("quickfix") { "quickfix" }
-                        else { kind.as_str() };
+                    let kind_short = if kind.contains("fixAll") {
+                        "fix all"
+                    } else if kind.contains("quickfix") {
+                        "quickfix"
+                    } else {
+                        kind.as_str()
+                    };
                     let kind_w = self.measure_ui_width(kind_short, 0.72);
                     self.draw_string_scaled(
                         kind_short,
@@ -496,7 +743,7 @@ impl Renderer {
         y: f32,
         size: f32,
     ) {
-                if !self.file_icon_cache.contains_key(key) {
+        if !self.file_icon_cache.contains_key(key) {
             let pre_rasterized = {
                 let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
                 if let Some(opt_data) = cache.get_mut(key) {

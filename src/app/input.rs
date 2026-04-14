@@ -90,13 +90,34 @@ impl App {
                         self.ide_panel.lsp_scroll_x.scroll_by(dx);
                     }
 
-                                        let mut total_h = 8.0 * s;
-                    let mut max_log_w = 0.0f32;
-                    for info in &self.ide_panel.lsp_servers {
-                        let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                        total_h += 136.0 * s + logs_h + 16.0 * s;
-                        if is_expanded {
+                                                                                let mut total_h = 8.0 * s;
+                                                            let mut max_log_w = 0.0f32;
+                                                            for info in &self.ide_panel.lsp_servers {
+                                                                let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                                                                let mut logs_h = 0.0;
+                                                                if is_expanded {
+                                                                    let mut lines = 0;
+                                                                    let mut skip_until = None;
+                                                                    if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+                                                                        for i in 0..ed.line_offsets.len() {
+                                                                            if let Some(tgt) = skip_until {
+                                                                                if i < tgt { continue; }
+                                                                                skip_until = None;
+                                                                            }
+                                                                            lines += 1;
+                                                                            if ed.folded_lines.contains(&i) {
+                                                                                skip_until = Some(ed.foldable_lines[&i]);
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        for entry in &info.logs {
+                                                                            lines += entry.text.split('\n').count();
+                                                                        }
+                                                                    }
+                                                                    logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                                                                }
+                                                                total_h += 136.0 * s + logs_h + 16.0 * s;
+                                                                if is_expanded {
                             for line in &info.logs {
                                 let mut draw_str = line.text.as_str();
                                 if draw_str.len() > 250 {
@@ -333,11 +354,32 @@ impl App {
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
 
-                                        let mut total_h = 8.0 * s;
+                                                                                let mut total_h = 8.0 * s;
                     let mut max_log_w = 0.0f32;
                                         for info in self.ide_panel.lsp_servers.iter() {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
+                        let mut logs_h = 0.0;
+                        if is_expanded {
+                            let mut lines = 0;
+                            let mut skip_until = None;
+                            if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+                                for i in 0..ed.line_offsets.len() {
+                                    if let Some(tgt) = skip_until {
+                                        if i < tgt { continue; }
+                                        skip_until = None;
+                                    }
+                                    lines += 1;
+                                    if ed.folded_lines.contains(&i) {
+                                        skip_until = Some(ed.foldable_lines[&i]);
+                                    }
+                                }
+                            } else {
+                                for entry in &info.logs {
+                                    lines += entry.text.split('\n').count();
+                                }
+                            }
+                            logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                        }
                         total_h += 136.0 * s + logs_h + 16.0 * s;
                         if is_expanded {
                             for line in &info.logs {
@@ -394,11 +436,32 @@ impl App {
                     let servers_copy = self.ide_panel.lsp_servers.clone();
                     let mut current_y = cy + 8.0 * s - scroll_y;
 
-                                        for info in servers_copy.iter() {
-                        let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                        let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                        let base_h = 136.0 * s;
-                        let row_h = base_h + logs_h;
+                                                                                for info in servers_copy.iter() {
+                                                                let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                                                                let mut logs_h = 0.0;
+                                                                if is_expanded {
+                                                                    let mut lines = 0;
+                                                                    let mut skip_until = None;
+                                                                    if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+                                                                        for i in 0..ed.line_offsets.len() {
+                                                                            if let Some(tgt) = skip_until {
+                                                                                if i < tgt { continue; }
+                                                                                skip_until = None;
+                                                                            }
+                                                                            lines += 1;
+                                                                            if ed.folded_lines.contains(&i) {
+                                                                                skip_until = Some(ed.foldable_lines[&i]);
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        for entry in &info.logs {
+                                                                            lines += entry.text.split('\n').count();
+                                                                        }
+                                                                    }
+                                                                    logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                                                                }
+                                                                let base_h = 136.0 * s;
+                                                                let row_h = base_h + logs_h;
 
                         // Only process clicks if visible
                         if current_y + row_h > cy && current_y < cy + ch {
@@ -555,87 +618,114 @@ impl App {
                             }
 
                                                         // Клик по области логов — фокус + позиция курсора
-                            if is_expanded {
+                                                        if is_expanded {
                                 let log_bg_y = btn_y2 + btn_h + 10.0 * s;
-                                let log_bg_h = logs_h - 18.0 * s;
+                                let box_h = logs_h - 18.0 * s;
                                 let log_bg_x = card_x + pad_x;
                                 let log_bg_w = card_w - pad_x * 2.0;
-                                if mx >= log_bg_x
-                                    && mx <= log_bg_x + log_bg_w
-                                    && my >= log_bg_y
-                                    && my <= log_bg_y + log_bg_h
-                                {
+
+                                if mx >= log_bg_x && mx <= log_bg_x + log_bg_w && my >= log_bg_y && my <= log_bg_y + box_h {
                                     self.ide_panel.lsp_logs_focused = Some(info.name.to_string());
-                                    // Вычислить позицию курсора в тексте
+
+                                    let mut text_y = log_bg_y + 16.0 * s;
+                                    let mut global_line_count = 0;
+                                    let mut skip_until = None;
                                     let line_h = 16.0 * s;
-                                    let max_lines = (log_bg_h / line_h) as usize + 1;
-                                    let start_idx = info.logs.len().saturating_sub(max_lines);
-                                    let clicked_rel = ((my - log_bg_y) / line_h) as usize;
-                                    let clicked_line = (start_idx + clicked_rel)
-                                        .min(info.logs.len().saturating_sub(1));
-                                                                        let mut byte_off: usize =
-                                                                                info.logs[..clicked_line].iter().map(|l| l.text.len() + 1).sum();
                                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
-                                    if let Some(line_str) = info.logs.get(clicked_line) {
-                                        let line_text = line_str.text.as_str();
-                                        let click_x_in_line =
-                                            (mx - log_bg_x - 6.0 * s + scroll_x).max(0.0);
-                                        let r = self.renderer.as_mut().unwrap();
-                                        let mut best_pos = 0usize;
-                                        let mut best_dist = f32::MAX;
-                                        let mut ci = 0usize;
-                                        for c in line_text.chars() {
-                                            let x = r.measure_mono_width(&line_text[..ci], 0.7);
-                                            if (x - click_x_in_line).abs() < best_dist {
-                                                best_dist = (x - click_x_in_line).abs();
-                                                best_pos = ci;
+
+                                    for entry in &info.logs {
+                                        for line in entry.text.split('\n') {
+                                            if let Some(tgt) = skip_until {
+                                                if global_line_count < tgt {
+                                                    global_line_count += 1;
+                                                    continue;
+                                                } else { skip_until = None; }
                                             }
-                                            ci += c.len_utf8();
-                                        }
-                                        // Проверить и правый край
-                                        let x_end = r.measure_mono_width(line_text, 0.7);
-                                                                                if (x_end - click_x_in_line).abs() < best_dist {
-                                            best_pos = line_text.len();
-                                        }
-                                        byte_off += best_pos;
-                                    }
-                                                                        if let Some(ed) =
-                                        self.ide_panel.lsp_log_editors.get_mut(info.name){
-                                        let shift = self.modifiers.shift_key();
 
-                                        let now = std::time::Instant::now();
-                                        let dx = mx - self.last_click_pos.0;
-                                        let dy = my - self.last_click_pos.1;
-                                        let dist_sq = dx * dx + dy * dy;
+                                            if my >= text_y - line_h && my <= text_y {
+                                                if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(info.name) {
+                                                    let is_foldable = ed.foldable_lines.contains_key(&global_line_count);
+                                                    let click_x_in_line = (mx - log_bg_x - 20.0 * s + scroll_x).max(0.0);
 
-                                        if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0 {
-                                            self.click_count += 1;
-                                        } else {
-                                            self.click_count = 1;
-                                        }
+                                                    let mut toggled = false;
+                                                    if is_foldable && mx >= log_bg_x && mx <= log_bg_x + 18.0 * s {
+                                                        if ed.folded_lines.contains(&global_line_count) {
+                                                            ed.folded_lines.remove(&global_line_count);
+                                                            ed.folded_start_bytes.remove(&ed.line_offsets[global_line_count]);
+                                                        } else {
+                                                            ed.folded_lines.insert(global_line_count);
+                                                            ed.folded_start_bytes.insert(ed.line_offsets[global_line_count]);
+                                                        }
+                                                        toggled = true;
+                                                    }
 
-                                        self.last_click_time = now;
-                                        self.last_click_pos = (mx, my);
+                                                    if !toggled {
+                                                        let r = self.renderer.as_mut().unwrap();
+                                                        let mut best_pos = 0usize;
+                                                        let mut best_dist = f32::MAX;
+                                                        let mut ci = 0usize;
+                                                        for c in line.chars() {
+                                                            let x = r.measure_mono_width(&line[..ci], 0.7);
+                                                            if (x - click_x_in_line).abs() < best_dist {
+                                                                best_dist = (x - click_x_in_line).abs();
+                                                                best_pos = ci;
+                                                            }
+                                                            ci += c.len_utf8();
+                                                        }
+                                                        let x_end = r.measure_mono_width(line, 0.7);
+                                                        if (x_end - click_x_in_line).abs() < best_dist {
+                                                            best_pos = line.len();
+                                                        }
+                                                        let line_start_byte = ed.line_offsets[global_line_count];
+                                                        let byte_off = (line_start_byte + best_pos).min(ed.len());
 
-                                        if shift {
-                                            if ed.selection_anchor.is_none() {
-                                                ed.selection_anchor = Some(ed.cursor);
+                                                        let shift = self.modifiers.shift_key();
+                                                        let now = std::time::Instant::now();
+                                                        let dx = mx - self.last_click_pos.0;
+                                                        let dy = my - self.last_click_pos.1;
+                                                        let dist_sq = dx * dx + dy * dy;
+
+                                                        if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0 {
+                                                            self.click_count += 1;
+                                                        } else {
+                                                            self.click_count = 1;
+                                                        }
+
+                                                        self.last_click_time = now;
+                                                        self.last_click_pos = (mx, my);
+
+                                                        if shift {
+                                                            if ed.selection_anchor.is_none() {
+                                                                ed.selection_anchor = Some(ed.cursor);
+                                                            }
+                                                        } else {
+                                                            ed.selection_anchor = None;
+                                                        }
+                                                        ed.cursor = byte_off;
+                                                        self.is_dragging_lsp_log = true;
+
+                                                        if self.click_count == 2 {
+                                                            ed.select_word();
+                                                        } else if self.click_count >= 3 {
+                                                            ed.select_line();
+                                                            self.click_count = 3;
+                                                        }
+                                                    }
+                                                }
+                                                self.window.as_ref().unwrap().request_redraw();
+                                                return;
                                             }
-                                        } else {
-                                            ed.selection_anchor = None;
-                                        }
-                                        ed.cursor = byte_off;
-                                        self.is_dragging_lsp_log = true;
 
-                                        if self.click_count == 2 {
-                                            ed.select_word();
-                                        } else if self.click_count >= 3 {
-                                            ed.select_line();
-                                            self.click_count = 3;
+                                            if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+                                                if ed.folded_lines.contains(&global_line_count) {
+                                                    skip_until = Some(ed.foldable_lines[&global_line_count]);
+                                                }
+                                            }
+
+                                            text_y += line_h;
+                                            global_line_count += 1;
                                         }
                                     }
-                                    self.window.as_ref().unwrap().request_redraw();
-                                    return;
                                 }
                             }
                                                 }
@@ -1727,7 +1817,7 @@ impl App {
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
-        if self.is_dragging_settings_ignore {
+                if self.is_dragging_settings_ignore {
             let w = (1000.0 * s)
                 .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
             let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
@@ -1755,119 +1845,142 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.settings_ignore_editor.cursor = target_idx;
-                } else if self.is_dragging_lsp_log {
+        } else if self.is_dragging_lsp_log {
             // Drag-selection в логах LSP
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
-                if let Some(_info) = self
-                    .ide_panel
-                    .lsp_servers
-                    .iter()
-                    .find(|i| i.name == focused_name.as_str())
-                {
-                    let s = self.renderer.as_ref().unwrap().scale_factor;
-                    // Пересчитать lsp_bounds
-                    let is_top = self.ide_panel.slots.iter().any(|sl| {
-                        sl.id == crate::app::PanelId::LspServers
-                            && sl.group == crate::app::PanelGroup::Top
-                    });
-                    let lsp_bounds = if is_top {
-                        let sb_w = 48.0 * s;
-                        let title_h = 32.0 * s;
-                        let panel_left_w = self.ide_panel.left_width * s;
-                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                        Some((sb_w, title_h, panel_left_w, wh - title_h))
-                    } else {
-                        let open_bottom: Vec<_> = self
-                            .ide_panel
-                            .slots
-                            .iter()
-                            .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
-                            .collect();
-                        if open_bottom
-                            .first()
-                            .map(|f| f.id == crate::app::PanelId::LspServers)
-                            .unwrap_or(false)
-                        {
+                let mut lsp_bounds = None;
+                let is_top = self.ide_panel.slots.iter().any(|sl| {
+                    sl.id == crate::app::PanelId::LspServers
+                        && sl.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    let sb_w = 48.0 * s;
+                    let title_h = 32.0 * s;
+                    let panel_left_w = self.ide_panel.left_width * s;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+                } else {
+                    let open_bottom: Vec<_> = self
+                        .ide_panel
+                        .slots
+                        .iter()
+                        .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                        .collect();
+                    if let Some(first) = open_bottom.first() {
+                        if first.id == crate::app::PanelId::LspServers {
                             let sb_w = 48.0 * s;
                             let tab_h = 32.0 * s;
                             let panel_bottom_h = self.ide_panel.bottom_height * s;
                             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                             let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                            Some((
+                            lsp_bounds = Some((
                                 sb_w,
                                 wh - panel_bottom_h + 1.0 + tab_h,
                                 ww - sb_w,
                                 panel_bottom_h - 1.0 - tab_h,
-                            ))
-                        } else {
-                            None
+                            ));
                         }
-                    };
-                    if let Some((cx, cy, _cw, _ch)) = lsp_bounds {
-                        let pad_x = 12.0 * s;
-                        let btn_h = 24.0 * s;
-                        let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
-                                                let scroll_x = self.ide_panel.lsp_scroll_x.current;
-                        let mut cur_y = cy + 8.0 * s - scroll_y;
-                        for srv in self.ide_panel.lsp_servers.clone().iter() {
-                            let is_exp = self.ide_panel.lsp_logs_expanded.contains(srv.name);
-                            let logs_h = if is_exp { 150.0 * s } else { 0.0 };
-                            let row_h = 136.0 * s + logs_h;
-                                                        if srv.name == focused_name.as_str() && is_exp {
-                                let card_x = cx + 12.0 * s;
-                                                                let _card_w = _cw - 24.0 * s;
-                                let btn_y1 = cur_y + 56.0 * s;
-                                let btn_y2 = btn_y1 + btn_h + 8.0 * s;
-                                let log_bg_x = card_x + pad_x;
-                                let log_bg_y = btn_y2 + btn_h + 10.0 * s;
-                                let log_bg_h = logs_h - 18.0 * s;
-                                let line_h = 16.0 * s;
-                                let max_lines = (log_bg_h / line_h) as usize + 1;
-                                let start_idx = srv.logs.len().saturating_sub(max_lines);
-                                let my_drag = position.y as f32;
-                                let clicked_rel = (((my_drag - log_bg_y) / line_h) as usize)
-                                    .min(max_lines.saturating_sub(1));
-                                let clicked_line =
-                                    (start_idx + clicked_rel).min(srv.logs.len().saturating_sub(1));
-                                let mut byte_off: usize =
-                                                                        srv.logs[..clicked_line].iter().map(|l| l.text.len() + 1).sum();
-                                if let Some(line_str) = srv.logs.get(clicked_line) {
-                                    let line_text = line_str.text.as_str();
-                                    let click_x_in_line = (position.x as f32 - log_bg_x - 6.0 * s
-                                        + scroll_x)
-                                        .max(0.0);
-                                    let r = self.renderer.as_mut().unwrap();
-                                    let mut best_pos = 0usize;
-                                    let mut best_dist = f32::MAX;
-                                    let mut ci = 0usize;
-                                    for c in line_text.chars() {
-                                        let x = r.measure_mono_width(&line_text[..ci], 0.7);
-                                        if (x - click_x_in_line).abs() < best_dist {
-                                            best_dist = (x - click_x_in_line).abs();
-                                            best_pos = ci;
-                                        }
-                                        ci += c.len_utf8();
+                    }
+                }
+
+                if let Some((cx, cy, _cw, _ch)) = lsp_bounds {
+                    let pad_x = 12.0 * s;
+                    let btn_h = 24.0 * s;
+                    let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
+                    let scroll_x = self.ide_panel.lsp_scroll_x.current;
+                    let mut cur_y = cy + 8.0 * s - scroll_y;
+
+                    for srv in self.ide_panel.lsp_servers.clone().iter() {
+                        let is_exp = self.ide_panel.lsp_logs_expanded.contains(srv.name);
+                        let mut logs_h = 0.0;
+                        if is_exp {
+                            let mut lines = 0;
+                            let mut skip_until = None;
+                            if let Some(ed) = self.ide_panel.lsp_log_editors.get(srv.name) {
+                                for i in 0..ed.line_offsets.len() {
+                                    if let Some(tgt) = skip_until {
+                                        if i < tgt { continue; }
+                                        skip_until = None;
                                     }
-                                    let x_end = r.measure_mono_width(line_text, 0.7);
-                                    if (x_end - click_x_in_line).abs() < best_dist {
-                                        best_pos = line_text.len();
+                                    lines += 1;
+                                    if ed.folded_lines.contains(&i) {
+                                        skip_until = Some(ed.foldable_lines[&i]);
                                     }
-                                    byte_off += best_pos;
                                 }
-                                if let Some(ed) = self
-                                    .ide_panel
-                                    .lsp_log_editors
-                                    .get_mut(focused_name.as_str())
-                                {
-                                    if ed.selection_anchor.is_none() {
-                                        ed.selection_anchor = Some(ed.cursor);
-                                    }
-                                    ed.cursor = byte_off;
-                                                                }
-                                break;
+                            } else {
+                                for entry in &srv.logs {
+                                    lines += entry.text.split('\n').count();
+                                }
                             }
-                            cur_y += row_h + 16.0 * s;
+                            logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
                         }
+                        let row_h = 136.0 * s + logs_h;
+
+                        if srv.name == focused_name.as_str() && is_exp {
+                            let card_x = cx + 12.0 * s;
+                            let btn_y1 = cur_y + 56.0 * s;
+                            let btn_y2 = btn_y1 + btn_h + 8.0 * s;
+                            let log_bg_x = card_x + pad_x;
+                            let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+
+                            let mut text_y = log_bg_y + 16.0 * s;
+                            let mut global_line_count = 0;
+                            let mut skip_until = None;
+                            let line_h = 16.0 * s;
+                            let my_drag = position.y as f32;
+
+                            for entry in &srv.logs {
+                                for line in entry.text.split('\n') {
+                                    if let Some(tgt) = skip_until {
+                                        if global_line_count < tgt {
+                                            global_line_count += 1;
+                                            continue;
+                                        } else { skip_until = None; }
+                                    }
+
+                                    if my_drag >= text_y - line_h && my_drag <= text_y {
+                                        if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(focused_name.as_str()) {
+                                            let click_x_in_line = (position.x as f32 - log_bg_x - 20.0 * s + scroll_x).max(0.0);
+                                            let r = self.renderer.as_mut().unwrap();
+                                            let mut best_pos = 0usize;
+                                            let mut best_dist = f32::MAX;
+                                            let mut ci = 0usize;
+                                            for c in line.chars() {
+                                                let x = r.measure_mono_width(&line[..ci], 0.7);
+                                                if (x - click_x_in_line).abs() < best_dist {
+                                                    best_dist = (x - click_x_in_line).abs();
+                                                    best_pos = ci;
+                                                }
+                                                ci += c.len_utf8();
+                                            }
+                                            let x_end = r.measure_mono_width(line, 0.7);
+                                            if (x_end - click_x_in_line).abs() < best_dist {
+                                                best_pos = line.len();
+                                            }
+                                            let line_start_byte = ed.line_offsets[global_line_count];
+                                            let byte_off = (line_start_byte + best_pos).min(ed.len());
+
+                                            if ed.selection_anchor.is_none() {
+                                                ed.selection_anchor = Some(ed.cursor);
+                                            }
+                                            ed.cursor = byte_off;
+                                        }
+                                        break;
+                                    }
+
+                                    if let Some(ed) = self.ide_panel.lsp_log_editors.get(srv.name) {
+                                        if ed.folded_lines.contains(&global_line_count) {
+                                            skip_until = Some(ed.foldable_lines[&global_line_count]);
+                                        }
+                                    }
+
+                                    text_y += line_h;
+                                    global_line_count += 1;
+                                }
+                            }
+                            break;
+                        }
+                        cur_y += row_h + 16.0 * s;
                     }
                 }
             }
@@ -1920,36 +2033,57 @@ impl App {
             }
         } else if self.ide_panel.lsp_scroll_y.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            let mut lsp_bounds = None;
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
-                sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
-            });
-            if is_top {
-                let sb_w = 48.0 * s;
-                let title_h = 32.0 * s;
-                let panel_left_w = self.ide_panel.left_width * s;
-                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
-            } else {
-                let open_bottom: Vec<_> = self.ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).collect();
-                if let Some(first) = open_bottom.first() {
-                    if first.id == crate::app::PanelId::LspServers {
-                        let sb_w = 48.0 * s;
-                        let tab_h = 32.0 * s;
-                        let panel_bottom_h = self.ide_panel.bottom_height * s;
-                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                        lsp_bounds = Some((sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h));
-                    }
-                }
-            }
-                        if let Some((_, cy, _, ch)) = lsp_bounds {
-                let mut total_h = 8.0 * s;
-                for info in self.ide_panel.lsp_servers.iter() {
-                    let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                    let logs_h = if is_expanded { 150.0 * s } else { 0.0 };
-                    total_h += 136.0 * s + logs_h + 16.0 * s;
-                }
+                        let mut lsp_bounds = None;
+                        let is_top = self.ide_panel.slots.iter().any(|sl| {
+                            sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
+                        });
+                        if is_top {
+                            let sb_w = 48.0 * s;
+                            let title_h = 32.0 * s;
+                            let panel_left_w = self.ide_panel.left_width * s;
+                            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                            lsp_bounds = Some((sb_w, title_h, panel_left_w, wh - title_h));
+                        } else {
+                            let open_bottom: Vec<_> = self.ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).collect();
+                            if let Some(first) = open_bottom.first() {
+                                if first.id == crate::app::PanelId::LspServers {
+                                    let sb_w = 48.0 * s;
+                                    let tab_h = 32.0 * s;
+                                    let panel_bottom_h = self.ide_panel.bottom_height * s;
+                                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                                    let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                                    lsp_bounds = Some((sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h));
+                                }
+                            }
+                        }
+                                    if let Some((_, cy, _, ch)) = lsp_bounds {
+                            let mut total_h = 8.0 * s;
+                            for info in self.ide_panel.lsp_servers.iter() {
+                                let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
+                                let mut logs_h = 0.0;
+                                if is_expanded {
+                                    let mut lines = 0;
+                                    let mut skip_until = None;
+                                    if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+                                        for i in 0..ed.line_offsets.len() {
+                                            if let Some(tgt) = skip_until {
+                                                if i < tgt { continue; }
+                                                skip_until = None;
+                                            }
+                                            lines += 1;
+                                            if ed.folded_lines.contains(&i) {
+                                                skip_until = Some(ed.foldable_lines[&i]);
+                                            }
+                                        }
+                                    } else {
+                                        for entry in &info.logs {
+                                            lines += entry.text.split('\n').count();
+                                        }
+                                    }
+                                    logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                                }
+                                total_h += 136.0 * s + logs_h + 16.0 * s;
+                            }
                 let track_h = ch - 10.0 * s;
                 let max_y = (total_h - ch).max(0.0);
                 let thumb_h = (ch / total_h * track_h).max(40.0 * s);
