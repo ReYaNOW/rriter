@@ -340,6 +340,9 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
+                                let lsp_diags = self.lsp.as_ref()
+                    .map(|l| l.diagnostics.as_slice())
+                    .unwrap_or(&[]);
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     self.scroll_x.current,
@@ -363,6 +366,7 @@ impl ApplicationHandler for App {
                     self.is_ide_mode,
                     &self.ide_panel,
                     self.show_settings,
+                    lsp_diags,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -845,6 +849,58 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             } else {
                 needs_redraw = true;
+            }
+        }
+
+                // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
+        if self.is_ide_mode {
+            if let Some(lsp) = &mut self.lsp {
+                for event in lsp.poll() {
+                    match event {
+                        crate::lsp::LspEvent::Diagnostics { .. } => {
+                            // lsp.diagnostics обновлены внутри poll() автоматически
+                            if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                        }
+                        crate::lsp::LspEvent::CodeActions { actions, .. } => {
+                            if let (Some(action), Some(path)) = (
+                                actions.into_iter().find(|a| a.edit.is_some()),
+                                self.file_path.clone(),
+                            ) {
+                                if let Some(edit) = action.edit {
+                                    let new_text = crate::lsp::apply_workspace_edit_to_text(
+                                        &self.editor.get_full_text(), &edit, &path,
+                                    );
+                                    if new_text != self.editor.get_full_text() {
+                                        let version = self.editor.version + 1;
+                                        self.editor = crate::editor::Editor::new(new_text.len() + 8192);
+                                        self.editor.version = version;
+                                        let _ = self.editor.insert_str(&new_text);
+                                        self.editor.cursor = 0;
+                                        self.editor.set_original_text();
+                                        self.highlighter.reset(
+                                            version,
+                                            new_text.clone(),
+                                            self.file_extension.clone(),
+                                        );
+                                        if let Some(lsp2) = &mut self.lsp {
+                                            lsp2.notify_change(
+                                                &path,
+                                                &self.file_extension.clone(),
+                                                &new_text,
+                                                version as i32,
+                                            );
+                                        }
+                                        if let Some(w) = self.window.as_ref() {
+                                            App::update_window_title(w, &self.base_title, true);
+                                            w.request_redraw();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        crate::lsp::LspEvent::ServerReady => {}
+                    }
+                }
             }
         }
 

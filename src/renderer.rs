@@ -1065,6 +1065,26 @@ impl Renderer {
         }
     }
 
+        /// Рисует волнистое подчёркивание (squiggle) — зигзаг из 2px квадратов.
+    /// `x` — начало, `baseline_y` — нижняя граница строки (baseline + descender),
+    /// `w` — ширина участка, `color` — цвет.
+    pub fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4]) {
+        let s = self.scale_factor;
+        let seg = 3.0 * s;   // ширина одного зубца
+        let h = 2.0 * s;     // высота зубца
+        let y0 = baseline_y;
+        let y1 = baseline_y + h;
+        let mut cx = x;
+        let mut up = true;
+        while cx < x + w {
+            let x2 = (cx + seg).min(x + w);
+            let ty = if up { y0 } else { y1 };
+            self.push_quad(cx, ty, x2 - cx, h, 0.0, 0.0, 0.0, 0.0, color, 4.0);
+            cx = x2;
+            up = !up;
+        }
+    }
+
     pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
         self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
     }

@@ -15,7 +15,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-    pub fn draw(
+        pub fn draw(
         &mut self,
         editor: &mut Editor,
         scroll_x: f32,
@@ -39,6 +39,7 @@ impl Renderer {
         is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
+        lsp_diagnostics: &[crate::lsp::Diagnostic],
     ) -> (bool, Vec<(usize, usize)>) {
         if show_welcome {
             return (self.draw_welcome(recent_files), Vec::new());
@@ -1102,7 +1103,52 @@ impl Renderer {
             }
         }
 
-        self.flush();
+                self.flush();
+
+        // LSP squiggles — волнистые подчёркивания диагностик
+        if !lsp_diagnostics.is_empty() {
+            let render_scroll_y = scroll_y.round();
+            let render_scroll_x = scroll_x.round();
+            for diag in lsp_diagnostics {
+                // Цвет по severity
+                let color: [f32; 4] = match diag.severity {
+                    crate::lsp::DiagSeverity::Error   => [0.96, 0.26, 0.21, 0.90],
+                    crate::lsp::DiagSeverity::Warning => [0.98, 0.75, 0.18, 0.90],
+                    crate::lsp::DiagSeverity::Info    => [0.26, 0.73, 0.90, 0.80],
+                    crate::lsp::DiagSeverity::Hint    => [0.50, 0.50, 0.50, 0.70],
+                };
+                let line = diag.start_line as usize;
+                if line >= editor.line_offsets.len() { continue; }
+                // Находим visual line для физической строки
+                let vis_idx = if line < self.phys_to_visual.len() {
+                    self.phys_to_visual[line]
+                } else {
+                    continue
+                };
+                if vis_idx >= self.visual_lines.len() { continue; }
+                let v_line = self.visual_lines[vis_idx];
+                let line_y = self.baseline_offset + v_line.y_offset - render_scroll_y;
+                let squiggle_y = line_y + 2.0 * self.scale_factor;
+
+                // Определяем X-диапазон из col (приближённо через char_advance для ASCII)
+                // UTF-16 col → pixel x: берём средний advance как aprox.
+                let avg_adv = self.char_advance(' ').max(self.char_advance('a'));
+                let sc = diag.start_col as f32;
+                let ec = if diag.end_line == diag.start_line {
+                    diag.end_col as f32
+                } else {
+                    sc + 8.0 // многострочная диагностика — минимум 8 символов
+                };
+                let x_start = self.left_padding + sc * avg_adv - render_scroll_x;
+                let x_end = self.left_padding + ec * avg_adv - render_scroll_x;
+                let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
+
+                if x_end < self.left_padding || x_start > self.width { continue; }
+
+                self.push_squiggle(x_start.max(self.left_padding), squiggle_y, squiggle_w, color);
+            }
+            self.flush();
+        }
 
         let gutter_x = if is_ide_mode {
             48.0 * s + panel_left_w

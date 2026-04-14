@@ -257,9 +257,11 @@ pub struct App {
     pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
-    pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
+        pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
+    /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
+    pub lsp: Option<crate::lsp::LspManager>,
 }
 
 impl App {
@@ -618,7 +620,13 @@ impl App {
         self.search_current_idx = None;
         self.show_search = false;
         self.autocomplete_active = false;
-        self.show_welcome = true;
+                self.show_welcome = true;
+        if self.is_ide_mode {
+            if let Some(lsp) = &mut self.lsp {
+                let ext = self.file_extension.clone();
+                lsp.notify_close(&ext);
+            }
+        }
 
         self.scroll_y.current = 0.0;
         self.scroll_y.target = 0.0;
@@ -746,10 +754,20 @@ impl App {
                 self.scroll_x.current = 0.0;
                 self.scroll_x.target = 0.0;
 
-                self.last_sent_version = u64::MAX;
+                                self.last_sent_version = u64::MAX;
                 self.search_results.clear();
                 self.search_current_idx = None;
                 self.autocomplete_active = false;
+                if self.is_ide_mode {
+                    if let Some(lsp) = &mut self.lsp {
+                        lsp.notify_open(
+                            &path,
+                            &self.file_extension,
+                            &content,
+                            self.editor.version as i32,
+                        );
+                    }
+                }
                 if let Some(w) = self.window.as_ref() {
                     App::update_window_title(w, &self.base_title, false);
                     w.request_redraw();

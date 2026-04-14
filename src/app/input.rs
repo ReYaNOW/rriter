@@ -1830,8 +1830,17 @@ impl App {
                 self.search_results.clear();
             }
 
-            if !self.editor.sync_edits.is_empty() {
+                        if !self.editor.sync_edits.is_empty() {
                 let edits = std::mem::take(&mut self.editor.sync_edits);
+                // LSP didChange — отправляем полный текст только если файл Python и IDE режим
+                if self.is_ide_mode {
+                    if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                        let text = self.editor.get_full_text();
+                        let ext = self.file_extension.clone();
+                        let path = path.clone();
+                        lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                    }
+                }
                 self.highlighter.apply_edits(self.editor.version, edits);
             }
             self.last_sent_version = self.editor.version;

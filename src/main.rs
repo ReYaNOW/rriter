@@ -2,6 +2,7 @@ mod app;
 mod editor;
 // mod generated;
 mod highlighter;
+mod lsp;
 mod queries;
 mod render_view;
 mod renderer;
@@ -457,8 +458,15 @@ F8\tПоказать/скрыть счетчик FPS
         settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
         ide_panel: crate::load_panel_state(),
-        file_tree_rx: None,
+                file_tree_rx: None,
         file_tree_notify_rx: None,
+        lsp: if is_ide_cli {
+            Some(crate::lsp::LspManager::new(
+                config.ide_workspaces.first().cloned(),
+            ))
+        } else {
+            None
+        },
     };
 
     app.highlighter.reset(
