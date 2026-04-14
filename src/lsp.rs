@@ -223,11 +223,25 @@ fn json_escape(s: &str) -> String {
 
 /// Сериализует путь → file:// URI
 fn path_to_uri(path: &str) -> String {
-    format!("file://{}", path)
+    let p = std::path::Path::new(path);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+    let mut s = abs.to_string_lossy().replace('\\', "/");
+    if !s.starts_with('/') {
+        s.insert(0, '/');
+    }
+    format!("file://{}", s)
 }
 
 fn uri_to_path(uri: &str) -> PathBuf {
-    let s = uri.strip_prefix("file://").unwrap_or(uri);
+    let mut s = uri.strip_prefix("file://").unwrap_or(uri);
+    // Для Windows (file:///C:/...) убираем первый слеш
+    if s.starts_with('/') && s.chars().nth(2) == Some(':') {
+        s = &s[1..];
+    }
     PathBuf::from(s)
 }
 
@@ -324,216 +338,75 @@ fn write_frame(writer: &mut BufWriter<std::process::ChildStdin>, body: &[u8]) ->
 /// Минимальный value-tree для парсинга LSP ответов без полной serde-схемы.
 /// Используем только базовый JSON-парсинг.
 
-fn get_str_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let search = format!("\"{}\":", key);
-    let start = json.find(&search)? + search.len();
-    let rest = json[start..].trim_start();
-    if rest.starts_with('"') {
-        let inner = &rest[1..];
-        let end = find_str_end(inner)?;
-        Some(&inner[..end])
-    } else {
-        None
-    }
-}
+fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
+    let range = v.get("range")?;
+    let start = range.get("start")?;
+    let end = range.get("end")?;
 
-fn get_num_field(json: &str, key: &str) -> Option<i64> {
-    let search = format!("\"{}\":", key);
-    let start = json.find(&search)? + search.len();
-    let rest = json[start..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
+    let sl = start.get("line")?.as_u64()? as u32;
+    let sc = start.get("character")?.as_u64()? as u32;
+    let el = end.get("line")?.as_u64()? as u32;
+    let ec = end.get("character")?.as_u64()? as u32;
 
-/// Находит конец строкового литерала (после открывающей кавычки)
-fn find_str_end(s: &str) -> Option<usize> {
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' => return Some(i),
-            b'\\' => i += 2,
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-fn unescape_json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('"') => out.push('"'),
-                Some('\\') => out.push('\\'),
-                Some('/') => out.push('/'),
-                Some('n') => out.push('\n'),
-                Some('r') => out.push('\r'),
-                Some('t') => out.push('\t'),
-                Some('u') => {
-                    let hex: String = chars.by_ref().take(4).collect();
-                    if let Ok(n) = u32::from_str_radix(&hex, 16) {
-                        if let Some(ch) = char::from_u32(n) {
-                            out.push(ch);
-                        }
-                    }
-                }
-                Some(c) => out.push(c),
-                None => {}
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// Извлекает все JSON-объекты из массива верхнего уровня
-/// (не рекурсивный full-парсер, но достаточно для LSP ответов)
-fn extract_array_objects(json: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let bytes = json.as_bytes();
-    let mut i = 0;
-    // Ищем начало массива
-    while i < bytes.len() && bytes[i] != b'[' { i += 1; }
-    if i >= bytes.len() { return result; }
-    i += 1;
-
-    loop {
-        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\n' || bytes[i] == b'\r' || bytes[i] == b'\t' || bytes[i] == b',') {
-            i += 1;
-        }
-        if i >= bytes.len() || bytes[i] == b']' { break; }
-        if bytes[i] == b'{' {
-            let start = i;
-            let mut depth = 0i32;
-            let mut in_str = false;
-            let mut escape = false;
-            while i < bytes.len() {
-                let b = bytes[i];
-                if escape { escape = false; i += 1; continue; }
-                if b == b'\\' && in_str { escape = true; i += 1; continue; }
-                if b == b'"' { in_str = !in_str; i += 1; continue; }
-                if !in_str {
-                    if b == b'{' { depth += 1; }
-                    else if b == b'}' {
-                        depth -= 1;
-                        if depth == 0 { i += 1; break; }
-                    }
-                }
-                i += 1;
-            }
-            result.push(&json[start..i]);
-        } else {
-            i += 1;
-        }
-    }
-    result
-}
-
-/// Извлекает значение ключа как JSON-подстроку (объект или массив)
-fn get_object_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let search = format!("\"{}\":", key);
-    let pos = json.find(&search)? + search.len();
-    let rest = json[pos..].trim_start();
-    let bytes = rest.as_bytes();
-    if bytes.is_empty() { return None; }
-    let opener = bytes[0];
-    if opener != b'{' && opener != b'[' { return None; }
-    let closer = if opener == b'{' { b'}' } else { b']' };
-    let mut depth = 0i32;
-    let mut in_str = false;
-    let mut escape = false;
-    for (i, &b) in bytes.iter().enumerate() {
-        if escape { escape = false; continue; }
-        if b == b'\\' && in_str { escape = true; continue; }
-        if b == b'"' { in_str = !in_str; continue; }
-        if !in_str {
-            if b == opener as u8 { depth += 1; }
-            else if b == closer { depth -= 1; if depth == 0 { return Some(&rest[..=i]); } }
-        }
-    }
-    None
-}
-
-// ── Парсинг диагностик ────────────────────────────────────────────────────────
-
-fn parse_diagnostic_obj(obj: &str) -> Option<Diagnostic> {
-    let range = get_object_field(obj, "range")?;
-    let start = get_object_field(range, "start")?;
-    let end = get_object_field(range, "end")?;
-
-    let sl = get_num_field(start, "line")? as u32;
-    let sc = get_num_field(start, "character")? as u32;
-    let el = get_num_field(end, "line")? as u32;
-    let ec = get_num_field(end, "character")? as u32;
-
-    let severity_n = get_num_field(obj, "severity").unwrap_or(1);
-    let severity = match severity_n {
+    let severity = match v.get("severity").and_then(|s| s.as_u64()).unwrap_or(1) {
         1 => DiagSeverity::Error,
         2 => DiagSeverity::Warning,
         3 => DiagSeverity::Info,
         _ => DiagSeverity::Hint,
     };
 
-    let message = if let Some(s) = get_str_field(obj, "message") {
-        unescape_json_str(s)
-    } else {
-        return None;
-    };
+    let message = v.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
 
-    // code может быть строкой или числом
-    let code: Option<String> = get_str_field(obj, "code")
-        .map(|s| s.to_string())
-        .or_else(|| get_num_field(obj, "code").map(|n| n.to_string()));
+    let code = v.get("code").and_then(|c| {
+        if let Some(s) = c.as_str() { Some(s.to_string()) }
+        else if let Some(n) = c.as_u64() { Some(n.to_string()) }
+        else { None }
+    });
 
-    let source = get_str_field(obj, "source").map(|s| s.to_string());
+    let source = v.get("source").and_then(|s| s.as_str()).map(|s| s.to_string());
 
     Some(Diagnostic { start_line: sl, start_col: sc, end_line: el, end_col: ec, severity, code, message, source })
 }
 
-// ── Парсинг TextEdit / WorkspaceEdit ─────────────────────────────────────────
+fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
+    let range = v.get("range")?;
+    let start = range.get("start")?;
+    let end_r = range.get("end")?;
 
-fn parse_text_edit_obj(obj: &str) -> Option<TextChange> {
-    let range = get_object_field(obj, "range")?;
-    let start = get_object_field(range, "start")?;
-    let end_r = get_object_field(range, "end")?;
+    let sl = start.get("line")?.as_u64()? as u32;
+    let sc = start.get("character")?.as_u64()? as u32;
+    let el = end_r.get("line")?.as_u64()? as u32;
+    let ec = end_r.get("character")?.as_u64()? as u32;
 
-    let sl = get_num_field(start, "line")? as u32;
-    let sc = get_num_field(start, "character")? as u32;
-    let el = get_num_field(end_r, "line")? as u32;
-    let ec = get_num_field(end_r, "character")? as u32;
-
-    let new_text = get_str_field(obj, "newText")
-        .map(unescape_json_str)
-        .unwrap_or_default();
+    let new_text = v.get("newText").and_then(|t| t.as_str()).unwrap_or("").to_string();
 
     Some(TextChange { start_line: sl, start_col: sc, end_line: el, end_col: ec, new_text })
 }
 
-fn parse_workspace_edit_from_json(json: &str) -> WorkspaceEdit {
+fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
     let mut edit = WorkspaceEdit::default();
 
-    // Формат 1: "changes": { "file:///path": [ TextEdit ] }
-    if let Some(changes_obj) = get_object_field(json, "changes") {
-        // Парсим ключи (URI) и массивы правок
-        parse_changes_object(changes_obj, &mut edit);
+    if let Some(changes) = v.get("changes").and_then(|c| c.as_object()) {
+        for (uri, edits) in changes {
+            let path = uri_to_path(uri);
+            if let Some(arr) = edits.as_array() {
+                let parsed_edits: Vec<TextChange> = arr.iter().filter_map(parse_text_edit_value).collect();
+                if !parsed_edits.is_empty() {
+                    edit.changes.entry(path).or_default().extend(parsed_edits);
+                }
+            }
+        }
     }
 
-    // Формат 2: "documentChanges": [ { textDocument: {uri}, edits: [TextEdit] } ]
-    if let Some(doc_changes) = get_object_field(json, "documentChanges") {
-        for item in extract_array_objects(doc_changes) {
-            if let Some(td) = get_object_field(item, "textDocument") {
-                if let Some(uri) = get_str_field(td, "uri") {
+    if let Some(doc_changes) = v.get("documentChanges").and_then(|d| d.as_array()) {
+        for item in doc_changes {
+            if let Some(td) = item.get("textDocument") {
+                if let Some(uri) = td.get("uri").and_then(|u| u.as_str()) {
                     let path = uri_to_path(uri);
-                    if let Some(edits_arr) = get_object_field(item, "edits") {
-                        let changes: Vec<TextChange> = extract_array_objects(edits_arr)
-                            .into_iter()
-                            .filter_map(parse_text_edit_obj)
-                            .collect();
-                        if !changes.is_empty() {
-                            edit.changes.entry(path).or_default().extend(changes);
+                    if let Some(edits) = item.get("edits").and_then(|e| e.as_array()) {
+                        let parsed_edits: Vec<TextChange> = edits.iter().filter_map(parse_text_edit_value).collect();
+                        if !parsed_edits.is_empty() {
+                            edit.changes.entry(path).or_default().extend(parsed_edits);
                         }
                     }
                 }
@@ -544,144 +417,109 @@ fn parse_workspace_edit_from_json(json: &str) -> WorkspaceEdit {
     edit
 }
 
-fn parse_changes_object(json: &str, edit: &mut WorkspaceEdit) {
-    // Итерируем по "uri": [edits] парам внутри объекта
-    let bytes = json.as_bytes();
-    let mut i = 0;
-    // Пропускаем открывающую {
-    while i < bytes.len() && bytes[i] != b'{' { i += 1; }
-    i += 1;
-
-    loop {
-        // Ищем ключ (URI)
-        while i < bytes.len() && bytes[i] != b'"' && bytes[i] != b'}' { i += 1; }
-        if i >= bytes.len() || bytes[i] == b'}' { break; }
-        i += 1; // skip "
-        let key_start = i;
-        while i < bytes.len() && bytes[i] != b'"' { i += 1; }
-        let uri = &json[key_start..i];
-        i += 1; // skip "
-        // Ищем :
-        while i < bytes.len() && bytes[i] != b':' { i += 1; }
-        i += 1;
-        // Ищем [
-        while i < bytes.len() && bytes[i] != b'[' && bytes[i] != b'}' { i += 1; }
-        if i >= bytes.len() || bytes[i] == b'}' { break; }
-
-        // Находим конец массива
-        let arr_start = i;
-        let mut depth = 0i32;
-        let mut in_s = false;
-        let mut esc = false;
-        let mut j = i;
-        while j < bytes.len() {
-            let b = bytes[j];
-            if esc { esc = false; j += 1; continue; }
-            if b == b'\\' && in_s { esc = true; j += 1; continue; }
-            if b == b'"' { in_s = !in_s; j += 1; continue; }
-            if !in_s {
-                if b == b'[' { depth += 1; }
-                else if b == b']' { depth -= 1; if depth == 0 { j += 1; break; } }
-            }
-            j += 1;
-        }
-        let arr_json = &json[arr_start..j];
-        i = j;
-
-        let path = uri_to_path(uri);
-        let changes: Vec<TextChange> = extract_array_objects(arr_json)
-            .into_iter()
-            .filter_map(parse_text_edit_obj)
-            .collect();
-        if !changes.is_empty() {
-            edit.changes.entry(path).or_default().extend(changes);
-        }
-    }
-}
-
-fn parse_code_action_obj(obj: &str) -> Option<CodeAction> {
-    let title = get_str_field(obj, "title")
-        .map(unescape_json_str)
-        .unwrap_or_default();
-
-    let kind = get_str_field(obj, "kind").map(|s| s.to_string());
-
-    let edit = get_object_field(obj, "edit")
-        .map(parse_workspace_edit_from_json);
+fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
+    let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
+    let kind = v.get("kind").and_then(|k| k.as_str()).map(|s| s.to_string());
+    let edit = v.get("edit").map(parse_workspace_edit_value);
 
     Some(CodeAction { title, kind, edit })
 }
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
-fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
-    let json = match std::str::from_utf8(body) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
+            fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
+                let msg: serde_json::Value = match serde_json::from_slice(body) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let log_msg = format!("[LSP RECV ERROR] {}: {}", e, String::from_utf8_lossy(body));
+                        let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
+                        return;
+                    }
+                };
 
-    let method = get_str_field(json, "method");
-    let id = get_num_field(json, "id");
+                let log_msg = format!("[LSP RECV] {}", serde_json::to_string(&msg).unwrap_or_default());
+                let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
 
-    match method {
-        // ── Уведомление от сервера: диагностика ──────────────────────────
-        Some("textDocument/publishDiagnostics") => {
-            if let Some(params) = get_object_field(json, "params") {
-                if let Some(uri) = get_str_field(params, "uri") {
-                    let path = uri_to_path(uri);
-                    let version = get_num_field(params, "version").map(|v| v as i32);
+                let method = msg.get("method").and_then(|v| v.as_str());
+        let id = msg.get("id").and_then(|v| {
+            v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        });
 
-                    let items = if let Some(diag_arr) = get_object_field(params, "diagnostics") {
-                        extract_array_objects(diag_arr)
-                            .into_iter()
-                            .filter_map(parse_diagnostic_obj)
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
+        match method {
+            Some("textDocument/publishDiagnostics") => {
+                if let Some(params) = msg.get("params") {
+                    if let Some(uri) = params.get("uri").and_then(|v| v.as_str()) {
+                        let path = uri_to_path(uri);
+                        let version = params.get("version").and_then(|v| v.as_i64()).map(|v| v as i32);
 
-                    let _ = event_tx.send(LspEvent::Diagnostics { path, version, items });
+                        let mut items = Vec::new();
+                        if let Some(diags) = params.get("diagnostics").and_then(|v| v.as_array()) {
+                            for d in diags {
+                                if let Some(diag) = parse_diagnostic_value(d) {
+                                    items.push(diag);
+                                }
+                            }
+                        }
+                        let _ = event_tx.send(LspEvent::Diagnostics { path, version, items });
+                    }
                 }
             }
-        }
-
-        // ── Сервер просит применить правку ───────────────────────────────
-        Some("workspace/applyEdit") => {
-            // Отвечаем серверу что применили (без ошибок)
-            // Сами правки шлём в главный поток как CodeActions
-            if let Some(params) = get_object_field(json, "params") {
-                if let Some(edit_obj) = get_object_field(params, "edit") {
-                    let edit = parse_workspace_edit_from_json(edit_obj);
-                    let action = CodeAction {
-                        title: "workspace/applyEdit".to_string(),
-                        kind: None,
-                        edit: Some(edit),
-                    };
-                    let _ = event_tx.send(LspEvent::CodeActions {
-                        request_id: -1,
-                        actions: vec![action],
-                    });
+            Some("workspace/applyEdit") => {
+                if let Some(params) = msg.get("params") {
+                    if let Some(edit_obj) = params.get("edit") {
+                        let edit = parse_workspace_edit_value(edit_obj);
+                        let action = CodeAction {
+                            title: "workspace/applyEdit".to_string(),
+                            kind: None,
+                            edit: Some(edit),
+                        };
+                        let _ = event_tx.send(LspEvent::CodeActions {
+                            request_id: -1,
+                            actions: vec![action],
+                        });
+                    }
                 }
             }
-        }
-
-        // ── Ответ на запрос initialize ───────────────────────────────────
-        Some("initialize") | None if id.is_some() && get_object_field(json, "result").is_some() => {
-            // Проверяем: если есть "result" и нет "error" — это успешный ответ
-            if get_object_field(json, "result").is_some()
-                && get_object_field(json, "error").is_none()
-            {
-                // Если это ответ на initialize — ничего не делаем, supervisor сам шлёт initialized
-                // Если это ответ на codeAction — парсим как array
+            Some("initialize") => {}
+            Some("window/logMessage") => {
+                if let Some(params) = msg.get("params") {
+                    if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
+                        let _ = event_tx.send(LspEvent::Log { name: server_name, message: msg_str.to_string() });
+                    }
+                }
+            }
+            Some("client/registerCapability") | Some("client/unregisterCapability") => {
                 if let Some(req_id) = id {
-                    if let Some(result) = get_object_field(json, "result") {
-                        // Пробуем распарсить как массив code actions
-                        if result.trim_start().starts_with('[') {
-                            let actions: Vec<CodeAction> = extract_array_objects(result)
-                                .into_iter()
-                                .filter_map(parse_code_action_obj)
-                                .collect();
-                            let _ = event_tx.send(LspEvent::CodeActions {
+                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
+                    let _ = out_tx.send(reply.into_bytes());
+                }
+            }
+            Some("workspace/configuration") => {
+                if let Some(req_id) = id {
+                    let mut count = 1;
+                    if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
+                        count = items.len().max(1);
+                    }
+                    let config_obj = r#"{"configurationPreference":"fileSystemFirst"}"#;
+                    let objs = vec![config_obj; count].join(",");
+                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
+                    let _ = out_tx.send(reply.into_bytes());
+                }
+            }
+            Some(m) => {
+                if let Some(req_id) = id {
+                    if m != "window/logMessage" && m != "textDocument/publishDiagnostics" && m != "workspace/applyEdit" {
+                        let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#, req_id);
+                        let _ = out_tx.send(reply.into_bytes());
+                    }
+                }
+            }
+            None => {
+                if let Some(req_id) = id {
+                    if let Some(result) = msg.get("result") {
+                        if let Some(arr) = result.as_array() {
+                            let actions: Vec<CodeAction> = arr.iter().filter_map(parse_code_action_value).collect();
+                                                        let _ = event_tx.send(LspEvent::CodeActions {
                                 request_id: req_id as i32,
                                 actions,
                             });
@@ -690,67 +528,7 @@ fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'stati
                 }
             }
         }
-
-        // ── Сервер шлёт запросы (например window/showMessage) ───────────
-                Some("window/logMessage") => {
-            if let Some(params) = get_object_field(json, "params") {
-                if let Some(msg) = get_str_field(params, "message") {
-                    let unescaped = unescape_json_str(msg);
-                    let _ = event_tx.send(LspEvent::Log { name: server_name, message: unescaped });
-                }
-            }
-        }
-
-                Some("client/registerCapability") | Some("client/unregisterCapability") => {
-            if let Some(req_id) = id {
-                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
-                let _ = out_tx.send(reply.into_bytes());
-            }
-        }
-
-                Some("workspace/configuration") => {
-            if let Some(req_id) = id {
-                let mut count = 1;
-                if let Some(params) = get_object_field(json, "params") {
-                    if let Some(items) = get_object_field(params, "items") {
-                        count = extract_array_objects(items).len().max(1);
-                    }
-                }
-                let empty_objs = vec![r#"{}"#; count].join(",");
-                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, empty_objs);
-                let _ = out_tx.send(reply.into_bytes());
-            }
-        }
-
-        Some(m) => {
-            // Игнорируем незнакомые уведомления. Если это запрос, отвечаем MethodNotFound, чтобы сервер не завис.
-            if let Some(req_id) = id {
-                if m != "window/logMessage" && m != "textDocument/publishDiagnostics" && m != "workspace/applyEdit" {
-                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#, req_id);
-                    let _ = out_tx.send(reply.into_bytes());
-                }
-            }
-        }
-
-        None => {
-            // Ответ на запрос (id есть, method нет)
-            if let Some(req_id) = id {
-                if let Some(result) = get_object_field(json, "result") {
-                    if result.trim_start().starts_with('[') {
-                        let actions: Vec<CodeAction> = extract_array_objects(result)
-                            .into_iter()
-                            .filter_map(parse_code_action_obj)
-                            .collect();
-                        let _ = event_tx.send(LspEvent::CodeActions {
-                            request_id: req_id as i32,
-                            actions,
-                        });
-                    }
-                }
-            }
-        }
     }
-}
 
 // ── Запуск процесса ───────────────────────────────────────────────────────────
 
@@ -761,9 +539,13 @@ struct SpawnedProcess {
 
 fn spawn_server(
     def: &'static LspServerDef,
+    workspace: Option<&Path>,
     event_tx: Sender<LspEvent>,
 ) -> Option<SpawnedProcess> {
     let mut cmd = Command::new(def.program);
+    if let Some(ws) = workspace {
+        cmd.current_dir(ws);
+    }
     for arg in def.args {
         cmd.arg(arg);
     }
@@ -869,8 +651,20 @@ struct OpenFile {
     text: String,
 }
 
-fn run_supervisor(
-    def: &'static LspServerDef,
+fn send_and_log(
+    out_tx: &Sender<Vec<u8>>,
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    msg: Vec<u8>,
+) -> Result<(), mpsc::SendError<Vec<u8>>> {
+    if let Ok(s) = std::str::from_utf8(&msg) {
+        let log_msg = format!("[LSP SEND] {}", s);
+        let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
+    }
+    out_tx.send(msg)
+}
+
+fn run_supervisor(def: &'static LspServerDef,
     workspace: Option<PathBuf>,
     cmd_rx: Receiver<Cmd>,
     event_tx: Sender<LspEvent>,
@@ -883,7 +677,7 @@ fn run_supervisor(
     'outer: loop {
         let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Starting });
         // ── Запускаем процесс ─────────────────────────────────────────
-        let mut proc = match spawn_server(def, event_tx.clone()) {
+        let mut proc = match spawn_server(def, workspace.as_deref(), event_tx.clone()) {
             Some(p) => p,
             None => {
                 let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Crashed });
@@ -894,12 +688,12 @@ fn run_supervisor(
         };
         restart_delay = Duration::from_millis(500); // сброс на удачный запуск
 
-        // ── Handshake: initialize ─────────────────────────────────────────
+                // ── Handshake: initialize ─────────────────────────────────────────
         init_id = next_id();
         let init_msg = make_initialize(init_id, workspace.as_deref());
-        if proc.out_tx.send(init_msg).is_err() {
+        if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
-        }
+                }
 
         // Ждём ответ на initialize (простой polling цикл)
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -918,19 +712,19 @@ fn run_supervisor(
             initialized = true;
             break;
         }
-        if !initialized { continue 'outer; }
+                if !initialized { continue 'outer; }
 
         // Шлём initialized notification
-        if proc.out_tx.send(make_initialized()).is_err() {
+        if send_and_log(&proc.out_tx, &event_tx, def.program, make_initialized()).is_err() {
             continue 'outer;
         }
                 let _ = event_tx.send(LspEvent::ServerReady);
         let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Running });
 
-        // Если был открыт файл — reopenуем после рестарта
+                // Если был открыт файл — reopenуем после рестарта
         if let Some(ref of) = open_file {
             let msg = make_did_open(&of.uri, of.lang, of.version, &of.text);
-            if proc.out_tx.send(msg).is_err() {
+            if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                 continue 'outer;
             }
         }
@@ -960,35 +754,35 @@ fn run_supervisor(
                         let _ = proc.child.kill();
                         break 'inner;
                     }
-                    Ok(Cmd::Open { uri, lang, version, text }) => {
+                                        Ok(Cmd::Open { uri, lang, version, text }) => {
                         let msg = make_did_open(&uri, lang, version, &text);
                         open_file = Some(OpenFile { uri, lang, version, text });
-                        if proc.out_tx.send(msg).is_err() { break 'inner; }
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
                     }
                     Ok(Cmd::Change { uri, version, text }) => {
                         if let Some(ref mut of) = open_file {
-                            of.version = version;
+                                                        of.version = version;
                             of.text = text.clone();
                         }
                         let msg = make_did_change_full(&uri, version, &text);
-                        if proc.out_tx.send(msg).is_err() { break 'inner; }
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
                     }
-                    Ok(Cmd::Close { uri: _ }) => {
+                                        Ok(Cmd::Close { uri: _ }) => {
                         if let Some(ref of) = open_file {
                             let msg = make_did_close(&of.uri);
-                            let _ = proc.out_tx.send(msg);
+                            let _ = send_and_log(&proc.out_tx, &event_tx, def.program, msg);
                         }
                         open_file = None;
                     }
-                    Ok(Cmd::CodeAction { id, uri, start_line, start_col, end_line, end_col, diagnostics_json }) => {
+                                        Ok(Cmd::CodeAction { id, uri, start_line, start_col, end_line, end_col, diagnostics_json }) => {
                         let msg = make_code_action(id, &uri, start_line, start_col, end_line, end_col, &diagnostics_json);
-                        if proc.out_tx.send(msg).is_err() { break 'inner; }
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
                     }
-                    Ok(Cmd::Shutdown) => {
+                                        Ok(Cmd::Shutdown) => {
                         let sid = next_id();
-                        let _ = proc.out_tx.send(make_shutdown(sid));
+                        let _ = send_and_log(&proc.out_tx, &event_tx, def.program, make_shutdown(sid));
                         thread::sleep(Duration::from_millis(200));
-                        let _ = proc.out_tx.send(make_exit());
+                        let _ = send_and_log(&proc.out_tx, &event_tx, def.program, make_exit());
                         let _ = proc.child.wait();
                         return; // выходим из supervisor насовсем
                     }
@@ -1225,19 +1019,33 @@ impl LspManager {
         }
     }
 
-    /// Уведомляет LSP об открытии файла
+        /// Уведомляет LSP об открытии файла
     pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
-        self.current_path = Some(path.clone());
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.current_path = Some(abs_path.clone());
         self.diagnostics.clear();
         if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_open(path, text, version);
+            proc.notify_open(&abs_path, text, version);
         }
     }
 
     /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
     pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
         if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_change(path, text, version);
+            proc.notify_change(&abs_path, text, version);
         }
     }
 
@@ -1278,11 +1086,13 @@ impl LspManager {
         // Обновляем кешированные диагностики и статусы
         for ev in &all {
                         match ev {
-                LspEvent::Diagnostics { path, items, .. } => {
-                    if self.current_path.as_deref() == Some(path.as_path()) {
-                        self.diagnostics = items.clone();
-                    }
-                }
+                                                                                                                LspEvent::Diagnostics { path, items, .. } => {
+                                                                                                                    let incoming_uri = path_to_uri(&path.to_string_lossy());
+                                                                                                                    let current_uri = self.current_path.as_ref().map(|p| path_to_uri(&p.to_string_lossy()));
+                                                                                                                    if Some(incoming_uri) == current_uri {
+                                                                                                                        self.diagnostics = items.clone();
+                                                                                                                    }
+                                                                                                                }
                 LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
