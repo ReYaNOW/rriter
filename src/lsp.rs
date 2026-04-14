@@ -234,19 +234,24 @@ fn uri_to_path(uri: &str) -> PathBuf {
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
 
 fn make_initialize(id: i32, workspace: Option<&Path>) -> Vec<u8> {
-    let workspace_json = if let Some(ws) = workspace {
+    let (root_uri_json, workspace_json) = if let Some(ws) = workspace {
         let uri = path_to_uri(&ws.to_string_lossy());
-        format!(
-            r#","workspaceFolders":[{{"uri":"{}","name":"workspace"}}]"#,
-            json_escape(&uri)
+        let escaped_uri = json_escape(&uri);
+        (
+            format!(r#""{}""#, escaped_uri),
+            format!(
+                r#","workspaceFolders":[{{"uri":"{}","name":"workspace"}}]"#,
+                escaped_uri
+            )
         )
     } else {
-        String::new()
+        (String::from("null"), String::new())
     };
 
     let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"textDocument":{{"synchronization":{{"dynamicRegistration":false,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":null{workspace_json}}}}}"#,
-        std::process::id()
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
+        std::process::id(),
+        root_uri_json
     );
     body.into_bytes()
 }
@@ -609,7 +614,7 @@ fn parse_code_action_obj(obj: &str) -> Option<CodeAction> {
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
-fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str) {
+fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
     let json = match std::str::from_utf8(body) {
         Ok(s) => s,
         Err(_) => return,
@@ -696,8 +701,35 @@ fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'stati
             }
         }
 
-        Some(_) => {
-            // Игнорируем незнакомые уведомления
+                Some("client/registerCapability") | Some("client/unregisterCapability") => {
+            if let Some(req_id) = id {
+                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
+                let _ = out_tx.send(reply.into_bytes());
+            }
+        }
+
+                Some("workspace/configuration") => {
+            if let Some(req_id) = id {
+                let mut count = 1;
+                if let Some(params) = get_object_field(json, "params") {
+                    if let Some(items) = get_object_field(params, "items") {
+                        count = extract_array_objects(items).len().max(1);
+                    }
+                }
+                let empty_objs = vec![r#"{}"#; count].join(",");
+                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, empty_objs);
+                let _ = out_tx.send(reply.into_bytes());
+            }
+        }
+
+        Some(m) => {
+            // Игнорируем незнакомые уведомления. Если это запрос, отвечаем MethodNotFound, чтобы сервер не завис.
+            if let Some(req_id) = id {
+                if m != "window/logMessage" && m != "textDocument/publishDiagnostics" && m != "workspace/applyEdit" {
+                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#, req_id);
+                    let _ = out_tx.send(reply.into_bytes());
+                }
+            }
         }
 
         None => {
@@ -746,7 +778,8 @@ fn spawn_server(
         let stdout = child.stdout.take()?;
         let stderr = child.stderr.take()?;
 
-        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+                let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let reader_out_tx = out_tx.clone();
 
         let err_tx = event_tx.clone();
         let srv_name = def.program;
@@ -816,9 +849,9 @@ fn spawn_server(
                         Err(_) => { break; }
                     }
                 }
-                                if read < content_len { break; }
+                                                if read < content_len { break; }
 
-                dispatch_frame(&body, &event_tx, def.program);
+                dispatch_frame(&body, &event_tx, def.program, &reader_out_tx);
             }
         }).ok()?;
 

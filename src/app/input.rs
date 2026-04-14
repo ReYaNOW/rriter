@@ -1569,11 +1569,15 @@ impl App {
                         .round();
                     self.scroll_y.current = self.scroll_y.target;
                 }
-            } else {
+                        } else {
                 self.is_dragging = true;
                 self.scroll_y.anim_speed = 15.0;
 
                 self.scroll_y.stop_anim();
+
+                self.ide_panel.lsp_logs_focused = None;
+                self.search_focused = false;
+                self.settings_ignore_focused = false;
 
                 let now = Instant::now();
                 let dx = last_mouse_x - self.last_click_pos.0;
@@ -2022,8 +2026,8 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
-        let ctrl = self.modifiers.control_key();
+        pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let mut is_edit = false;
 
@@ -2145,12 +2149,12 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_editor_keyboard_input(
+        pub fn handle_editor_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        let ctrl = self.modifiers.control_key();
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
 
         if self.show_welcome {
@@ -3114,9 +3118,9 @@ impl App {
                 return;
             }
 
-            if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
+                        if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
                 if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(&focused_name) {
-                    let ctrl = self.modifiers.control_key();
+                    let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
                     let shift = self.modifiers.shift_key();
                     match key_event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
