@@ -430,23 +430,33 @@ impl Renderer {
                                         }
                                     }
 
-                                    let mut current_x = log_bg_x + 20.0 * s - scroll_x.round();
+                                                                        let mut current_x = log_bg_x + 20.0 * s - scroll_x.round();
                                     let mut i = 0;
+                                    let abs_entry_start = global_byte_off + line_byte_off_in_entry;
                                     while i < line.len() {
-                                        let abs_byte = line_byte_off_in_entry + i;
+                                        let abs_byte = abs_entry_start + i;
                                         let mut color = [0.875, 0.882, 0.902, 1.0];
                                         let mut chunk_end = line.len();
 
                                         for span in &entry.spans {
                                             if abs_byte >= span.start && abs_byte < span.end {
                                                 color = span.color;
-                                                chunk_end = chunk_end.min(span.end - (global_byte_off + line_byte_off_in_entry));
+                                                chunk_end = chunk_end.min(
+                                                    span.end.saturating_sub(abs_entry_start),
+                                                );
                                                 break;
                                             } else if span.start > abs_byte {
-                                                chunk_end = chunk_end.min(span.start - (global_byte_off + line_byte_off_in_entry));
+                                                chunk_end = chunk_end.min(
+                                                    span.start.saturating_sub(abs_entry_start),
+                                                );
                                             }
                                         }
-                                        chunk_end = chunk_end.min(line.len());
+                                        // Гарантируем продвижение: chunk_end всегда > i
+                                        let chunk_end = chunk_end.min(line.len()).max(i + 1);
+                                        // Выровнять по границе UTF-8
+                                        let chunk_end = (chunk_end..=line.len())
+                                            .find(|&e| line.is_char_boundary(e))
+                                            .unwrap_or(line.len());
 
                                         let text_chunk = &line[i..chunk_end];
                                         self.draw_string_mono_scaled(text_chunk, current_x, text_y, color, 0.7);
@@ -1122,19 +1132,20 @@ impl Renderer {
             text_scale,
         );
 
-        let (btn_save, btn_discard, btn_cancel) =
+                let (btn_save, btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
 
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
-        let mut wants_pointer = false;
-        wants_pointer |= btn_save.render(self, mx, my, s, false);
-        wants_pointer |= btn_discard.render(self, mx, my, s, false);
-        wants_pointer |= btn_cancel.render(self, mx, my, s, false);
+        // Регистрируем через UI систему — убирает дублирование хитбоксов в input.rs
+        let mut ui_reg = crate::ui_system::UiRegistry::new();
+        ui_reg.register_button(crate::ui_system::UiId::DialogSave, &btn_save, self, mx, my, s, false);
+        ui_reg.register_button(crate::ui_system::UiId::DialogDiscard, &btn_discard, self, mx, my, s, false);
+        ui_reg.register_button(crate::ui_system::UiId::DialogCancel, &btn_cancel, self, mx, my, s, false);
 
         self.flush();
-        wants_pointer
+        ui_reg.wants_pointer()
     }
 
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
@@ -1377,7 +1388,7 @@ impl Renderer {
         ui_registry.wants_pointer()
     }
 
-    pub fn draw_settings(
+                pub fn draw_settings(
         &mut self,
         anim_progress: f32,
         active_tab: usize,
@@ -1390,6 +1401,7 @@ impl Renderer {
         settings_ignore_scroll_x: &mut f32,
         ide_scroll_y: f32,
         blink_alpha: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
             return 0;
@@ -1454,20 +1466,21 @@ impl Renderer {
         let sidebar_w = 200.0 * s;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
-        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь"];
-        let mut tab_y = iy + 20.0 * s;
-        for (i, title) in tabs.iter().enumerate() {
-            let tab_rect_y = tab_y;
-            let tab_rect_h = 36.0 * s;
+                        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь"];
+                        let mut tab_y = iy + 20.0 * s;
+                        for (i, title) in tabs.iter().enumerate() {
+                            let tab_rect_y = tab_y;
+                            let tab_rect_h = 36.0 * s;
 
-            let is_hovered = self.last_mouse_x >= ix + 10.0 * s
-                && self.last_mouse_x <= ix + sidebar_w - 10.0 * s
-                && self.last_mouse_y >= tab_rect_y
-                && self.last_mouse_y <= tab_rect_y + tab_rect_h;
+                            let is_hovered = ui_registry.register_rect(
+                                crate::ui_system::UiId::SettingsTab(i),
+                                ix + 10.0 * s, tab_rect_y, sidebar_w - 20.0 * s, tab_rect_h,
+                                self.last_mouse_x, self.last_mouse_y,
+                            );
 
-            if is_hovered {
-                wants_pointer = true;
-            }
+                            if is_hovered {
+                                wants_pointer = true;
+                            }
 
             if i == active_tab {
                 self.push_rounded_rect(
@@ -1560,7 +1573,7 @@ impl Renderer {
             );
             content_y += 40.0 * s;
 
-            for path in ide_workspaces {
+                        for (ws_idx, path) in ide_workspaces.iter().enumerate() {
                 let path_str = path.to_string_lossy();
                 let item_w = 460.0 * s;
                 let item_h = 36.0 * s;
@@ -1590,24 +1603,36 @@ impl Renderer {
                     0.95,
                 );
 
+                                                let del_btn_x = content_x + item_w - 34.0 * s;
+                let del_btn_y = content_y + 3.0 * s;
+                let del_btn_size = 30.0 * s;
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsIdeRemoveWorkspace(ws_idx),
+                    del_btn_x, del_btn_y, del_btn_size, del_btn_size,
+                    self.last_mouse_x, self.last_mouse_y,
+                );
                 let btn_del = crate::widgets::IconButton {
-                    x: content_x + item_w - 34.0 * s,
-                    y: content_y + 3.0 * s,
-                    size: 30.0 * s,
+                    x: del_btn_x,
+                    y: del_btn_y,
+                    size: del_btn_size,
                     icon: Some(crate::widgets::IconType::Discard),
                     is_active: false,
                     icon_size: Some(18.0 * s),
                     active_square_width: None,
                 };
-                wants_pointer |=
-                    btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-
+                wants_pointer |= btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
                 content_y += 46.0 * s;
             }
 
+            let add_btn_y_reg = content_y.round();
+            ui_registry.register_rect(
+                crate::ui_system::UiId::SettingsIdeAddWorkspace,
+                content_x, add_btn_y_reg, 190.0 * s, 36.0 * s,
+                self.last_mouse_x, self.last_mouse_y,
+            );
             let btn_add = crate::widgets::Button {
                 x: content_x,
-                y: content_y.round(),
+                y: add_btn_y_reg,
                 w: 190.0 * s,
                 h: 36.0 * s,
                 text: "Добавить папку".to_string(),
@@ -1811,10 +1836,25 @@ impl Renderer {
             }
 
             // Кнопка «Добавить» — неактивна если поле пустое или только пробелы
-            let trimmed_input = full_text.trim();
+                        let trimmed_input = full_text.trim();
             let btn_add_x = content_x + input_w + 10.0 * s;
             let btn_add_y = content_y;
             let btn_add_w = 110.0 * s;
+
+            // Регистрируем поле ввода и кнопку добавления через ui_registry
+            ui_registry.register_rect(
+                crate::ui_system::UiId::SettingsIdeIgnoreInput,
+                content_x, content_y, input_w, input_h,
+                self.last_mouse_x, self.last_mouse_y,
+            );
+            if !trimmed_input.is_empty() {
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsIdeAddIgnore,
+                    btn_add_x, btn_add_y, btn_add_w, input_h,
+                    self.last_mouse_x, self.last_mouse_y,
+                );
+            }
+
             if trimmed_input.is_empty() {
                 // Строго копируем математику округления из widgets.rs (Button::render)
                 let bx = btn_add_x.round();
@@ -1882,7 +1922,7 @@ impl Renderer {
             let max_row_w = 460.0 * s;
             let mut chip_x = content_x;
 
-            for pattern in ide_ignore_patterns.iter() {
+                        for (chip_idx, pattern) in ide_ignore_patterns.iter().enumerate() {
                 let text_w = self.measure_ui_width(pattern, 0.88);
                 let close_area = 22.0 * s;
                 let chip_w = text_w + pad_x * 2.0 + close_area;
@@ -1897,10 +1937,11 @@ impl Renderer {
                     && self.last_mouse_y >= content_y
                     && self.last_mouse_y <= content_y + chip_h;
 
-                let close_hov = self.last_mouse_x >= chip_x + chip_w - close_area - 2.0 * s
-                    && self.last_mouse_x <= chip_x + chip_w
-                    && self.last_mouse_y >= content_y
-                    && self.last_mouse_y <= content_y + chip_h;
+                let close_hov = ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsIdeRemoveIgnore(chip_idx),
+                    chip_x + chip_w - close_area - 2.0 * s, content_y, close_area + 2.0 * s, chip_h,
+                    self.last_mouse_x, self.last_mouse_y,
+                );
 
                 if chip_hov {
                     wants_pointer = true;

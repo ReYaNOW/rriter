@@ -2001,7 +2001,7 @@ impl Renderer {
         scrollbar_width: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> bool {
-        let mut wants_pointer = false;
+                let wants_pointer = false;
         let s = self.scale_factor;
         let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
         let search_w = 480.0 * s;

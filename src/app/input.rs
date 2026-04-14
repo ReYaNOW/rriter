@@ -1,5 +1,4 @@
 use crate::app::{App, LspActionItem, PendingAction};
-use crate::widgets::IconButton;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
@@ -603,7 +602,7 @@ impl App {
             return;
         }
 
-        if self.show_settings {
+                if self.show_settings {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;
                 self.is_dragging_lsp_log = false;
@@ -622,189 +621,52 @@ impl App {
                 if mx < x || mx > x + w || my < y || my > y + h {
                     self.show_settings = false;
                 } else {
-                    let pad_top = 35.0 * s;
-                    let pad_h = 40.0 * s;
-                    let ix = x + pad_h;
-                    let iy = y + pad_top;
-                    let sidebar_w = 200.0 * s;
-                    if mx >= ix + 10.0 * s && mx <= ix + sidebar_w - 10.0 * s {
-                        let mut tab_y = iy + 20.0 * s;
-                        for i in 0..5 {
-                            if my >= tab_y && my <= tab_y + 36.0 * s {
-                                self.settings_tab = i;
-                                break;
-                            }
-                            tab_y += 40.0 * s;
-                        }
-                    } else if self.settings_tab == 0 {
-                        let scroll_y = self.settings_ide_scroll.current;
-                        let content_x = ix + sidebar_w + 30.0 * s;
-
-                        // ── Удаление рабочей области ──────────────────────
-                        let mut current_y = iy + 126.0 * s - scroll_y;
-                        for (idx, _path) in self.ide_workspaces.clone().iter().enumerate() {
-                            let item_w = 460.0 * s;
-                            let btn_x = content_x + item_w - 34.0 * s;
-                            let btn_y = current_y + 3.0 * s;
-                            let btn_size = 30.0 * s;
-
-                            if mx >= btn_x
-                                && mx <= btn_x + btn_size
-                                && my >= btn_y
-                                && my <= btn_y + btn_size
-                            {
-                                self.ide_workspaces.remove(idx);
-                                let w = self.window.as_ref().unwrap();
-                                let maximized = w.is_maximized();
-                                crate::save_config(&crate::Config {
-                                    window_width: self.window_width,
-                                    window_height: self.window_height,
-                                    maximized,
-                                    ide_workspaces: self.ide_workspaces.clone(),
-                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                });
-                                self.refresh_file_tree();
-                                break;
-                            }
-                            current_y += 46.0 * s;
-                        }
-
-                        // ── Кнопка «Добавить папку» ───────────────────────
-                        let add_btn_y =
-                            iy + 126.0 * s - scroll_y + self.ide_workspaces.len() as f32 * 46.0 * s;
-                        if mx >= content_x
-                            && mx <= content_x + 190.0 * s
-                            && my >= add_btn_y
-                            && my <= add_btn_y + 36.0 * s
-                        {
-                            self.trigger_folder_picker();
-                        }
-
-                        // ── Поле ввода игнора ────────────────────────────
-                        // Вычисляем Y поля: после рабочих областей + 56 + 20 + 28 + 22 + 20
-                        let input_section_y = add_btn_y + 56.0 * s // после кнопки
-                            + 20.0 * s             // разделитель
-                            + 28.0 * s             // заголовок
-                            + 22.0 * s             // пояснение 1
-                            + 20.0 * s; // пояснение 2
-                        let input_h = 34.0 * s;
-                        let input_w = 330.0 * s;
-
-                        let on_input = mx >= content_x
-                            && mx <= content_x + input_w
-                            && my >= input_section_y
-                            && my <= input_section_y + input_h;
-
-                        if on_input {
-                            self.settings_ignore_focused = true;
-                            self.is_dragging_settings_ignore = true;
-                            let text = self.settings_ignore_editor.get_full_text();
-                            let start_x = content_x + 8.0 * s;
-                            let x_offset = (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
-                            let mut current_x = 0.0;
-                            let mut target_idx = text.len();
-                            let mut byte_idx = 0;
-                            for c in text.chars() {
-                                let adv = self
-                                    .renderer
-                                    .as_mut()
-                                    .unwrap()
-                                    .get_ui_glyph(c)
-                                    .map(|g| g.advance)
-                                    .unwrap_or(10.0)
-                                    * 0.95;
-                                if x_offset <= current_x + adv / 2.0 {
-                                    target_idx = byte_idx;
-                                    break;
+                    // Все клики по кнопкам и табам обрабатываются через ui_registry
+                    if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                        match clicked_id {
+                            crate::ui_system::UiId::SettingsIdeIgnoreInput => {
+                                // Специальная обработка: позиционирование курсора по клику
+                                self.settings_ignore_focused = true;
+                                self.is_dragging_settings_ignore = true;
+                                let s = self.renderer.as_ref().unwrap().scale_factor;
+                                let pad_h = 40.0 * s;
+                                let sidebar_w = 200.0 * s;
+                                let ix = x + pad_h;
+                                let content_x = ix + sidebar_w + 30.0 * s;
+                                let text = self.settings_ignore_editor.get_full_text();
+                                let start_x = content_x + 8.0 * s;
+                                let x_offset = (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
+                                let mut current_x = 0.0;
+                                let mut target_idx = text.len();
+                                let mut byte_idx = 0;
+                                for c in text.chars() {
+                                    let adv = self
+                                        .renderer
+                                        .as_mut()
+                                        .unwrap()
+                                        .get_ui_glyph(c)
+                                        .map(|g| g.advance)
+                                        .unwrap_or(10.0)
+                                        * 0.95;
+                                    if x_offset <= current_x + adv / 2.0 {
+                                        target_idx = byte_idx;
+                                        break;
+                                    }
+                                    current_x += adv;
+                                    byte_idx += c.len_utf8();
                                 }
-                                current_x += adv;
-                                byte_idx += c.len_utf8();
+                                self.settings_ignore_editor.cursor = target_idx;
+                                self.settings_ignore_editor.selection_anchor = Some(target_idx);
                             }
-                            self.settings_ignore_editor.cursor = target_idx;
-                            self.settings_ignore_editor.selection_anchor = Some(target_idx);
-                        }
-
-                        // ── Кнопка «Добавить» паттерн ────────────────────
-                        let btn_add_x = content_x + input_w + 10.0 * s;
-                        let on_add_btn = mx >= btn_add_x
-                            && mx <= btn_add_x + 110.0 * s
-                            && my >= input_section_y
-                            && my <= input_section_y + input_h;
-
-                        if on_add_btn {
-                            let trimmed = self
-                                .settings_ignore_editor
-                                .get_full_text()
-                                .trim()
-                                .to_string();
-                            if !trimmed.is_empty() && !self.ide_ignore_patterns.contains(&trimmed) {
-                                self.ide_ignore_patterns.push(trimmed);
-                                self.settings_ignore_editor.select_all();
-                                self.settings_ignore_editor.delete_selection();
-                                let w = self.window.as_ref().unwrap();
-                                let maximized = w.is_maximized();
-                                crate::save_config(&crate::Config {
-                                    window_width: self.window_width,
-                                    window_height: self.window_height,
-                                    maximized,
-                                    ide_workspaces: self.ide_workspaces.clone(),
-                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                });
-                                self.refresh_file_tree();
+                            other => {
+                                // Снимаем фокус с поля ввода при клике в другое место
+                                self.settings_ignore_focused = false;
+                                self.handle_ui_click(other);
                             }
                         }
-
-                        // ── Удаление чипа паттерна ────────────────────────
-                        let chip_h = 28.0 * s;
-                        let pad_x = 12.0 * s;
-                        let chip_gap_x = 8.0 * s;
-                        let chip_gap_y = 8.0 * s;
-                        let max_row_w = 460.0 * s;
-                        let mut chip_cx = content_x;
-                        let mut chip_cy = input_section_y + input_h + 16.0 * s;
-
-                        for (cidx, pattern) in self.ide_ignore_patterns.clone().iter().enumerate() {
-                            // Пересчитываем ширину чипа так же как в draw_settings
-                            let text_w = self
-                                .renderer
-                                .as_mut()
-                                .unwrap()
-                                .measure_ui_width(pattern, 0.88);
-                            let close_area = 22.0 * s;
-                            let chip_w = text_w + pad_x * 2.0 + close_area;
-
-                            if chip_cx + chip_w > content_x + max_row_w && chip_cx > content_x {
-                                chip_cx = content_x;
-                                chip_cy += chip_h + chip_gap_y;
-                            }
-
-                            let close_x = chip_cx + chip_w - close_area - 2.0 * s;
-                            let on_close = mx >= close_x
-                                && mx <= chip_cx + chip_w
-                                && my >= chip_cy
-                                && my <= chip_cy + chip_h;
-
-                            if on_close {
-                                self.ide_ignore_patterns.remove(cidx);
-                                let w = self.window.as_ref().unwrap();
-                                let maximized = w.is_maximized();
-                                crate::save_config(&crate::Config {
-                                    window_width: self.window_width,
-                                    window_height: self.window_height,
-                                    maximized,
-                                    ide_workspaces: self.ide_workspaces.clone(),
-                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                });
-                                self.refresh_file_tree();
-                                break;
-                            }
-                            chip_cx += chip_w + chip_gap_x;
-                        }
-
-                        // Клик вне поля — снимаем фокус
-                        if !on_input {
-                            self.settings_ignore_focused = false;
-                        }
+                    } else {
+                        // Клик мимо любого элемента — снимаем фокус
+                        self.settings_ignore_focused = false;
                     }
                 }
             }
@@ -1057,7 +919,7 @@ impl App {
             let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
             let scrollbar_x = window_width - minimap_w - scrollbar_w;
 
-            if self.show_search && self.search_anim_y > -10.0 {
+                        if self.show_search && self.search_anim_y > -10.0 {
                 let search_w = 480.0 * s;
                 let search_h = 52.0 * s;
                 let search_x = scrollbar_x - search_w - 20.0 * s;
@@ -1069,8 +931,6 @@ impl App {
                 {
                     let input_x = search_x + 10.0 * s;
                     let input_w = 260.0 * s;
-                    let btn_y = self.search_anim_y + 8.0 * s;
-                    let btn_size = 36.0 * s;
 
                     if last_mouse_x >= input_x && last_mouse_x <= input_x + input_w {
                         self.search_focused = true;
@@ -1098,85 +958,8 @@ impl App {
                         }
                         self.search_editor.cursor = target_idx;
                         self.search_editor.selection_anchor = Some(target_idx);
-                    } else {
-                        let mut current_btn_x = search_x + search_w - 10.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_close = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                            icon_size: Some(26.0 * s),
-                            active_square_width: None,
-                        };
-                        current_btn_x -= 10.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_down = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                            icon_size: Some(26.0 * s),
-                            active_square_width: None,
-                        };
-                        current_btn_x -= 10.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_up = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                            icon_size: Some(26.0 * s),
-                            active_square_width: None,
-                        };
-                        current_btn_x -= 10.0 * s;
-
-                        current_btn_x -= btn_size;
-                        let btn_case = IconButton {
-                            x: current_btn_x,
-                            y: btn_y,
-                            size: btn_size,
-                            icon: None,
-                            is_active: false,
-                            icon_size: Some(26.0 * s),
-                            active_square_width: None,
-                        };
-
-                        if btn_case.is_hovered(last_mouse_x, last_mouse_y) {
-                            self.search_case_sensitive = !self.search_case_sensitive;
-                            self.update_search();
-                            self.jump_to_search_result();
-                        } else if btn_up.is_hovered(last_mouse_x, last_mouse_y) {
-                            if !self.search_results.is_empty() {
-                                if let Some(idx) = self.search_current_idx {
-                                    self.search_current_idx = Some(if idx == 0 {
-                                        self.search_results.len() - 1
-                                    } else {
-                                        idx - 1
-                                    });
-                                }
-                                self.jump_to_search_result();
-                            }
-                        } else if btn_down.is_hovered(last_mouse_x, last_mouse_y) {
-                            if !self.search_results.is_empty() {
-                                if let Some(idx) = self.search_current_idx {
-                                    self.search_current_idx =
-                                        Some((idx + 1) % self.search_results.len());
-                                }
-                                self.jump_to_search_result();
-                            }
-                        } else if btn_close.is_hovered(last_mouse_x, last_mouse_y) {
-                            self.show_search = false;
-                            self.search_focused = false;
-                            self.search_results.clear();
-                            self.search_current_idx = None;
-                        }
+                    } else if let Some(clicked_id) = self.ui_registry.find_at(last_mouse_x, last_mouse_y) {
+                        self.handle_ui_click(clicked_id);
                     }
                     self.window.as_ref().unwrap().request_redraw();
                     return;

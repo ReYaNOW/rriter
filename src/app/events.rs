@@ -448,7 +448,7 @@ impl ApplicationHandler for App {
 
                 let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
-                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
+                                        settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
@@ -460,6 +460,7 @@ impl ApplicationHandler for App {
                         &mut self.settings_ignore_scroll_x,
                         self.settings_ide_scroll.current,
                         blink_alpha,
+                        &mut self.ui_registry,
                     );
                     if settings_cursor_mode == 1 {
                         wants_pointer = true;
