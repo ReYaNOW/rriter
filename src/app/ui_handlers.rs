@@ -183,17 +183,33 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-            // LSP panel - пока заглушки, т.к. методы управления серверами не реализованы
+                        // LSP panel
             UiId::LspServerRestart(_idx) => {
-                // TODO: Реализовать перезапуск LSP сервера
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.restart_python();
+                    self.ide_panel.lsp_servers = lsp.servers_info();
+                }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::LspServerToggle(_idx) => {
-                // TODO: Реализовать включение/отключение LSP сервера
+            UiId::LspServerToggle(idx) => {
+                if idx < self.ide_panel.lsp_servers.len() {
+                    let is_disabled = matches!(self.ide_panel.lsp_servers[idx].status, crate::lsp::LspServerStatus::Disabled);
+                    if let Some(lsp) = &mut self.lsp {
+                        if is_disabled {
+                            lsp.enable_python();
+                        } else {
+                            lsp.disable_python();
+                        }
+                        self.ide_panel.lsp_servers = lsp.servers_info();
+                    }
+                }
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::LspServerStop(_idx) => {
-                // TODO: Реализовать остановку LSP сервера
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.disable_python();
+                    self.ide_panel.lsp_servers = lsp.servers_info();
+                }
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::LspServerLogs(idx) => {
@@ -244,39 +260,9 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-            // File tree
+                        // File tree
             UiId::FileTreeNode(idx) => {
-                if idx < self.ide_panel.file_tree_nodes.len() {
-                    let node = &self.ide_panel.file_tree_nodes[idx];
-                    if node.is_dir {
-                        let path = node.path.clone();
-                        if self.ide_panel.file_tree_expanded.contains(&path) {
-                            self.ide_panel.file_tree_expanded.remove(&path);
-                        } else {
-                            self.ide_panel.file_tree_expanded.insert(path);
-                        }
-                        self.refresh_file_tree();
-                    } else {
-                        let path = node.path.clone();
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            self.file_path = Some(path.clone());
-                            self.base_title = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            let ext = path.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
-                            self.file_extension = ext.clone();
-
-                            let old_version = self.editor.version;
-                            self.editor = Editor::new(content.len() + 8192);
-                            let _ = self.editor.insert_str(&content);
-                            self.editor.cursor = 0;
-                            self.editor.version = old_version + 1;
-                            self.editor.set_original_text();
-                            self.editor.sync_edits.clear();
-                            self.highlighter.reset(self.editor.version, content, ext);
-
-                            App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
-                        }
-                    }
-                }
+                self.handle_file_tree_click(idx);
                 self.window.as_ref().unwrap().request_redraw();
             }
         }

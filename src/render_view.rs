@@ -233,7 +233,7 @@ impl Renderer {
                     y
                 };
 
-                let btn = IconButton {
+                                let btn = IconButton {
                     x: btn_x,
                     y: btn_y,
                     size: btn_size,
@@ -242,7 +242,7 @@ impl Renderer {
                     icon_size: Some(36.0 * s),
                     active_square_width: Some(sb_w),
                 };
-                wants_pointer |= btn.render(self, mx, my, s, false);
+                ui_registry.register_icon_button(crate::ui_system::UiId::SidebarSlot(slot.id), &btn, self, mx, my, s, false);
             }
 
             // Призрак перетаскиваемой кнопки + разделитель
@@ -373,7 +373,7 @@ impl Renderer {
                 if ide_panel.is_open(crate::app::PanelId::LspServers) {
                     let is_top = ide_panel.slots.iter().any(|s| s.id == crate::app::PanelId::LspServers && s.group == crate::app::PanelGroup::Top);
                     if is_top {
-                                                self.draw_lsp_servers_panel(
+                                                                                self.draw_lsp_servers_panel(
                             panel_x,
                             title_h,
                             panel_left_w,
@@ -386,6 +386,7 @@ impl Renderer {
                             &ide_panel.lsp_log_editors,
                             &ide_panel.lsp_logs_focused,
                             !lsp_diagnostics.is_empty(),
+                            ui_registry,
                         );
                     }
                 }
@@ -426,17 +427,18 @@ impl Renderer {
                         let last_vis =
                             (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
 
-                        for i in first_vis..last_vis {
+                                                for i in first_vis..last_vis {
                             let node = &ide_panel.file_tree_nodes[i];
                             let row_y = title_h + i as f32 * row_h - scroll;
 
-                            if ide_panel.file_tree_hovered_idx == Some(i) {
+                            ui_registry.register_rect(crate::ui_system::UiId::FileTreeNode(i), panel_x, row_y, panel_left_w, row_h, mx, my);
+
+                            if ide_panel.file_tree_hovered_idx == Some(i) || ui_registry.hovered() == Some(crate::ui_system::UiId::FileTreeNode(i)) {
                                 self.push_rect(
                                     panel_x,
                                     row_y,
                                     panel_left_w,
-                                    row_h,
-                                    [1.0, 1.0, 1.0, 0.06],
+                                    row_h,[1.0, 1.0, 1.0, 0.06],
                                 );
                             }
 
@@ -1432,7 +1434,7 @@ impl Renderer {
             if content_h > 8.0 * s {
                 if let Some(slot) = open_bottom.first() {
                     if slot.id == crate::app::PanelId::LspServers {
-                                                self.draw_lsp_servers_panel(
+                                                                                                self.draw_lsp_servers_panel(
                             panel_x,
                             content_y,
                             panel_w,
@@ -1445,6 +1447,7 @@ impl Renderer {
                             &ide_panel.lsp_log_editors,
                             &ide_panel.lsp_logs_focused,
                             !lsp_diagnostics.is_empty(),
+                            ui_registry,
                         );
                     } else {
                         let label = slot.id.label();

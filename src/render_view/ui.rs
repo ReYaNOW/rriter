@@ -4,7 +4,7 @@ use glow::HasContext;
 
 impl Renderer {
     /// Рисует содержимое панели LSP серверов (левая панель)
-    pub fn draw_lsp_servers_panel(
+        pub fn draw_lsp_servers_panel(
         &mut self,
         content_x: f32,
         content_y: f32,
@@ -18,6 +18,7 @@ impl Renderer {
         lsp_log_editors: &rustc_hash::FxHashMap<String, crate::editor::Editor>,
         lsp_logs_focused: &Option<String>,
         fix_all_active: bool,
+        ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
         self.flush();
         unsafe {
@@ -82,10 +83,10 @@ impl Renderer {
                                                     }
                                                 }
                                             }
-                                            total_h += 136.0 * s + logs_h + 16.0 * s;
+                                                                                        total_h += 136.0 * s + logs_h + 16.0 * s;
                                         }
 
-                                                for info in servers.iter() {
+                                                for (server_idx, info) in servers.iter().enumerate() {
                                             let is_expanded = expanded_logs.contains(info.name);
                                             let mut logs_h = 0.0;
                                             if is_expanded {
@@ -202,34 +203,21 @@ impl Renderer {
                 let btn_x_fix_all = card_x + pad_x;
                 let btn_x_logs = btn_x_fix_all + bw_fix_all + 6.0 * s;
 
-                let hover_restart = mx >= btn_x_restart
-                    && mx <= btn_x_restart + bw_restart
-                    && my >= btn_y1
-                    && my <= btn_y1 + btn_h;
-                let hover_toggle = mx >= btn_x_toggle
-                    && mx <= btn_x_toggle + bw_toggle
-                    && my >= btn_y1
-                    && my <= btn_y1 + btn_h;
+                                let hover_restart = ui_registry.register_rect(crate::ui_system::UiId::LspServerRestart(server_idx), btn_x_restart, btn_y1, bw_restart, btn_h, mx, my);
+                let hover_toggle = ui_registry.register_rect(crate::ui_system::UiId::LspServerToggle(server_idx), btn_x_toggle, btn_y1, bw_toggle, btn_h, mx, my);
                 let is_stopped = matches!(
                     info.status,
                     crate::lsp::LspServerStatus::Disabled | crate::lsp::LspServerStatus::Crashed
                 );
-                let hover_stop = !is_stopped
-                    && mx >= btn_x_stop
-                    && mx <= btn_x_stop + bw_stop
-                    && my >= btn_y1
-                    && my <= btn_y1 + btn_h;
+                let hover_stop = if !is_stopped {
+                    ui_registry.register_rect(crate::ui_system::UiId::LspServerStop(server_idx), btn_x_stop, btn_y1, bw_stop, btn_h, mx, my)
+                } else { false };
 
-                let hover_logs = mx >= btn_x_logs
-                    && mx <= btn_x_logs + bw_logs
-                    && my >= btn_y2
-                    && my <= btn_y2 + btn_h;
+                let hover_logs = ui_registry.register_rect(crate::ui_system::UiId::LspServerLogs(server_idx), btn_x_logs, btn_y2, bw_logs, btn_h, mx, my);
                 let fix_enabled = !is_stopped && fix_all_active;
-                let hover_fix_all = fix_enabled
-                    && mx >= btn_x_fix_all
-                    && mx <= btn_x_fix_all + bw_fix_all
-                    && my >= btn_y2
-                    && my <= btn_y2 + btn_h;
+                let hover_fix_all = if fix_enabled {
+                    ui_registry.register_rect(crate::ui_system::UiId::LspServerFixAll(server_idx), btn_x_fix_all, btn_y2, bw_fix_all, btn_h, mx, my)
+                } else { false };
 
                 let btn_bg_restart = if hover_restart {
                     [0.35, 0.35, 0.40, 1.0]
@@ -469,9 +457,15 @@ impl Renderer {
                                     if let Some(log_ed) = lsp_log_editors.get(info.name) {
                                         let is_folded = log_ed.folded_lines.contains(&global_line_count);
                                         let is_foldable = log_ed.foldable_lines.contains_key(&global_line_count);
-                                        if is_foldable {
+                                                                                if is_foldable {
                                             let icon = if is_folded { "\u{f0115}" } else { "\u{f0114}" };
-                                            self.draw_string_scaled(icon, log_bg_x + 4.0 * s - scroll_x.round(), text_y, [0.6, 0.6, 0.7, 1.0], 0.75);
+                                            let icon_x = log_bg_x + 4.0 * s - scroll_x.round();
+                                            let is_hovered = ui_registry.register_rect(
+                                                crate::ui_system::UiId::LspLogFoldToggle(server_idx, global_line_count),
+                                                icon_x, text_y - 12.0 * s, 16.0 * s, 16.0 * s, mx, my
+                                            );
+                                            let color = if is_hovered {[0.8, 0.8, 0.9, 1.0] } else {[0.6, 0.6, 0.7, 1.0] };
+                                            self.draw_string_scaled(icon, icon_x, text_y, color, 0.75);
                                         }
                                         if is_folded {
                                             let btn_w = self.measure_ui_width("...", 0.8) + 10.0 * s;
