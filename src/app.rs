@@ -30,14 +30,16 @@ pub enum PanelId {
     Explorer,
     Terminal,
     Problems,
+    LspServers,
 }
 
 impl PanelId {
-    pub fn label(self) -> &'static str {
+        pub fn label(self) -> &'static str {
         match self {
             PanelId::Explorer => "Проводник",
             PanelId::Terminal => "Терминал",
             PanelId::Problems => "Ляпы",
+            PanelId::LspServers => "LSP Серверы",
         }
     }
     pub fn icon(self) -> crate::widgets::IconType {
@@ -45,6 +47,7 @@ impl PanelId {
             PanelId::Explorer => crate::widgets::IconType::Explorer,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
             PanelId::Problems => crate::widgets::IconType::Problems,
+            PanelId::LspServers => crate::widgets::IconType::LspServers,
         }
     }
 }
@@ -70,6 +73,31 @@ pub struct PanelDragState {
     pub threshold_passed: bool,
 }
 
+/// Элемент меню быстрых действий LSP (Alt+Enter)
+#[derive(Debug, Clone)]
+pub enum LspActionItem {
+    /// Авто-правка от ruff (workspace edit)
+    CodeAction(crate::lsp::CodeAction),
+    /// Добавить # noqa: CODES к строке
+    AddNoqa { codes: Vec<String> },
+    /// Добавить # noqa (отключить все для строки)
+    AddNoqaAll,
+}
+
+/// Состояние всплывающего меню Alt+Enter
+#[derive(Debug, Clone)]
+pub struct LspActionsMenu {
+    /// Физическая строка курсора (0-based)
+    pub cursor_line: u32,
+    pub items: Vec<LspActionItem>,
+    pub selected: usize,
+    /// Позиция меню на экране
+    pub menu_x: f32,
+    pub menu_y: f32,
+    /// ID запроса code actions (ждём ответа)
+    pub pending_request_id: Option<i32>,
+}
+
 pub struct IdePanelState {
     pub slots: Vec<PanelSlot>,
     pub left_width: f32,
@@ -81,14 +109,21 @@ pub struct IdePanelState {
     pub file_tree_expanded: FxHashSet<std::path::PathBuf>,
     pub explorer_scroll: crate::scroll::ScrollState,
     pub file_tree_hovered_idx: Option<usize>,
+    /// Актуальная инфа о LSP серверах для рендера панели
+    pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
 }
 
 impl Default for IdePanelState {
-    fn default() -> Self {
+        fn default() -> Self {
         Self {
             slots: vec![
                 PanelSlot {
                     id: PanelId::Explorer,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
+                    id: PanelId::LspServers,
                     group: PanelGroup::Top,
                     open: false,
                 },
@@ -112,6 +147,7 @@ impl Default for IdePanelState {
             file_tree_expanded: FxHashSet::default(),
             explorer_scroll: crate::scroll::ScrollState::new(15.0),
             file_tree_hovered_idx: None,
+            lsp_servers: Vec::new(),
         }
     }
 }
@@ -260,8 +296,10 @@ pub struct App {
         pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
-    /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
+        /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
+    /// Меню быстрых действий LSP (Alt+Enter)
+    pub lsp_actions_menu: Option<LspActionsMenu>,
 }
 
 impl App {

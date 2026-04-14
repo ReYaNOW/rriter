@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
+
 use std::thread;
 use std::time::Duration;
 
@@ -31,6 +31,20 @@ fn next_id() -> i32 {
 }
 
 // ── Публичные типы ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LspServerStatus {
+    Starting,
+    Running,
+    Crashed,
+    Disabled,
+}
+
+#[derive(Debug, Clone)]
+pub struct LspServerInfo {
+    pub name: &'static str,
+    pub status: LspServerStatus,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagSeverity {
@@ -77,6 +91,7 @@ pub enum LspEvent {
     /// Диагностика для файла (ошибки/предупреждения от ruff)
     Diagnostics {
         path: PathBuf,
+        #[allow(dead_code)]
         version: Option<i32>,
         items: Vec<Diagnostic>,
     },
@@ -85,8 +100,14 @@ pub enum LspEvent {
         request_id: i32,
         actions: Vec<CodeAction>,
     },
-    /// Сервер готов принимать запросы
+        /// Сервер готов принимать запросы
     ServerReady,
+    /// Статус сервера изменился
+    StatusChanged {
+        #[allow(dead_code)]
+        name: &'static str,
+        status: LspServerStatus,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +123,7 @@ struct LspServerDef {
     program: &'static str,
     args: &'static [&'static str],
     language_id: &'static str,
+    #[allow(dead_code)]
     extensions: &'static [&'static str],
 }
 
@@ -115,6 +137,8 @@ const RUFF_SERVER: LspServerDef = LspServerDef {
 // ── Внутренние команды main → supervisor ─────────────────────────────────────
 
 enum Cmd {
+    /// Перезапустить сервер
+    Restart,
     /// Открыть файл (didOpen)
     Open {
         uri: String,
@@ -129,7 +153,7 @@ enum Cmd {
         text: String,
     },
     /// Закрыть файл (didClose)
-    Close { uri: String },
+    Close { #[allow(dead_code)] uri: String },
     /// Запросить codeActions для позиции
     CodeAction {
         id: i32,
@@ -150,6 +174,7 @@ enum Cmd {
 /// `line_offsets[i]` = байтовый offset начала строки i.
 /// LSP character = UTF-16 code units (для ASCII = байты).
 #[inline]
+#[allow(dead_code)]
 pub fn offset_to_lsp_pos(text: &str, offset: usize, line_offsets: &[usize]) -> (u32, u32) {
     let offset = offset.min(text.len());
     // Бинарный поиск строки
@@ -792,12 +817,15 @@ fn run_supervisor(
     let mut open_file: Option<OpenFile> = None;
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
+    let mut user_requested_restart = false;
 
     'outer: loop {
-        // ── Запускаем процесс ─────────────────────────────────────────────
+        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Starting });
+        // ── Запускаем процесс ─────────────────────────────────────────
         let mut proc = match spawn_server(def, event_tx.clone()) {
             Some(p) => p,
             None => {
+                let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Crashed });
                 thread::sleep(restart_delay);
                 restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
                 continue 'outer;
@@ -835,7 +863,8 @@ fn run_supervisor(
         if proc.out_tx.send(make_initialized()).is_err() {
             continue 'outer;
         }
-        let _ = event_tx.send(LspEvent::ServerReady);
+                let _ = event_tx.send(LspEvent::ServerReady);
+        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Running });
 
         // Если был открыт файл — reopenуем после рестарта
         if let Some(ref of) = open_file {
@@ -847,9 +876,13 @@ fn run_supervisor(
 
         // ── Основной цикл supervisor ──────────────────────────────────────
         'inner: loop {
-            // Проверяем краш процесса
+                        // Проверяем краш процесса
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
+                    if !user_requested_restart {
+                        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Crashed });
+                    }
+                    user_requested_restart = false;
                     thread::sleep(Duration::from_millis(1000));
                     break 'inner; // рестарт
                 }
@@ -860,6 +893,12 @@ fn run_supervisor(
             // Обрабатываем команды от главного треда
             loop {
                 match cmd_rx.try_recv() {
+                    Ok(Cmd::Restart) => {
+                        user_requested_restart = true;
+                        // Убиваем текущий процесс — supervisor перезапустит
+                        let _ = proc.child.kill();
+                        break 'inner;
+                    }
                     Ok(Cmd::Open { uri, lang, version, text }) => {
                         let msg = make_did_open(&uri, lang, version, &text);
                         open_file = Some(OpenFile { uri, lang, version, text });
@@ -909,6 +948,7 @@ pub struct LspProcess {
     pub event_rx: Receiver<LspEvent>,
     current_uri: Option<String>,
     def: &'static LspServerDef,
+    pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
 }
 
 impl LspProcess {
@@ -922,19 +962,25 @@ impl LspProcess {
             .spawn(move || run_supervisor(def, ws, cmd_rx, event_tx))
             .expect("failed to start LSP supervisor");
 
-        LspProcess { cmd_tx, event_rx, current_uri: None, def }
+                LspProcess { cmd_tx, event_rx, current_uri: None, def, open_file_data: None }
     }
 
-    /// textDocument/didOpen
+        /// textDocument/didOpen
     pub fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32) {
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
+        self.open_file_data = Some((self.def.language_id.to_string(), text.to_string()));
         let _ = self.cmd_tx.send(Cmd::Open {
             uri,
             lang: self.def.language_id,
             version,
             text: text.to_string(),
         });
+    }
+
+    /// Перезапустить сервер
+    pub fn restart(&mut self) {
+        let _ = self.cmd_tx.send(Cmd::Restart);
     }
 
     /// textDocument/didChange — полный текст (Full Sync).
@@ -1032,23 +1078,74 @@ pub struct LspManager {
     /// Актуальные диагностики текущего файла
     pub diagnostics: Vec<Diagnostic>,
     current_path: Option<PathBuf>,
+    /// Статус ruff сервера
+    pub python_status: LspServerStatus,
+    /// Отключён ли ruff вручную
+    pub python_disabled: bool,
 }
 
 impl LspManager {
-    pub fn new(workspace: Option<PathBuf>) -> Self {
+        pub fn new(workspace: Option<PathBuf>) -> Self {
         LspManager {
             python: None,
             workspace,
             diagnostics: Vec::new(),
             current_path: None,
+            python_status: LspServerStatus::Disabled,
+            python_disabled: false,
         }
     }
 
-    /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
+        /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
     fn ensure_python(&mut self) {
-        if self.python.is_none() {
+        if self.python.is_none() && !self.python_disabled {
+            self.python_status = LspServerStatus::Starting;
             self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
         }
+    }
+
+    /// Перезапустить ruff сервер
+    pub fn restart_python(&mut self) {
+        if let Some(proc) = &mut self.python {
+            proc.restart();
+            self.python_status = LspServerStatus::Starting;
+        } else if !self.python_disabled {
+            self.python_status = LspServerStatus::Starting;
+            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
+        }
+    }
+
+    /// Отключить ruff (остановить и не перезапускать)
+    pub fn disable_python(&mut self) {
+        self.python_disabled = true;
+        self.python_status = LspServerStatus::Disabled;
+        if let Some(p) = self.python.take() {
+            p.shutdown();
+        }
+        self.diagnostics.clear();
+    }
+
+    /// Включить ruff обратно
+    pub fn enable_python(&mut self) {
+        self.python_disabled = false;
+        self.python_status = LspServerStatus::Starting;
+        self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
+        // Re-open current file if any
+        if let Some(path) = &self.current_path.clone() {
+            if let Some(proc) = &mut self.python {
+                if let Some((_, text)) = &proc.open_file_data.clone() {
+                    proc.notify_open(path, text, 1);
+                }
+            }
+        }
+    }
+
+    /// Информация о серверах для UI
+    pub fn servers_info(&self) -> Vec<LspServerInfo> {
+        vec![LspServerInfo {
+            name: RUFF_SERVER.program,
+            status: self.python_status.clone(),
+        }]
     }
 
     /// Возвращает процесс для нужного расширения, запустив при необходимости
@@ -1103,7 +1200,7 @@ impl LspManager {
         ))
     }
 
-    /// Опрашивает события от всех серверов. Вызывать раз в кадр.
+        /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
         let mut all = Vec::new();
@@ -1112,21 +1209,27 @@ impl LspManager {
             all.extend(proc.poll());
         }
 
-        // Обновляем кешированные диагностики
+        // Обновляем кешированные диагностики и статусы
         for ev in &all {
-            if let LspEvent::Diagnostics { path, items, .. } = ev {
-                if self.current_path.as_deref() == Some(path.as_path()) {
-                    self.diagnostics = items.clone();
+            match ev {
+                LspEvent::Diagnostics { path, items, .. } => {
+                    if self.current_path.as_deref() == Some(path.as_path()) {
+                        self.diagnostics = items.clone();
+                    }
                 }
+                LspEvent::StatusChanged { status, .. } => {
+                    self.python_status = status.clone();
+                }
+                _ => {}
             }
         }
 
         all
     }
 
-    /// Диагностики для текущего файла, отфильтрованные по строке
-    pub fn diagnostics_for_line(&self, line: u32) -> impl Iterator<Item = &Diagnostic> {
-        self.diagnostics.iter().filter(move |d| d.start_line == line)
+        /// Диагностики для текущего файла, отфильтрованные по строке
+    pub fn diagnostics_for_line(&self, line: u32) -> Vec<&Diagnostic> {
+        self.diagnostics.iter().filter(move |d| d.start_line == line).collect()
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
@@ -1143,8 +1246,9 @@ impl LspManager {
         Some(id)
     }
 
-    pub fn shutdown(self) {
-        if let Some(p) = self.python { p.shutdown(); }
+        pub fn shutdown(mut self) {
+        self.python_disabled = true;
+        if let Some(p) = self.python.take() { p.shutdown(); }
     }
 }
 
@@ -1155,7 +1259,6 @@ impl LspManager {
 pub fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize {
     let mut cur_line = 0u32;
     let mut cur_col = 0u32; // UTF-16 единицы
-    let mut byte_pos = 0usize;
 
     for (i, ch) in text.char_indices() {
         if cur_line == line && cur_col >= col {
@@ -1164,7 +1267,6 @@ pub fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize {
         if ch == '\n' {
             cur_line += 1;
             cur_col = 0;
-            byte_pos = i + 1;
         } else {
             cur_col += ch.len_utf16() as u32;
         }

@@ -78,10 +78,11 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
     path.push("panels.txt");
     let mut lines: Vec<String> = Vec::new();
     for slot in &state.slots {
-        let id_s = match slot.id {
+                let id_s = match slot.id {
             crate::app::PanelId::Explorer => "Explorer",
             crate::app::PanelId::Terminal => "Terminal",
             crate::app::PanelId::Problems => "Problems",
+            crate::app::PanelId::LspServers => "LspServers",
         };
         let grp_s = match slot.group {
             crate::app::PanelGroup::Top => "Top",
@@ -113,10 +114,11 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
     for line in content.lines() {
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() == 3 {
-            let id = match parts[0] {
+                        let id = match parts[0] {
                 "Explorer" => crate::app::PanelId::Explorer,
                 "Terminal" => crate::app::PanelId::Terminal,
                 "Problems" => crate::app::PanelId::Problems,
+                "LspServers" => crate::app::PanelId::LspServers,
                 _ => continue,
             };
             let group = if parts[1] == "Top" {
@@ -460,13 +462,14 @@ F8\tПоказать/скрыть счетчик FPS
         ide_panel: crate::load_panel_state(),
                 file_tree_rx: None,
         file_tree_notify_rx: None,
-        lsp: if is_ide_cli {
+                lsp: if is_ide_cli {
             Some(crate::lsp::LspManager::new(
                 config.ide_workspaces.first().cloned(),
             ))
         } else {
             None
         },
+        lsp_actions_menu: None,
     };
 
     app.highlighter.reset(

@@ -3,6 +3,240 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
+        /// Рисует содержимое панели LSP серверов (левая панель)
+    pub fn draw_lsp_servers_panel(
+        &mut self,
+        panel_x: f32,
+        title_h: f32,
+        panel_w: f32,
+        panel_h: f32,
+        s: f32,
+        servers: &[crate::lsp::LspServerInfo],
+    ) {
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                panel_x as i32,
+                0,
+                panel_w as i32,
+                (panel_h - title_h) as i32,
+            );
+        }
+
+        let row_h = 52.0 * s;
+        let pad_x = 12.0 * s;
+        let text_scale = 0.92;
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
+
+        if servers.is_empty() {
+            let hint = "Нет активных серверов";
+            let tw = self.measure_ui_width(hint, text_scale);
+            self.draw_string_scaled(
+                hint,
+                panel_x + (panel_w - tw) / 2.0,
+                title_h + 32.0 * s,
+                [0.45, 0.45, 0.45, 1.0],
+                text_scale,
+            );
+        }
+
+        for (i, info) in servers.iter().enumerate() {
+            let row_y = title_h + i as f32 * row_h;
+
+            // Разделитель строк
+            if i > 0 {
+                self.push_rect(panel_x + pad_x, row_y, panel_w - pad_x * 2.0, 1.0, [1.0, 1.0, 1.0, 0.07]);
+            }
+
+            // Статус-точка
+            let dot_r = 5.0 * s;
+            let dot_x = panel_x + pad_x + dot_r;
+            let dot_y = row_y + row_h / 2.0 - dot_r - 4.0 * s;
+            let (dot_color, status_text) = match info.status {
+                crate::lsp::LspServerStatus::Running  => ([0.28, 0.85, 0.45, 1.0], "Работает"),
+                crate::lsp::LspServerStatus::Starting => ([0.85, 0.75, 0.25, 1.0], "Запуск..."),
+                crate::lsp::LspServerStatus::Crashed  => ([0.90, 0.30, 0.30, 1.0], "Упал"),
+                crate::lsp::LspServerStatus::Disabled => ([0.45, 0.45, 0.45, 1.0], "Отключён"),
+            };
+            self.push_rounded_rect(dot_x - dot_r, dot_y - dot_r, dot_r * 2.0, dot_r * 2.0, dot_r, dot_color);
+
+            // Название сервера
+            self.draw_string_scaled(
+                info.name,
+                panel_x + pad_x + dot_r * 2.0 + 6.0 * s,
+                dot_y + dot_r + 4.0 * s,
+                self.theme.fg,
+                text_scale,
+            );
+
+            // Статус текст
+            let status_color = dot_color;
+            self.draw_string_scaled(
+                status_text,
+                panel_x + pad_x + dot_r * 2.0 + 6.0 * s,
+                dot_y + dot_r + 4.0 * s + 16.0 * s,
+                status_color,
+                0.78,
+            );
+
+            // Кнопки Restart / Disable|Enable / Fix All / Stop
+            let btn_h = 22.0 * s;
+            let btn_y = row_y + row_h - btn_h - 6.0 * s;
+            let btn_pad = 10.0 * s;
+            let label_restart = "Restart";
+            let label_toggle = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) { "Enable" } else { "Disable" };
+            let label_fix_all = "Fix All";
+            let label_stop = "Stop";
+
+            let bw_restart  = self.measure_ui_width(label_restart,  0.8) + btn_pad * 2.0;
+            let bw_toggle   = self.measure_ui_width(label_toggle,   0.8) + btn_pad * 2.0;
+            let bw_fix_all  = self.measure_ui_width(label_fix_all,  0.8) + btn_pad * 2.0;
+            let bw_stop     = self.measure_ui_width(label_stop,     0.8) + btn_pad * 2.0;
+            let btn_x_restart  = panel_x + pad_x;
+            let btn_x_toggle   = btn_x_restart + bw_restart + 6.0 * s;
+            let btn_x_fix_all  = btn_x_toggle  + bw_toggle  + 6.0 * s;
+            let btn_x_stop     = btn_x_fix_all + bw_fix_all + 6.0 * s;
+
+            let hover_restart  = mx >= btn_x_restart  && mx <= btn_x_restart  + bw_restart  && my >= btn_y && my <= btn_y + btn_h;
+            let hover_toggle   = mx >= btn_x_toggle   && mx <= btn_x_toggle   + bw_toggle   && my >= btn_y && my <= btn_y + btn_h;
+            let hover_fix_all  = mx >= btn_x_fix_all  && mx <= btn_x_fix_all  + bw_fix_all  && my >= btn_y && my <= btn_y + btn_h;
+            let hover_stop     = mx >= btn_x_stop     && mx <= btn_x_stop     + bw_stop     && my >= btn_y && my <= btn_y + btn_h;
+
+            let btn_bg_restart = if hover_restart { [0.35, 0.35, 0.40, 1.0] } else { [0.22, 0.22, 0.27, 1.0] };
+            let btn_bg_toggle  = if hover_toggle  { [0.35, 0.35, 0.40, 1.0] } else { [0.22, 0.22, 0.27, 1.0] };
+            let btn_bg_fix_all = if hover_fix_all { [0.28, 0.40, 0.28, 1.0] } else { [0.18, 0.28, 0.18, 1.0] };
+            let btn_bg_stop    = if hover_stop    { [0.45, 0.22, 0.22, 1.0] } else { [0.32, 0.15, 0.15, 1.0] };
+
+            self.push_rounded_rect(btn_x_restart, btn_y, bw_restart, btn_h, 3.0 * s, btn_bg_restart);
+            self.draw_string_scaled(label_restart, btn_x_restart + btn_pad, btn_y + btn_h / 2.0 + 5.0 * s, self.theme.fg, 0.8);
+
+            self.push_rounded_rect(btn_x_toggle, btn_y, bw_toggle, btn_h, 3.0 * s, btn_bg_toggle);
+            self.draw_string_scaled(label_toggle, btn_x_toggle + btn_pad, btn_y + btn_h / 2.0 + 5.0 * s, self.theme.fg, 0.8);
+
+            self.push_rounded_rect(btn_x_fix_all, btn_y, bw_fix_all, btn_h, 3.0 * s, btn_bg_fix_all);
+            self.draw_string_scaled(label_fix_all, btn_x_fix_all + btn_pad, btn_y + btn_h / 2.0 + 5.0 * s, [0.60, 0.90, 0.60, 1.0], 0.8);
+
+            self.push_rounded_rect(btn_x_stop, btn_y, bw_stop, btn_h, 3.0 * s, btn_bg_stop);
+            self.draw_string_scaled(label_stop, btn_x_stop + btn_pad, btn_y + btn_h / 2.0 + 5.0 * s, [0.95, 0.55, 0.55, 1.0], 0.8);
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+
+    /// Рисует плавающее меню Alt+Enter (LSP быстрые действия)
+    /// Возвращает true если мышь над меню
+    pub fn draw_lsp_actions_menu(
+        &mut self,
+        menu: &crate::app::LspActionsMenu,
+        _blink_alpha: f32,
+    ) -> bool {
+        if menu.items.is_empty() {
+            // Показываем "Загрузка..." если ждём code actions
+            if menu.pending_request_id.is_some() {
+                let s = self.scale_factor;
+                let w = 180.0 * s;
+                let h = 36.0 * s;
+                let x = menu.menu_x;
+                let y = menu.menu_y;
+                self.push_rounded_rect(x - 2.0, y - 2.0, w + 4.0, h + 4.0, 5.0 * s, [0.20, 0.20, 0.25, 1.0]);
+                self.push_rounded_rect(x, y, w, h, 4.0 * s, [0.14, 0.15, 0.19, 1.0]);
+                self.draw_string_scaled("Загрузка...", x + 12.0 * s, y + h / 2.0 + 6.0 * s, [0.5, 0.5, 0.5, 1.0], 0.9);
+            }
+            return false;
+        }
+
+        let s = self.scale_factor;
+        let item_h = 36.0 * s;
+        let menu_w = 320.0 * s;
+        let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
+
+        // Подгоняем к экрану
+        let max_x = self.width - menu_w - 4.0 * s;
+        let max_y = self.height - menu_h - 4.0 * s;
+        let mx_pos = menu.menu_x.min(max_x).max(0.0);
+        let my_pos = menu.menu_y.min(max_y).max(0.0);
+
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
+
+        let hovered = mx >= mx_pos && mx <= mx_pos + menu_w && my >= my_pos && my <= my_pos + menu_h;
+
+        // Тень
+        self.push_rounded_rect(mx_pos + 4.0 * s, my_pos + 4.0 * s, menu_w, menu_h, 6.0 * s, [0.0, 0.0, 0.0, 0.45]);
+        // Фон меню + рамка
+        self.push_rounded_rect(mx_pos - 1.0, my_pos - 1.0, menu_w + 2.0, menu_h + 2.0, 6.0 * s, [0.35, 0.25, 0.50, 0.6]);
+        self.push_rounded_rect(mx_pos, my_pos, menu_w, menu_h, 5.0 * s, [0.12, 0.13, 0.17, 1.0]);
+
+        for (i, item) in menu.items.iter().enumerate() {
+            let item_y = my_pos + 4.0 * s + i as f32 * item_h;
+
+            let is_selected = i == menu.selected;
+            let is_hovered = mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
+
+            if is_selected || is_hovered {
+                let hi_color = if is_selected {
+                    [0.30, 0.20, 0.45, 1.0]
+                } else {
+                    [0.20, 0.20, 0.28, 1.0]
+                };
+                self.push_rounded_rect(mx_pos + 3.0 * s, item_y + 1.0, menu_w - 6.0 * s, item_h - 2.0, 4.0 * s, hi_color);
+            }
+
+            let (icon_str, label, label_color) = match item {
+                crate::app::LspActionItem::CodeAction(action) => {
+                    let label = action.title.as_str();
+                    ("⚡", label, self.theme.fg)
+                }
+                crate::app::LspActionItem::AddNoqa { codes } => {
+                    // временная строка не нужна — выводим отдельно
+                    let _ = codes;
+                    ("🔇", "Добавить # noqa: …", [0.80, 0.75, 0.55, 1.0])
+                }
+                crate::app::LspActionItem::AddNoqaAll => {
+                    ("🔕", "Добавить # noqa (отключить все)", [0.65, 0.60, 0.50, 1.0])
+                }
+            };
+
+            let text_y = item_y + item_h / 2.0 + 6.0 * s;
+            self.draw_string_scaled(icon_str, mx_pos + 10.0 * s, text_y, label_color, 0.9);
+
+            // Для AddNoqa с кодами — собираем строку из кодов
+            let label_str: std::borrow::Cow<str> = match item {
+                crate::app::LspActionItem::AddNoqa { codes } if !codes.is_empty() => {
+                    let s = format!("Добавить # noqa: {}", codes.join(", "));
+                    std::borrow::Cow::Owned(s)
+                }
+                _ => std::borrow::Cow::Borrowed(label),
+            };
+            self.draw_string_scaled(&label_str, mx_pos + 28.0 * s, text_y, label_color, 0.9);
+
+            // Подсказка по типу действия (quickfix/source)
+            if let crate::app::LspActionItem::CodeAction(action) = item {
+                if let Some(kind) = &action.kind {
+                    let kind_short = if kind.contains("fixAll") { "fix all" }
+                        else if kind.contains("quickfix") { "quickfix" }
+                        else { kind.as_str() };
+                    let kind_w = self.measure_ui_width(kind_short, 0.72);
+                    self.draw_string_scaled(
+                        kind_short,
+                        mx_pos + menu_w - kind_w - 10.0 * s,
+                        text_y,
+                        [0.45, 0.45, 0.45, 1.0],
+                        0.72,
+                    );
+                }
+            }
+        }
+
+        self.flush();
+        hovered
+    }
+
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
         self.flush();
         unsafe {

@@ -1160,6 +1160,35 @@ impl Editor {
         self.data.len() - (self.gap_end - self.gap_start)
     }
 
+    /// Итерирует по символам логической строки `line_idx` без аллокации.
+    /// `f(ch, utf16_units_before, pixel_x_accum)` — вызывается для каждого символа.
+    /// Возвращает pixel_x у символа с данным utf16_col, или total_x если col за концом строки.
+    #[inline]
+    pub fn utf16_col_to_byte_advance<F>(&self, line_idx: usize, mut f: F)
+    where
+        F: FnMut(char, u32, usize), // (char, utf16_before, byte_offset_in_logical_text)
+    {
+        let start = self.line_offsets.get(line_idx).copied().unwrap_or(0);
+        let end = self.line_offsets.get(line_idx + 1)
+            .map(|&o| o.saturating_sub(1))
+            .unwrap_or(self.len());
+        let mut utf16: u32 = 0;
+        let mut pos = start;
+        while pos < end {
+            let b = self.byte_at(pos);
+            let char_len = if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 };
+            let mut buf = [0u8; 4];
+            for k in 0..char_len { buf[k] = self.byte_at(pos + k); }
+            if let Ok(s) = std::str::from_utf8(&buf[..char_len]) {
+                if let Some(ch) = s.chars().next() {
+                    f(ch, utf16, pos);
+                    utf16 += ch.len_utf16() as u32;
+                }
+            }
+            pos += char_len;
+        }
+    }
+
     pub fn get_selection(&self) -> Option<String> {
         let anchor = self.selection_anchor?;
         if anchor == self.cursor {

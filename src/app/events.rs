@@ -415,6 +415,12 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                                // LSP actions menu — рисуем поверх всего
+                if let Some(menu) = &self.lsp_actions_menu {
+                    let wants = self.renderer.as_mut().unwrap().draw_lsp_actions_menu(menu, blink_alpha);
+                    if wants { wants_pointer = true; }
+                }
+
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
                     let render_scroll_y = self.scroll_y.current.round();
@@ -861,44 +867,37 @@ impl ApplicationHandler for App {
                             // lsp.diagnostics обновлены внутри poll() автоматически
                             if let Some(w) = self.window.as_ref() { w.request_redraw(); }
                         }
-                        crate::lsp::LspEvent::CodeActions { actions, .. } => {
-                            if let (Some(action), Some(path)) = (
-                                actions.into_iter().find(|a| a.edit.is_some()),
-                                self.file_path.clone(),
-                            ) {
-                                if let Some(edit) = action.edit {
-                                    let new_text = crate::lsp::apply_workspace_edit_to_text(
-                                        &self.editor.get_full_text(), &edit, &path,
-                                    );
-                                    if new_text != self.editor.get_full_text() {
-                                        let version = self.editor.version + 1;
-                                        self.editor = crate::editor::Editor::new(new_text.len() + 8192);
-                                        self.editor.version = version;
-                                        let _ = self.editor.insert_str(&new_text);
-                                        self.editor.cursor = 0;
-                                        self.editor.set_original_text();
-                                        self.highlighter.reset(
-                                            version,
-                                            new_text.clone(),
-                                            self.file_extension.clone(),
-                                        );
-                                        if let Some(lsp2) = &mut self.lsp {
-                                            lsp2.notify_change(
-                                                &path,
-                                                &self.file_extension.clone(),
-                                                &new_text,
-                                                version as i32,
-                                            );
-                                        }
-                                        if let Some(w) = self.window.as_ref() {
-                                            App::update_window_title(w, &self.base_title, true);
-                                            w.request_redraw();
-                                        }
-                                    }
+                                                crate::lsp::LspEvent::CodeActions { request_id, actions } => {
+                            // Проверяем: это ответ на Alt+Enter меню?
+                            let is_for_menu = self.lsp_actions_menu
+                                .as_ref()
+                                .and_then(|m| m.pending_request_id)
+                                .map(|id| id == request_id)
+                                .unwrap_or(false);
+
+                            if is_for_menu {
+                                // Добавляем code actions в начало меню
+                                if let Some(menu) = &mut self.lsp_actions_menu {
+                                    let mut new_items: Vec<crate::app::LspActionItem> = actions
+                                        .into_iter()
+                                        .filter(|a| a.edit.is_some())
+                                        .map(crate::app::LspActionItem::CodeAction)
+                                        .collect();
+                                    new_items.extend(menu.items.drain(..));
+                                    menu.items = new_items;
+                                    menu.pending_request_id = None;
                                 }
+                                if let Some(w) = self.window.as_ref() { w.request_redraw(); }
                             }
                         }
                         crate::lsp::LspEvent::ServerReady => {}
+                        crate::lsp::LspEvent::StatusChanged { .. } => {
+                            // Обновляем lsp_servers в ide_panel
+                            if let Some(lsp) = &self.lsp {
+                                self.ide_panel.lsp_servers = lsp.servers_info();
+                            }
+                            if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                        }
                     }
                 }
             }

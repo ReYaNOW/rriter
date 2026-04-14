@@ -1,4 +1,4 @@
-use crate::app::{App, PendingAction};
+use crate::app::{App, LspActionItem, PendingAction};
 use crate::editor::Editor;
 use crate::widgets::IconButton;
 use std::time::Instant;
@@ -141,7 +141,131 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+        // Клик вне меню LSP — закрываем меню
+        if state == ElementState::Pressed && self.lsp_actions_menu.is_some() {
+                    let s = self.renderer.as_ref().unwrap().scale_factor;
+        let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+        let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if let Some(menu) = &self.lsp_actions_menu {
+            let item_h = 36.0 * s;
+                let menu_w = 320.0 * s;
+                let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
+                let in_menu = mx >= menu.menu_x && mx <= menu.menu_x + menu_w
+                    && my >= menu.menu_y && my <= menu.menu_y + menu_h;
+                if in_menu {
+                    // Клик внутри меню — выбираем элемент
+                    let rel_y = my - menu.menu_y - 4.0 * s;
+                    let idx = (rel_y / item_h) as usize;
+                    if idx < menu.items.len() {
+                        let menu_clone = self.lsp_actions_menu.take().unwrap();
+                        let item = menu_clone.items[idx].clone();
+                        let cursor_line = menu_clone.cursor_line;
+                        drop(menu_clone);
+                        match item {
+                            LspActionItem::CodeAction(action) => {
+                                if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
+                                    let new_text = crate::lsp::apply_workspace_edit_to_text(
+                                        &self.editor.get_full_text(), &edit, &path,
+                                    );
+                                    if new_text != self.editor.get_full_text() {
+                                        self.apply_full_text_replacement(new_text);
+                                    }
+                                }
+                            }
+                            LspActionItem::AddNoqa { codes } => {
+                                self.insert_noqa_comment(cursor_line, &codes);
+                            }
+                            LspActionItem::AddNoqaAll => {
+                                self.insert_noqa_comment(cursor_line, &[]);
+                            }
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                } else {
+                    self.lsp_actions_menu = None;
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+        }
+
+        // Клики по кнопкам LSP-панели
+        if state == ElementState::Pressed && self.is_ide_mode
+            && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let sb_w = 48.0 * s;
+            let title_h = 32.0 * s;
+            let _panel_left_w = self.ide_panel.left_width * s;
+            let row_h = 52.0 * s;
+            let pad_x = 12.0 * s;
+            let btn_h = 22.0 * s;
+
+            let servers_copy = self.ide_panel.lsp_servers.clone();
+            for (i, info) in servers_copy.iter().enumerate() {
+                let row_y = title_h + i as f32 * row_h;
+                let btn_y = row_y + row_h - btn_h - 6.0 * s;
+
+                let label_restart = "Restart";
+                let label_toggle = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) { "Enable" } else { "Disable" };
+                let label_fix_all = "Fix All";
+                let label_stop = "Stop";
+                let btn_pad = 10.0 * s;
+
+                let bw_restart  = self.renderer.as_mut().unwrap().measure_ui_width(label_restart,  0.8) + btn_pad * 2.0;
+                let bw_toggle   = self.renderer.as_mut().unwrap().measure_ui_width(label_toggle,   0.8) + btn_pad * 2.0;
+                let bw_fix_all  = self.renderer.as_mut().unwrap().measure_ui_width(label_fix_all,  0.8) + btn_pad * 2.0;
+                let bw_stop     = self.renderer.as_mut().unwrap().measure_ui_width(label_stop,     0.8) + btn_pad * 2.0;
+
+                let btn_x_restart  = sb_w + pad_x;
+                let btn_x_toggle   = btn_x_restart + bw_restart + 6.0 * s;
+                let btn_x_fix_all  = btn_x_toggle  + bw_toggle  + 6.0 * s;
+                let btn_x_stop     = btn_x_fix_all + bw_fix_all + 6.0 * s;
+
+                if mx >= btn_x_restart && mx <= btn_x_restart + bw_restart && my >= btn_y && my <= btn_y + btn_h {
+                    // Restart
+                    if let Some(lsp) = &mut self.lsp {
+                        lsp.restart_python();
+                        self.ide_panel.lsp_servers = lsp.servers_info();
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                if mx >= btn_x_toggle && mx <= btn_x_toggle + bw_toggle && my >= btn_y && my <= btn_y + btn_h {
+                    if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
+                        if let Some(lsp) = &mut self.lsp {
+                            lsp.enable_python();
+                            self.ide_panel.lsp_servers = lsp.servers_info();
+                        }
+                    } else {
+                        if let Some(lsp) = &mut self.lsp {
+                            lsp.disable_python();
+                            self.ide_panel.lsp_servers = lsp.servers_info();
+                        }
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                if mx >= btn_x_fix_all && mx <= btn_x_fix_all + bw_fix_all && my >= btn_y && my <= btn_y + btn_h {
+                    if let Some(lsp) = &mut self.lsp {
+                        lsp.request_fix_all(&self.file_extension);
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                if mx >= btn_x_stop && mx <= btn_x_stop + bw_stop && my >= btn_y && my <= btn_y + btn_h {
+                    if let Some(lsp) = self.lsp.take() {
+                        lsp.shutdown();
+                    }
+                    self.ide_panel.lsp_servers.clear();
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+        }
+
         if self.dialog_window.is_some() {
             if state == ElementState::Pressed {
                 if let Some(dw) = self.dialog_window.as_ref() {
@@ -1504,6 +1628,50 @@ impl App {
             }
         }
 
+                // Alt+Enter — меню быстрых действий LSP
+        if self.modifiers.alt_key() {
+            if let PhysicalKey::Code(KeyCode::Enter) = key_event.physical_key {
+                self.open_lsp_actions_menu();
+                return;
+            }
+        }
+
+        // Навигация в открытом меню LSP
+        if self.lsp_actions_menu.is_some() {
+            match key_event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    self.lsp_actions_menu = None;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                PhysicalKey::Code(KeyCode::ArrowUp) => {
+                    if let Some(menu) = &mut self.lsp_actions_menu {
+                        if menu.selected > 0 {
+                            menu.selected -= 1;
+                        } else {
+                            menu.selected = menu.items.len().saturating_sub(1);
+                        }
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                PhysicalKey::Code(KeyCode::ArrowDown) => {
+                    if let Some(menu) = &mut self.lsp_actions_menu {
+                        if !menu.items.is_empty() {
+                            menu.selected = (menu.selected + 1) % menu.items.len();
+                        }
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                    self.apply_selected_lsp_action();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         let mut cursor_moved = false;
         let mut is_edit = false;
         let mut should_trigger_autocomplete = false;
@@ -1959,12 +2127,228 @@ impl App {
             }
         }
 
-        self.last_action = Instant::now();
+                self.last_action = Instant::now();
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_keyboard_input(
-        &mut self,
+    /// Открывает меню быстрых действий LSP для текущей строки
+    fn open_lsp_actions_menu(&mut self) {
+        if !self.is_ide_mode || self.show_welcome {
+            return;
+        }
+        let cursor = self.editor.cursor;
+        let cursor_line = self.editor.line_offsets
+            .partition_point(|&o| o <= cursor)
+            .saturating_sub(1) as u32;
+
+        // Собираем диагностики текущей строки
+        let diags: Vec<crate::lsp::Diagnostic> = if let Some(lsp) = &self.lsp {
+            lsp.diagnostics_for_line(cursor_line)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Вычисляем позицию меню (под курсором)
+        let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
+        let _s = self.renderer.as_ref().unwrap().scale_factor;
+        let menu_x = cx.max(self.renderer.as_ref().unwrap().left_padding);
+        let menu_y = cy - self.scroll_y.current + self.renderer.as_ref().unwrap().line_height;
+
+        // Начальные элементы: noqa варианты
+        let mut items: Vec<crate::app::LspActionItem> = Vec::new();
+
+        if !diags.is_empty() {
+            // Сначала "Добавить # noqa: CODES" для конкретных кодов
+            let codes: Vec<String> = diags.iter()
+                .filter_map(|d| d.code.clone())
+                .collect();
+            if !codes.is_empty() {
+                items.push(crate::app::LspActionItem::AddNoqa { codes: codes.clone() });
+            }
+            // Затем "Добавить # noqa" (всё отключить)
+            items.push(crate::app::LspActionItem::AddNoqaAll);
+        }
+
+        // Запрашиваем code actions от LSP
+        let pending_id = if !diags.is_empty() {
+            if let Some(lsp) = &mut self.lsp {
+                let ext = self.file_extension.clone();
+                let sl = cursor_line;
+                let el = cursor_line;
+                let sc = diags.iter().map(|d| d.start_col).min().unwrap_or(0);
+                let ec = diags.iter().map(|d| d.end_col).max().unwrap_or(0);
+                lsp.request_code_actions(&ext, sl, sc, el, ec, &diags)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if items.is_empty() && pending_id.is_none() {
+            return; // нечего показывать
+        }
+
+        self.lsp_actions_menu = Some(crate::app::LspActionsMenu {
+            cursor_line,
+            items,
+            selected: 0,
+            menu_x,
+            menu_y,
+            pending_request_id: pending_id,
+        });
+
+        self.window.as_ref().unwrap().request_redraw();
+    }
+
+    /// Применяет выбранный элемент меню LSP
+    pub fn apply_selected_lsp_action(&mut self) {
+        let menu = match self.lsp_actions_menu.take() {
+            Some(m) => m,
+            None => return,
+        };
+        if menu.items.is_empty() {
+            return;
+        }
+        let item = menu.items[menu.selected.min(menu.items.len() - 1)].clone();
+
+        match item {
+            crate::app::LspActionItem::CodeAction(action) => {
+                if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
+                    let new_text = crate::lsp::apply_workspace_edit_to_text(
+                        &self.editor.get_full_text(), &edit, &path,
+                    );
+                    if new_text != self.editor.get_full_text() {
+                        self.apply_full_text_replacement(new_text);
+                    }
+                }
+            }
+            crate::app::LspActionItem::AddNoqa { codes } => {
+                self.insert_noqa_comment(menu.cursor_line, &codes);
+            }
+            crate::app::LspActionItem::AddNoqaAll => {
+                self.insert_noqa_comment(menu.cursor_line, &[]);
+            }
+        }
+
+        self.window.as_ref().unwrap().request_redraw();
+    }
+
+    /// Вставляет/обновляет # noqa комментарий на указанной строке
+    fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
+        let line = line as usize;
+        let line_end = if line + 1 < self.editor.line_offsets.len() {
+            self.editor.line_offsets[line + 1] - 1 // позиция перед \n
+        } else {
+            self.editor.len()
+        };
+
+        // Читаем текущую строку
+        let line_start = self.editor.line_offsets.get(line).copied().unwrap_or(0);
+        let mut line_bytes = Vec::with_capacity(line_end - line_start);
+        for i in line_start..line_end {
+            line_bytes.push(self.editor.byte_at(i));
+        }
+        let line_text = String::from_utf8_lossy(&line_bytes);
+
+        // Вычисляем куда вставить
+        if let Some(noqa_pos_in_line) = line_text.find("# noqa") {
+            // Уже есть noqa — добавляем коды если нужно
+            if codes.is_empty() {
+                return; // Уже есть # noqa, всё ок
+            }
+            // Парсим существующие коды
+            let noqa_byte_start = line_start + noqa_pos_in_line;
+            let noqa_text = &line_text[noqa_pos_in_line..];
+            let existing = if let Some(colon) = noqa_text.find(": ") {
+                noqa_text[colon + 2..]
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
+            let mut merged = existing.clone();
+            for code in codes {
+                if !merged.contains(code) {
+                    merged.push(code.clone());
+                }
+            }
+
+            // Заменяем noqa блок
+            let new_noqa = format!("# noqa: {}", merged.join(", "));
+            let old_noqa_len = line_text.len() - noqa_pos_in_line;
+
+            // Удаляем старый noqa
+            self.editor.cursor = noqa_byte_start;
+            for _ in 0..old_noqa_len {
+                let _ = self.editor.delete_forward();
+            }
+            // Вставляем новый
+            let ins_start = self.editor.cursor;
+            let (del_info, ins_len) = self.editor.insert_str(&new_noqa);
+            if let Some((off, len)) = del_info { self.highlighter.shift_delete(off, len); }
+            self.highlighter.shift_insert(ins_start, ins_len, Some(&new_noqa));
+        } else {
+            // Нет noqa — добавляем в конец строки
+            self.editor.cursor = line_end;
+            let noqa = if codes.is_empty() {
+                "  # noqa".to_string()
+            } else {
+                format!("  # noqa: {}", codes.join(", "))
+            };
+            let ins_start = self.editor.cursor;
+            let (del_info, ins_len) = self.editor.insert_str(&noqa);
+            if let Some((off, len)) = del_info { self.highlighter.shift_delete(off, len); }
+            self.highlighter.shift_insert(ins_start, ins_len, Some(&noqa));
+        }
+
+        // Синхронизируем с LSP и подсветчиком
+        if !self.editor.sync_edits.is_empty() {
+            let edits = std::mem::take(&mut self.editor.sync_edits);
+            if self.is_ide_mode {
+                if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                    let text = self.editor.get_full_text();
+                    let ext = self.file_extension.clone();
+                    let path = path.clone();
+                    lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                }
+            }
+            self.highlighter.apply_edits(self.editor.version, edits);
+        }
+
+        App::update_window_title(
+            self.window.as_ref().unwrap(),
+            &self.base_title,
+            self.editor.is_dirty(),
+        );
+    }
+
+    /// Заменяет весь текст редактора новым (для workspace edit)
+    fn apply_full_text_replacement(&mut self, new_text: String) {
+        let version = self.editor.version + 1;
+        self.editor = crate::editor::Editor::new(new_text.len() + 8192);
+        self.editor.version = version;
+        let _ = self.editor.insert_str(&new_text);
+        self.editor.cursor = 0;
+        self.editor.set_original_text();
+        self.highlighter.reset(version, new_text.clone(), self.file_extension.clone());
+        if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+            lsp.notify_change(path, &self.file_extension.clone(), &new_text, version as i32);
+        }
+        App::update_window_title(
+            self.window.as_ref().unwrap(),
+            &self.base_title,
+            true,
+        );
+    }
+
+    pub fn handle_main_keyboard_input(&mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {

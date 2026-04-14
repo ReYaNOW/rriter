@@ -368,6 +368,18 @@ impl Renderer {
                     // Не ставим wants_pointer — обрабатывается в events.rs с правильным курсором
                 }
 
+                                // --- LSP серверы ---
+                if ide_panel.is_open(crate::app::PanelId::LspServers) {
+                    self.draw_lsp_servers_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        editor_height,
+                        s,
+                        &ide_panel.lsp_servers,
+                    );
+                }
+
                 // --- Дерево файлов проводника ---
                 if ide_panel.is_open(crate::app::PanelId::Explorer) {
                     self.flush();
@@ -1130,17 +1142,25 @@ impl Renderer {
                 let line_y = self.baseline_offset + v_line.y_offset - render_scroll_y;
                 let squiggle_y = line_y + 2.0 * self.scale_factor;
 
-                // Определяем X-диапазон из col (приближённо через char_advance для ASCII)
-                // UTF-16 col → pixel x: берём средний advance как aprox.
-                let avg_adv = self.char_advance(' ').max(self.char_advance('a'));
-                let sc = diag.start_col as f32;
-                let ec = if diag.end_line == diag.start_line {
-                    diag.end_col as f32
-                } else {
-                    sc + 8.0 // многострочная диагностика — минимум 8 символов
-                };
-                let x_start = self.left_padding + sc * avg_adv - render_scroll_x;
-                let x_end = self.left_padding + ec * avg_adv - render_scroll_x;
+                // Точный расчёт X-позиции: идём по символам строки, считая UTF-16 единицы
+                let avg_adv = self.char_advance('a');
+                let mut x_start_px = 0.0f32;
+                let mut x_end_px = 0.0f32;
+                let mut cur_x = 0.0f32;
+                editor.utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
+                    if utf16_before == diag.start_col { x_start_px = cur_x; }
+                    if diag.end_line == diag.start_line && utf16_before == diag.end_col { x_end_px = cur_x; }
+                    cur_x += if ch == '\t' { self.char_advance(' ') * 4.0 } else { self.char_advance(ch) };
+                });
+                // Если col за концом строки — ставим на конец
+                if diag.start_col >= editor.line_offsets.get(line + 1).map(|_| u32::MAX).unwrap_or(u32::MAX) || x_start_px == 0.0 && diag.start_col > 0 {
+                    x_start_px = cur_x;
+                }
+                if x_end_px == 0.0 {
+                    x_end_px = if diag.end_line == diag.start_line { cur_x } else { x_start_px + avg_adv * 8.0 };
+                }
+                let x_start = self.left_padding + x_start_px - render_scroll_x;
+                let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
 
                 if x_end < self.left_padding || x_start > self.width { continue; }

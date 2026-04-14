@@ -14,6 +14,7 @@ pub enum IconType {
     Terminal,
     Explorer,
     Problems,
+    LspServers,
 }
 
 pub struct Button {
