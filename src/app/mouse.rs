@@ -15,7 +15,7 @@ impl App {
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
 
-        // Скролл в области проводника файлов — перехватываем до всего остального
+                // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let sb_w = 48.0 * s;
@@ -23,7 +23,19 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
-            if mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h {
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+            let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top);
+
+            let (cx, cy, cw, ch) = if is_top {
+                (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+            } else {
+                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                let tab_h = 32.0 * s;
+                (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
+            };
+
+            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
                 let row_h = 28.0 * s;
@@ -36,7 +48,7 @@ impl App {
             }
         }
 
-                if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
@@ -59,25 +71,41 @@ impl App {
                             let log_bg_w = cw - 48.0 * s;
                             let log_bg_h = logs_h - 18.0 * s;
 
-                                                        if mx >= log_bg_x && mx <= log_bg_x + log_bg_w && my >= log_bg_y && my <= log_bg_y + log_bg_h {
-                                let (inner_total_h, inner_max_w) = self.lsp_server_inner_size(info, s);
+                            if mx >= log_bg_x
+                                && mx <= log_bg_x + log_bg_w
+                                && my >= log_bg_y
+                                && my <= log_bg_y + log_bg_h
+                            {
+                                let (inner_total_h, inner_max_w) =
+                                    self.lsp_server_inner_size(info, s);
                                 let name = info.name.to_string();
 
-                                let inner_y = self.ide_panel.lsp_logs_scroll_y.entry(name.clone()).or_insert_with(|| crate::scroll::ScrollState::new(7.0));
+                                let inner_y = self
+                                    .ide_panel
+                                    .lsp_logs_scroll_y
+                                    .entry(name.clone())
+                                    .or_insert_with(|| crate::scroll::ScrollState::new(7.0));
                                 inner_y.anim_speed = 7.0;
                                 if !shift {
                                     inner_y.scroll_by(dy);
                                 }
                                 inner_y.clamp_target(0.0, (inner_total_h - log_bg_h).max(0.0));
 
-                                let inner_x = self.ide_panel.lsp_logs_scroll_x.entry(name).or_insert_with(|| crate::scroll::ScrollState::new(7.0));
+                                let inner_x = self
+                                    .ide_panel
+                                    .lsp_logs_scroll_x
+                                    .entry(name)
+                                    .or_insert_with(|| crate::scroll::ScrollState::new(7.0));
                                 inner_x.anim_speed = 7.0;
                                 if shift {
                                     inner_x.scroll_by(dy);
                                 } else {
                                     inner_x.scroll_by(dx);
                                 }
-                                inner_x.clamp_target(0.0, (inner_max_w + 20.0 * s - log_bg_w).max(0.0));
+                                inner_x.clamp_target(
+                                    0.0,
+                                    (inner_max_w + 20.0 * s - log_bg_w).max(0.0),
+                                );
 
                                 over_inner = true;
                                 break;
@@ -96,7 +124,9 @@ impl App {
                             self.ide_panel.lsp_scroll_x.scroll_by(dx);
                         }
                         let total_h = self.lsp_panel_total_h(s);
-                        self.ide_panel.lsp_scroll_y.clamp_target(0.0, (total_h - ch).max(0.0));
+                        self.ide_panel
+                            .lsp_scroll_y
+                            .clamp_target(0.0, (total_h - ch).max(0.0));
                         self.ide_panel.lsp_scroll_x.clamp_target(0.0, 0.0);
                     }
 
@@ -504,7 +534,7 @@ impl App {
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
-                        self.autocomplete_scroll.is_dragging = false;
+            self.autocomplete_scroll.is_dragging = false;
             self.scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_y.is_dragging = false;
@@ -664,7 +694,9 @@ impl App {
 
             if self.ide_panel.is_resizing_left {
                 let sb_w = 48.0 * s;
-                let new_w = ((px - sb_w) / s).max(80.0).min(600.0);
+                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                let max_w = ((ww - sb_w) / s) - 300.0;
+                let new_w = ((px - sb_w) / s).max(80.0).min(max_w.max(80.0));
                 self.ide_panel.left_width = new_w;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -672,7 +704,8 @@ impl App {
 
             if self.ide_panel.is_resizing_bottom {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                let new_h = ((wh - py) / s).max(60.0).min(500.0);
+                let max_h = (wh / s) - 50.0;
+                let new_h = ((wh - py) / s).max(60.0).min(max_h.max(60.0));
                 self.ide_panel.bottom_height = new_h;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -733,7 +766,7 @@ impl App {
             // Drag-selection в логах LSP
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
                 if let Some((cx, cy, _cw, _ch)) = self.lsp_panel_bounds() {
-                                        let pad_x = 12.0 * s;
+                    let pad_x = 12.0 * s;
                     let btn_h = 24.0 * s;
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let mut cur_y = cy + 8.0 * s - scroll_y;
@@ -747,23 +780,43 @@ impl App {
                             let card_x = cx + 12.0 * s;
                             let btn_y1 = cur_y + 56.0 * s;
                             let btn_y2 = btn_y1 + btn_h + 8.0 * s;
-                                                        let log_bg_x = card_x + pad_x;
+                            let log_bg_x = card_x + pad_x;
                             let log_bg_y = btn_y2 + btn_h + 10.0 * s;
 
-                                                        let inner_scroll_y = self.ide_panel.lsp_logs_scroll_y.get(srv.name).map(|ss| ss.current).unwrap_or(0.0).round();
-                            let inner_scroll_x = self.ide_panel.lsp_logs_scroll_x.get(srv.name).map(|ss| ss.current).unwrap_or(0.0).round();
+                            let inner_scroll_y = self
+                                .ide_panel
+                                .lsp_logs_scroll_y
+                                .get(srv.name)
+                                .map(|ss| ss.current)
+                                .unwrap_or(0.0)
+                                .round();
+                            let inner_scroll_x = self
+                                .ide_panel
+                                .lsp_logs_scroll_x
+                                .get(srv.name)
+                                .map(|ss| ss.current)
+                                .unwrap_or(0.0)
+                                .round();
                             let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
                             let line_h = 16.0 * s;
                             let my_drag = position.y as f32;
 
-                            if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(focused_name.as_str()) {
+                            if let Some(ed) = self
+                                .ide_panel
+                                .lsp_log_editors
+                                .get_mut(focused_name.as_str())
+                            {
                                 let mut phys_line = 0;
                                 let (first, second) = ed.text_parts();
                                 let first_len = first.len();
 
                                 while phys_line < ed.line_offsets.len() {
                                     let is_folded = ed.folded_lines.contains(&phys_line);
-                                    let fold_end = if is_folded { ed.foldable_lines.get(&phys_line).copied() } else { None };
+                                    let fold_end = if is_folded {
+                                        ed.foldable_lines.get(&phys_line).copied()
+                                    } else {
+                                        None
+                                    };
 
                                     if my_drag >= text_y - line_h && my_drag <= text_y {
                                         let start_byte = ed.line_offsets[phys_line];
@@ -773,7 +826,10 @@ impl App {
                                             ed.len()
                                         };
 
-                                        let click_x_in_line = (position.x as f32 - log_bg_x - 20.0 * s + inner_scroll_x).max(0.0);
+                                        let click_x_in_line =
+                                            (position.x as f32 - log_bg_x - 20.0 * s
+                                                + inner_scroll_x)
+                                                .max(0.0);
                                         let r = self.renderer.as_mut().unwrap();
 
                                         let mut current_x = 0.0;
@@ -783,13 +839,22 @@ impl App {
 
                                         while current_chunk_offset < end_byte {
                                             let chunk = if current_chunk_offset < first_len {
-                                                &first[current_chunk_offset..end_byte.min(first_len)]
+                                                &first
+                                                    [current_chunk_offset..end_byte.min(first_len)]
                                             } else {
-                                                &second[current_chunk_offset - first_len..end_byte - first_len]
+                                                &second[current_chunk_offset - first_len
+                                                    ..end_byte - first_len]
                                             };
 
                                             for c in chunk.chars() {
-                                                let adv = if c == '\n' || c == '\u{FE0F}' || c == '\u{200D}' { 0.0 } else { r.char_advance(c) * 0.7 };
+                                                let adv = if c == '\n'
+                                                    || c == '\u{FE0F}'
+                                                    || c == '\u{200D}'
+                                                {
+                                                    0.0
+                                                } else {
+                                                    r.char_advance(c) * 0.7
+                                                };
                                                 let dist = (current_x - click_x_in_line).abs();
                                                 if dist < best_dist {
                                                     best_dist = dist;
@@ -823,13 +888,15 @@ impl App {
                     }
                 }
             }
-                } else if self.ide_panel.lsp_scroll_x.is_dragging {
+        } else if self.ide_panel.lsp_scroll_x.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some((cx, _, cw, _)) = self.lsp_panel_bounds() {
                 let track_w = cw - 30.0 * s;
                 let max_x = 0.0;
                 let thumb_w = track_w;
-                let ratio = (position.x as f32 - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset) / (track_w - thumb_w).max(0.0001);
+                let ratio =
+                    (position.x as f32 - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset)
+                        / (track_w - thumb_w).max(0.0001);
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
             }
@@ -846,19 +913,43 @@ impl App {
                 self.ide_panel.lsp_scroll_y.target = (ratio * max_y).clamp(0.0, max_y);
                 self.ide_panel.lsp_scroll_y.current = self.ide_panel.lsp_scroll_y.target;
             }
-        } else if self.ide_panel.lsp_servers.iter().any(|info| self.ide_panel.lsp_logs_scroll_y.get(info.name).map(|s| s.is_dragging).unwrap_or(false) || self.ide_panel.lsp_logs_scroll_x.get(info.name).map(|s| s.is_dragging).unwrap_or(false)) {
+        } else if self.ide_panel.lsp_servers.iter().any(|info| {
+            self.ide_panel
+                .lsp_logs_scroll_y
+                .get(info.name)
+                .map(|s| s.is_dragging)
+                .unwrap_or(false)
+                || self
+                    .ide_panel
+                    .lsp_logs_scroll_x
+                    .get(info.name)
+                    .map(|s| s.is_dragging)
+                    .unwrap_or(false)
+        }) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             for (idx, info) in self.ide_panel.lsp_servers.clone().iter().enumerate() {
                 let name = info.name.to_string();
-                let is_drag_y = self.ide_panel.lsp_logs_scroll_y.get(&name).map(|s| s.is_dragging).unwrap_or(false);
-                let is_drag_x = self.ide_panel.lsp_logs_scroll_x.get(&name).map(|s| s.is_dragging).unwrap_or(false);
+                let is_drag_y = self
+                    .ide_panel
+                    .lsp_logs_scroll_y
+                    .get(&name)
+                    .map(|s| s.is_dragging)
+                    .unwrap_or(false);
+                let is_drag_x = self
+                    .ide_panel
+                    .lsp_logs_scroll_x
+                    .get(&name)
+                    .map(|s| s.is_dragging)
+                    .unwrap_or(false);
 
                 if is_drag_y || is_drag_x {
                     if let Some((cx, cy, cw, _ch)) = self.lsp_panel_bounds() {
                         let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                         let mut current_y = cy + 8.0 * s - scroll_y;
                         for (i, srv) in self.ide_panel.lsp_servers.iter().enumerate() {
-                            if i == idx { break; }
+                            if i == idx {
+                                break;
+                            }
                             let logs_h = self.lsp_server_logs_h(srv, s);
                             current_y += 136.0 * s + logs_h + 16.0 * s;
                         }
@@ -879,15 +970,18 @@ impl App {
                             let track_h = log_bg_h - 14.0 * s;
                             let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s);
                             let sy = self.ide_panel.lsp_logs_scroll_y.get_mut(&name).unwrap();
-                            let ratio = (position.y as f32 - log_bg_y - 2.0 * s - sy.drag_offset) / (track_h - thumb_h).max(0.0001);
+                            let ratio = (position.y as f32 - log_bg_y - 2.0 * s - sy.drag_offset)
+                                / (track_h - thumb_h).max(0.0001);
                             sy.target = (ratio * max_y).clamp(0.0, max_y);
                             sy.current = sy.target;
                         } else if is_drag_x {
                             let max_x = (inner_max_w + 20.0 * s - log_bg_w).max(0.0);
                             let track_w = log_bg_w - 14.0 * s;
-                            let thumb_w = (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s);
+                            let thumb_w =
+                                (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s);
                             let sx = self.ide_panel.lsp_logs_scroll_x.get_mut(&name).unwrap();
-                            let ratio = (position.x as f32 - log_bg_x - 2.0 * s - sx.drag_offset) / (track_w - thumb_w).max(0.0001);
+                            let ratio = (position.x as f32 - log_bg_x - 2.0 * s - sx.drag_offset)
+                                / (track_w - thumb_w).max(0.0001);
                             sx.target = (ratio * max_x).clamp(0.0, max_x);
                             sx.current = sx.target;
                         }

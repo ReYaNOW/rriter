@@ -7,13 +7,14 @@ impl App {
         let is_top = self.ide_panel.slots.iter().any(|sl| {
             sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
         });
-        if is_top {
+                if is_top {
             let wh = self.window.as_ref()?.inner_size().height as f32;
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
             Some((
                 48.0 * s,
                 32.0 * s,
                 self.ide_panel.left_width * s,
-                wh - 32.0 * s,
+                wh - 32.0 * s - panel_bottom_h,
             ))
         } else {
             let first = self
@@ -47,12 +48,12 @@ impl App {
     }
 
     /// Высота блока логов одного LSP-сервера (0 если не развёрнут)
-        pub(crate) fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32 {
+                pub(crate) fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32 {
         if !self.ide_panel.lsp_logs_expanded.contains(info.name) {
             return 0.0;
         }
         let (inner_total_h, _) = self.lsp_server_inner_size(info, s);
-        (inner_total_h + 20.0 * s).clamp(50.0 * s, 300.0 * s)
+        (inner_total_h + 20.0 * s).clamp(50.0 * s, 800.0 * s)
     }
 
         pub(crate) fn lsp_server_inner_size(&self, info: &crate::lsp::LspServerInfo, s: f32) -> (f32, f32) {

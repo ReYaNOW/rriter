@@ -84,9 +84,9 @@ impl Renderer {
         for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
             let mut logs_h = 0.0;
-            if is_expanded {
+                                    if is_expanded {
                 let (inner_h, _) = get_inner_size(info, self);
-                logs_h = (inner_h + 20.0 * s).clamp(50.0 * s, 300.0 * s);
+                logs_h = (inner_h + 20.0 * s).clamp(50.0 * s, 800.0 * s);
             }
             total_h += 136.0 * s + logs_h + 16.0 * s;
         }
@@ -96,11 +96,11 @@ impl Renderer {
             let mut logs_h = 0.0;
             let mut inner_total_h = 0.0;
             let mut inner_max_w = 0.0;
-            if is_expanded {
+                                    if is_expanded {
                 let (h, w) = get_inner_size(info, self);
                 inner_total_h = h;
                 inner_max_w = w;
-                logs_h = (inner_total_h + 20.0 * s).clamp(50.0 * s, 300.0 * s);
+                logs_h = (inner_total_h + 20.0 * s).clamp(50.0 * s, 800.0 * s);
             }
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
