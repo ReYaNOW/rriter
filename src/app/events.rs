@@ -1035,34 +1035,7 @@ impl ApplicationHandler for App {
         }
 
         if self.highlighter.poll(self.editor.version) {
-            self.editor.foldable_lines.clear();
-            self.editor.foldable_ranges_bytes.clear();
-            for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
-                self.editor
-                    .foldable_ranges_bytes
-                    .push((start_b, end_b, is_sticky));
-                let sl = self
-                    .editor
-                    .line_offsets
-                    .partition_point(|&x| x <= start_b)
-                    .saturating_sub(1);
-                let el = self
-                    .editor
-                    .line_offsets
-                    .partition_point(|&x| x <= end_b)
-                    .saturating_sub(1);
-                if el > sl {
-                    self.editor.foldable_lines.insert(sl, el);
-                    if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
-                        self.editor.folded_lines.insert(sl);
-                        self.editor
-                            .folded_start_bytes
-                            .insert(self.editor.line_offsets[sl]);
-                    }
-                }
-            }
-
-            self.is_highlighted_once = true;
+            self.apply_highlight_results();
             if self.autocomplete_active {
                 self.update_autocomplete();
             }

@@ -444,7 +444,10 @@ impl App {
             }
             self.refresh_file_tree();
         } else {
-            self.load_file(node.path.clone(), false);
+            // Не перезагружаем файл, если он уже открыт
+            if self.file_path.as_deref() != Some(node.path.as_path()) {
+                self.load_file(node.path.clone(), false);
+            }
         }
     }
 

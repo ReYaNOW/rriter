@@ -777,6 +777,38 @@ impl App {
         crate::save_recent_files(&self.recent_files);
     }
 
+    /// Применяет последние результаты подсветки (foldable ranges) к состоянию редактора.
+    /// Вызывать после `highlighter.poll()` или `highlighter.wait_for_first_result()`.
+    pub fn apply_highlight_results(&mut self) {
+        self.editor.foldable_lines.clear();
+        self.editor.foldable_ranges_bytes.clear();
+        for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
+            self.editor
+                .foldable_ranges_bytes
+                .push((start_b, end_b, is_sticky));
+            let sl = self
+                .editor
+                .line_offsets
+                .partition_point(|&x| x <= start_b)
+                .saturating_sub(1);
+            let el = self
+                .editor
+                .line_offsets
+                .partition_point(|&x| x <= end_b)
+                .saturating_sub(1);
+            if el > sl {
+                self.editor.foldable_lines.insert(sl, el);
+                if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
+                    self.editor.folded_lines.insert(sl);
+                    self.editor
+                        .folded_start_bytes
+                        .insert(self.editor.line_offsets[sl]);
+                }
+            }
+        }
+        self.is_highlighted_once = true;
+    }
+
     pub fn load_file(&mut self, path: PathBuf, add_to_history: bool) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
@@ -810,6 +842,15 @@ impl App {
                     self.editor.get_full_text(),
                     self.file_extension.clone(),
                 );
+
+                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
+                // Для малых файлов Tree-sitter укладывается в < 5мс, большие файлы — просто не ждут.
+                if self.highlighter.wait_for_first_result(
+                    self.editor.version,
+                    std::time::Duration::from_millis(50),
+                ) {
+                    self.apply_highlight_results();
+                }
 
                 self.scroll_y.current = 0.0;
                 self.scroll_y.target = 0.0;

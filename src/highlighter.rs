@@ -1134,6 +1134,37 @@ impl Highlighter {
         updated
     }
 
+    /// Блокирует текущий поток (до `timeout`) ожидая первый результат для `version`.
+    /// Возвращает `true` если результат получен и применён до таймаута.
+    /// Используется при открытии файла, чтобы первый кадр уже содержал подсветку.
+    pub fn wait_for_first_result(&mut self, version: u64, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let remaining = deadline - now;
+            match self.rx.recv_timeout(remaining) {
+                Ok((ver, spans, completions, foldable_ranges)) => {
+                    if ver >= self.current_version {
+                        self.current_version = ver;
+                    }
+                    if ver == version {
+                        self.spans = spans;
+                        self.completions = completions;
+                        self.foldable_ranges = foldable_ranges;
+                        // Дренируем оставшиеся ожидающие результаты
+                        self.poll(version);
+                        return true;
+                    }
+                    // Устаревший результат — ждём дальше
+                }
+                Err(_) => return false,
+            }
+        }
+    }
+
     pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>) {
         let prev_offset = offset.saturating_sub(1);
         let mut predicted_color = DRACULA_FG;
