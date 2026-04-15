@@ -268,14 +268,29 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::LspLogFoldToggle(server_idx, line_idx) => {
+                        UiId::LspLogFoldToggle(server_idx, line_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name;
                     if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(name) {
-                        if ed.folded_lines.contains(&line_idx) {
-                            ed.folded_lines.remove(&line_idx);
-                        } else if ed.foldable_lines.contains_key(&line_idx) {
-                            ed.folded_lines.insert(line_idx);
+                        let is_folded = ed.folded_lines.contains(&line_idx);
+                        if let Some(&end_idx) = ed.foldable_lines.get(&line_idx) {
+                            if is_folded {
+                                for i in line_idx..=end_idx {
+                                    ed.folded_lines.remove(&i);
+                                    if i < ed.line_offsets.len() {
+                                        ed.folded_start_bytes.remove(&ed.line_offsets[i]);
+                                    }
+                                }
+                            } else {
+                                for i in line_idx..=end_idx {
+                                    if ed.foldable_lines.contains_key(&i) {
+                                        ed.folded_lines.insert(i);
+                                        if i < ed.line_offsets.len() {
+                                            ed.folded_start_bytes.insert(ed.line_offsets[i]);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -486,8 +501,22 @@ impl App {
             UiId::LspScrollY => {
                 self.ide_panel.lsp_scroll_y.is_dragging = true;
             }
-            UiId::LspScrollX => {
+                        UiId::LspScrollX => {
                 self.ide_panel.lsp_scroll_x.is_dragging = true;
+            }
+            UiId::LspLogScrollY(server_idx) => {
+                if server_idx < self.ide_panel.lsp_servers.len() {
+                    let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
+                    let scroll = self.ide_panel.lsp_logs_scroll_y.entry(name).or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    scroll.is_dragging = true;
+                }
+            }
+            UiId::LspLogScrollX(server_idx) => {
+                if server_idx < self.ide_panel.lsp_servers.len() {
+                    let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
+                    let scroll = self.ide_panel.lsp_logs_scroll_x.entry(name).or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    scroll.is_dragging = true;
+                }
             }
             UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {

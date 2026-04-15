@@ -697,11 +697,21 @@ impl ApplicationHandler for App {
         if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
         }
-        if self.ide_panel.lsp_scroll_y.update(dt) {
+                if self.ide_panel.lsp_scroll_y.update(dt) {
             needs_redraw = true;
         }
         if self.ide_panel.lsp_scroll_x.update(dt) {
             needs_redraw = true;
+        }
+        for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
+            if scroll.update(dt) {
+                needs_redraw = true;
+            }
+        }
+        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
+            if scroll.update(dt) {
+                needs_redraw = true;
+            }
         }
 
         if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {

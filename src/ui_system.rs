@@ -63,7 +63,9 @@ pub enum UiId {
     BottomPanelBody,
     LspLogArea(usize),
     LspScrollY,
-    LspScrollX,
+        LspScrollX,
+    LspLogScrollY(usize),
+    LspLogScrollX(usize),
 }
 
 /// Тип UI элемента с его геометрией

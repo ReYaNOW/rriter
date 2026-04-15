@@ -396,18 +396,13 @@ impl Renderer {
                             && s.group == crate::app::PanelGroup::Top
                     });
                     if is_top {
-                        self.draw_lsp_servers_panel(
+                                                self.draw_lsp_servers_panel(
                             panel_x,
                             title_h,
                             panel_left_w,
                             editor_height - title_h,
                             s,
-                            &ide_panel.lsp_servers,
-                            &ide_panel.lsp_logs_expanded,
-                            ide_panel.lsp_scroll_y.current,
-                            ide_panel.lsp_scroll_x.current,
-                            &ide_panel.lsp_log_editors,
-                            &ide_panel.lsp_logs_focused,
+                            ide_panel,
                             !lsp_diagnostics.is_empty(),
                             ui_registry,
                         );
@@ -1656,18 +1651,13 @@ impl Renderer {
             if content_h > 8.0 * s {
                 if let Some(slot) = open_bottom.first() {
                     if slot.id == crate::app::PanelId::LspServers {
-                        self.draw_lsp_servers_panel(
+                                                self.draw_lsp_servers_panel(
                             panel_x,
                             content_y,
                             panel_w,
                             content_h,
                             s,
-                            &ide_panel.lsp_servers,
-                            &ide_panel.lsp_logs_expanded,
-                            ide_panel.lsp_scroll_y.current,
-                            ide_panel.lsp_scroll_x.current,
-                            &ide_panel.lsp_log_editors,
-                            &ide_panel.lsp_logs_focused,
+                            ide_panel,
                             !lsp_diagnostics.is_empty(),
                             ui_registry,
                         );

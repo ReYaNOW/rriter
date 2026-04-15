@@ -3,22 +3,23 @@ use glow::HasContext;
 
 impl Renderer {
     /// Рисует содержимое панели LSP серверов (левая панель)
-    pub fn draw_lsp_servers_panel(
+        pub fn draw_lsp_servers_panel(
         &mut self,
         content_x: f32,
         content_y: f32,
         content_w: f32,
         content_h: f32,
         s: f32,
-        servers: &[crate::lsp::LspServerInfo],
-        expanded_logs: &rustc_hash::FxHashSet<String>,
-        scroll_y: f32,
-        scroll_x: f32,
-        lsp_log_editors: &rustc_hash::FxHashMap<String, crate::editor::Editor>,
-        lsp_logs_focused: &Option<String>,
+        ide_panel: &crate::app::IdePanelState,
         fix_all_active: bool,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
+        let scroll_y = ide_panel.lsp_scroll_y.current;
+        let servers = &ide_panel.lsp_servers;
+        let expanded_logs = &ide_panel.lsp_logs_expanded;
+        let lsp_log_editors = &ide_panel.lsp_log_editors;
+        let lsp_logs_focused = &ide_panel.lsp_logs_focused;
+
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -48,43 +49,45 @@ impl Renderer {
             );
         }
 
-        let mut current_y = content_y + 8.0 * s - scroll_y.round();
+                let get_inner_size = |info: &crate::lsp::LspServerInfo, renderer: &mut Self| -> (f32, f32) {
+            let mut lines = 0;
+            let mut max_w = 0.0f32;
+            let mut skip_until = None;
+            let mut global_line_count = 0;
+            for entry in &info.logs {
+                for line in entry.text.split('\n') {
+                    if let Some(tgt) = skip_until {
+                        if global_line_count < tgt {
+                            global_line_count += 1;
+                            continue;
+                        } else {
+                            skip_until = None;
+                        }
+                    }
+                    lines += 1;
+                    let w = renderer.measure_mono_width(line, 0.7);
+                    if w > max_w { max_w = w; }
+
+                    if let Some(ed) = lsp_log_editors.get(info.name) {
+                        if ed.folded_lines.contains(&global_line_count) {
+                            skip_until = Some(ed.foldable_lines[&global_line_count]);
+                        }
+                    }
+                    global_line_count += 1;
+                }
+            }
+            (lines as f32 * 16.0 * s, max_w)
+        };
+
+        let mut current_y = content_y + 8.0 * s - scroll_y;
         let mut total_h = 8.0 * s;
-        let mut max_log_w = 0.0f32;
+
         for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
             let mut logs_h = 0.0;
             if is_expanded {
-                let mut lines = 0;
-                let mut skip_until = None;
-                if let Some(ed) = lsp_log_editors.get(info.name) {
-                    for i in 0..ed.line_offsets.len() {
-                        if let Some(tgt) = skip_until {
-                            if i < tgt {
-                                continue;
-                            }
-                            skip_until = None;
-                        }
-                        lines += 1;
-                        if ed.folded_lines.contains(&i) {
-                            skip_until = Some(ed.foldable_lines[&i]);
-                        }
-                    }
-                } else {
-                    for entry in &info.logs {
-                        lines += entry.text.split('\n').count();
-                    }
-                }
-                logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
-
-                for entry in &info.logs {
-                    for line in entry.text.split('\n') {
-                        let lw = self.measure_mono_width(line, 0.7);
-                        if lw > max_log_w {
-                            max_log_w = lw;
-                        }
-                    }
-                }
+                let (inner_h, _) = get_inner_size(info, self);
+                logs_h = (inner_h + 20.0 * s).clamp(50.0 * s, 300.0 * s);
             }
             total_h += 136.0 * s + logs_h + 16.0 * s;
         }
@@ -92,28 +95,13 @@ impl Renderer {
         for (server_idx, info) in servers.iter().enumerate() {
             let is_expanded = expanded_logs.contains(info.name);
             let mut logs_h = 0.0;
+            let mut inner_total_h = 0.0;
+            let mut inner_max_w = 0.0;
             if is_expanded {
-                let mut lines = 0;
-                let mut skip_until = None;
-                if let Some(ed) = lsp_log_editors.get(info.name) {
-                    for i in 0..ed.line_offsets.len() {
-                        if let Some(tgt) = skip_until {
-                            if i < tgt {
-                                continue;
-                            }
-                            skip_until = None;
-                        }
-                        lines += 1;
-                        if ed.folded_lines.contains(&i) {
-                            skip_until = Some(ed.foldable_lines[&i]);
-                        }
-                    }
-                } else {
-                    for entry in &info.logs {
-                        lines += entry.text.split('\n').count();
-                    }
-                }
-                logs_h = (lines as f32 * 16.0 * s).max(50.0 * s) + 20.0 * s;
+                let (h, w) = get_inner_size(info, self);
+                inner_total_h = h;
+                inner_max_w = w;
+                logs_h = (inner_total_h + 20.0 * s).clamp(50.0 * s, 300.0 * s);
             }
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
@@ -412,7 +400,7 @@ impl Renderer {
                     let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
                     let inter_h = (inter_y2 - inter_y1).max(0.0);
 
-                    ui_registry.register_rect(
+                                        ui_registry.register_blocker(
                         crate::ui_system::UiId::LspLogArea(server_idx),
                         log_bg_x,
                         log_bg_y,
@@ -434,8 +422,10 @@ impl Renderer {
                             );
                         }
 
-                        let line_h = 16.0 * s;
-                        let _first_visible_line = (scroll_y / line_h).floor() as usize;
+                                                let line_h = 16.0 * s;
+                        let inner_scroll_y = ide_panel.lsp_logs_scroll_y.get(info.name).map(|ss| ss.current).unwrap_or(0.0);
+                        let inner_scroll_x = ide_panel.lsp_logs_scroll_x.get(info.name).map(|ss| ss.current).unwrap_or(0.0);
+                        let _first_visible_line = (inner_scroll_y / line_h).floor() as usize;
 
                         let mut sel_lo = 0;
                         let mut sel_hi = 0;
@@ -450,7 +440,7 @@ impl Renderer {
                             sel_hi = hi;
                         }
 
-                        let mut text_y = log_bg_y + 16.0 * s;
+                        let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
                         let mut global_line_count = 0;
                         let mut global_byte_off: usize = 0;
                         let mut skip_until = None;
@@ -488,17 +478,17 @@ impl Renderer {
                                             .rev()
                                             .find(|&i| line.is_char_boundary(i))
                                             .unwrap_or(0);
-                                        let in_e = (in_e..=line.len())
+                                                                                let in_e = (in_e..=line.len())
                                             .find(|&i| line.is_char_boundary(i))
                                             .unwrap_or(line.len());
                                         let x1 = log_bg_x
                                             + 20.0 * s
                                             + self.measure_mono_width(&line[..in_s], 0.7)
-                                            - scroll_x.round();
+                                            - inner_scroll_x;
                                         let x2 = log_bg_x
                                             + 20.0 * s
                                             + self.measure_mono_width(&line[..in_e], 0.7)
-                                            - scroll_x.round();
+                                            - inner_scroll_x;
                                         let ry = text_y - 14.0 * s;
                                         let x1c = x1.max(log_bg_x);
                                         let x2c = x2.min(log_bg_x + log_bg_w);
@@ -508,13 +498,12 @@ impl Renderer {
                                                 ry,
                                                 x2c - x1c,
                                                 line_h,
-                                                0.0,
-                                                [0.40, 0.28, 0.72, 0.45],
+                                                0.0,[0.40, 0.28, 0.72, 0.45],
                                             );
                                         }
                                     }
 
-                                    let mut current_x = log_bg_x + 20.0 * s - scroll_x.round();
+                                    let mut current_x = log_bg_x + 20.0 * s - inner_scroll_x;
                                     let mut i = 0;
                                     let abs_entry_start = global_byte_off + line_byte_off_in_entry;
                                     while i < line.len() {
@@ -554,13 +543,12 @@ impl Renderer {
                                             log_ed.folded_lines.contains(&global_line_count);
                                         let is_foldable =
                                             log_ed.foldable_lines.contains_key(&global_line_count);
-                                        if is_foldable {
+                                                                                if is_foldable {
                                             let icon =
                                                 if is_folded { "\u{f0115}" } else { "\u{f0114}" };
-                                            let icon_x = log_bg_x + 4.0 * s - scroll_x.round();
+                                            let icon_x = log_bg_x + 4.0 * s - inner_scroll_x;
                                             let is_hovered = ui_registry.register_rect(
-                                                crate::ui_system::UiId::LspLogFoldToggle(
-                                                    server_idx,
+                                                crate::ui_system::UiId::LspLogFoldToggle(server_idx,
                                                     global_line_count,
                                                 ),
                                                 icon_x,
@@ -579,9 +567,23 @@ impl Renderer {
                                                 icon, icon_x, text_y, color, 0.75,
                                             );
                                         }
-                                        if is_folded {
+                                                                                if is_folded {
                                             let btn_w =
                                                 self.measure_ui_width("...", 0.8) + 10.0 * s;
+
+                                            ui_registry.register_rect(
+                                                crate::ui_system::UiId::LspLogFoldToggle(
+                                                    server_idx,
+                                                    global_line_count,
+                                                ),
+                                                current_x + 5.0 * s,
+                                                text_y - 12.0 * s,
+                                                btn_w,
+                                                line_h - 2.0 * s,
+                                                mx,
+                                                my,
+                                            );
+
                                             self.push_rounded_rect(
                                                 current_x + 5.0 * s,
                                                 text_y - 12.0 * s,
@@ -593,8 +595,7 @@ impl Renderer {
                                             self.draw_string_scaled(
                                                 "...",
                                                 current_x + 10.0 * s,
-                                                text_y,
-                                                [0.8, 0.8, 0.8, 1.0],
+                                                text_y,[0.8, 0.8, 0.8, 1.0],
                                                 0.8,
                                             );
                                             skip_until =
@@ -609,7 +610,56 @@ impl Renderer {
                             global_byte_off += entry.text.len() + 1;
                         }
 
-                        self.flush();
+                                                self.flush();
+
+                        if inner_total_h > log_bg_h {
+                            let max_y = (inner_total_h - log_bg_h).max(0.0);
+                            let ratio = (inner_scroll_y / max_y).clamp(0.0, 1.0);
+                            let track_h = log_bg_h - 14.0 * s;
+                            let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s);
+                            let thumb_y = log_bg_y + 7.0 * s + ratio * (track_h - thumb_h);
+                            self.push_rounded_rect(
+                                log_bg_x + log_bg_w - 8.0 * s,
+                                thumb_y,
+                                4.0 * s,
+                                thumb_h,
+                                2.0 * s,
+                                [1.0, 1.0, 1.0, 0.22],
+                            );
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::LspLogScrollY(server_idx),
+                                log_bg_x + log_bg_w - 14.0 * s,
+                                log_bg_y,
+                                14.0 * s,
+                                log_bg_h,
+                                mx, my
+                            );
+                        }
+
+                        if inner_max_w + 20.0 * s > log_bg_w {
+                            let max_x = (inner_max_w + 20.0 * s - log_bg_w).max(0.0);
+                            let ratio = (inner_scroll_x / max_x).clamp(0.0, 1.0);
+                            let track_w = log_bg_w - 14.0 * s;
+                            let thumb_w = (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s);
+                            let thumb_x = log_bg_x + 7.0 * s + ratio * (track_w - thumb_w);
+                            self.push_rounded_rect(
+                                thumb_x,
+                                log_bg_y + log_bg_h - 8.0 * s,
+                                thumb_w,
+                                4.0 * s,
+                                2.0 * s,
+                                [1.0, 1.0, 1.0, 0.22],
+                            );
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::LspLogScrollX(server_idx),
+                                log_bg_x,
+                                log_bg_y + log_bg_h - 14.0 * s,
+                                log_bg_w,
+                                14.0 * s,
+                                mx, my
+                            );
+                        }
+
                         unsafe {
                             let sy = (self.height - (content_y + content_h)).round() as i32;
                             self.gl.scissor(
@@ -645,31 +695,6 @@ impl Renderer {
                 content_y,
                 10.0 * s,
                 content_h,
-                mx,
-                my,
-            );
-        }
-
-        let max_scroll_x = (max_log_w + 20.0 * s - (content_w - 32.0 * s)).max(0.0);
-        if max_scroll_x > 0.0 {
-            let ratio = (scroll_x / max_scroll_x).clamp(0.0, 1.0);
-            let track_w = content_w - 30.0 * s;
-            let thumb_w = (content_w / (max_log_w + 20.0 * s) * track_w).max(40.0 * s);
-            let thumb_x = content_x + 10.0 * s + ratio * (track_w - thumb_w);
-            self.push_rounded_rect(
-                thumb_x,
-                content_y + content_h - 12.0 * s,
-                thumb_w,
-                10.0 * s,
-                5.0 * s,
-                [1.0, 1.0, 1.0, 0.22],
-            );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::LspScrollX,
-                content_x,
-                content_y + content_h - 12.0 * s,
-                content_w,
-                10.0 * s,
                 mx,
                 my,
             );
