@@ -456,6 +456,9 @@ impl ApplicationHandler for App {
 
                 let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
+                    // Помечаем границу: элементы оверлея регистрируются ниже.
+                    // find_overlay_at() будет искать только среди них.
+                    self.ui_registry.mark_overlay_start();
                     settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,

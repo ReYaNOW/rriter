@@ -284,6 +284,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::F1) => {
                 self.show_settings = true;
+                self.is_dragging = false;
                 return;
             }
             PhysicalKey::Code(KeyCode::KeyF) if ctrl => {

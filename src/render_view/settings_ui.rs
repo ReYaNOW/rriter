@@ -46,6 +46,9 @@ impl Renderer {
         if anim_progress <= 0.0 {
             return 0;
         }
+        // Элементы основного draw() (сайдбар, панели) не должны влиять
+        // на курсор внутри модального окна настроек.
+        ui_registry.reset_cursor_state();
         let s = self.scale_factor;
         let overlay_alpha = (anim_progress * 0.6).clamp(0.0, 1.0);
         self.push_rect(

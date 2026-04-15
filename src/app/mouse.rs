@@ -274,8 +274,9 @@ impl App {
                 if mx < x || mx > x + w || my < y || my > y + h {
                     self.show_settings = false;
                 } else {
-                    // Все клики по кнопкам и табам обрабатываются через ui_registry
-                    if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    // Ищем только среди оверлейных элементов настроек,
+                    // чтобы фоновые элементы редактора не реагировали на клики.
+                    if let Some(clicked_id) = self.ui_registry.find_overlay_at(mx, my) {
                         match clicked_id {
                             crate::ui_system::UiId::SettingsIdeIgnoreInput => {
                                 // Специальная обработка: позиционирование курсора по клику
@@ -858,7 +859,7 @@ impl App {
 
                 self.scroll_y.anim_speed = 15.0;
             }
-        } else if self.is_dragging {
+        } else if self.is_dragging && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             self.editor.set_cursor_at_pos(

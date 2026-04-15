@@ -141,6 +141,11 @@ pub struct UiRegistry {
     hovered: Option<UiId>,
     wants_pointer: bool,
     wants_text: bool,
+    /// Индекс-метка: элементы начиная с этой позиции считаются
+    /// "оверлейными" (настройки, диалоги). Используется для поиска
+    /// только среди элементов оверлея, чтобы не активировать
+    /// фоновые элементы редактора кликами сквозь модальные окна.
+    overlay_mark: usize,
 }
 
 impl UiRegistry {
@@ -150,6 +155,7 @@ impl UiRegistry {
             hovered: None,
             wants_pointer: false,
             wants_text: false,
+            overlay_mark: 0,
         }
     }
 
@@ -159,6 +165,23 @@ impl UiRegistry {
         self.hovered = None;
         self.wants_pointer = false;
         self.wants_text = false;
+        self.overlay_mark = 0;
+    }
+
+    /// Ставит метку: все элементы, зарегистрированные ПОСЛЕ этого вызова,
+    /// считаются оверлейными. `find_overlay_at` ищет только среди них.
+    pub fn mark_overlay_start(&mut self) {
+        self.overlay_mark = self.elements.len();
+    }
+
+    /// Ищет элемент под курсором только среди оверлейных элементов
+    /// (зарегистрированных после последнего `mark_overlay_start`).
+    pub fn find_overlay_at(&self, mx: f32, my: f32) -> Option<UiId> {
+        self.elements[self.overlay_mark..]
+            .iter()
+            .rev()
+            .find(|el| el.contains(mx, my))
+            .map(|el| el.id())
     }
 
     /// Регистрирует кнопку и возвращает, наведена ли на неё мышь
@@ -274,6 +297,14 @@ impl UiRegistry {
     /// Возвращает текущий наведённый элемент
     pub fn hovered(&self) -> Option<UiId> {
         self.hovered
+    }
+
+    /// Сбрасывает только флаги курсора (без очистки элементов).
+    /// Используется при переходе к рендеру оверлеев (настройки, диалоги),
+    /// чтобы элементы под оверлеем не влияли на тип курсора.
+    pub fn reset_cursor_state(&mut self) {
+        self.wants_pointer = false;
+        self.wants_text = false;
     }
 
     /// Нужен ли курсор-указатель
