@@ -439,12 +439,9 @@ impl Renderer {
                             sel_hi = hi;
                         }
 
-                        let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
-                        let mut global_line_count = 0;
-                        let mut global_byte_off: usize = 0;
                                                 let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
 
-                                                                        if let Some(log_ed) = lsp_log_editors.get(info.name) {
+                        if let Some(log_ed) = lsp_log_editors.get(info.name) {
                             let mut phys_line = 0;
                             let (first, second) = log_ed.text_parts();
                             let first_len = first.len();

@@ -1237,27 +1237,27 @@ impl Renderer {
 
                 let mut hovered_diag = None;
 
-        // LSP squiggles — волнистые подчёркивания диагностик
+                // LSP squiggles — волнистые подчёркивания диагностик
         if !lsp_diagnostics.is_empty() {
             let render_scroll_y = scroll_y.round();
             let render_scroll_x = scroll_x.round();
             for (idx, diag) in lsp_diagnostics.iter().enumerate() {
-                // Цвет по severity
+                                // Цвет по severity
                 let color: [f32; 4] = match diag.severity {
-                    crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.90],
-                    crate::lsp::DiagSeverity::Warning => [0.98, 0.75, 0.18, 0.90],
-                    crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 0.80],
-                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 0.70],
+                    crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.90],
+                    crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 0.90],
+                    crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.80],
+                    crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.70],
                 };
                                 let line = diag.start_line as usize;
                 if line >= editor.line_offsets.len() {
                     continue;
                 }
 
-                let mut v_line_opt = None;
+                                let mut v_line_opt = None;
                 for vl in &self.visual_lines {
                     if vl.physical_line == line + 1 {
-                        v_line_opt = Some(vl);
+                        v_line_opt = Some(*vl);
                         break;
                     }
                 }
@@ -1302,9 +1302,11 @@ impl Renderer {
                         x_start_px + avg_adv * 8.0
                     };
                 }
-                                let x_start = self.left_padding + x_start_px - render_scroll_x;
+                                                let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
+
+                let top_y = v_line.y_offset - render_scroll_y;
 
                 // Расширяем хитбокс, если мы УЖЕ смотрим на этот pop-up (Hysteresis)
                 let is_active = self.last_hovered_diag == Some(idx);
@@ -1312,8 +1314,8 @@ impl Renderer {
                 let hit_margin_y = if is_active { 50.0 * s } else { 0.0 };
 
                 if mx >= x_start - hit_margin_x && mx <= x_start + squiggle_w + hit_margin_x && 
-                   my >= line_y - hit_margin_y && my <= line_y + self.line_height + hit_margin_y {
-                    hovered_diag = Some((idx, diag.clone(), x_start, line_y, line_y + self.line_height));
+                   my >= top_y - hit_margin_y && my <= top_y + self.line_height + hit_margin_y {
+                    hovered_diag = Some((idx, diag.clone(), x_start, top_y, top_y + self.line_height));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {
@@ -1741,21 +1743,21 @@ impl Renderer {
                 by = diag_y_bottom + 8.0 * s;
             }
 
-            let border_color = match diag.severity {
-                crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.6],
-                crate::lsp::DiagSeverity::Warning => [0.98, 0.75, 0.18, 0.6],
-                crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.6],
-                crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.6],
-            };
+                                    let border_color = match diag.severity {
+                                        crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.6],
+                                        crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 0.6],
+                                        crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.6],
+                                        crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.6],
+                                    };
 
-            self.push_rounded_rect(bx - 1.0, by - 1.0, box_w + 2.0, box_h + 2.0, 6.0 * s, border_color);
-            self.push_rounded_rect(bx, by, box_w, box_h, 6.0 * s,[0.15, 0.16, 0.20, 1.0]);
+                                    self.push_rounded_rect(bx - 1.0, by - 1.0, box_w + 2.0, box_h + 2.0, 6.0 * s, border_color);
+                                    self.push_rounded_rect(bx, by, box_w, box_h, 6.0 * s,[0.15, 0.16, 0.20, 1.0]);
 
-            let title_color = match diag.severity {
-                crate::lsp::DiagSeverity::Error =>[0.96, 0.46, 0.41, 1.0],
-                crate::lsp::DiagSeverity::Warning =>[0.98, 0.85, 0.38, 1.0],
-                _ =>[0.7, 0.7, 0.75, 1.0],
-            };
+                                    let title_color = match diag.severity {
+                                        crate::lsp::DiagSeverity::Error =>[0.96, 0.46, 0.41, 1.0],
+                                        crate::lsp::DiagSeverity::Warning =>[0.98, 0.92, 0.4, 1.0],
+                                        _ =>[0.7, 0.7, 0.75, 1.0],
+                                    };
             self.draw_string_scaled(&title, bx + pad, by + pad + 6.0 * s, title_color, 0.85);
 
             let is_copied = if let Some(copied_idx) = ide_panel.diag_copied_idx {

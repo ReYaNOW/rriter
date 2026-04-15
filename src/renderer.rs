@@ -65,7 +65,7 @@ pub struct VisualLine {
 }
 #[derive(Clone)]
 pub struct FontData {
-    pub data: std::borrow::Cow<'static,[u8]>,
+    pub data: std::borrow::Cow<'static, [u8]>,
     pub index: u32,
 }
 
@@ -125,7 +125,7 @@ pub struct Renderer {
     pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
     pub icon_logo: Option<glow::Texture>,
     /// Кэш SVG-иконок для дерева файлов. Ключ — &'static str из file_icons_map.
-        pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
+    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub last_hovered_diag: Option<usize>,
@@ -171,9 +171,9 @@ impl Renderer {
                                         } else if (v_mode == 4.0) {
                         out_color = v_col;
                     } else if (v_mode == 6.0) {
-                        float wave = v_sdf_params.x * sin(v_uv.x * v_sdf_params.y);
+                                                float wave = v_sdf_params.x * sin(v_uv.x * v_sdf_params.y);
                         float d = abs(v_uv.y - wave) - v_sdf_params.z;
-                        float alpha = smoothstep(1.0, 0.0, d);
+                        float alpha = 1.0 - smoothstep(0.0, 1.5, d);
                         if (alpha <= 0.0) discard;
                         out_color = vec4(v_col.rgb, v_col.a * alpha);
                     } else {
@@ -259,17 +259,23 @@ impl Renderer {
                 "/usr/share/fonts/noto/NotoColorEmoji.google.ttf",
             ];
 
-                        let mut fonts = Vec::new();
+            let mut fonts = Vec::new();
 
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    fonts.push(FontData {
+                        data: std::borrow::Cow::Owned(data),
+                        index: 0,
+                    });
                     break;
                 }
             }
 
-            let nerd_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf"));
-            let inter_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(include_bytes!("fonts/Inter-Regular.otf"));
+            let nerd_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(
+                include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf"),
+            );
+            let inter_font_data: std::borrow::Cow<'static, [u8]> =
+                std::borrow::Cow::Borrowed(include_bytes!("fonts/Inter-Regular.otf"));
 
             fonts.push(FontData {
                 data: nerd_font_data.clone(),
@@ -278,12 +284,15 @@ impl Renderer {
 
             for path in emoji_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    fonts.push(FontData {
+                        data: std::borrow::Cow::Owned(data),
+                        index: 0,
+                    });
                     break;
                 }
             }
 
-            let ui_font_paths =[
+            let ui_font_paths = [
                 "/usr/share/fonts/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/TTF/NotoSans-Regular.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
@@ -300,7 +309,10 @@ impl Renderer {
 
             for path in ui_font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    ui_fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    ui_fonts.push(FontData {
+                        data: std::borrow::Cow::Owned(data),
+                        index: 0,
+                    });
                     break;
                 }
             }
@@ -361,7 +373,7 @@ impl Renderer {
                 Some(tex)
             };
 
-                        let icon_logo = load_icon_from_memory(include_bytes!("icons/icon.png"), "icon");
+            let icon_logo = load_icon_from_memory(include_bytes!("icons/icon.png"), "icon");
 
             let mut renderer = Self {
                 gl,
@@ -408,7 +420,7 @@ impl Renderer {
                 last_search_idx: None,
                 last_search_len: 0,
                 icons: HashMap::new(),
-                                file_icon_cache: rustc_hash::FxHashMap::default(),
+                file_icon_cache: rustc_hash::FxHashMap::default(),
                 icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
@@ -1082,11 +1094,11 @@ impl Renderer {
     /// Рисует волнистое подчёркивание (squiggle) — зигзаг из 2px квадратов.
     /// `x` — начало, `baseline_y` — нижняя граница строки (baseline + descender),
     /// `w` — ширина участка, `color` — цвет.
-        pub fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4]) {
+    pub fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4]) {
         let s = self.scale_factor;
-        let amplitude = 1.2 * s;
-        let period = 1.1 / s;
-        let thickness = 0.8 * s;
+        let amplitude = 1.0 * s;
+        let period = 0.6 / s;
+        let thickness = 0.05 * s;
 
         let h = amplitude * 2.0 + thickness * 2.0 + 2.0;
         let y_center = baseline_y + amplitude + thickness;
@@ -1103,10 +1115,34 @@ impl Renderer {
 
         let sdf_params = [amplitude, period, thickness];
 
-        let v1 = Vertex { pos: [x1, y1], uv: [uv_x0, uv_y0], color, mode: 6.0, sdf_params };
-        let v2 = Vertex { pos: [x2, y1], uv:[uv_x1, uv_y0], color, mode: 6.0, sdf_params };
-        let v3 = Vertex { pos: [x2, y2], uv:[uv_x1, uv_y1], color, mode: 6.0, sdf_params };
-        let v4 = Vertex { pos: [x1, y2], uv: [uv_x0, uv_y1], color, mode: 6.0, sdf_params };
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [uv_x0, uv_y0],
+            color,
+            mode: 6.0,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [uv_x1, uv_y0],
+            color,
+            mode: 6.0,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [uv_x1, uv_y1],
+            color,
+            mode: 6.0,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [uv_x0, uv_y1],
+            color,
+            mode: 6.0,
+            sdf_params,
+        };
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
