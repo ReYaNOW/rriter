@@ -482,9 +482,9 @@ impl App {
                 cursor_moved = true;
                 is_edit = true;
             }
-            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+                        PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
                 self.editor.select_expand();
-                cursor_moved = true;
+                self.autocomplete_active = false;
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                 if let Some(text) = self.editor.get_selection() {
@@ -516,9 +516,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                        PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
                 self.editor.select_all();
-                cursor_moved = true;
+                self.autocomplete_active = false;
             }
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {

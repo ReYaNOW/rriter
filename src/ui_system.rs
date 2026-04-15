@@ -52,9 +52,10 @@ pub enum UiId {
     EditorFoldArrow(usize),
     EditorFoldDots(usize),
     StickyLine(usize, usize),
-    EditorScrollbarY,
+        EditorScrollbarY,
     EditorScrollbarX,
     EditorTextBody,
+    EditorMinimap,
 
     // Panels
     ResizeLeft,

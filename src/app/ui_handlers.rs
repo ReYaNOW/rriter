@@ -420,7 +420,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::EditorScrollbarY => {
+                        UiId::EditorScrollbarY | UiId::EditorMinimap => {
                 if let Some(r) = self.renderer.as_ref() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;

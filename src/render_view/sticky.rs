@@ -4,7 +4,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-    pub(crate) fn draw_sticky_lines(
+        pub(crate) fn draw_sticky_lines(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
@@ -13,6 +13,7 @@ impl Renderer {
         render_scroll_x: f32,
         anim_progress: f32,
         anim_is_adding: bool,
+        gutter_x: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
@@ -150,14 +151,17 @@ impl Renderer {
                     alpha,
                 ];
                 let shadow_top =[0.0, 0.0, 0.0, 0.4 * alpha];
-                let shadow_bottom =[0.0, 0.0, 0.0, 0.0];
+                                                let shadow_bottom =[0.0, 0.0, 0.0, 0.0];
 
-                self.push_rect(0.0, rect_y, rect_w, self.line_height, sticky_bg);
+                let sticky_x = gutter_x + 2.0;
+                let sticky_w = rect_w - sticky_x;
+
+                self.push_rect(sticky_x, rect_y, sticky_w, self.line_height, sticky_bg);
                 if i == current_sticky_lines.len() - 1 {
                     self.push_vertical_gradient(
-                        0.0,
+                        sticky_x,
                         rect_y + self.line_height,
-                        rect_w,
+                        sticky_w,
                         8.0 * s,
                         shadow_top,
                         shadow_bottom,
@@ -275,18 +279,18 @@ impl Renderer {
                     self.gl.disable(glow::SCISSOR_TEST);
                 }
 
-                ui_registry.register_rect(
+                                ui_registry.register_rect(
                     crate::ui_system::UiId::StickyLine(start_byte, i),
-                    0.0,
+                    sticky_x,
                     rect_y,
-                    rect_w,
+                    sticky_w,
                     self.line_height,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
 
                 self.sticky_scroll_rects
-                    .push((0.0, rect_y, rect_w, self.line_height, start_byte));
+                    .push((sticky_x, rect_y, sticky_w, self.line_height, start_byte));
             }
             self.flush();
         }

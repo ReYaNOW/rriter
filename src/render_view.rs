@@ -1425,13 +1425,23 @@ impl Renderer {
 
         self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
 
-        self.draw_minimap(
+                self.draw_minimap(
             editor,
             spans,
             render_scroll_y,
             max_scroll,
             total_lines,
             visible_cursor_line,
+        );
+
+        ui_registry.register_rect(
+            crate::ui_system::UiId::EditorMinimap,
+            minimap_x,
+            0.0,
+            minimap_w,
+            editor_height,
+            mx,
+            my,
         );
 
         if self.max_scroll_x > 0.0 {
@@ -1465,7 +1475,7 @@ impl Renderer {
             );
         }
 
-        let target_sticky_lines = self.draw_sticky_lines(
+                let target_sticky_lines = self.draw_sticky_lines(
             editor,
             spans,
             current_sticky_lines,
@@ -1473,6 +1483,7 @@ impl Renderer {
             render_scroll_x,
             sticky_anim_progress,
             sticky_anim_is_adding,
+            gutter_x,
             ui_registry,
         );
 
