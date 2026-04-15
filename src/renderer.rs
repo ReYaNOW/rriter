@@ -7,10 +7,10 @@ use swash::FontRef;
 use tiny_skia;
 
 pub const MAX_VERTICES: usize = 100_000;
-pub const ATLAS_SIZE: i32 = 2048;
+pub const ATLAS_SIZE_W: i32 = 1024;
+pub const ATLAS_SIZE_H: i32 = 2048;
 
-#[derive(Clone)]
-pub struct Theme {
+#[derive(Clone)]pub struct Theme {
     pub bg: [f32; 4],
     pub fg: [f32; 4],
     pub sel: [f32; 4],
@@ -64,7 +64,7 @@ pub struct VisualLine {
 }
 #[derive(Clone)]
 pub struct FontData {
-    pub data: Vec<u8>,
+    pub data: std::sync::Arc<[u8]>,
     pub index: u32,
 }
 
@@ -219,12 +219,12 @@ impl Renderer {
                 glow::TEXTURE_MAG_FILTER,
                 glow::LINEAR as i32,
             );
-            gl.tex_image_2d(
+                        gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA8 as i32,
-                ATLAS_SIZE,
-                ATLAS_SIZE,
+                ATLAS_SIZE_W,
+                ATLAS_SIZE_H,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
@@ -251,16 +251,16 @@ impl Renderer {
                 "/usr/share/fonts/noto/NotoColorEmoji.google.ttf",
             ];
 
-            let mut fonts = Vec::new();
+                        let mut fonts = Vec::new();
 
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data, index: 0 });
+                    fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
                 }
             }
 
-            let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").to_vec();
-            let inter_font_data = include_bytes!("fonts/Inter-Regular.otf").to_vec();
+            let nerd_font_data: std::sync::Arc<[u8]> = std::sync::Arc::from(include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").as_slice());
+            let inter_font_data: std::sync::Arc<[u8]> = std::sync::Arc::from(include_bytes!("fonts/Inter-Regular.otf").as_slice());
 
             fonts.push(FontData {
                 data: nerd_font_data.clone(),
@@ -269,7 +269,7 @@ impl Renderer {
 
             for path in emoji_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data, index: 0 });
+                    fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
                 }
             }
 
@@ -280,21 +280,21 @@ impl Renderer {
                 "/usr/share/fonts/Inter/Inter-Regular.ttf",
             ];
 
-            let mut ui_fonts = Vec::new();
+                        let mut ui_fonts = Vec::new();
 
             // Inter теперь первый в приоритете для UI
             ui_fonts.push(FontData {
-                data: inter_font_data,
+                data: inter_font_data.clone(),
                 index: 0,
             });
 
             for path in ui_font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    ui_fonts.push(FontData { data, index: 0 });
+                    ui_fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
                 }
             }
             ui_fonts.push(FontData {
-                data: nerd_font_data,
+                data: nerd_font_data.clone(),
                 index: 0,
             });
 
@@ -429,7 +429,7 @@ impl Renderer {
         let w = target_size as i32;
         let h = target_size as i32;
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE {
+                if self.atlas_x + w + 2 > ATLAS_SIZE_W {
             self.atlas_x = 2;
             self.atlas_y += self.max_row_h + 2;
             self.max_row_h = 0;
@@ -464,11 +464,11 @@ impl Renderer {
             );
         }
 
-        let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE as f32,
-            uw: w as f32 / ATLAS_SIZE as f32,
-            vh: h as f32 / ATLAS_SIZE as f32,
+                let info = GlyphInfo {
+            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
+            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
+            uw: w as f32 / ATLAS_SIZE_W as f32,
+            vh: h as f32 / ATLAS_SIZE_H as f32,
             width: w as f32,
             height: h as f32,
             offset_x: 0.0,
@@ -564,16 +564,16 @@ impl Renderer {
                 advance: glyph_advance,
                 is_emoji: 0.0,
             };
-            self.glyphs.insert(c, info);
+                        self.glyphs.insert(c, info);
             return Some(info);
         }
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE {
+        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
             self.atlas_x = 2;
             self.atlas_y += self.max_row_h + 2;
             self.max_row_h = 0;
         }
-        if self.atlas_y + h + 2 > ATLAS_SIZE {
+        if self.atlas_y + h + 2 > ATLAS_SIZE_H {
             self.glyphs.clear();
             self.ui_glyphs.clear();
             self.atlas_x = 2;
@@ -581,17 +581,16 @@ impl Renderer {
             self.max_row_h = 0;
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                let clear_data = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
-                self.gl.tex_sub_image_2d(
+                self.gl.tex_image_2d(
                     glow::TEXTURE_2D,
                     0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
                     0,
-                    0,
-                    ATLAS_SIZE,
-                    ATLAS_SIZE,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(&clear_data)),
+                    glow::PixelUnpackData::Slice(None),
                 );
             }
         }
@@ -629,11 +628,11 @@ impl Renderer {
             );
         }
 
-        let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE as f32,
-            uw: w as f32 / ATLAS_SIZE as f32,
-            vh: h as f32 / ATLAS_SIZE as f32,
+                let info = GlyphInfo {
+            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
+            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
+            uw: w as f32 / ATLAS_SIZE_W as f32,
+            vh: h as f32 / ATLAS_SIZE_H as f32,
             width: w as f32,
             height: h as f32,
             offset_x: img.placement.left as f32,
@@ -728,16 +727,16 @@ impl Renderer {
                 advance: glyph_advance,
                 is_emoji: 0.0,
             };
-            self.ui_glyphs.insert(c, info);
+                        self.ui_glyphs.insert(c, info);
             return Some(info);
         }
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE {
+        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
             self.atlas_x = 2;
             self.atlas_y += self.max_row_h + 2;
             self.max_row_h = 0;
         }
-        if self.atlas_y + h + 2 > ATLAS_SIZE {
+        if self.atlas_y + h + 2 > ATLAS_SIZE_H {
             self.glyphs.clear();
             self.ui_glyphs.clear();
             self.atlas_x = 2;
@@ -745,17 +744,16 @@ impl Renderer {
             self.max_row_h = 0;
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                let clear_data = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
-                self.gl.tex_sub_image_2d(
+                self.gl.tex_image_2d(
                     glow::TEXTURE_2D,
                     0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
                     0,
-                    0,
-                    ATLAS_SIZE,
-                    ATLAS_SIZE,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(&clear_data)),
+                    glow::PixelUnpackData::Slice(None),
                 );
             }
         }
@@ -793,11 +791,11 @@ impl Renderer {
             );
         }
 
-        let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE as f32,
-            uw: w as f32 / ATLAS_SIZE as f32,
-            vh: h as f32 / ATLAS_SIZE as f32,
+                let info = GlyphInfo {
+            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
+            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
+            uw: w as f32 / ATLAS_SIZE_W as f32,
+            vh: h as f32 / ATLAS_SIZE_H as f32,
             width: w as f32,
             height: h as f32,
             offset_x: img.placement.left as f32,
