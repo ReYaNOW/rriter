@@ -1,4 +1,4 @@
-use crate::app::{App, LspActionItem};
+use crate::app::App;
 
 impl App {
     /// Возвращает (x, y, w, h) области LSP-панели или None если не открыта
