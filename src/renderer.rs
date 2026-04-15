@@ -127,8 +127,12 @@ pub struct Renderer {
     /// Кэш SVG-иконок для дерева файлов. Ключ — &'static str из file_icons_map.
     pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
-    pub phys_to_visual: Vec<usize>,
+        pub phys_to_visual: Vec<usize>,
     pub last_hovered_diag: Option<usize>,
+    pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
+    pub hide_popups_until_mouse_move: bool,
+    pub last_known_mouse: (f32, f32),
+    pub last_editor_version_for_typing: u64,
 }
 
 impl Renderer {
@@ -422,9 +426,13 @@ impl Renderer {
                 icons: HashMap::new(),
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 icon_logo,
-                sticky_scroll_rects: Vec::new(),
+                                sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
                 last_hovered_diag: None,
+                last_diag_popup_rect: None,
+                hide_popups_until_mouse_move: false,
+                last_known_mouse: (0.0, 0.0),
+                last_editor_version_for_typing: u64::MAX,
             };
 
             for i in 32..128u8 {
@@ -967,16 +975,22 @@ impl Renderer {
             (
                 crate::widgets::IconType::Explorer,
                 include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Problems,
-                include_bytes!("icons/problems.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::LspServers,
-                include_bytes!("icons/atom/icons/ui/server.svg").as_slice(),
-            ),
-        ];
+            ),                        (
+                            crate::widgets::IconType::Problems,
+                            include_bytes!("icons/problems.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::LspServers,
+                            include_bytes!("icons/atom/icons/ui/server.svg").as_slice(),
+                        ),                                    (
+                                        crate::widgets::IconType::Copy,
+                                        include_bytes!("icons/copy.svg").as_slice(),
+                                    ),
+                                    (
+                                        crate::widgets::IconType::Check,
+                                        include_bytes!("icons/check.svg").as_slice(),
+                                    ),
+                                ];
         let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
             let svg_data_str = String::from_utf8_lossy(data);
@@ -985,14 +999,17 @@ impl Renderer {
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
             } else if icon_type == crate::widgets::IconType::Problems {
                 svg_data_str.replace("#D81B60", "#b0bec5")
-            } else if icon_type == crate::widgets::IconType::Plus
+                        } else if icon_type == crate::widgets::IconType::Plus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
                 || icon_type == crate::widgets::IconType::LspServers
+                || icon_type == crate::widgets::IconType::Copy
+                || icon_type == crate::widgets::IconType::Check
             {
                 svg_data_str
                     .replace("currentColor", "#ffffff")
                     .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
+                    .replace("stroke=\"#000000\"", "stroke=\"#ffffff\"")
             } else {
                 svg_data_str.into_owned()
             };

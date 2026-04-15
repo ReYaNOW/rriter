@@ -15,6 +15,8 @@ pub enum IconType {
     Explorer,
     Problems,
     LspServers,
+    Copy,
+    Check,
 }
 
 pub struct Button {

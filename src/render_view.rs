@@ -121,11 +121,21 @@ impl Renderer {
         } else {
             0.0
         };
-        let panel_bottom_h = if is_ide_mode && ide_panel.any_bottom_open() {
+                let panel_bottom_h = if is_ide_mode && ide_panel.any_bottom_open() {
             ide_panel.bottom_height * s
         } else {
             0.0
         };
+
+        if (self.last_mouse_x, self.last_mouse_y) != self.last_known_mouse {
+            self.hide_popups_until_mouse_move = false;
+            self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
+        }
+        if self.last_editor_version_for_typing != editor.version {
+            self.hide_popups_until_mouse_move = true;
+            self.last_editor_version_for_typing = editor.version;
+        }
+
         let real_height = self.height;
         // Нижняя панель полупрозрачная, поэтому текст, скролл и мини-карта
         // рендерятся на всю высоту окна, проходя ПОД панелью без сжатия.
@@ -1302,19 +1312,38 @@ impl Renderer {
                         x_start_px + avg_adv * 8.0
                     };
                 }
-                                                let x_start = self.left_padding + x_start_px - render_scroll_x;
+                                                                let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
 
-                let top_y = v_line.y_offset - render_scroll_y;
+                                let top_y = v_line.y_offset - render_scroll_y;
 
-                // Расширяем хитбокс, если мы УЖЕ смотрим на этот pop-up (Hysteresis)
-                let is_active = self.last_hovered_diag == Some(idx);
-                let hit_margin_x = if is_active { 150.0 * s } else { 0.0 };
-                let hit_margin_y = if is_active { 50.0 * s } else { 0.0 };
+                let mut in_hitbox = false;
+                let is_under_panel = top_y > self.height - panel_bottom_h - self.line_height;
 
-                if mx >= x_start - hit_margin_x && mx <= x_start + squiggle_w + hit_margin_x && 
-                   my >= top_y - hit_margin_y && my <= top_y + self.line_height + hit_margin_y {
+                if !self.hide_popups_until_mouse_move && !is_under_panel {
+                    let squiggle_hit_y_top = top_y;
+                    let squiggle_hit_y_bottom = top_y + self.line_height;
+
+                    if mx >= x_start && mx <= x_start + squiggle_w && my >= squiggle_hit_y_top && my <= squiggle_hit_y_bottom {
+                        in_hitbox = true;
+                    }
+
+                    if self.last_hovered_diag == Some(idx) {
+                        if let Some(rect) = self.last_diag_popup_rect {
+                            let min_x = x_start.min(rect.0) - 20.0 * s;
+                            let max_x = (x_start + squiggle_w).max(rect.0 + rect.2) + 20.0 * s;
+                            let min_y = squiggle_hit_y_top.min(rect.1) - 20.0 * s;
+                            let max_y = squiggle_hit_y_bottom.max(rect.1 + rect.3) + 20.0 * s;
+
+                            if mx >= min_x && mx <= max_x && my >= min_y && my <= max_y {
+                                in_hitbox = true;
+                            }
+                        }
+                    }
+                }
+
+                if in_hitbox {
                     hovered_diag = Some((idx, diag.clone(), x_start, top_y, top_y + self.line_height));
                 }
 
@@ -1689,33 +1718,23 @@ impl Renderer {
         }
 
                 // --- LSP Diagnostic Tooltip ---
+                if hovered_diag.is_none() {
+            self.last_diag_popup_rect = None;
+        }
         self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
 
         if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) = hovered_diag {
             let s = self.scale_factor;
             let pad = 12.0 * s;
+            let line_h = 20.0 * s;
 
-            // Заголовок (код ошибки + источник)
-            let mut title = String::new();
-            if let Some(src) = &diag.source {
-                title.push_str(src);
-            }
-            if let Some(code) = &diag.code {
-                if !title.is_empty() { title.push_str(" "); }
-                title.push_str(code);
-            }
-            if title.is_empty() {
-                title.push_str("Ошибка");
-            }
-
+            let source_text = format!("({})", diag.source.as_deref().unwrap_or("LSP"));
             let msg = &diag.message;
-            let msg_w = self.measure_ui_width(msg, 0.9);
-            let title_w = self.measure_ui_width(&title, 0.85);
-            let box_w = (msg_w.max(title_w) + pad * 2.0 + 100.0 * s).clamp(250.0 * s, 600.0 * s);
 
             let mut lines = Vec::new();
             let mut cur_line = String::new();
-            let max_text_w = box_w - pad * 2.0;
+            let max_text_w = 400.0 * s; 
+
             for word in msg.split_whitespace() {
                 let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 0.9);
                 if w > max_text_w && !cur_line.is_empty() {
@@ -1728,83 +1747,102 @@ impl Renderer {
             }
             if !cur_line.is_empty() { lines.push(cur_line); }
 
-                        let line_h = 20.0 * s;
-            let box_h = pad * 2.0 + 24.0 * s + lines.len() as f32 * line_h;
+            let last_line_w = self.measure_ui_width(&lines.last().unwrap_or(&String::new()), 0.9);
+            let source_w = self.measure_ui_width(&source_text, 0.9);
+            let mut source_on_new_line = false;
+
+            if last_line_w + source_w + 10.0 * s > max_text_w {
+                lines.push(String::new());
+                source_on_new_line = true;
+            }
+
+            let mut box_text_w = 0.0f32;
+            for line in &lines {
+                let lw = self.measure_ui_width(line, 0.9);
+                if lw > box_text_w { box_text_w = lw; }
+            }
+            if source_on_new_line && source_w > box_text_w {
+                box_text_w = source_w;
+            } else if !source_on_new_line {
+                let combined_w = last_line_w + 8.0 * s + source_w;
+                if combined_w > box_text_w { box_text_w = combined_w; }
+            }
+
+            let icon_sz = 20.0 * s;
+            let box_w = (box_text_w + pad * 2.0 + icon_sz + 16.0 * s).max(180.0 * s);
+            let box_h = pad * 2.0 + lines.len() as f32 * line_h;
 
             let mut bx = diag_x;
             if bx + box_w > self.width - 20.0 * s {
                 bx = self.width - box_w - 20.0 * s;
             }
 
-            // Пытаемся показать сверху (на строчку выше)
             let mut by = line_y_top - box_h - 8.0 * s;
-            // Если сверху не влезает, показываем снизу
             if by < 0.0 {
                 by = diag_y_bottom + 8.0 * s;
             }
 
-                                    let border_color = match diag.severity {
-                                        crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.6],
-                                        crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 0.6],
-                                        crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.6],
-                                        crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.6],
-                                    };
+            self.last_diag_popup_rect = Some((bx, by, box_w, box_h));
 
-                                    self.push_rounded_rect(bx - 1.0, by - 1.0, box_w + 2.0, box_h + 2.0, 6.0 * s, border_color);
-                                    self.push_rounded_rect(bx, by, box_w, box_h, 6.0 * s,[0.15, 0.16, 0.20, 1.0]);
+            let border_color = match diag.severity {
+                crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.6],
+                crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 0.6],
+                crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.6],
+                crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.6],
+            };
 
-                                    let title_color = match diag.severity {
-                                        crate::lsp::DiagSeverity::Error =>[0.96, 0.46, 0.41, 1.0],
-                                        crate::lsp::DiagSeverity::Warning =>[0.98, 0.92, 0.4, 1.0],
-                                        _ =>[0.7, 0.7, 0.75, 1.0],
-                                    };
-            self.draw_string_scaled(&title, bx + pad, by + pad + 6.0 * s, title_color, 0.85);
+                        let bg_color = [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0];
+                        self.push_rounded_rect(bx.round() - 1.0, by.round() - 1.0, box_w.round() + 2.0, box_h.round() + 2.0, 6.0 * s, border_color);
+                        self.push_rounded_rect(bx.round(), by.round(), box_w.round(), box_h.round(), 6.0 * s, bg_color);
 
-            let is_copied = if let Some(copied_idx) = ide_panel.diag_copied_idx {
-                if copied_idx == idx {
-                    if let Some(time) = ide_panel.diag_copied_time {
-                        if time.elapsed().as_secs_f32() < 2.0 {
-                            true
-                        } else { false }
-                    } else { false }
-                } else { false }
-            } else { false };
+                        let mut text_y = by + pad + 14.0 * s;
+                        for (i, line) in lines.iter().enumerate() {
+                            self.draw_string_scaled(&line, (bx + pad).round(), text_y.round(),[0.9, 0.9, 0.9, 1.0], 0.9);
 
-            let copy_str = if is_copied { "✓ Скопировано" } else { "Копировать" };
-            let copy_w = self.measure_ui_width(copy_str, 0.8);
-            let copy_x = bx + box_w - pad - copy_w - 8.0 * s;
-            let copy_y = by + pad - 2.0 * s;
+                            if i == lines.len() - 1 {
+                                let line_w = self.measure_ui_width(line, 0.9);
+                                let sx = if source_on_new_line { bx + pad } else { bx + pad + line_w + 8.0 * s };
+                                self.draw_string_scaled(&source_text, sx.round(), text_y.round(),[0.55, 0.55, 0.6, 1.0], 0.9);
+                            }
+                            text_y += line_h;
+                        }
 
-            let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
-            let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
+                        let is_copied = if let Some(copied_idx) = ide_panel.diag_copied_idx {
+                            copied_idx == idx && ide_panel.diag_copied_time.map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false)
+                        } else { false };
 
-            let copy_hover = mx >= copy_x - 4.0 * s && mx <= copy_x + copy_w + 4.0 * s && my >= copy_y && my <= copy_y + 18.0 * s;
-            if copy_hover {
-                self.push_rounded_rect(copy_x - 4.0 * s, copy_y, copy_w + 8.0 * s, 18.0 * s, 3.0 * s, [1.0, 1.0, 1.0, 0.1]);
-                wants_pointer = true;
-            }
+                        let btn_x = (bx + box_w - pad - icon_sz).round();
+                        let btn_y = (by + pad - 2.0 * s).round();
 
-            ui_registry.register_rect(
-                crate::ui_system::UiId::CopyDiagnostic(idx),
-                copy_x - 4.0 * s, copy_y, copy_w + 8.0 * s, 18.0 * s, mx, my
-            );
+                        let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+                        let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
 
-            let copy_col = if is_copied {[0.3, 0.9, 0.4, 1.0] } else if copy_hover {[0.9, 0.9, 0.9, 1.0] } else {[0.6, 0.6, 0.6, 1.0] };
-            self.draw_string_scaled(copy_str, copy_x, copy_y + 10.0 * s, copy_col, 0.8);
+                        let btn_hovered = mx >= btn_x - 4.0 * s && mx <= btn_x + icon_sz + 4.0 * s && my >= btn_y - 2.0 * s && my <= btn_y + icon_sz + 4.0 * s;
 
-            self.push_rect(bx + pad, by + pad + 18.0 * s, box_w - pad * 2.0, 1.0, [1.0, 1.0, 1.0, 0.1]);
+                        if btn_hovered {
+                            self.push_rounded_rect(btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, 4.0 * s, [1.0, 1.0, 1.0, 0.1]);
+                            wants_pointer = true;
+                        }
 
-            let mut text_y = by + pad + 24.0 * s + 10.0 * s;
-            for line in lines {
-                self.draw_string_scaled(&line, bx + pad, text_y,[0.9, 0.9, 0.9, 1.0], 0.9);
-                text_y += line_h;
-            }
+                        let icon_type = if is_copied { crate::widgets::IconType::Check } else { crate::widgets::IconType::Copy };
+                        let icon_color = if is_copied {[0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
 
-            ui_registry.register_blocker(
-                crate::ui_system::UiId::BottomPanelBody,
-                bx, by, box_w, box_h, mx, my
-            );
-        }
+                        let icon_render_sz = 16.0 * s;
+                        let offset = (icon_sz - icon_render_sz) / 2.0;
+                        self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
+
+                        // СНАЧАЛА регистрируем фон (Blocker), чтобы он не перехватывал клики по кнопкам
+                        ui_registry.register_blocker(
+                            crate::ui_system::UiId::BottomPanelBody,
+                            bx, by, box_w, box_h, mx, my
+                        );
+
+                        // ЗАТЕМ кнопку копирования (она будет найдена первой, так как поиск идет с конца)
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::CopyDiagnostic(idx),
+                            btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, mx, my
+                        );
+                    }
 
         self.flush();
 
