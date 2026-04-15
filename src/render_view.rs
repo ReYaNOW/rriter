@@ -766,11 +766,23 @@ impl Renderer {
         let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
         let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-        let minimap_w = self.minimap_width;
+                let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
         let scrollbar_x = minimap_x - scrollbar_width;
 
-        let solid_minimap_bg = [
+        let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+        let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
+        ui_registry.register_text_input(
+            crate::ui_system::UiId::EditorTextBody,
+            self.left_padding,
+            0.0,
+            scrollbar_x - self.left_padding,
+            editor_height,
+            mx,
+            my,
+        );
+
+                let solid_minimap_bg = [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
             self.theme.minimap_bg[2],
@@ -1491,7 +1503,7 @@ impl Renderer {
 
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
-            ui_registry.register_rect(
+                        ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarX,
                 self.left_padding,
                 editor_height - 14.0 * s,
@@ -1501,16 +1513,6 @@ impl Renderer {
                 self.last_mouse_y,
             );
         }
-
-        ui_registry.register_rect(
-            crate::ui_system::UiId::EditorTextBody,
-            self.left_padding,
-            0.0,
-            scrollbar_x - self.left_padding,
-            editor_height,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
 
         if show_fps {
             let center_x = (self.width - minimap_w) / 2.0;
@@ -1648,12 +1650,12 @@ impl Renderer {
             }
         }
 
-        if dialog_window_open {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
+                if dialog_window_open {
+            self.push_rect(0.0, 0.0, self.width, self.height,[0.0, 0.0, 0.0, 0.6]);
         }
         self.flush();
 
-        (wants_pointer, target_sticky_lines)
+        (wants_pointer | ui_registry.wants_pointer(), target_sticky_lines)
     }
 
     fn draw_minimap(
