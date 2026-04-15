@@ -12,12 +12,12 @@
 //   initialize + didOpen для текущего файла.
 
 use std::collections::HashMap;
-use tree_sitter::StreamingIterator;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use tree_sitter::StreamingIterator;
 
 use std::thread;
 use std::time::Duration;
@@ -113,7 +113,7 @@ pub enum LspEvent {
         request_id: i32,
         actions: Vec<CodeAction>,
     },
-        /// Сервер готов принимать запросы
+    /// Сервер готов принимать запросы
     ServerReady,
     /// Статус сервера изменился
     StatusChanged {
@@ -166,7 +166,10 @@ enum Cmd {
         text: String,
     },
     /// Закрыть файл (didClose)
-    Close { #[allow(dead_code)] uri: String },
+    Close {
+        #[allow(dead_code)]
+        uri: String,
+    },
     /// Запросить codeActions для позиции
     CodeAction {
         id: i32,
@@ -218,10 +221,7 @@ fn json_escape(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => {
-                let _ = std::fmt::Write::write_fmt(
-                    &mut out,
-                    format_args!("\\u{:04x}", c as u32),
-                );
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{:04x}", c as u32));
             }
             c => out.push(c),
         }
@@ -264,7 +264,7 @@ fn make_initialize(id: i32, workspace: Option<&Path>) -> Vec<u8> {
             format!(
                 r#","workspaceFolders":[{{"uri":"{}","name":"workspace"}}]"#,
                 escaped_uri
-            )
+            ),
         )
     } else {
         (String::from("null"), String::new())
@@ -314,7 +314,10 @@ fn make_did_close(uri: &str) -> Vec<u8> {
 fn make_code_action(
     id: i32,
     uri: &str,
-    sl: u32, sc: u32, el: u32, ec: u32,
+    sl: u32,
+    sc: u32,
+    el: u32,
+    ec: u32,
     diag_json: &str,
 ) -> Vec<u8> {
     let body = format!(
@@ -363,17 +366,37 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         _ => DiagSeverity::Hint,
     };
 
-    let message = v.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+    let message = v
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let code = v.get("code").and_then(|c| {
-        if let Some(s) = c.as_str() { Some(s.to_string()) }
-        else if let Some(n) = c.as_u64() { Some(n.to_string()) }
-        else { None }
+        if let Some(s) = c.as_str() {
+            Some(s.to_string())
+        } else if let Some(n) = c.as_u64() {
+            Some(n.to_string())
+        } else {
+            None
+        }
     });
 
-    let source = v.get("source").and_then(|s| s.as_str()).map(|s| s.to_string());
+    let source = v
+        .get("source")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
 
-    Some(Diagnostic { start_line: sl, start_col: sc, end_line: el, end_col: ec, severity, code, message, source })
+    Some(Diagnostic {
+        start_line: sl,
+        start_col: sc,
+        end_line: el,
+        end_col: ec,
+        severity,
+        code,
+        message,
+        source,
+    })
 }
 
 fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
@@ -386,9 +409,19 @@ fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
     let el = end_r.get("line")?.as_u64()? as u32;
     let ec = end_r.get("character")?.as_u64()? as u32;
 
-    let new_text = v.get("newText").and_then(|t| t.as_str()).unwrap_or("").to_string();
+    let new_text = v
+        .get("newText")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    Some(TextChange { start_line: sl, start_col: sc, end_line: el, end_col: ec, new_text })
+    Some(TextChange {
+        start_line: sl,
+        start_col: sc,
+        end_line: el,
+        end_col: ec,
+        new_text,
+    })
 }
 
 fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
@@ -398,7 +431,8 @@ fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
         for (uri, edits) in changes {
             let path = uri_to_path(uri);
             if let Some(arr) = edits.as_array() {
-                let parsed_edits: Vec<TextChange> = arr.iter().filter_map(parse_text_edit_value).collect();
+                let parsed_edits: Vec<TextChange> =
+                    arr.iter().filter_map(parse_text_edit_value).collect();
                 if !parsed_edits.is_empty() {
                     edit.changes.entry(path).or_default().extend(parsed_edits);
                 }
@@ -412,7 +446,8 @@ fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
                 if let Some(uri) = td.get("uri").and_then(|u| u.as_str()) {
                     let path = uri_to_path(uri);
                     if let Some(edits) = item.get("edits").and_then(|e| e.as_array()) {
-                        let parsed_edits: Vec<TextChange> = edits.iter().filter_map(parse_text_edit_value).collect();
+                        let parsed_edits: Vec<TextChange> =
+                            edits.iter().filter_map(parse_text_edit_value).collect();
                         if !parsed_edits.is_empty() {
                             edit.changes.entry(path).or_default().extend(parsed_edits);
                         }
@@ -426,8 +461,15 @@ fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
 }
 
 fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
-    let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
-    let kind = v.get("kind").and_then(|k| k.as_str()).map(|s| s.to_string());
+    let title = v
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    let kind = v
+        .get("kind")
+        .and_then(|k| k.as_str())
+        .map(|s| s.to_string());
     let edit = v.get("edit").map(parse_workspace_edit_value);
 
     Some(CodeAction { title, kind, edit })
@@ -435,108 +477,137 @@ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
-                        fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>) {
-                let msg: serde_json::Value = match serde_json::from_slice(body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let log_msg = format!("[LSP RECV ERROR] {}: {}", e, String::from_utf8_lossy(body));
-                        let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
-                        return;
-                    }
-                };
+fn dispatch_frame(
+    body: &[u8],
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    out_tx: &Sender<Vec<u8>>,
+) {
+    let msg: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => {
+            let log_msg = format!("[LSP RECV ERROR] {}: {}", e, String::from_utf8_lossy(body));
+            let _ = event_tx.send(LspEvent::Log {
+                name: server_name,
+                message: log_msg,
+            });
+            return;
+        }
+    };
 
-                                let log_msg = format!("[LSP RECV] {}", String::from_utf8_lossy(body));
-                let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
+    let log_msg = format!("[LSP RECV] {}", String::from_utf8_lossy(body));
+    let _ = event_tx.send(LspEvent::Log {
+        name: server_name,
+        message: log_msg,
+    });
 
-                let method = msg.get("method").and_then(|v| v.as_str());
-        let id = msg.get("id").and_then(|v| {
-            v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-        });
+    let method = msg.get("method").and_then(|v| v.as_str());
+    let id = msg.get("id").and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    });
 
-        match method {
-            Some("textDocument/publishDiagnostics") => {
-                if let Some(params) = msg.get("params") {
-                    if let Some(uri) = params.get("uri").and_then(|v| v.as_str()) {
-                        let path = uri_to_path(uri);
-                        let version = params.get("version").and_then(|v| v.as_i64()).map(|v| v as i32);
+    match method {
+        Some("textDocument/publishDiagnostics") => {
+            if let Some(params) = msg.get("params") {
+                if let Some(uri) = params.get("uri").and_then(|v| v.as_str()) {
+                    let path = uri_to_path(uri);
+                    let version = params
+                        .get("version")
+                        .and_then(|v| v.as_i64())
+                        .map(|v| v as i32);
 
-                        let mut items = Vec::new();
-                        if let Some(diags) = params.get("diagnostics").and_then(|v| v.as_array()) {
-                            for d in diags {
-                                if let Some(diag) = parse_diagnostic_value(d) {
-                                    items.push(diag);
-                                }
+                    let mut items = Vec::new();
+                    if let Some(diags) = params.get("diagnostics").and_then(|v| v.as_array()) {
+                        for d in diags {
+                            if let Some(diag) = parse_diagnostic_value(d) {
+                                items.push(diag);
                             }
                         }
-                        let _ = event_tx.send(LspEvent::Diagnostics { path, version, items });
                     }
+                    let _ = event_tx.send(LspEvent::Diagnostics {
+                        path,
+                        version,
+                        items,
+                    });
                 }
             }
-            Some("workspace/applyEdit") => {
-                if let Some(params) = msg.get("params") {
-                    if let Some(edit_obj) = params.get("edit") {
-                        let edit = parse_workspace_edit_value(edit_obj);
-                        let action = CodeAction {
-                            title: "workspace/applyEdit".to_string(),
-                            kind: None,
-                            edit: Some(edit),
-                        };
+        }
+        Some("workspace/applyEdit") => {
+            if let Some(params) = msg.get("params") {
+                if let Some(edit_obj) = params.get("edit") {
+                    let edit = parse_workspace_edit_value(edit_obj);
+                    let action = CodeAction {
+                        title: "workspace/applyEdit".to_string(),
+                        kind: None,
+                        edit: Some(edit),
+                    };
+                    let _ = event_tx.send(LspEvent::CodeActions {
+                        request_id: -1,
+                        actions: vec![action],
+                    });
+                }
+            }
+        }
+        Some("initialize") => {}
+        Some("window/logMessage") => {
+            if let Some(params) = msg.get("params") {
+                if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
+                    let _ = event_tx.send(LspEvent::Log {
+                        name: server_name,
+                        message: msg_str.to_string(),
+                    });
+                }
+            }
+        }
+        Some("client/registerCapability") | Some("client/unregisterCapability") => {
+            if let Some(req_id) = id {
+                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
+                let _ = out_tx.send(reply.into_bytes());
+            }
+        }
+        Some("workspace/configuration") => {
+            if let Some(req_id) = id {
+                let mut count = 1;
+                if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
+                    count = items.len().max(1);
+                }
+                let config_obj = r#"{"configurationPreference":"fileSystemFirst"}"#;
+                let objs = vec![config_obj; count].join(",");
+                let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
+                let _ = out_tx.send(reply.into_bytes());
+            }
+        }
+        Some(m) => {
+            if let Some(req_id) = id {
+                if m != "window/logMessage"
+                    && m != "textDocument/publishDiagnostics"
+                    && m != "workspace/applyEdit"
+                {
+                    let reply = format!(
+                        r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#,
+                        req_id
+                    );
+                    let _ = out_tx.send(reply.into_bytes());
+                }
+            }
+        }
+        None => {
+            if let Some(req_id) = id {
+                if let Some(result) = msg.get("result") {
+                    if let Some(arr) = result.as_array() {
+                        let actions: Vec<CodeAction> =
+                            arr.iter().filter_map(parse_code_action_value).collect();
                         let _ = event_tx.send(LspEvent::CodeActions {
-                            request_id: -1,
-                            actions: vec![action],
+                            request_id: req_id as i32,
+                            actions,
                         });
-                    }
-                }
-            }
-            Some("initialize") => {}
-            Some("window/logMessage") => {
-                if let Some(params) = msg.get("params") {
-                    if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
-                        let _ = event_tx.send(LspEvent::Log { name: server_name, message: msg_str.to_string() });
-                    }
-                }
-            }
-            Some("client/registerCapability") | Some("client/unregisterCapability") => {
-                if let Some(req_id) = id {
-                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
-                    let _ = out_tx.send(reply.into_bytes());
-                }
-            }
-            Some("workspace/configuration") => {
-                if let Some(req_id) = id {
-                    let mut count = 1;
-                    if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
-                        count = items.len().max(1);
-                    }
-                    let config_obj = r#"{"configurationPreference":"fileSystemFirst"}"#;
-                    let objs = vec![config_obj; count].join(",");
-                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
-                    let _ = out_tx.send(reply.into_bytes());
-                }
-            }
-            Some(m) => {
-                if let Some(req_id) = id {
-                    if m != "window/logMessage" && m != "textDocument/publishDiagnostics" && m != "workspace/applyEdit" {
-                        let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#, req_id);
-                        let _ = out_tx.send(reply.into_bytes());
-                    }
-                }
-            }
-            None => {
-                if let Some(req_id) = id {
-                    if let Some(result) = msg.get("result") {
-                        if let Some(arr) = result.as_array() {
-                            let actions: Vec<CodeAction> = arr.iter().filter_map(parse_code_action_value).collect();
-                                                        let _ = event_tx.send(LspEvent::CodeActions {
-                                request_id: req_id as i32,
-                                actions,
-                            });
-                        }
                     }
                 }
             }
         }
     }
+}
 
 // ── Запуск процесса ───────────────────────────────────────────────────────────
 
@@ -557,33 +628,36 @@ fn spawn_server(
     for arg in def.args {
         cmd.arg(arg);
     }
-            let mut child = cmd
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .ok()?;
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
 
-        let stdin = child.stdin.take()?;
-        let stdout = child.stdout.take()?;
-        let stderr = child.stderr.take()?;
+    let stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
 
-                let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
-        let reader_out_tx = out_tx.clone();
+    let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+    let reader_out_tx = out_tx.clone();
 
-        let err_tx = event_tx.clone();
-        let srv_name = def.program;
-        thread::Builder::new()
-            .name(format!("lsp-stderr-{}", srv_name))
-            .spawn(move || {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(msg) = line {
-                        let _ = err_tx.send(LspEvent::Log { name: srv_name, message: msg });
-                    }
+    let err_tx = event_tx.clone();
+    let srv_name = def.program;
+    thread::Builder::new()
+        .name(format!("lsp-stderr-{}", srv_name))
+        .spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(msg) = line {
+                    let _ = err_tx.send(LspEvent::Log {
+                        name: srv_name,
+                        message: msg,
+                    });
                 }
-            })
-            .ok()?;
+            }
+        })
+        .ok()?;
 
     // Тред-писатель: получает байты, оборачивает в Content-Length фрейм
     thread::Builder::new()
@@ -610,17 +684,15 @@ fn spawn_server(
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
                 }
-                let content_len = if let Some(rest) = header_buf
-                    .trim()
-                    .strip_prefix("Content-Length:")
-                {
-                    match rest.trim().parse::<usize>() {
-                        Ok(n) => n,
-                        Err(_) => continue,
-                    }
-                } else {
-                    continue;
-                };
+                let content_len =
+                    if let Some(rest) = header_buf.trim().strip_prefix("Content-Length:") {
+                        match rest.trim().parse::<usize>() {
+                            Ok(n) => n,
+                            Err(_) => continue,
+                        }
+                    } else {
+                        continue;
+                    };
 
                 // Пропускаем \r\n разделитель
                 header_buf.clear();
@@ -628,22 +700,31 @@ fn spawn_server(
                     break;
                 }
 
-                if content_len == 0 { continue; }
+                if content_len == 0 {
+                    continue;
+                }
 
                 let mut body = vec![0u8; content_len];
                 let mut read = 0;
                 while read < content_len {
                     match std::io::Read::read(&mut reader, &mut body[read..]) {
-                        Ok(0) => { break; }
+                        Ok(0) => {
+                            break;
+                        }
                         Ok(n) => read += n,
-                        Err(_) => { break; }
+                        Err(_) => {
+                            break;
+                        }
                     }
                 }
-                                                if read < content_len { break; }
+                if read < content_len {
+                    break;
+                }
 
                 dispatch_frame(&body, &event_tx, def.program, &reader_out_tx);
             }
-        }).ok()?;
+        })
+        .ok()?;
 
     Some(SpawnedProcess { child, out_tx })
 }
@@ -667,12 +748,16 @@ fn send_and_log(
 ) -> Result<(), mpsc::SendError<Vec<u8>>> {
     if let Ok(s) = std::str::from_utf8(&msg) {
         let log_msg = format!("[LSP SEND] {}", s);
-        let _ = event_tx.send(LspEvent::Log { name: server_name, message: log_msg });
+        let _ = event_tx.send(LspEvent::Log {
+            name: server_name,
+            message: log_msg,
+        });
     }
     out_tx.send(msg)
 }
 
-fn run_supervisor(def: &'static LspServerDef,
+fn run_supervisor(
+    def: &'static LspServerDef,
     workspace: Option<PathBuf>,
     cmd_rx: Receiver<Cmd>,
     event_tx: Sender<LspEvent>,
@@ -683,12 +768,18 @@ fn run_supervisor(def: &'static LspServerDef,
     let mut user_requested_restart = false;
 
     'outer: loop {
-        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Starting });
+        let _ = event_tx.send(LspEvent::StatusChanged {
+            name: def.program,
+            status: LspServerStatus::Starting,
+        });
         // ── Запускаем процесс ─────────────────────────────────────────
         let mut proc = match spawn_server(def, workspace.as_deref(), event_tx.clone()) {
             Some(p) => p,
             None => {
-                let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Crashed });
+                let _ = event_tx.send(LspEvent::StatusChanged {
+                    name: def.program,
+                    status: LspServerStatus::Crashed,
+                });
                 thread::sleep(restart_delay);
                 restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
                 continue 'outer;
@@ -696,12 +787,12 @@ fn run_supervisor(def: &'static LspServerDef,
         };
         restart_delay = Duration::from_millis(500); // сброс на удачный запуск
 
-                // ── Handshake: initialize ─────────────────────────────────────────
+        // ── Handshake: initialize ─────────────────────────────────────────
         init_id = next_id();
         let init_msg = make_initialize(init_id, workspace.as_deref());
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
-                }
+        }
 
         // Ждём ответ на initialize (простой polling цикл)
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -720,16 +811,21 @@ fn run_supervisor(def: &'static LspServerDef,
             initialized = true;
             break;
         }
-                if !initialized { continue 'outer; }
+        if !initialized {
+            continue 'outer;
+        }
 
         // Шлём initialized notification
         if send_and_log(&proc.out_tx, &event_tx, def.program, make_initialized()).is_err() {
             continue 'outer;
         }
-                let _ = event_tx.send(LspEvent::ServerReady);
-        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Running });
+        let _ = event_tx.send(LspEvent::ServerReady);
+        let _ = event_tx.send(LspEvent::StatusChanged {
+            name: def.program,
+            status: LspServerStatus::Running,
+        });
 
-                // Если был открыт файл — reopenуем после рестарта
+        // Если был открыт файл — reopenуем после рестарта
         if let Some(ref of) = open_file {
             let msg = make_did_open(&of.uri, of.lang, of.version, &of.text);
             if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
@@ -739,11 +835,14 @@ fn run_supervisor(def: &'static LspServerDef,
 
         // ── Основной цикл supervisor ──────────────────────────────────────
         'inner: loop {
-                        // Проверяем краш процесса
+            // Проверяем краш процесса
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
                     if !user_requested_restart {
-                        let _ = event_tx.send(LspEvent::StatusChanged { name: def.program, status: LspServerStatus::Crashed });
+                        let _ = event_tx.send(LspEvent::StatusChanged {
+                            name: def.program,
+                            status: LspServerStatus::Crashed,
+                        });
                     }
                     user_requested_restart = false;
                     thread::sleep(Duration::from_millis(1000));
@@ -762,33 +861,66 @@ fn run_supervisor(def: &'static LspServerDef,
                         let _ = proc.child.kill();
                         break 'inner;
                     }
-                                        Ok(Cmd::Open { uri, lang, version, text }) => {
+                    Ok(Cmd::Open {
+                        uri,
+                        lang,
+                        version,
+                        text,
+                    }) => {
                         let msg = make_did_open(&uri, lang, version, &text);
-                        open_file = Some(OpenFile { uri, lang, version, text });
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
+                        open_file = Some(OpenFile {
+                            uri,
+                            lang,
+                            version,
+                            text,
+                        });
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
                     }
                     Ok(Cmd::Change { uri, version, text }) => {
                         if let Some(ref mut of) = open_file {
-                                                        of.version = version;
+                            of.version = version;
                             of.text = text.clone();
                         }
                         let msg = make_did_change_full(&uri, version, &text);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
                     }
-                                        Ok(Cmd::Close { uri: _ }) => {
+                    Ok(Cmd::Close { uri: _ }) => {
                         if let Some(ref of) = open_file {
                             let msg = make_did_close(&of.uri);
                             let _ = send_and_log(&proc.out_tx, &event_tx, def.program, msg);
                         }
                         open_file = None;
                     }
-                                        Ok(Cmd::CodeAction { id, uri, start_line, start_col, end_line, end_col, diagnostics_json }) => {
-                        let msg = make_code_action(id, &uri, start_line, start_col, end_line, end_col, &diagnostics_json);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() { break 'inner; }
+                    Ok(Cmd::CodeAction {
+                        id,
+                        uri,
+                        start_line,
+                        start_col,
+                        end_line,
+                        end_col,
+                        diagnostics_json,
+                    }) => {
+                        let msg = make_code_action(
+                            id,
+                            &uri,
+                            start_line,
+                            start_col,
+                            end_line,
+                            end_col,
+                            &diagnostics_json,
+                        );
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
                     }
-                                        Ok(Cmd::Shutdown) => {
+                    Ok(Cmd::Shutdown) => {
                         let sid = next_id();
-                        let _ = send_and_log(&proc.out_tx, &event_tx, def.program, make_shutdown(sid));
+                        let _ =
+                            send_and_log(&proc.out_tx, &event_tx, def.program, make_shutdown(sid));
                         thread::sleep(Duration::from_millis(200));
                         let _ = send_and_log(&proc.out_tx, &event_tx, def.program, make_exit());
                         let _ = proc.child.wait();
@@ -825,10 +957,16 @@ impl LspProcess {
             .spawn(move || run_supervisor(def, ws, cmd_rx, event_tx))
             .expect("failed to start LSP supervisor");
 
-                LspProcess { cmd_tx, event_rx, current_uri: None, def, open_file_data: None }
+        LspProcess {
+            cmd_tx,
+            event_rx,
+            current_uri: None,
+            def,
+            open_file_data: None,
+        }
     }
 
-        /// textDocument/didOpen
+    /// textDocument/didOpen
     pub fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32) {
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
@@ -851,7 +989,11 @@ impl LspProcess {
     pub fn notify_change(&mut self, path: &PathBuf, text: &str, version: i32) {
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
-        let _ = self.cmd_tx.send(Cmd::Change { uri, version, text: text.to_string() });
+        let _ = self.cmd_tx.send(Cmd::Change {
+            uri,
+            version,
+            text: text.to_string(),
+        });
     }
 
     /// textDocument/didClose
@@ -866,8 +1008,10 @@ impl LspProcess {
     pub fn request_code_actions(
         &mut self,
         path: &PathBuf,
-        start_line: u32, start_col: u32,
-        end_line: u32, end_col: u32,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
         diagnostics: &[Diagnostic],
     ) -> i32 {
         let id = next_id();
@@ -877,7 +1021,12 @@ impl LspProcess {
         let diag_json = encode_diagnostics_json(diagnostics);
 
         let _ = self.cmd_tx.send(Cmd::CodeAction {
-            id, uri, start_line, start_col, end_line, end_col,
+            id,
+            uri,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
             diagnostics_json: diag_json,
         });
         id
@@ -906,7 +1055,9 @@ impl LspProcess {
 fn encode_diagnostics_json(diags: &[Diagnostic]) -> String {
     let mut out = String::from('[');
     for (i, d) in diags.iter().enumerate() {
-        if i > 0 { out.push(','); }
+        if i > 0 {
+            out.push(',');
+        }
         let sev = match d.severity {
             DiagSeverity::Error => 1,
             DiagSeverity::Warning => 2,
@@ -944,12 +1095,12 @@ pub struct LspManager {
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     /// Отключён ли ruff вручную
-            pub python_disabled: bool,
-        pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
-    }
+    pub python_disabled: bool,
+    pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
+}
 
 impl LspManager {
-        pub fn new(workspace: Option<PathBuf>) -> Self {
+    pub fn new(workspace: Option<PathBuf>) -> Self {
         LspManager {
             python: None,
             workspace,
@@ -961,7 +1112,7 @@ impl LspManager {
         }
     }
 
-        /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
+    /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
     fn ensure_python(&mut self) {
         if self.python.is_none() && !self.python_disabled {
             self.python_status = LspServerStatus::Starting;
@@ -981,7 +1132,7 @@ impl LspManager {
     }
 
     /// Отключить ruff (остановить и не перезапускать)
-        pub fn disable_python(&mut self) {
+    pub fn disable_python(&mut self) {
         self.python_disabled = true;
         self.python_status = LspServerStatus::Disabled;
         if let Some(p) = self.python.take() {
@@ -1007,8 +1158,12 @@ impl LspManager {
     }
 
     /// Информация о серверах для UI
-        pub fn servers_info(&self) -> Vec<LspServerInfo> {
-        let logs = self.server_logs.get(RUFF_SERVER.program).cloned().unwrap_or_default();
+    pub fn servers_info(&self) -> Vec<LspServerInfo> {
+        let logs = self
+            .server_logs
+            .get(RUFF_SERVER.program)
+            .cloned()
+            .unwrap_or_default();
         vec![LspServerInfo {
             name: RUFF_SERVER.program,
             status: self.python_status.clone(),
@@ -1027,7 +1182,7 @@ impl LspManager {
         }
     }
 
-        /// Уведомляет LSP об открытии файла
+    /// Уведомляет LSP об открытии файла
     pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -1071,18 +1226,25 @@ impl LspManager {
     pub fn request_code_actions(
         &mut self,
         ext: &str,
-        start_line: u32, start_col: u32,
-        end_line: u32, end_col: u32,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
         relevant_diags: &[Diagnostic],
     ) -> Option<i32> {
         let path = self.current_path.clone()?;
         let proc = self.process_for_ext(ext)?;
         Some(proc.request_code_actions(
-            &path, start_line, start_col, end_line, end_col, relevant_diags,
+            &path,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+            relevant_diags,
         ))
     }
 
-        /// Опрашивает события от всех серверов. Вызывать раз в кадр.
+    /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
         let mut all = Vec::new();
@@ -1092,23 +1254,30 @@ impl LspManager {
         }
 
         // Обновляем кешированные диагностики и статусы
-                for ev in &mut all {
-                        match ev {
-                                                                                                                LspEvent::Diagnostics { path, items, .. } => {
-                                                                                                                    let incoming_uri = path_to_uri(&path.to_string_lossy());
-                                                                                                                    let current_uri = self.current_path.as_ref().map(|p| path_to_uri(&p.to_string_lossy()));
-                                                                                                                    if Some(incoming_uri) == current_uri {
-                                                                                                                        self.diagnostics = items.clone();
-                                                                                                                    }
-                                                                                                                }
-                                LspEvent::StatusChanged { status, .. } => {
+        for ev in &mut all {
+            match ev {
+                LspEvent::Diagnostics { path, items, .. } => {
+                    let incoming_uri = path_to_uri(&path.to_string_lossy());
+                    let current_uri = self
+                        .current_path
+                        .as_ref()
+                        .map(|p| path_to_uri(&p.to_string_lossy()));
+                    if Some(incoming_uri) == current_uri {
+                        self.diagnostics = items.clone();
+                    }
+                }
+                LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
-                                                                LspEvent::Log { name, message } => {
+                LspEvent::Log { name, message } => {
                     let (final_text, spans, folds) = format_and_highlight_json(message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
-                    logs.push(LogEntry { text: final_text, spans, folds });
+                    logs.push(LogEntry {
+                        text: final_text,
+                        spans,
+                        folds,
+                    });
                     if logs.len() > 100 {
                         logs.remove(0);
                     }
@@ -1120,9 +1289,12 @@ impl LspManager {
         all
     }
 
-        /// Диагностики для текущего файла, отфильтрованные по строке
+    /// Диагностики для текущего файла, отфильтрованные по строке
     pub fn diagnostics_for_line(&self, line: u32) -> Vec<&Diagnostic> {
-        self.diagnostics.iter().filter(move |d| d.start_line == line).collect()
+        self.diagnostics
+            .iter()
+            .filter(move |d| d.start_line == line)
+            .collect()
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
@@ -1132,17 +1304,23 @@ impl LspManager {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
         let _ = proc.cmd_tx.send(Cmd::CodeAction {
-            id, uri,
-            start_line: 0, start_col: 0, end_line: u32::MAX, end_col: 0,
+            id,
+            uri,
+            start_line: 0,
+            start_col: 0,
+            end_line: u32::MAX,
+            end_col: 0,
             diagnostics_json: String::from("[]"),
         });
         Some(id)
     }
 
-            #[allow(dead_code)]
+    #[allow(dead_code)]
     pub fn shutdown(mut self) {
         self.python_disabled = true;
-        if let Some(p) = self.python.take() { p.shutdown(); }
+        if let Some(p) = self.python.take() {
+            p.shutdown();
+        }
     }
 }
 
@@ -1183,7 +1361,8 @@ pub fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &Pat
     // Сортируем правки с конца файла к началу
     let mut sorted = changes.clone();
     sorted.sort_unstable_by(|a, b| {
-        b.start_line.cmp(&a.start_line)
+        b.start_line
+            .cmp(&a.start_line)
             .then(b.start_col.cmp(&a.start_col))
     });
 
@@ -1195,10 +1374,16 @@ pub fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &Pat
             result.replace_range(start..end, &change.new_text);
         }
     }
-            result
+    result
 }
 
-pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>) {
+pub fn format_and_highlight_json(
+    raw_text: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<(usize, usize)>,
+) {
     let (prefix, content) = if raw_text.starts_with("[LSP RECV] ") {
         ("[LSP RECV]\n", &raw_text[11..])
     } else if raw_text.starts_with("[LSP SEND] ") {
@@ -1229,8 +1414,10 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
     let mut spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: prefix.len(),
-        color: if prefix.contains("RECV") {[0.313, 0.980, 0.482, 1.0]
-        } else {[0.545, 0.913, 0.992, 1.0]
+        color: if prefix.contains("RECV") {
+            [0.313, 0.980, 0.482, 1.0]
+        } else {
+            [0.545, 0.913, 0.992, 1.0]
         },
     }];
     let mut folds = Vec::new();
@@ -1246,7 +1433,10 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
                     for cap in m.captures {
                         let node = cap.node;
                         if node.end_position().row > node.start_position().row + 1 {
-                            folds.push((node.start_byte() + prefix.len(), node.end_byte() + prefix.len()));
+                            folds.push((
+                                node.start_byte() + prefix.len(),
+                                node.end_byte() + prefix.len(),
+                            ));
                         }
                     }
                 }
@@ -1262,12 +1452,12 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
                         for cap in m.captures {
                             let name = query.capture_names()[cap.index as usize];
                             let color = match name {
-                                "property" =>[0.545, 0.913, 0.992, 1.0],
-                                "string" =>[0.945, 0.980, 0.549, 1.0],
-                                "number" =>[0.741, 0.576, 0.976, 1.0],
-                                "boolean" =>[1.0, 0.474, 0.776, 1.0],
-                                "keyword.control" =>[1.0, 0.474, 0.776, 1.0],
-                                "comment" =>[0.384, 0.447, 0.643, 1.0],
+                                "property" => [0.545, 0.913, 0.992, 1.0],
+                                "string" => [0.945, 0.980, 0.549, 1.0],
+                                "number" => [0.741, 0.576, 0.976, 1.0],
+                                "boolean" => [1.0, 0.474, 0.776, 1.0],
+                                "keyword.control" => [1.0, 0.474, 0.776, 1.0],
+                                "comment" => [0.384, 0.447, 0.643, 1.0],
                                 _ => continue,
                             };
                             spans.push(crate::highlighter::ColorSpan {
@@ -1286,12 +1476,10 @@ pub fn format_and_highlight_json(raw_text: &str) -> (String, Vec<crate::highligh
         spans.push(crate::highlighter::ColorSpan {
             start: prefix.len(),
             end: final_string.len(),
-            color:[0.875, 0.882, 0.902, 1.0],
+            color: [0.875, 0.882, 0.902, 1.0],
         });
     }
 
     spans.sort_by_key(|s| s.start);
     (final_string, spans, folds)
 }
-
-

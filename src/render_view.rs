@@ -1,4 +1,6 @@
 pub mod core_text;
+pub mod lsp_ui;
+pub mod settings_ui;
 pub mod ui;
 
 use crate::editor::Editor;
@@ -15,7 +17,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-        pub fn draw(
+    pub fn draw(
         &mut self,
         editor: &mut Editor,
         scroll_x: f32,
@@ -233,7 +235,7 @@ impl Renderer {
                     y
                 };
 
-                                let btn = IconButton {
+                let btn = IconButton {
                     x: btn_x,
                     y: btn_y,
                     size: btn_size,
@@ -242,7 +244,15 @@ impl Renderer {
                     icon_size: Some(36.0 * s),
                     active_square_width: Some(sb_w),
                 };
-                ui_registry.register_icon_button(crate::ui_system::UiId::SidebarSlot(slot.id), &btn, self, mx, my, s, false);
+                ui_registry.register_icon_button(
+                    crate::ui_system::UiId::SidebarSlot(slot.id),
+                    &btn,
+                    self,
+                    mx,
+                    my,
+                    s,
+                    false,
+                );
             }
 
             // Призрак перетаскиваемой кнопки + разделитель
@@ -352,7 +362,7 @@ impl Renderer {
                     }
                 }
 
-                                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
                 if mx >= resize_x - 4.0 * s
                     && mx <= resize_x + 4.0 * s
@@ -363,16 +373,28 @@ impl Renderer {
                         resize_x - 2.0,
                         0.0,
                         2.0,
-                        editor_height,[0.60, 0.35, 0.85, 0.4],
+                        editor_height,
+                        [0.60, 0.35, 0.85, 0.4],
                     );
                 }
-                ui_registry.register_rect(crate::ui_system::UiId::ResizeLeft, resize_x - 4.0 * s, 0.0, 8.0 * s, editor_height, mx, my);
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::ResizeLeft,
+                    resize_x - 4.0 * s,
+                    0.0,
+                    8.0 * s,
+                    editor_height,
+                    mx,
+                    my,
+                );
 
-                                                                // --- LSP серверы ---
+                // --- LSP серверы ---
                 if ide_panel.is_open(crate::app::PanelId::LspServers) {
-                    let is_top = ide_panel.slots.iter().any(|s| s.id == crate::app::PanelId::LspServers && s.group == crate::app::PanelGroup::Top);
+                    let is_top = ide_panel.slots.iter().any(|s| {
+                        s.id == crate::app::PanelId::LspServers
+                            && s.group == crate::app::PanelGroup::Top
+                    });
                     if is_top {
-                                                                                self.draw_lsp_servers_panel(
+                        self.draw_lsp_servers_panel(
                             panel_x,
                             title_h,
                             panel_left_w,
@@ -426,18 +448,30 @@ impl Renderer {
                         let last_vis =
                             (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
 
-                                                for i in first_vis..last_vis {
+                        for i in first_vis..last_vis {
                             let node = &ide_panel.file_tree_nodes[i];
                             let row_y = title_h + i as f32 * row_h - scroll;
 
-                            ui_registry.register_rect(crate::ui_system::UiId::FileTreeNode(i), panel_x, row_y, panel_left_w, row_h, mx, my);
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::FileTreeNode(i),
+                                panel_x,
+                                row_y,
+                                panel_left_w,
+                                row_h,
+                                mx,
+                                my,
+                            );
 
-                            if ide_panel.file_tree_hovered_idx == Some(i) || ui_registry.hovered() == Some(crate::ui_system::UiId::FileTreeNode(i)) {
+                            if ide_panel.file_tree_hovered_idx == Some(i)
+                                || ui_registry.hovered()
+                                    == Some(crate::ui_system::UiId::FileTreeNode(i))
+                            {
                                 self.push_rect(
                                     panel_x,
                                     row_y,
                                     panel_left_w,
-                                    row_h,[1.0, 1.0, 1.0, 0.06],
+                                    row_h,
+                                    [1.0, 1.0, 1.0, 0.06],
                                 );
                             }
 
@@ -591,7 +625,7 @@ impl Renderer {
         // --- Одинаковые слова (Word Highlighting) ---
         let mut identical_words = Vec::new();
         let mut target_word = None;
-                let is_valid_word = |s: &str| -> bool {
+        let is_valid_word = |s: &str| -> bool {
             s.chars().next().map_or(false, |c| !c.is_ascii_digit())
                 && s.as_bytes()
                     .iter()
@@ -1038,12 +1072,21 @@ impl Renderer {
                     final_x += self.char_advance(v_line_info.fold_suffix[i as usize]);
                 }
 
-                                let hit_y_top = y - self.line_height;
+                let hit_y_top = y - self.line_height;
                 let hit_y_bottom = y + 5.0 * s;
                 let hit_w = next_x + 10.0 * s - (box_x - 2.0 * s);
-                ui_registry.register_rect(crate::ui_system::UiId::EditorFoldDots(phys_idx), box_x - 2.0 * s, hit_y_top, hit_w, hit_y_bottom - hit_y_top, self.last_mouse_x, self.last_mouse_y);
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::EditorFoldDots(phys_idx),
+                    box_x - 2.0 * s,
+                    hit_y_top,
+                    hit_w,
+                    hit_y_bottom - hit_y_top,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
 
-                if cursor_pos.is_none()&& editor.cursor >= end_byte
+                if cursor_pos.is_none()
+                    && editor.cursor >= end_byte
                     && editor.cursor <= actual_end_byte
                 {
                     cursor_pos = Some((final_x, y));
@@ -1120,7 +1163,7 @@ impl Renderer {
             }
         }
 
-                self.flush();
+        self.flush();
 
         // LSP squiggles — волнистые подчёркивания диагностик
         if !lsp_diagnostics.is_empty() {
@@ -1129,20 +1172,24 @@ impl Renderer {
             for diag in lsp_diagnostics {
                 // Цвет по severity
                 let color: [f32; 4] = match diag.severity {
-                    crate::lsp::DiagSeverity::Error   => [0.96, 0.26, 0.21, 0.90],
+                    crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.90],
                     crate::lsp::DiagSeverity::Warning => [0.98, 0.75, 0.18, 0.90],
-                    crate::lsp::DiagSeverity::Info    => [0.26, 0.73, 0.90, 0.80],
-                    crate::lsp::DiagSeverity::Hint    => [0.50, 0.50, 0.50, 0.70],
+                    crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 0.80],
+                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 0.70],
                 };
                 let line = diag.start_line as usize;
-                if line >= editor.line_offsets.len() { continue; }
+                if line >= editor.line_offsets.len() {
+                    continue;
+                }
                 // Находим visual line для физической строки
                 let vis_idx = if line < self.phys_to_visual.len() {
                     self.phys_to_visual[line]
                 } else {
-                    continue
+                    continue;
                 };
-                if vis_idx >= self.visual_lines.len() { continue; }
+                if vis_idx >= self.visual_lines.len() {
+                    continue;
+                }
                 let v_line = self.visual_lines[vis_idx];
                 let line_y = self.baseline_offset + v_line.y_offset - render_scroll_y;
                 let squiggle_y = line_y + 2.0 * self.scale_factor;
@@ -1153,24 +1200,50 @@ impl Renderer {
                 let mut x_end_px = 0.0f32;
                 let mut cur_x = 0.0f32;
                 editor.utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
-                    if utf16_before == diag.start_col { x_start_px = cur_x; }
-                    if diag.end_line == diag.start_line && utf16_before == diag.end_col { x_end_px = cur_x; }
-                    cur_x += if ch == '\t' { self.char_advance(' ') * 4.0 } else { self.char_advance(ch) };
+                    if utf16_before == diag.start_col {
+                        x_start_px = cur_x;
+                    }
+                    if diag.end_line == diag.start_line && utf16_before == diag.end_col {
+                        x_end_px = cur_x;
+                    }
+                    cur_x += if ch == '\t' {
+                        self.char_advance(' ') * 4.0
+                    } else {
+                        self.char_advance(ch)
+                    };
                 });
                 // Если col за концом строки — ставим на конец
-                if diag.start_col >= editor.line_offsets.get(line + 1).map(|_| u32::MAX).unwrap_or(u32::MAX) || x_start_px == 0.0 && diag.start_col > 0 {
+                if diag.start_col
+                    >= editor
+                        .line_offsets
+                        .get(line + 1)
+                        .map(|_| u32::MAX)
+                        .unwrap_or(u32::MAX)
+                    || x_start_px == 0.0 && diag.start_col > 0
+                {
                     x_start_px = cur_x;
                 }
                 if x_end_px == 0.0 {
-                    x_end_px = if diag.end_line == diag.start_line { cur_x } else { x_start_px + avg_adv * 8.0 };
+                    x_end_px = if diag.end_line == diag.start_line {
+                        cur_x
+                    } else {
+                        x_start_px + avg_adv * 8.0
+                    };
                 }
                 let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
 
-                if x_end < self.left_padding || x_start > self.width { continue; }
+                if x_end < self.left_padding || x_start > self.width {
+                    continue;
+                }
 
-                self.push_squiggle(x_start.max(self.left_padding), squiggle_y, squiggle_w, color);
+                self.push_squiggle(
+                    x_start.max(self.left_padding),
+                    squiggle_y,
+                    squiggle_w,
+                    color,
+                );
             }
             self.flush();
         }
@@ -1212,12 +1285,20 @@ impl Renderer {
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
             let phys_idx = v_line.physical_line - 1;
 
-                        if editor.foldable_lines.contains_key(&phys_idx) {
+            if editor.foldable_lines.contains_key(&phys_idx) {
                 let arrow_x = self.left_padding - 20.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
                 self.draw_string_scaled(arrow_str, arrow_x, y - 1.0 * s, self.theme.line_num, 1.0);
-                ui_registry.register_rect(crate::ui_system::UiId::EditorFoldArrow(phys_idx), arrow_x - 5.0 * s, y - self.line_height, 20.0 * s, self.line_height + 5.0 * s, self.last_mouse_x, self.last_mouse_y);
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::EditorFoldArrow(phys_idx),
+                    arrow_x - 5.0 * s,
+                    y - self.line_height,
+                    20.0 * s,
+                    self.line_height + 5.0 * s,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
             }
 
             let mut n = v_line.physical_line;
@@ -1306,7 +1387,7 @@ impl Renderer {
             );
         }
 
-                let target_sticky_lines = self.draw_sticky_lines(
+        let target_sticky_lines = self.draw_sticky_lines(
             editor,
             spans,
             current_sticky_lines,
@@ -1317,7 +1398,7 @@ impl Renderer {
             ui_registry,
         );
 
-                if scrollbar_width > 0.0 {
+        if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height)
@@ -1328,17 +1409,42 @@ impl Renderer {
                 thumb_y,
                 scrollbar_width - 2.0 * s,
                 thumb_h,
-                (scrollbar_width - 2.0 * s) / 2.0,[0.7, 0.33, 0.54, 0.8],
+                (scrollbar_width - 2.0 * s) / 2.0,
+                [0.7, 0.33, 0.54, 0.8],
             );
-            ui_registry.register_rect(crate::ui_system::UiId::EditorScrollbarY, scrollbar_x, 0.0, scrollbar_width, editor_height, self.last_mouse_x, self.last_mouse_y);
+            ui_registry.register_rect(
+                crate::ui_system::UiId::EditorScrollbarY,
+                scrollbar_x,
+                0.0,
+                scrollbar_width,
+                editor_height,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
         }
 
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
-            ui_registry.register_rect(crate::ui_system::UiId::EditorScrollbarX, self.left_padding, editor_height - 14.0 * s, track_w, 14.0 * s, self.last_mouse_x, self.last_mouse_y);
+            ui_registry.register_rect(
+                crate::ui_system::UiId::EditorScrollbarX,
+                self.left_padding,
+                editor_height - 14.0 * s,
+                track_w,
+                14.0 * s,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
         }
 
-        ui_registry.register_rect(crate::ui_system::UiId::EditorTextBody, self.left_padding, 0.0, scrollbar_x - self.left_padding, editor_height, self.last_mouse_x, self.last_mouse_y);
+        ui_registry.register_rect(
+            crate::ui_system::UiId::EditorTextBody,
+            self.left_padding,
+            0.0,
+            scrollbar_x - self.left_padding,
+            editor_height,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
 
         if show_fps {
             let center_x = (self.width - minimap_w) / 2.0;
@@ -1349,7 +1455,7 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
-                if search_anim_y > -100.0 * self.scale_factor {
+        if search_anim_y > -100.0 * self.scale_factor {
             wants_pointer |= self.draw_search_panel(
                 search_anim_y,
                 search_editor,
@@ -1370,7 +1476,7 @@ impl Renderer {
             let panel_x = sb_w;
             let panel_y = self.height - panel_bottom_h;
             let panel_w = self.width - panel_x;
-                        let panel_bg =[
+            let panel_bg = [
                 0.129, // #21
                 0.133, // #22
                 0.173, // #2c
@@ -1386,7 +1492,7 @@ impl Renderer {
             );
 
             let tab_h = 32.0 * s;
-                        let tab_bar_bg =[
+            let tab_bar_bg = [
                 (self.theme.bg[0] + 0.07).min(1.0),
                 (self.theme.bg[1] + 0.07).min(1.0),
                 (self.theme.bg[2] + 0.08).min(1.0),
@@ -1423,21 +1529,29 @@ impl Renderer {
                 tx += tw;
             }
 
-                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+            // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
             let mx = self.last_mouse_x;
             let my = self.last_mouse_y;
             if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
-                self.push_rect(panel_x, panel_y, panel_w, 2.0,[0.60, 0.35, 0.85, 0.4]);
+                self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
             }
-            ui_registry.register_rect(crate::ui_system::UiId::ResizeBottom, panel_x, panel_y - 4.0 * s, panel_w, 8.0 * s, mx, my);
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ResizeBottom,
+                panel_x,
+                panel_y - 4.0 * s,
+                panel_w,
+                8.0 * s,
+                mx,
+                my,
+            );
 
-                        // Плейсхолдер контента
+            // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
             let content_h = panel_bottom_h - 1.0 - tab_h;
             if content_h > 8.0 * s {
                 if let Some(slot) = open_bottom.first() {
                     if slot.id == crate::app::PanelId::LspServers {
-                                                                                                self.draw_lsp_servers_panel(
+                        self.draw_lsp_servers_panel(
                             panel_x,
                             content_y,
                             panel_w,
@@ -1711,7 +1825,7 @@ impl Renderer {
         );
     }
 
-        fn draw_sticky_lines(
+    fn draw_sticky_lines(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
@@ -1977,12 +2091,20 @@ impl Renderer {
                     }
                 }
 
-                                self.flush();
+                self.flush();
                 unsafe {
                     self.gl.disable(glow::SCISSOR_TEST);
                 }
 
-                ui_registry.register_rect(crate::ui_system::UiId::StickyLine(start_byte, i), 0.0, rect_y, rect_w, self.line_height, self.last_mouse_x, self.last_mouse_y);
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::StickyLine(start_byte, i),
+                    0.0,
+                    rect_y,
+                    rect_w,
+                    self.line_height,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
 
                 self.sticky_scroll_rects
                     .push((0.0, rect_y, rect_w, self.line_height, start_byte));
@@ -1993,7 +2115,7 @@ impl Renderer {
         target_sticky_lines
     }
 
-        #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn draw_search_panel(
         &mut self,
         search_anim_y: f32,
@@ -2006,7 +2128,7 @@ impl Renderer {
         scrollbar_width: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> bool {
-                let wants_pointer = false;
+        let wants_pointer = false;
         let s = self.scale_factor;
         let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
         let search_w = 480.0 * s;
@@ -2055,7 +2177,7 @@ impl Renderer {
         } else {
             [0.3, 0.3, 0.3, 1.0]
         };
-                self.push_rounded_rect(
+        self.push_rounded_rect(
             input_x - 1.0,
             input_y - 1.0,
             input_w + 2.0,
@@ -2065,7 +2187,15 @@ impl Renderer {
         );
         self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
 
-        ui_registry.register_text_input(crate::ui_system::UiId::SearchInput, input_x, input_y, input_w, input_h, self.last_mouse_x, self.last_mouse_y);
+        ui_registry.register_text_input(
+            crate::ui_system::UiId::SearchInput,
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
 
         self.flush();
         unsafe {
@@ -2270,10 +2400,42 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
-                ui_registry.register_icon_button(crate::ui_system::UiId::SearchCaseToggle, &btn_case, self, mx, my, s, false);
-        ui_registry.register_icon_button(crate::ui_system::UiId::SearchPrev, &btn_up, self, mx, my, s, false);
-        ui_registry.register_icon_button(crate::ui_system::UiId::SearchNext, &btn_down, self, mx, my, s, false);
-        ui_registry.register_icon_button(crate::ui_system::UiId::SearchClose, &btn_close, self, mx, my, s, false);
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SearchCaseToggle,
+            &btn_case,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SearchPrev,
+            &btn_up,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SearchNext,
+            &btn_down,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SearchClose,
+            &btn_close,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
 
         wants_pointer || ui_registry.wants_pointer()
     }

@@ -14,7 +14,8 @@ pub mod file_icons_bytes {
 
 use file_icons_bytes::{file_svg, folder_svg};
 use file_icons_map::{
-    file_icon_key_exact, folder_icon_key_exact, FILE_ICON_FALLBACKS, FOLDER_ICON_FALLBACKS, match_file_pattern, match_folder_pattern
+    file_icon_key_exact, folder_icon_key_exact, match_file_pattern, match_folder_pattern,
+    FILE_ICON_FALLBACKS, FOLDER_ICON_FALLBACKS,
 };
 
 struct FallbackMatcher {
@@ -64,12 +65,12 @@ pub fn file_icon_key(name: &str) -> &'static str {
             return k;
         }
     }
-        // 3. Быстрые статические паттерны из build.rs
+    // 3. Быстрые статические паттерны из build.rs
     if let Some(k) = match_file_pattern(name) {
         return k;
     }
 
-        // 4. Оставшиеся сложные regex проверяются за ОДИН проход!
+    // 4. Оставшиеся сложные regex проверяются за ОДИН проход!
     if let Some(idx) = FILE_REGEXES.set.matches(name).into_iter().next() {
         return FILE_REGEXES.keys[idx];
     }
@@ -85,7 +86,7 @@ pub fn folder_icon_key(name: &str) -> &'static str {
     if let Some(k) = match_folder_pattern(name) {
         return k;
     }
-        if let Some(idx) = FOLDER_REGEXES.set.matches(name).into_iter().next() {
+    if let Some(idx) = FOLDER_REGEXES.set.matches(name).into_iter().next() {
         return FOLDER_REGEXES.keys[idx];
     }
     "default"

@@ -340,7 +340,9 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                                let lsp_diags = self.lsp.as_ref()
+                let lsp_diags = self
+                    .lsp
+                    .as_ref()
                     .map(|l| l.diagnostics.as_slice())
                     .unwrap_or(&[]);
 
@@ -420,10 +422,16 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                                // LSP actions menu — рисуем поверх всего
+                // LSP actions menu — рисуем поверх всего
                 if let Some(menu) = &self.lsp_actions_menu {
-                    let wants = self.renderer.as_mut().unwrap().draw_lsp_actions_menu(menu, blink_alpha);
-                    if wants { wants_pointer = true; }
+                    let wants = self
+                        .renderer
+                        .as_mut()
+                        .unwrap()
+                        .draw_lsp_actions_menu(menu, blink_alpha);
+                    if wants {
+                        wants_pointer = true;
+                    }
                 }
 
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
@@ -448,7 +456,7 @@ impl ApplicationHandler for App {
 
                 let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
-                                        settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
+                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
@@ -683,7 +691,7 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             }
         }
-                if self.ide_panel.explorer_scroll.update(dt) {
+        if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
         }
         if self.ide_panel.lsp_scroll_y.update(dt) {
@@ -870,7 +878,7 @@ impl ApplicationHandler for App {
             }
         }
 
-                                                                                                // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
+        // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
         let mut lsp_events = Vec::new();
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
@@ -881,75 +889,98 @@ impl ApplicationHandler for App {
         for event in lsp_events {
             match event {
                 crate::lsp::LspEvent::Diagnostics { .. } => {
-                            // lsp.diagnostics обновлены внутри poll() автоматически
-                            if let Some(w) = self.window.as_ref() { w.request_redraw(); }
-                        }
-                                                crate::lsp::LspEvent::CodeActions { request_id, actions } => {
-                            // Проверяем: это ответ на Alt+Enter меню?
-                            let is_for_menu = self.lsp_actions_menu
-                                .as_ref()
-                                .and_then(|m| m.pending_request_id)
-                                .map(|id| id == request_id)
-                                .unwrap_or(false);
-
-                                                        if is_for_menu {
-                                // Добавляем code actions в начало меню
-                                if let Some(menu) = &mut self.lsp_actions_menu {
-                                    let mut new_items: Vec<crate::app::LspActionItem> = actions
-                                        .into_iter()
-                                        .filter(|a| a.edit.is_some())
-                                        .map(crate::app::LspActionItem::CodeAction)
-                                        .collect();
-                                    new_items.extend(menu.items.drain(..));
-                                    menu.items = new_items;
-                                    menu.pending_request_id = None;
-                                }
-                                if let Some(w) = self.window.as_ref() { w.request_redraw(); }
-                            } else if self.pending_fix_all_id == Some(request_id) {
-                                // Fix All из панели LSP серверов
-                                self.pending_fix_all_id = None;
-                                if let Some(action) = actions.into_iter().find(|a| a.edit.is_some()) {
-                                    if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
-                                        let new_text = crate::lsp::apply_workspace_edit_to_text(
-                                            &self.editor.get_full_text(), &edit, &path,
-                                        );
-                                        if new_text != self.editor.get_full_text() {
-                                            self.apply_full_text_replacement(new_text);
-                                        }
-                                    }
-                                }
-                                if let Some(w) = self.window.as_ref() { w.request_redraw(); }
-                            }
-                        }
-                                                                                                                                                crate::lsp::LspEvent::ServerReady => {}
-                                                crate::lsp::LspEvent::StatusChanged { .. } => {}
-                                                crate::lsp::LspEvent::Log { .. } => {}
-                        // Fix All ответ
+                    // lsp.diagnostics обновлены внутри poll() автоматически
+                    if let Some(w) = self.window.as_ref() {
+                        w.request_redraw();
                     }
                 }
+                crate::lsp::LspEvent::CodeActions {
+                    request_id,
+                    actions,
+                } => {
+                    // Проверяем: это ответ на Alt+Enter меню?
+                    let is_for_menu = self
+                        .lsp_actions_menu
+                        .as_ref()
+                        .and_then(|m| m.pending_request_id)
+                        .map(|id| id == request_id)
+                        .unwrap_or(false);
+
+                    if is_for_menu {
+                        // Добавляем code actions в начало меню
+                        if let Some(menu) = &mut self.lsp_actions_menu {
+                            let mut new_items: Vec<crate::app::LspActionItem> = actions
+                                .into_iter()
+                                .filter(|a| a.edit.is_some())
+                                .map(crate::app::LspActionItem::CodeAction)
+                                .collect();
+                            new_items.extend(menu.items.drain(..));
+                            menu.items = new_items;
+                            menu.pending_request_id = None;
+                        }
+                        if let Some(w) = self.window.as_ref() {
+                            w.request_redraw();
+                        }
+                    } else if self.pending_fix_all_id == Some(request_id) {
+                        // Fix All из панели LSP серверов
+                        self.pending_fix_all_id = None;
+                        if let Some(action) = actions.into_iter().find(|a| a.edit.is_some()) {
+                            if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone())
+                            {
+                                let new_text = crate::lsp::apply_workspace_edit_to_text(
+                                    &self.editor.get_full_text(),
+                                    &edit,
+                                    &path,
+                                );
+                                if new_text != self.editor.get_full_text() {
+                                    self.apply_full_text_replacement(new_text);
+                                }
+                            }
+                        }
+                        if let Some(w) = self.window.as_ref() {
+                            w.request_redraw();
+                        }
+                    }
+                }
+                crate::lsp::LspEvent::ServerReady => {}
+                crate::lsp::LspEvent::StatusChanged { .. } => {}
+                crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
+            }
+        }
 
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
-                                // Умная синхронизация без аллокаций каждый кадр.
+                // Умная синхронизация без аллокаций каждый кадр.
                 // Обновляем UI только если статус или логи реально изменились.
                 let lsp_logs_len = lsp.server_logs.get("ruff").map(|l| l.len()).unwrap_or(0);
-                let needs_update = self.ide_panel.lsp_servers.is_empty() 
+                let needs_update = self.ide_panel.lsp_servers.is_empty()
                     || self.ide_panel.lsp_servers[0].status != lsp.python_status
                     || self.ide_panel.lsp_servers[0].logs.len() != lsp_logs_len;
 
-                                if needs_update {
+                if needs_update {
                     self.ide_panel.lsp_servers = lsp.servers_info();
                     // Синхронизируем Editor для логов (для выделения и копирования)
                     for info in &self.ide_panel.lsp_servers {
-                                                let new_text = info.logs.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+                        let new_text = info
+                            .logs
+                            .iter()
+                            .map(|l| l.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         let focused = self.ide_panel.lsp_logs_focused.as_deref() == Some(info.name);
-                        let entry = self.ide_panel.lsp_log_editors
+                        let entry = self
+                            .ide_panel
+                            .lsp_log_editors
                             .entry(info.name.to_string())
                             .or_insert_with(|| crate::editor::Editor::new(new_text.len().max(512)));
-                                                // Пересоздаём только если текст изменился (иначе сбросим выделение)
+                        // Пересоздаём только если текст изменился (иначе сбросим выделение)
                         if entry.get_full_text() != new_text {
                             let saved_cursor = if focused { Some(entry.cursor) } else { None };
-                            let saved_anchor = if focused { entry.selection_anchor } else { None };
+                            let saved_anchor = if focused {
+                                entry.selection_anchor
+                            } else {
+                                None
+                            };
                             *entry = crate::editor::Editor::new(new_text.len().max(512));
                             let _ = entry.insert_str(&new_text);
 
@@ -957,15 +988,25 @@ impl ApplicationHandler for App {
                             let mut byte_offset = 0;
                             for log in &info.logs {
                                 for &(s, e) in &log.folds {
-                                    entry.foldable_ranges_bytes.push((byte_offset + s, byte_offset + e, false));
+                                    entry.foldable_ranges_bytes.push((
+                                        byte_offset + s,
+                                        byte_offset + e,
+                                        false,
+                                    ));
                                 }
                                 byte_offset += log.text.len() + 1;
                             }
                             entry.rebuild_line_offsets();
 
                             for &(s, e, _) in &entry.foldable_ranges_bytes {
-                                let sl = entry.line_offsets.partition_point(|&x| x <= s).saturating_sub(1);
-                                let el = entry.line_offsets.partition_point(|&x| x <= e).saturating_sub(1);
+                                let sl = entry
+                                    .line_offsets
+                                    .partition_point(|&x| x <= s)
+                                    .saturating_sub(1);
+                                let el = entry
+                                    .line_offsets
+                                    .partition_point(|&x| x <= e)
+                                    .saturating_sub(1);
                                 if el > sl {
                                     entry.folded_lines.insert(sl);
                                     entry.folded_start_bytes.insert(entry.line_offsets[sl]);
@@ -974,7 +1015,8 @@ impl ApplicationHandler for App {
 
                             if let Some(c) = saved_cursor {
                                 entry.cursor = c.min(new_text.len());
-                                entry.selection_anchor = saved_anchor.map(|a| a.min(new_text.len()));
+                                entry.selection_anchor =
+                                    saved_anchor.map(|a| a.min(new_text.len()));
                             } else {
                                 // По умолчанию курсор в конце (хвост лога)
                                 entry.cursor = new_text.len();
@@ -982,7 +1024,9 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
-                    if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                    if let Some(w) = self.window.as_ref() {
+                        w.request_redraw();
+                    }
                 }
             }
         }

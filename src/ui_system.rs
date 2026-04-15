@@ -1,6 +1,5 @@
 /// Декларативная система UI для автоматической обработки кнопок и виджетов
 /// Устраняет необходимость вручную прописывать координаты и биндинги для каждой кнопки
-
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconButton};
 
@@ -39,7 +38,7 @@ pub enum UiId {
     // Sidebar
     SidebarSlot(crate::app::PanelId),
 
-            // File tree
+    // File tree
     FileTreeNode(usize),
 
     // Search
@@ -219,7 +218,16 @@ impl UiRegistry {
     }
 
     /// Регистрирует текстовое поле
-    pub fn register_text_input(&mut self, id: UiId, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32) -> bool {
+    pub fn register_text_input(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
         let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
 
         self.elements.push(UiElement::TextInput { id, x, y, w, h });
@@ -232,7 +240,16 @@ impl UiRegistry {
     }
 
     /// Регистрирует кликабельную область (для элементов дерева файлов, чипов и т.д.)
-    pub fn register_rect(&mut self, id: UiId, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32) -> bool {
+    pub fn register_rect(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
         let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });

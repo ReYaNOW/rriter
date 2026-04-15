@@ -79,7 +79,7 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
     path.push("panels.txt");
     let mut lines: Vec<String> = Vec::new();
     for slot in &state.slots {
-                let id_s = match slot.id {
+        let id_s = match slot.id {
             crate::app::PanelId::Explorer => "Explorer",
             crate::app::PanelId::Terminal => "Terminal",
             crate::app::PanelId::Problems => "Problems",
@@ -115,7 +115,7 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
     for line in content.lines() {
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() == 3 {
-                        let id = match parts[0] {
+            let id = match parts[0] {
                 "Explorer" => crate::app::PanelId::Explorer,
                 "Terminal" => crate::app::PanelId::Terminal,
                 "Problems" => crate::app::PanelId::Problems,
@@ -143,7 +143,7 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
                 }
             }
         }
-        }
+    }
     if !loaded.is_empty() {
         for default_slot in state.slots {
             if !loaded.iter().any(|s| s.id == default_slot.id) {
@@ -273,14 +273,14 @@ fn load_dracula() -> Theme {
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
 
     Theme {
-        bg:[0.156, 0.164, 0.211, 1.0],
-        fg:[0.972, 0.972, 0.949, 1.0],
+        bg: [0.156, 0.164, 0.211, 1.0],
+        fg: [0.972, 0.972, 0.949, 1.0],
         sel: sel_color,
-        minimap_bg:[0.129, 0.133, 0.172, 1.0],
-        line_num:[0.384, 0.447, 0.643, 1.0],
+        minimap_bg: [0.129, 0.133, 0.172, 1.0],
+        line_num: [0.384, 0.447, 0.643, 1.0],
         minimap_cursor: sel_color,
-        modified_unsaved:[1.0, 0.474, 0.776, 1.0],
-        modified_saved:[0.313, 0.980, 0.482, 1.0],
+        modified_unsaved: [1.0, 0.474, 0.776, 1.0],
+        modified_saved: [0.313, 0.980, 0.482, 1.0],
     }
 }
 
@@ -437,7 +437,7 @@ F8\tПоказать/скрыть счетчик FPS
         search_case_sensitive: false,
         search_results: Vec::new(),
         search_current_idx: None,
-                is_dragging_search: false,
+        is_dragging_search: false,
 
         is_dragging_lsp_log: false,
 
@@ -468,16 +468,16 @@ F8\tПоказать/скрыть счетчик FPS
         settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
         ide_panel: crate::load_panel_state(),
-                file_tree_rx: None,
+        file_tree_rx: None,
         file_tree_notify_rx: None,
-                lsp: if is_ide_cli {
+        lsp: if is_ide_cli {
             Some(crate::lsp::LspManager::new(
                 config.ide_workspaces.first().cloned(),
             ))
         } else {
             None
         },
-                lsp_actions_menu: None,
+        lsp_actions_menu: None,
         pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
     };

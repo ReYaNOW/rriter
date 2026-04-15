@@ -1,7 +1,7 @@
 use crate::app::{App, LspActionItem};
+use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
-use std::time::Instant;
 
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
@@ -36,7 +36,7 @@ impl App {
             }
         }
 
-                if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
@@ -52,8 +52,12 @@ impl App {
                     }
                     let total_h = self.lsp_panel_total_h(s);
                     let max_log_w = self.lsp_max_log_width(s);
-                    self.ide_panel.lsp_scroll_y.clamp_target(0.0, (total_h - ch).max(0.0));
-                    self.ide_panel.lsp_scroll_x.clamp_target(0.0, (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0));
+                    self.ide_panel
+                        .lsp_scroll_y
+                        .clamp_target(0.0, (total_h - ch).max(0.0));
+                    self.ide_panel
+                        .lsp_scroll_x
+                        .clamp_target(0.0, (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0));
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
@@ -162,8 +166,8 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
-                if state == ElementState::Pressed {
+    pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+        if state == ElementState::Pressed {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
@@ -239,7 +243,7 @@ impl App {
             }
         }
 
-                        // Clicks routed through UI system
+        // Clicks routed through UI system
 
         if self.dialog_window.is_some() {
             if state == ElementState::Pressed {
@@ -251,7 +255,7 @@ impl App {
             return;
         }
 
-                if self.show_settings {
+        if self.show_settings {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;
                 self.is_dragging_lsp_log = false;
@@ -284,7 +288,8 @@ impl App {
                                 let content_x = ix + sidebar_w + 30.0 * s;
                                 let text = self.settings_ignore_editor.get_full_text();
                                 let start_x = content_x + 8.0 * s;
-                                let x_offset = (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
+                                let x_offset =
+                                    (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
                                 let mut current_x = 0.0;
                                 let mut target_idx = text.len();
                                 let mut byte_idx = 0;
@@ -451,7 +456,7 @@ impl App {
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
-                                    self.is_dragging = false;
+            self.is_dragging = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
@@ -466,16 +471,16 @@ impl App {
             return;
         }
 
-                                                if state == ElementState::Pressed {
+        if state == ElementState::Pressed {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let s = self.renderer.as_ref().unwrap().scale_factor;
 
-                        // Sidebar processing and resizing moved to ui_registry
-                        // Обработка кликов в дереве файлов теперь выполняется через ui_registry
-                        // Search input handled by ui_registry
+            // Sidebar processing and resizing moved to ui_registry
+            // Обработка кликов в дереве файлов теперь выполняется через ui_registry
+            // Search input handled by ui_registry
 
-                        if self.autocomplete_active {
+            if self.autocomplete_active {
                 if let Some((rx, ry, rw, rh)) = self.autocomplete_rect {
                     if last_mouse_x >= rx
                         && last_mouse_x <= rx + rw
@@ -527,7 +532,7 @@ impl App {
                 }
             }
 
-                        // Sticky lines, Folding, Scrollbars and Text Selection handled by ui_registry
+            // Sticky lines, Folding, Scrollbars and Text Selection handled by ui_registry
             self.last_action = Instant::now();
         }
         self.window.as_ref().unwrap().request_redraw();
@@ -647,7 +652,7 @@ impl App {
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
-                if self.is_dragging_settings_ignore {
+        if self.is_dragging_settings_ignore {
             let w = (1000.0 * s)
                 .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
             let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
@@ -675,7 +680,7 @@ impl App {
                 byte_idx += c.len_utf8();
             }
             self.settings_ignore_editor.cursor = target_idx;
-                } else if self.is_dragging_lsp_log {
+        } else if self.is_dragging_lsp_log {
             // Drag-selection в логах LSP
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
                 if let Some((cx, cy, _cw, _ch)) = self.lsp_panel_bounds() {
@@ -685,7 +690,7 @@ impl App {
                     let scroll_x = self.ide_panel.lsp_scroll_x.current;
                     let mut cur_y = cy + 8.0 * s - scroll_y;
 
-                                        for srv in self.ide_panel.lsp_servers.clone().iter() {
+                    for srv in self.ide_panel.lsp_servers.clone().iter() {
                         let logs_h = self.lsp_server_logs_h(srv, s);
                         let is_exp = logs_h > 0.0;
                         let row_h = 136.0 * s + logs_h;
@@ -709,12 +714,21 @@ impl App {
                                         if global_line_count < tgt {
                                             global_line_count += 1;
                                             continue;
-                                        } else { skip_until = None; }
+                                        } else {
+                                            skip_until = None;
+                                        }
                                     }
 
                                     if my_drag >= text_y - line_h && my_drag <= text_y {
-                                        if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(focused_name.as_str()) {
-                                            let click_x_in_line = (position.x as f32 - log_bg_x - 20.0 * s + scroll_x).max(0.0);
+                                        if let Some(ed) = self
+                                            .ide_panel
+                                            .lsp_log_editors
+                                            .get_mut(focused_name.as_str())
+                                        {
+                                            let click_x_in_line =
+                                                (position.x as f32 - log_bg_x - 20.0 * s
+                                                    + scroll_x)
+                                                    .max(0.0);
                                             let r = self.renderer.as_mut().unwrap();
                                             let mut best_pos = 0usize;
                                             let mut best_dist = f32::MAX;
@@ -731,8 +745,10 @@ impl App {
                                             if (x_end - click_x_in_line).abs() < best_dist {
                                                 best_pos = line.len();
                                             }
-                                            let line_start_byte = ed.line_offsets[global_line_count];
-                                            let byte_off = (line_start_byte + best_pos).min(ed.len());
+                                            let line_start_byte =
+                                                ed.line_offsets[global_line_count];
+                                            let byte_off =
+                                                (line_start_byte + best_pos).min(ed.len());
 
                                             if ed.selection_anchor.is_none() {
                                                 ed.selection_anchor = Some(ed.cursor);
@@ -744,7 +760,8 @@ impl App {
 
                                     if let Some(ed) = self.ide_panel.lsp_log_editors.get(srv.name) {
                                         if ed.folded_lines.contains(&global_line_count) {
-                                            skip_until = Some(ed.foldable_lines[&global_line_count]);
+                                            skip_until =
+                                                Some(ed.foldable_lines[&global_line_count]);
                                         }
                                     }
 
@@ -758,14 +775,16 @@ impl App {
                     }
                 }
             }
-                } else if self.ide_panel.lsp_scroll_x.is_dragging {
+        } else if self.ide_panel.lsp_scroll_x.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some((cx, _, cw, _)) = self.lsp_panel_bounds() {
                 let max_log_w = self.lsp_max_log_width(s);
                 let track_w = cw - 30.0 * s;
                 let max_x = (max_log_w + 20.0 * s - (cw - 32.0 * s)).max(0.0);
                 let thumb_w = (cw / (max_log_w + 20.0 * s) * track_w).max(40.0 * s);
-                let ratio = (position.x as f32 - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset) / (track_w - thumb_w).max(0.0001);
+                let ratio =
+                    (position.x as f32 - cx - 10.0 * s - self.ide_panel.lsp_scroll_x.drag_offset)
+                        / (track_w - thumb_w).max(0.0001);
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
             }
@@ -776,7 +795,9 @@ impl App {
                 let track_h = ch - 10.0 * s;
                 let max_y = (total_h - ch).max(0.0);
                 let thumb_h = (ch / total_h * track_h).max(40.0 * s);
-                let ratio = (position.y as f32 - cy - 5.0 * s - self.ide_panel.lsp_scroll_y.drag_offset) / (track_h - thumb_h).max(0.0001);
+                let ratio =
+                    (position.y as f32 - cy - 5.0 * s - self.ide_panel.lsp_scroll_y.drag_offset)
+                        / (track_h - thumb_h).max(0.0001);
                 self.ide_panel.lsp_scroll_y.target = (ratio * max_y).clamp(0.0, max_y);
                 self.ide_panel.lsp_scroll_y.current = self.ide_panel.lsp_scroll_y.target;
             }

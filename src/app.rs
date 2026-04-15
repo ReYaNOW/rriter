@@ -1,10 +1,10 @@
 pub mod events;
 pub mod file_icons;
-    pub mod file_tree;
-    pub mod keyboard;
-    pub mod lsp_actions;
-    pub mod mouse;
-    pub mod ui_handlers;
+pub mod file_tree;
+pub mod keyboard;
+pub mod lsp_actions;
+pub mod mouse;
+pub mod ui_handlers;
 
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
@@ -37,7 +37,7 @@ pub enum PanelId {
 }
 
 impl PanelId {
-            pub fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             PanelId::Explorer => "Проводник",
             PanelId::Terminal => "Терминал",
@@ -110,7 +110,7 @@ pub struct IdePanelState {
     pub is_resizing_bottom: bool,
     pub file_tree_nodes: Vec<crate::app::file_tree::FileNode>,
     pub file_tree_expanded: FxHashSet<std::path::PathBuf>,
-            pub explorer_scroll: crate::scroll::ScrollState,
+    pub explorer_scroll: crate::scroll::ScrollState,
     pub file_tree_hovered_idx: Option<usize>,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
@@ -124,7 +124,7 @@ pub struct IdePanelState {
 }
 
 impl Default for IdePanelState {
-        fn default() -> Self {
+    fn default() -> Self {
         Self {
             slots: vec![
                 PanelSlot {
@@ -154,10 +154,10 @@ impl Default for IdePanelState {
             is_resizing_left: false,
             is_resizing_bottom: false,
             file_tree_nodes: Vec::new(),
-                                    file_tree_expanded: FxHashSet::default(),
+            file_tree_expanded: FxHashSet::default(),
             explorer_scroll: crate::scroll::ScrollState::new(15.0),
             file_tree_hovered_idx: None,
-                        lsp_servers: Vec::new(),
+            lsp_servers: Vec::new(),
             lsp_logs_expanded: FxHashSet::default(),
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
             lsp_scroll_x: crate::scroll::ScrollState::new(15.0),
@@ -280,7 +280,7 @@ pub struct App {
     pub search_focused: bool,
     pub search_case_sensitive: bool,
     pub search_results: Vec<(usize, usize)>,
-        pub search_current_idx: Option<usize>,
+    pub search_current_idx: Option<usize>,
     pub is_dragging_search: bool,
 
     pub is_dragging_lsp_log: bool,
@@ -312,12 +312,12 @@ pub struct App {
     pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
-        pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
+    pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
-        /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
+    /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
-        /// Меню быстрых действий LSP (Alt+Enter)
+    /// Меню быстрых действий LSP (Alt+Enter)
     pub lsp_actions_menu: Option<LspActionsMenu>,
     /// Ожидаем ответа на Fix All запрос
     pub pending_fix_all_id: Option<i32>,
@@ -682,7 +682,7 @@ impl App {
         self.search_current_idx = None;
         self.show_search = false;
         self.autocomplete_active = false;
-                self.show_welcome = true;
+        self.show_welcome = true;
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 let ext = self.file_extension.clone();
@@ -816,7 +816,7 @@ impl App {
                 self.scroll_x.current = 0.0;
                 self.scroll_x.target = 0.0;
 
-                                self.last_sent_version = u64::MAX;
+                self.last_sent_version = u64::MAX;
                 self.search_results.clear();
                 self.search_current_idx = None;
                 self.autocomplete_active = false;

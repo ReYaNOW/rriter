@@ -88,10 +88,18 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
     let mut p = pat;
     let start = p.starts_with('^');
     let end = p.ends_with('$');
-    if start { p = &p[1..]; }
-    if end { p = &p[..p.len() - 1]; }
+    if start {
+        p = &p[1..];
+    }
+    if end {
+        p = &p[..p.len() - 1];
+    }
 
-    let clean = |s: &str| s.replace("\\.", ".").replace("\\\\", "\\").replace("\\-", "-");
+    let clean = |s: &str| {
+        s.replace("\\.", ".")
+            .replace("\\\\", "\\")
+            .replace("\\-", "-")
+    };
 
     if p.contains('[') || p.contains('(') || p.contains('|') || p.contains('+') || p.contains('?') {
         return None;
@@ -100,23 +108,39 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
     if p.starts_with(".*") && !p[2..].contains(".*") {
         let suffix = clean(&p[2..]);
         if end {
-            return Some(format!("    if name.ends_with(\"{}\") {{ return Some(\"{}\"); }}", escape(&suffix), escape(key)));
+            return Some(format!(
+                "    if name.ends_with(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&suffix),
+                escape(key)
+            ));
         } else {
-            return Some(format!("    if name.contains(\"{}\") {{ return Some(\"{}\"); }}", escape(&suffix), escape(key)));
+            return Some(format!(
+                "    if name.contains(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&suffix),
+                escape(key)
+            ));
         }
     }
-    if p.ends_with(".*") && !p[..p.len()-2].contains(".*") {
-        let prefix = clean(&p[..p.len()-2]);
+    if p.ends_with(".*") && !p[..p.len() - 2].contains(".*") {
+        let prefix = clean(&p[..p.len() - 2]);
         if start {
-            return Some(format!("    if name.starts_with(\"{}\") {{ return Some(\"{}\"); }}", escape(&prefix), escape(key)));
+            return Some(format!(
+                "    if name.starts_with(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&prefix),
+                escape(key)
+            ));
         } else {
-            return Some(format!("    if name.contains(\"{}\") {{ return Some(\"{}\"); }}", escape(&prefix), escape(key)));
+            return Some(format!(
+                "    if name.contains(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&prefix),
+                escape(key)
+            ));
         }
     }
     if start && end {
         if let Some(idx) = p.find(".*") {
             let prefix = clean(&p[..idx]);
-            let suffix = clean(&p[idx+2..]);
+            let suffix = clean(&p[idx + 2..]);
             if !prefix.contains(".*") && !suffix.contains(".*") {
                 return Some(format!(
                     "    if name.starts_with(\"{}\") && name.ends_with(\"{}\") && name.len() >= {} {{ return Some(\"{}\"); }}",
@@ -129,13 +153,29 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
     if !p.contains(".*") {
         let text = clean(p);
         if start && end {
-            return Some(format!("    if name == \"{}\" {{ return Some(\"{}\"); }}", escape(&text), escape(key)));
+            return Some(format!(
+                "    if name == \"{}\" {{ return Some(\"{}\"); }}",
+                escape(&text),
+                escape(key)
+            ));
         } else if start {
-            return Some(format!("    if name.starts_with(\"{}\") {{ return Some(\"{}\"); }}", escape(&text), escape(key)));
+            return Some(format!(
+                "    if name.starts_with(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&text),
+                escape(key)
+            ));
         } else if end {
-            return Some(format!("    if name.ends_with(\"{}\") {{ return Some(\"{}\"); }}", escape(&text), escape(key)));
+            return Some(format!(
+                "    if name.ends_with(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&text),
+                escape(key)
+            ));
         } else {
-            return Some(format!("    if name.contains(\"{}\") {{ return Some(\"{}\"); }}", escape(&text), escape(key)));
+            return Some(format!(
+                "    if name.contains(\"{}\") {{ return Some(\"{}\"); }}",
+                escape(&text),
+                escape(key)
+            ));
         }
     }
 
@@ -161,7 +201,7 @@ fn main() {
 
     // Fallback если JSON ещё не положили
     if !file_json_path.exists() || !folder_json_path.exists() {
-                let stub = "pub fn file_icon_key_exact(_: &str) -> Option<&'static str> { None }\n\
+        let stub = "pub fn file_icon_key_exact(_: &str) -> Option<&'static str> { None }\n\
                     pub fn folder_icon_key_exact(_: &str) -> Option<&'static str> { None }\n\
                     pub fn match_file_pattern(_: &str) -> Option<&'static str> { None }\n\
                     pub fn match_folder_pattern(_: &str) -> Option<&'static str> { None }\n\
@@ -284,10 +324,14 @@ fn main() {
         writeln!(map_out).unwrap();
     }
 
-        // regex функции + fallbacks
+    // regex функции + fallbacks
     {
         writeln!(map_out, "#[inline]").unwrap();
-        writeln!(map_out, "pub fn match_file_pattern(name: &str) -> Option<&'static str> {{").unwrap();
+        writeln!(
+            map_out,
+            "pub fn match_file_pattern(name: &str) -> Option<&'static str> {{"
+        )
+        .unwrap();
         let mut fallback_file = Vec::new();
         for (stem, _, pattern) in &file_entries {
             if !pattern.is_empty() {
@@ -300,14 +344,28 @@ fn main() {
         }
         writeln!(map_out, "    None\n}}\n").unwrap();
 
-        writeln!(map_out, "pub static FILE_ICON_FALLBACKS: &[(&str, &str)] = &[").unwrap();
+        writeln!(
+            map_out,
+            "pub static FILE_ICON_FALLBACKS: &[(&str, &str)] = &["
+        )
+        .unwrap();
         for (pattern, stem) in fallback_file {
-            writeln!(map_out, "    (\"{}\", \"{}\"),", escape(&pattern), escape(&stem)).unwrap();
+            writeln!(
+                map_out,
+                "    (\"{}\", \"{}\"),",
+                escape(&pattern),
+                escape(&stem)
+            )
+            .unwrap();
         }
         writeln!(map_out, "];\n").unwrap();
 
         writeln!(map_out, "#[inline]").unwrap();
-        writeln!(map_out, "pub fn match_folder_pattern(name: &str) -> Option<&'static str> {{").unwrap();
+        writeln!(
+            map_out,
+            "pub fn match_folder_pattern(name: &str) -> Option<&'static str> {{"
+        )
+        .unwrap();
         let mut fallback_folder = Vec::new();
         for (stem, _, pattern) in &folder_entries {
             if !pattern.is_empty() {
@@ -320,9 +378,19 @@ fn main() {
         }
         writeln!(map_out, "    None\n}}\n").unwrap();
 
-        writeln!(map_out, "pub static FOLDER_ICON_FALLBACKS: &[(&str, &str)] = &[").unwrap();
+        writeln!(
+            map_out,
+            "pub static FOLDER_ICON_FALLBACKS: &[(&str, &str)] = &["
+        )
+        .unwrap();
         for (pattern, stem) in fallback_folder {
-            writeln!(map_out, "    (\"{}\", \"{}\"),", escape(&pattern), escape(&stem)).unwrap();
+            writeln!(
+                map_out,
+                "    (\"{}\", \"{}\"),",
+                escape(&pattern),
+                escape(&stem)
+            )
+            .unwrap();
         }
         writeln!(map_out, "];\n").unwrap();
     }

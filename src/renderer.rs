@@ -853,7 +853,7 @@ impl Renderer {
         self.get_glyph(c).map(|g| g.advance).unwrap_or(10.0)
     }
 
-            pub fn push_quad(
+    pub fn push_quad(
         &mut self,
         x: f32,
         y: f32,
@@ -863,7 +863,7 @@ impl Renderer {
         v: f32,
         uw: f32,
         vh: f32,
-        color:[f32; 4],
+        color: [f32; 4],
         mode: f32,
     ) {
         let x1 = x.round();
@@ -871,7 +871,7 @@ impl Renderer {
         let x2 = (x + w).round();
         let y2 = (y + h).round();
 
-        let sdf_params =[0.0, 0.0, 0.0];
+        let sdf_params = [0.0, 0.0, 0.0];
 
         let v1 = Vertex {
             pos: [x1, y1],
@@ -946,16 +946,17 @@ impl Renderer {
             (
                 crate::widgets::IconType::Explorer,
                 include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
-            ),                        (
-                            crate::widgets::IconType::Problems,
-                            include_bytes!("icons/problems.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::LspServers,
-                            include_bytes!("icons/atom/icons/ui/server.svg").as_slice(),
-                        ),
-                    ];
-                    let opt = resvg::usvg::Options::default();
+            ),
+            (
+                crate::widgets::IconType::Problems,
+                include_bytes!("icons/problems.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::LspServers,
+                include_bytes!("icons/atom/icons/ui/server.svg").as_slice(),
+            ),
+        ];
+        let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
             let svg_data_str = String::from_utf8_lossy(data);
             let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
@@ -963,15 +964,15 @@ impl Renderer {
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
             } else if icon_type == crate::widgets::IconType::Problems {
                 svg_data_str.replace("#D81B60", "#b0bec5")
-                    } else if icon_type == crate::widgets::IconType::Plus
-            || icon_type == crate::widgets::IconType::Terminal
-            || icon_type == crate::widgets::IconType::Explorer
-            || icon_type == crate::widgets::IconType::LspServers
-        {
-            svg_data_str
-                .replace("currentColor", "#ffffff")
-                .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
-        } else {
+            } else if icon_type == crate::widgets::IconType::Plus
+                || icon_type == crate::widgets::IconType::Terminal
+                || icon_type == crate::widgets::IconType::Explorer
+                || icon_type == crate::widgets::IconType::LspServers
+            {
+                svg_data_str
+                    .replace("currentColor", "#ffffff")
+                    .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
+            } else {
                 svg_data_str.into_owned()
             };
 
@@ -1069,13 +1070,13 @@ impl Renderer {
         }
     }
 
-        /// Рисует волнистое подчёркивание (squiggle) — зигзаг из 2px квадратов.
+    /// Рисует волнистое подчёркивание (squiggle) — зигзаг из 2px квадратов.
     /// `x` — начало, `baseline_y` — нижняя граница строки (baseline + descender),
     /// `w` — ширина участка, `color` — цвет.
     pub fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4]) {
         let s = self.scale_factor;
-        let seg = 3.0 * s;   // ширина одного зубца
-        let h = 2.0 * s;     // высота зубца
+        let seg = 3.0 * s; // ширина одного зубца
+        let h = 2.0 * s; // высота зубца
         let y0 = baseline_y;
         let y1 = baseline_y + h;
         let mut cx = x;
@@ -1093,7 +1094,7 @@ impl Renderer {
         self.push_quad(x, y, w, h, -1.0, -1.0, 0.0, 0.0, color, 2.0);
     }
 
-            pub fn push_rounded_rect_gradient(
+    pub fn push_rounded_rect_gradient(
         &mut self,
         x: f32,
         y: f32,
@@ -1101,7 +1102,7 @@ impl Renderer {
         h: f32,
         r: f32,
         top_color: [f32; 4],
-        bottom_color:[f32; 4],
+        bottom_color: [f32; 4],
     ) {
         let w_round = w.round();
         let h_round = h.round();
@@ -1112,7 +1113,7 @@ impl Renderer {
 
         let hw = w_round / 2.0;
         let hh = h_round / 2.0;
-        let sdf_params =[hw, hh, r];
+        let sdf_params = [hw, hh, r];
 
         let v1 = Vertex {
             pos: [x1, y1],

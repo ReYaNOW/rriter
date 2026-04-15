@@ -211,10 +211,14 @@ impl Renderer {
         let mut phys_line = 0;
 
         while phys_line < editor.line_offsets.len() {
-                        let is_folded = editor.folded_lines.contains(&phys_line)
+            let is_folded = editor.folded_lines.contains(&phys_line)
                 && editor.foldable_lines.contains_key(&phys_line);
             let fold_end_line = if is_folded {
-                editor.foldable_lines.get(&phys_line).copied().unwrap_or(phys_line)
+                editor
+                    .foldable_lines
+                    .get(&phys_line)
+                    .copied()
+                    .unwrap_or(phys_line)
             } else {
                 phys_line
             };
@@ -523,7 +527,7 @@ impl Renderer {
         self.vertices.clear();
     }
 
-        pub fn push_vertical_gradient(
+    pub fn push_vertical_gradient(
         &mut self,
         x: f32,
         y: f32,
@@ -665,7 +669,7 @@ impl Renderer {
         w
     }
 
-        pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color:[f32; 4]) {
+    pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) {
         let w_round = w.round();
         let h_round = h.round();
         let x1 = x.round();

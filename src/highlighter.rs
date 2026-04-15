@@ -615,7 +615,7 @@ impl Highlighter {
                                     }
                                 }
 
-                                                                let mut param_scopes = Vec::new();
+                                let mut param_scopes = Vec::new();
                                 if let Some(q_str) = get_params_query(lang_name) {
                                     if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
@@ -688,7 +688,7 @@ impl Highlighter {
                                             }
                                         }
                                     }
-                                                                }
+                                }
 
                                 for q_str in queries {
                                     let cache_key = (lang_name, q_str);

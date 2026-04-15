@@ -1,9 +1,8 @@
 /// Обработчики UI событий - централизованная логика для кликов по кнопкам
 /// Устраняет дублирование кода между input.rs и ui.rs
-
 use crate::app::App;
-use crate::ui_system::UiId;
 use crate::editor::Editor;
+use crate::ui_system::UiId;
 
 impl App {
     /// Обрабатывает клик по UI элементу
@@ -20,7 +19,8 @@ impl App {
                 self.editor.version = old_version + 1;
                 self.editor.set_original_text();
                 self.editor.sync_edits.clear();
-                self.highlighter.reset(self.editor.version, "".to_string(), "".to_string());
+                self.highlighter
+                    .reset(self.editor.version, "".to_string(), "".to_string());
                 App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -38,7 +38,8 @@ impl App {
                 self.editor.version = old_version + 1;
                 self.editor.set_original_text();
                 self.editor.sync_edits.clear();
-                self.highlighter.reset(self.editor.version, "".to_string(), "".to_string());
+                self.highlighter
+                    .reset(self.editor.version, "".to_string(), "".to_string());
 
                 if !self.ide_workspaces.is_empty() {
                     self.ide_panel.toggle(crate::app::PanelId::Explorer);
@@ -62,8 +63,15 @@ impl App {
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         self.show_welcome = false;
                         self.file_path = Some(path.clone());
-                        self.base_title = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                        let ext = path.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+                        self.base_title = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        let ext = path
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_string())
+                            .unwrap_or_default();
                         self.file_extension = ext.clone();
 
                         let old_version = self.editor.version;
@@ -75,7 +83,11 @@ impl App {
                         self.editor.sync_edits.clear();
                         self.highlighter.reset(self.editor.version, content, ext);
 
-                        App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
+                        App::update_window_title(
+                            self.window.as_ref().unwrap(),
+                            &self.base_title,
+                            false,
+                        );
                         self.window.as_ref().unwrap().request_redraw();
                     }
                 }
@@ -106,7 +118,11 @@ impl App {
                     crate::app::PendingAction::CloseFile => {
                         self.show_welcome = true;
                         self.base_title = "Добро пожаловать".to_string();
-                        App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
+                        App::update_window_title(
+                            self.window.as_ref().unwrap(),
+                            &self.base_title,
+                            false,
+                        );
                     }
                 }
                 self.window.as_ref().unwrap().request_redraw();
@@ -132,7 +148,11 @@ impl App {
                     let config = crate::Config {
                         window_width: self.window_width,
                         window_height: self.window_height,
-                        maximized: self.window.as_ref().map(|w| w.is_maximized()).unwrap_or(false),
+                        maximized: self
+                            .window
+                            .as_ref()
+                            .map(|w| w.is_maximized())
+                            .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     };
@@ -142,7 +162,11 @@ impl App {
                 }
             }
             UiId::SettingsIdeAddIgnore => {
-                let pattern = self.settings_ignore_editor.get_full_text().trim().to_string();
+                let pattern = self
+                    .settings_ignore_editor
+                    .get_full_text()
+                    .trim()
+                    .to_string();
                 if !pattern.is_empty() && !self.ide_ignore_patterns.contains(&pattern) {
                     self.ide_ignore_patterns.push(pattern);
                     // Очищаем редактор
@@ -154,7 +178,11 @@ impl App {
                     let config = crate::Config {
                         window_width: self.window_width,
                         window_height: self.window_height,
-                        maximized: self.window.as_ref().map(|w| w.is_maximized()).unwrap_or(false),
+                        maximized: self
+                            .window
+                            .as_ref()
+                            .map(|w| w.is_maximized())
+                            .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     };
@@ -169,7 +197,11 @@ impl App {
                     let config = crate::Config {
                         window_width: self.window_width,
                         window_height: self.window_height,
-                        maximized: self.window.as_ref().map(|w| w.is_maximized()).unwrap_or(false),
+                        maximized: self
+                            .window
+                            .as_ref()
+                            .map(|w| w.is_maximized())
+                            .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     };
@@ -183,7 +215,7 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-                        // LSP panel
+            // LSP panel
             UiId::LspServerRestart(_idx) => {
                 if let Some(lsp) = &mut self.lsp {
                     lsp.restart_python();
@@ -193,7 +225,10 @@ impl App {
             }
             UiId::LspServerToggle(idx) => {
                 if idx < self.ide_panel.lsp_servers.len() {
-                    let is_disabled = matches!(self.ide_panel.lsp_servers[idx].status, crate::lsp::LspServerStatus::Disabled);
+                    let is_disabled = matches!(
+                        self.ide_panel.lsp_servers[idx].status,
+                        crate::lsp::LspServerStatus::Disabled
+                    );
                     if let Some(lsp) = &mut self.lsp {
                         if is_disabled {
                             lsp.enable_python();
@@ -260,7 +295,7 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-                                    // File tree
+            // File tree
             UiId::FileTreeNode(idx) => {
                 self.handle_file_tree_click(idx);
                 self.window.as_ref().unwrap().request_redraw();
@@ -296,7 +331,7 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-                        UiId::SearchCaseToggle => {
+            UiId::SearchCaseToggle => {
                 self.search_case_sensitive = !self.search_case_sensitive;
                 self.update_search();
                 self.jump_to_search_result();
@@ -307,35 +342,52 @@ impl App {
             UiId::EditorFoldArrow(phys_idx) => {
                 if self.editor.folded_lines.contains(&phys_idx) {
                     self.editor.folded_lines.remove(&phys_idx);
-                    self.editor.folded_start_bytes.remove(&self.editor.line_offsets[phys_idx]);
+                    self.editor
+                        .folded_start_bytes
+                        .remove(&self.editor.line_offsets[phys_idx]);
                 } else if self.editor.foldable_lines.contains_key(&phys_idx) {
                     self.editor.folded_lines.insert(phys_idx);
-                    self.editor.folded_start_bytes.insert(self.editor.line_offsets[phys_idx]);
+                    self.editor
+                        .folded_start_bytes
+                        .insert(self.editor.line_offsets[phys_idx]);
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorFoldDots(phys_idx) => {
                 self.editor.folded_lines.remove(&phys_idx);
-                self.editor.folded_start_bytes.remove(&self.editor.line_offsets[phys_idx]);
+                self.editor
+                    .folded_start_bytes
+                    .remove(&self.editor.line_offsets[phys_idx]);
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::StickyLine(target_byte, slot_index) => {
                 self.editor.cursor = target_byte;
                 self.editor.selection_anchor = None;
                 if let Some(r) = self.renderer.as_mut() {
-                    let phys_line = self.editor.line_offsets.partition_point(|&o| o <= target_byte).saturating_sub(1);
-                    let visual_line = r.phys_to_visual.get(phys_line).copied().unwrap_or(phys_line);
+                    let phys_line = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&o| o <= target_byte)
+                        .saturating_sub(1);
+                    let visual_line = r
+                        .phys_to_visual
+                        .get(phys_line)
+                        .copied()
+                        .unwrap_or(phys_line);
                     let line_y = visual_line as f32 * r.line_height;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     let max_scroll = r.get_max_scroll(&self.editor, wh);
                     let ry = slot_index as f32 * r.line_height;
                     let padding = r.line_height * 3.0;
-                    self.scroll_y.target = (line_y - ry - padding).max(0.0).clamp(0.0, max_scroll).round();
+                    self.scroll_y.target = (line_y - ry - padding)
+                        .max(0.0)
+                        .clamp(0.0, max_scroll)
+                        .round();
                     self.scroll_y.anim_speed = 15.0;
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::SearchInput => {
+            UiId::SearchInput => {
                 self.search_focused = true;
                 self.is_dragging_search = true;
                 if let Some(r) = self.renderer.as_mut() {
@@ -368,7 +420,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::EditorScrollbarY => {
+            UiId::EditorScrollbarY => {
                 if let Some(r) = self.renderer.as_ref() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
@@ -396,7 +448,8 @@ impl App {
                     let dy = my - self.last_click_pos.1;
                     let dist_sq = dx * dx + dy * dy;
 
-                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0 {
+                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0
+                    {
                         self.click_count += 1;
                     } else {
                         self.click_count = 1;
@@ -405,7 +458,8 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
 
-                    self.editor.set_cursor_at_pos(mx, my + self.scroll_y.current, r, true);
+                    self.editor
+                        .set_cursor_at_pos(mx, my + self.scroll_y.current, r, true);
                 }
 
                 if self.click_count == 2 {
@@ -434,7 +488,8 @@ impl App {
             }
             UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
-                    self.ide_panel.lsp_logs_focused = Some(self.ide_panel.lsp_servers[server_idx].name.to_string());
+                    self.ide_panel.lsp_logs_focused =
+                        Some(self.ide_panel.lsp_servers[server_idx].name.to_string());
                 }
                 self.is_dragging_lsp_log = true;
                 if let Some(r) = self.renderer.as_ref() {
@@ -445,7 +500,8 @@ impl App {
                     let dy = my - self.last_click_pos.1;
                     let dist_sq = dx * dx + dy * dy;
 
-                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0 {
+                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0
+                    {
                         self.click_count += 1;
                     } else {
                         self.click_count = 1;

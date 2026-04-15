@@ -9,16 +9,31 @@ impl App {
         });
         if is_top {
             let wh = self.window.as_ref()?.inner_size().height as f32;
-            Some((48.0 * s, 32.0 * s, self.ide_panel.left_width * s, wh - 32.0 * s))
+            Some((
+                48.0 * s,
+                32.0 * s,
+                self.ide_panel.left_width * s,
+                wh - 32.0 * s,
+            ))
         } else {
-            let first = self.ide_panel.slots.iter()
+            let first = self
+                .ide_panel
+                .slots
+                .iter()
                 .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)?;
-            if first.id != crate::app::PanelId::LspServers { return None; }
+            if first.id != crate::app::PanelId::LspServers {
+                return None;
+            }
             let tab_h = 32.0 * s;
             let panel_bottom_h = self.ide_panel.bottom_height * s;
             let wh = self.window.as_ref()?.inner_size().height as f32;
             let ww = self.window.as_ref()?.inner_size().width as f32;
-            Some((48.0 * s, wh - panel_bottom_h + 1.0 + tab_h, ww - 48.0 * s, panel_bottom_h - 1.0 - tab_h))
+            Some((
+                48.0 * s,
+                wh - panel_bottom_h + 1.0 + tab_h,
+                ww - 48.0 * s,
+                panel_bottom_h - 1.0 - tab_h,
+            ))
         }
     }
 
@@ -33,14 +48,23 @@ impl App {
 
     /// Высота блока логов одного LSP-сервера (0 если не развёрнут)
     pub(crate) fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32 {
-        if !self.ide_panel.lsp_logs_expanded.contains(info.name) { return 0.0; }
+        if !self.ide_panel.lsp_logs_expanded.contains(info.name) {
+            return 0.0;
+        }
         let lines: usize = if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
             let mut count = 0usize;
             let mut skip_until: Option<usize> = None;
             for i in 0..ed.line_offsets.len() {
-                if let Some(tgt) = skip_until { if i < tgt { continue; } skip_until = None; }
+                if let Some(tgt) = skip_until {
+                    if i < tgt {
+                        continue;
+                    }
+                    skip_until = None;
+                }
                 count += 1;
-                if ed.folded_lines.contains(&i) { skip_until = Some(ed.foldable_lines[&i]); }
+                if ed.folded_lines.contains(&i) {
+                    skip_until = Some(ed.foldable_lines[&i]);
+                }
             }
             count
         } else {
@@ -53,12 +77,16 @@ impl App {
     pub(crate) fn lsp_max_log_width(&mut self, _s: f32) -> f32 {
         let mut max_w = 0.0f32;
         for info in &self.ide_panel.lsp_servers {
-            if !self.ide_panel.lsp_logs_expanded.contains(info.name) { continue; }
+            if !self.ide_panel.lsp_logs_expanded.contains(info.name) {
+                continue;
+            }
             for entry in &info.logs {
                 for line in entry.text.split('\n') {
                     let s = if line.len() > 250 { &line[..250] } else { line };
                     let lw = self.renderer.as_mut().unwrap().measure_mono_width(s, 0.7);
-                    if lw > max_w { max_w = lw; }
+                    if lw > max_w {
+                        max_w = lw;
+                    }
                 }
             }
         }
