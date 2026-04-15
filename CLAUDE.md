@@ -38,14 +38,14 @@ RRiter создается как "редактор здорового челов
 ├── Makefile
 └── src
     ├── app
-│   ├── events.rs
-│   ├── file_icons.rs
-│   ├── file_tree.rs
-│   ├── keyboard.rs
-│   ├── lsp_actions.rs
-│   ├── mouse.rs
-│   └── ui_handlers.rs
-├── app.rs
+    │   ├── events.rs
+    │   ├── file_icons.rs
+    │   ├── file_tree.rs
+    │   ├── keyboard.rs
+    │   ├── lsp_actions.rs
+    │   ├── mouse.rs
+    │   └── ui_handlers.rs
+    ├── app.rs
     ├── editor.rs
     ├── fonts
     │   ├── Inter-Regular.otf
@@ -53,40 +53,24 @@ RRiter создается как "редактор здорового челов
     │   └── JetBrainsMono-Regular.ttf
     ├── highlighter.rs
     ├── icons
-    │   ├── atom
-    │   │   ├── folder_associations.json
-    │   │   ├── icon_associations.json
-    │   │   └── icons
-    │   │       ├── files  [1759 entries exceeds filelimit, not opening dir]
-    │   │       ├── folders  [333 entries exceeds filelimit, not opening dir]
-    │   │       ├── foldersOpen  [333 entries exceeds filelimit, not opening dir]
-    │   │       └── ui  [505 entries exceeds filelimit, not opening dir]
-    │   ├── dialog-cancel.svg
-    │   ├── dialog-warning.svg
-    │   ├── document-save.svg
-    │   ├── edit-delete.png
-    │   ├── edit-delete.svg
-    │   ├── format-text-uppercase.svg
-    │   ├── go-down.svg
-    │   ├── go-up.svg
-    │   ├── icon.png
-    │   ├── plus.svg
-    │   └── window-close.svg
+    │   ├── ... (иконки)
     ├── main.rs
     ├── queries.rs
     ├── renderer.rs
-        ├── render_view
+    ├── render_view         <-- Папка с модулями отрисовки
     │   ├── core_text.rs
     │   ├── lsp_ui.rs
+    │   ├── search.rs       (НОВОЕ: Панель поиска)
     │   ├── settings_ui.rs
+    │   ├── sticky.rs       (НОВОЕ: "Липкие" заголовки)
     │   └── ui.rs
-    ├── render_view.rs
+    ├── render_view.rs      <-- Главный файл-дирижер рендера
     ├── scroll.rs
-    ├── ui_system.rs            ← НОВОЕ: Декларативная система UI
+    ├── ui_system.rs        <-- Декларативная система UI
     ├── widgets.rs
-    └── Безымянный.txt
+    └── ...
 
-12 directories, 40 files
+12 directories, 42 files
 ```
 
 ---
@@ -268,7 +252,7 @@ if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
 
 ---
 
-## 🎨 Подсистема 2: Рендеринг (`renderer.rs` & `render_view.rs`)
+## 🎨 Подсистема 2: Рендеринг (`renderer.rs`, `render_view.rs` и `render_view/*`)
 
 Рендеринг в RRiter строится вокруг концепции **Batching (Пакетирование)**.
 Вместо того чтобы рисовать каждую букву отдельным вызовом к GPU (что катастрофически медленно), мы собираем данные в один массив вершин `self.vertices` и отправляем их разом.
@@ -299,13 +283,24 @@ pub struct Vertex {
 4. Мы сохраняем UV-координаты символа в атласе и его метрики (ширину, смещение).
 Далее отрисовка 'A' — это просто два треугольника, текстурированные нужным кусочком атласа.
 
-### Жизненный цикл кадра (`render_view.rs`)
-Метод `draw()` — дирижер сборки кадра:
-1. `update_cache()` разбивает байты на визуальные строки (`VisualLine`), обрабатывая фолдинг (свертывание кода).
-2. Отрисовывается фон и индикаторы изменения строк (Git/Save markers).
-3. Происходит проход по тексту. Для каждого байта определяется цвет (из подсветки синтаксиса, выделения или результатов поиска).
-4. Вызываются приватные методы для UI: `draw_minimap`, `draw_sticky_lines`, `draw_search_panel`.
-5. Массив вершин `flush()`-ится в видеокарту.
+### Жизненный цикл кадра и файловая структура (`render_view.rs` & `render_view/`)
+Метод `draw()` в `render_view.rs` — это главный дирижер сборки кадра. Он отвечает за общую последовательность, но делегирует сложную логику отрисовки специализированным под-модулям, чтобы избежать превращения в "God Function".
+
+**Файловая структура подсистемы:**
+- `renderer.rs`: Низкоуровневая обертка над OpenGL. Хранит буферы вершин (`Vec<Vertex>`), шейдеры, текстуры. Содержит методы для "рисования примитивов": `push_quad`, `push_rounded_rect` и т.д. Не знает о существовании редактора, только о геометрии.
+- `render_view.rs`: Высокоуровневый дирижер. Содержит главный метод `draw()`. Вызывает `update_cache()` для подготовки визуальных строк, а затем передает управление специализированным модулям.
+- `render_view/core_text.rs`: Отвечает за самую важную часть — рендеринг текста, курсора, выделения, подсветки скобок и одинаковых слов.
+- `render_view/sticky.rs` (Новое): Реализует логику "липких" заголовков. Анализирует уровни вложенности кода, определяет, какие строки должны "прилипнуть" к верху экрана, и отрисовывает их с анимацией.
+- `render_view/search.rs` (Новое): Инкапсулирует всю логику рендера панели поиска (Ctrl+F), включая ее текстовое поле, кнопки и отображение результатов.
+- `render_view/ui.rs`, `lsp_ui.rs`, `settings_ui.rs`: Отвечают за другие части интерфейса, такие как диалоговые окна, иконки, диагностики LSP и окно настроек.
+
+**Последовательность отрисовки в `draw()`:**
+1. Подготовка: `update_cache()` разбивает байты на визуальные строки (`VisualLine`), обрабатывая фолдинг (свертывание кода).
+2. Слой IDE: Отрисовываются панели (сайдбар, дерево файлов, нижняя панель).
+3. Основной слой: Рендерится фон, гаттер, номера строк, и затем вызывается `core_text.rs` для отрисовки самого текста.
+4. Декорации: Вызываются `draw_minimap`, `draw_sticky_lines` (из `sticky.rs`), скроллбары.
+5. Оверлеи: Поверх всего рисуются панели, которые могут перекрывать контент, например, `draw_search_panel` (из `search.rs`) или окно настроек.
+6. Отправка на GPU: Массив вершин `flush()`-ится в видеокарту.
 
 ---
 
