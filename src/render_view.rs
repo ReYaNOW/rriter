@@ -201,12 +201,12 @@ impl Renderer {
             // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
             self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
 
-            let btn_size = sb_w;
+                        let btn_size = sb_w;
             let btn_gap = 0.0;
             let btn_x = 0.0;
             let top_start_y = 0.0;
-            let mx = self.last_mouse_x;
-            let my = self.last_mouse_y;
+            let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+            let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
 
             let mut top_idx = 0usize;
             let mut bottom_idx = 0usize;
@@ -1595,9 +1595,9 @@ impl Renderer {
                 tx += tw;
             }
 
-            // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
-            let mx = self.last_mouse_x;
-            let my = self.last_mouse_y;
+                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+            let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+            let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
             if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
                 self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
             }

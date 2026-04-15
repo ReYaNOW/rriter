@@ -453,7 +453,10 @@ impl App {
 
     /// Возвращает индекс узла дерева под экранными координатами (mx, my),
     /// или None если курсор не над областью дерева файлов.
-    pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
+        pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
+        if self.show_settings || self.dialog_window.is_some() {
+            return None;
+        }
         if !self.is_ide_mode {
             return None;
         }
