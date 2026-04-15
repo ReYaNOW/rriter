@@ -673,28 +673,92 @@ impl Renderer {
             }
         }
 
-        if let Some(word) = target_word {
-            let full_text = editor.get_full_text();
-            let mut start = 0;
+                        if let Some(word) = target_word {
+            let (first, second) = editor.text_parts();
+            let first_bytes = first.as_bytes();
+            let second_bytes = second.as_bytes();
             let w_len = word.len();
-            while let Some(idx) = full_text[start..].find(&word) {
+            let full_len = first.len() + second.len();
+
+            let get_byte = |idx: usize| -> u8 {
+                if idx < first.len() {
+                    first_bytes[idx]
+                } else {
+                    second_bytes[idx - first.len()]
+                }
+            };
+
+            let mut start = 0;
+            while let Some(idx) = first[start..].find(&word) {
                 let abs_idx = start + idx;
                 let left_ok = if abs_idx == 0 {
                     true
                 } else {
-                    let b = full_text.as_bytes()[abs_idx - 1];
+                    let b = first_bytes[abs_idx - 1];
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
-                let right_ok = if abs_idx + w_len == len {
+                let right_ok = if abs_idx + w_len == full_len {
                     true
                 } else {
-                    let b = full_text.as_bytes()[abs_idx + w_len];
+                    let b = get_byte(abs_idx + w_len);
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
                 if left_ok && right_ok {
                     identical_words.push((abs_idx, abs_idx + w_len));
                 }
                 start = abs_idx + w_len;
+            }
+
+            let boundary_start = first.len().saturating_sub(w_len - 1);
+            for i in boundary_start..first.len() {
+                if i + w_len <= full_len {
+                    let mut matches = true;
+                    let w_bytes = word.as_bytes();
+                    for j in 0..w_len {
+                        if get_byte(i + j) != w_bytes[j] {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        let left_ok = if i == 0 {
+                            true
+                        } else {
+                            let b = get_byte(i - 1);
+                            !(b.is_ascii_alphanumeric() || b == b'_')
+                        };
+                        let right_ok = if i + w_len == full_len {
+                            true
+                        } else {
+                            let b = get_byte(i + w_len);
+                            !(b.is_ascii_alphanumeric() || b == b'_')
+                        };
+                        if left_ok && right_ok {
+                            identical_words.push((i, i + w_len));
+                        }
+                    }
+                }
+            }
+
+            let mut start = 0;
+            while let Some(idx) = second[start..].find(&word) {
+                let abs_idx = first.len() + start + idx;
+                let left_ok = if abs_idx == 0 {
+                    true
+                } else {
+                    let b = get_byte(abs_idx - 1);
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                };
+                let right_ok = if abs_idx + w_len == full_len {
+                    true
+                } else {
+                    let b = second_bytes[start + idx + w_len];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                };
+                if left_ok && right_ok {
+                    identical_words.push((abs_idx, abs_idx + w_len));
+                }
+                start = start + idx + w_len;
             }
         }
 

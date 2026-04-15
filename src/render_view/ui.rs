@@ -45,15 +45,12 @@ impl Renderer {
         y: f32,
         size: f32,
     ) {
-        if !self.file_icon_cache.contains_key(key) {
-            let pre_rasterized = {
-                let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
-                if let Some(opt_data) = cache.get_mut(key) {
-                    opt_data.take()
-                } else {
-                    None
-                }
-            };
+                if !self.file_icon_cache.contains_key(key) {
+            let pre_rasterized = crate::app::file_tree::RASTERIZED_ICONS
+                .lock()
+                .unwrap()
+                .remove(key)
+                .flatten();
 
             if let Some(data) = pre_rasterized {
                 let target = 64i32;

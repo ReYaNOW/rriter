@@ -113,10 +113,10 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
             let scale = (target as f32) / sz.width().max(sz.height());
             let dx = (target as f32 - sz.width() * scale) / 2.0;
             let dy = (target as f32 - sz.height() * scale) / 2.0;
-            let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
+                        let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
             resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-            let mut data = pixmap.data().to_vec();
+            let mut data = pixmap.take();
             for px in data.chunks_exact_mut(4) {
                 let a = px[3] as u32;
                 if a > 0 && a < 255 {
@@ -183,14 +183,10 @@ fn scan_dir_parallel(
     is_root: bool,
     max_depth: usize,
     gitignore: &ignore::gitignore::Gitignore,
-    user_patterns: &[String],
+    all_patterns: &[&str],
 ) -> Vec<FileNode> {
     let is_expanded = expanded.contains(&path);
     let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
-
-    // Используем только пользовательские паттерны.
-    // Дефолтные засеваются в конфиг при первом запуске (см. load_config в main.rs).
-    let all_patterns: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
 
     let is_ignored = if is_root {
         false
@@ -198,7 +194,7 @@ fn scan_dir_parallel(
         gitignore
             .matched_path_or_any_parents(&path, true)
             .is_ignore()
-            || matches_ignore_pattern(&name, &all_patterns)
+            || matches_ignore_pattern(&name, all_patterns)
     };
 
     let me = FileNode {
@@ -217,22 +213,22 @@ fn scan_dir_parallel(
 
     let (dirs, files) = read_children(&path);
 
-    // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
+        // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
     // это экономит поток-часы на игнорируемых поддеревьях.
     let dirs: Vec<_> = dirs
         .into_iter()
-        .filter(|(d_name, _)| !matches_ignore_pattern(d_name, &all_patterns))
+        .filter(|(d_name, _)| !matches_ignore_pattern(d_name, all_patterns))
         .collect();
     let files: Vec<_> = files
         .into_iter()
-        .filter(|(f_name, _)| !matches_ignore_pattern(f_name, &all_patterns))
+        .filter(|(f_name, _)| !matches_ignore_pattern(f_name, all_patterns))
         .collect();
 
     // Многопоточный обход дерева. flat_map в rayon собирает результаты
     // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
     let mut dir_nodes: Vec<FileNode> = dirs
         .into_par_iter()
-        .flat_map(|(d_name, d_path)| {
+                .flat_map(|(d_name, d_path)| {
             scan_dir_parallel(
                 d_path,
                 d_name,
@@ -241,12 +237,12 @@ fn scan_dir_parallel(
                 false,
                 max_depth,
                 gitignore,
-                user_patterns,
+                all_patterns,
             )
         })
         .collect();
 
-    // Параллельное применение Regex паттернов для подбора иконок файлов
+        // Параллельное применение Regex паттернов для подбора иконок файлов
     let mut file_nodes: Vec<FileNode> = files
         .into_par_iter()
         .map(|(f_name, f_path)| {
@@ -254,7 +250,7 @@ fn scan_dir_parallel(
             let is_ignored = gitignore
                 .matched_path_or_any_parents(&f_path, false)
                 .is_ignore()
-                || matches_ignore_pattern(&f_name, &all_patterns);
+                || matches_ignore_pattern(&f_name, all_patterns);
             FileNode {
                 path: f_path,
                 name: f_name,
@@ -299,10 +295,12 @@ pub fn spawn_scan(
                     .build()
                     .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
 
-                let name = root
+                                let name = root
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| root.to_string_lossy().into_owned());
+
+                let all_patterns_refs: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
 
                 scan_dir_parallel(
                     root.clone(),
@@ -312,7 +310,7 @@ pub fn spawn_scan(
                     true,
                     10,
                     &gitignore,
-                    &user_patterns,
+                    &all_patterns_refs,
                 )
             })
             .collect();

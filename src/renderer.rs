@@ -8,9 +8,10 @@ use tiny_skia;
 
 pub const MAX_VERTICES: usize = 100_000;
 pub const ATLAS_SIZE_W: i32 = 1024;
-pub const ATLAS_SIZE_H: i32 = 2048;
+pub const ATLAS_SIZE_H: i32 = 1024;
 
-#[derive(Clone)]pub struct Theme {
+#[derive(Clone)]
+pub struct Theme {
     pub bg: [f32; 4],
     pub fg: [f32; 4],
     pub sel: [f32; 4],
@@ -64,7 +65,7 @@ pub struct VisualLine {
 }
 #[derive(Clone)]
 pub struct FontData {
-    pub data: std::sync::Arc<[u8]>,
+    pub data: std::borrow::Cow<'static,[u8]>,
     pub index: u32,
 }
 
@@ -219,7 +220,7 @@ impl Renderer {
                 glow::TEXTURE_MAG_FILTER,
                 glow::LINEAR as i32,
             );
-                        gl.tex_image_2d(
+            gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA8 as i32,
@@ -255,12 +256,13 @@ impl Renderer {
 
             for path in font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
+                    fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    break;
                 }
             }
 
-            let nerd_font_data: std::sync::Arc<[u8]> = std::sync::Arc::from(include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf").as_slice());
-            let inter_font_data: std::sync::Arc<[u8]> = std::sync::Arc::from(include_bytes!("fonts/Inter-Regular.otf").as_slice());
+            let nerd_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf"));
+            let inter_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(include_bytes!("fonts/Inter-Regular.otf"));
 
             fonts.push(FontData {
                 data: nerd_font_data.clone(),
@@ -269,18 +271,19 @@ impl Renderer {
 
             for path in emoji_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
+                    fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    break;
                 }
             }
 
-            let ui_font_paths = [
+            let ui_font_paths =[
                 "/usr/share/fonts/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/TTF/NotoSans-Regular.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
                 "/usr/share/fonts/Inter/Inter-Regular.ttf",
             ];
 
-                        let mut ui_fonts = Vec::new();
+            let mut ui_fonts = Vec::new();
 
             // Inter теперь первый в приоритете для UI
             ui_fonts.push(FontData {
@@ -290,9 +293,11 @@ impl Renderer {
 
             for path in ui_font_paths.iter() {
                 if let Ok(data) = fs::read(path) {
-                    ui_fonts.push(FontData { data: std::sync::Arc::from(data), index: 0 });
+                    ui_fonts.push(FontData { data: std::borrow::Cow::Owned(data), index: 0 });
+                    break;
                 }
             }
+
             ui_fonts.push(FontData {
                 data: nerd_font_data.clone(),
                 index: 0,
@@ -429,7 +434,7 @@ impl Renderer {
         let w = target_size as i32;
         let h = target_size as i32;
 
-                if self.atlas_x + w + 2 > ATLAS_SIZE_W {
+        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
             self.atlas_x = 2;
             self.atlas_y += self.max_row_h + 2;
             self.max_row_h = 0;
@@ -440,13 +445,11 @@ impl Renderer {
         let transform = tiny_skia::Transform::from_scale(scale, scale);
         resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-        let mut rgba = vec![0u8; (w * h * 4) as usize];
-        for (i, pixel) in pixmap.data().chunks_exact(4).enumerate() {
-            let a = pixel[3];
-            rgba[i * 4] = 255;
-            rgba[i * 4 + 1] = 255;
-            rgba[i * 4 + 2] = 255;
-            rgba[i * 4 + 3] = a;
+        let data = pixmap.data_mut();
+        for pixel in data.chunks_exact_mut(4) {
+            pixel[0] = 255;
+            pixel[1] = 255;
+            pixel[2] = 255;
         }
 
         unsafe {
@@ -460,11 +463,11 @@ impl Renderer {
                 h,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(&rgba)),
+                glow::PixelUnpackData::Slice(Some(data)),
             );
         }
 
-                let info = GlyphInfo {
+        let info = GlyphInfo {
             u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
             v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
             uw: w as f32 / ATLAS_SIZE_W as f32,
@@ -564,7 +567,7 @@ impl Renderer {
                 advance: glyph_advance,
                 is_emoji: 0.0,
             };
-                        self.glyphs.insert(c, info);
+            self.glyphs.insert(c, info);
             return Some(info);
         }
 
@@ -628,7 +631,7 @@ impl Renderer {
             );
         }
 
-                let info = GlyphInfo {
+        let info = GlyphInfo {
             u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
             v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
             uw: w as f32 / ATLAS_SIZE_W as f32,
@@ -727,7 +730,7 @@ impl Renderer {
                 advance: glyph_advance,
                 is_emoji: 0.0,
             };
-                        self.ui_glyphs.insert(c, info);
+            self.ui_glyphs.insert(c, info);
             return Some(info);
         }
 
@@ -791,7 +794,7 @@ impl Renderer {
             );
         }
 
-                let info = GlyphInfo {
+        let info = GlyphInfo {
             u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
             v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
             uw: w as f32 / ATLAS_SIZE_W as f32,
@@ -988,7 +991,7 @@ impl Renderer {
                 let size = tree.size();
                 // SSAA (Super-Sampling): растеризуем вектор в гигантском разрешении.
                 // GPU Mipmaps аппаратно сожмут её до нужного размера без "мыла" и "лесенок".
-                let target_size = 256.0;
+                let target_size = 128.0;
 
                 let scale = if size.width() > size.height() {
                     target_size / size.width()
@@ -1008,7 +1011,7 @@ impl Renderer {
                     let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
                     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-                    let mut data = pixmap.data().to_vec();
+                    let data = pixmap.data_mut();
                     for pixel in data.chunks_exact_mut(4) {
                         let a = pixel[3] as u32;
                         if a > 0 && a < 255 {
@@ -1031,7 +1034,7 @@ impl Renderer {
                             0,
                             glow::RGBA,
                             glow::UNSIGNED_BYTE,
-                            glow::PixelUnpackData::Slice(Some(&data)),
+                            glow::PixelUnpackData::Slice(Some(data)),
                         );
                         self.gl.generate_mipmap(glow::TEXTURE_2D);
                         self.gl.tex_parameter_i32(
