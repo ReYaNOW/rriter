@@ -471,7 +471,10 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-            // Panels
+                        // Panels
+            UiId::BottomPanelBody => {
+                // Поглощаем клик — непрозрачная панель блокирует взаимодействие с редактором под ней
+            }
             UiId::ResizeLeft => {
                 self.ide_panel.is_resizing_left = true;
                 self.window.as_ref().unwrap().request_redraw();

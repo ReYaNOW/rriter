@@ -1550,16 +1550,24 @@ impl Renderer {
 
         // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
-        if is_ide_mode && panel_bottom_h > 0.0 {
+                        if is_ide_mode && panel_bottom_h > 0.0 {
             let sb_w = 48.0 * s;
             let panel_x = sb_w;
             let panel_y = self.height - panel_bottom_h;
             let panel_w = self.width - panel_x;
+
+            let is_terminal = ide_panel.slots.iter().any(|sl| {
+                sl.group == crate::app::PanelGroup::Bottom
+                    && sl.open
+                    && sl.id == crate::app::PanelId::Terminal
+            });
+            let panel_alpha = if is_terminal { 0.82 } else { 1.0 };
+
             let panel_bg = [
                 0.129, // #21
                 0.133, // #22
                 0.173, // #2c
-                0.85,
+                panel_alpha,
             ];
             // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
             self.push_rect(
@@ -1570,12 +1578,30 @@ impl Renderer {
                 panel_bg,
             );
 
+                                    // Непрозрачная панель полностью перехватывает мышь (курсор не меняется, клики не проваливаются)
+            if !is_terminal {
+                let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+                let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
+                let blocked = ui_registry.register_blocker(
+                    crate::ui_system::UiId::BottomPanelBody,
+                    panel_x,
+                    panel_y,
+                    panel_w,
+                    panel_bottom_h,
+                    mx,
+                    my,
+                );
+                if blocked {
+                    ui_registry.reset_cursor_state();
+                }
+            }
+
             let tab_h = 32.0 * s;
             let tab_bar_bg = [
                 (self.theme.bg[0] + 0.07).min(1.0),
                 (self.theme.bg[1] + 0.07).min(1.0),
                 (self.theme.bg[2] + 0.08).min(1.0),
-                0.85,
+                panel_alpha,
             ];
             self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 

@@ -57,9 +57,10 @@ pub enum UiId {
     EditorTextBody,
     EditorMinimap,
 
-    // Panels
+        // Panels
     ResizeLeft,
     ResizeBottom,
+    BottomPanelBody,
     LspLogArea(usize),
     LspScrollY,
     LspScrollX,
@@ -263,9 +264,26 @@ impl UiRegistry {
         hovered
     }
 
-    /// Регистрирует кликабельную область (для элементов дерева файлов, чипов и т.д.)
-    pub fn register_rect(
+        /// Регистрирует область-блокировщик: поглощает клики, но не меняет курсор.
+    /// Используется для непрозрачных панелей, перекрывающих редактор.
+    pub fn register_blocker(
         &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        self.elements.push(UiElement::Rect { id, x, y, w, h });
+        // Намеренно НЕ устанавливаем wants_pointer/wants_text
+        hovered
+    }
+
+    /// Регистрирует кликабельную область (для элементов дерева файлов, чипов и т.д.)
+    pub fn register_rect(&mut self,
         id: UiId,
         x: f32,
         y: f32,
