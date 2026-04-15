@@ -120,7 +120,9 @@ pub struct IdePanelState {
     pub lsp_log_editors: FxHashMap<String, Editor>,
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
     pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
-    pub lsp_logs_focused: Option<String>,
+        pub lsp_logs_focused: Option<String>,
+    pub diag_copied_idx: Option<usize>,
+    pub diag_copied_time: Option<std::time::Instant>,
 }
 
 impl Default for IdePanelState {
@@ -163,8 +165,10 @@ impl Default for IdePanelState {
             lsp_scroll_x: crate::scroll::ScrollState::new(15.0),
             lsp_log_editors: FxHashMap::default(),
             lsp_logs_scroll_y: FxHashMap::default(),
-            lsp_logs_scroll_x: FxHashMap::default(),
+                        lsp_logs_scroll_x: FxHashMap::default(),
             lsp_logs_focused: None,
+            diag_copied_idx: None,
+            diag_copied_time: None,
         }
     }
 }

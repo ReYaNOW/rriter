@@ -518,7 +518,15 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-                        UiId::LspLogArea(server_idx) => {
+                                    UiId::CopyDiagnostic(idx) => {
+                if let Some(diag) = self.lsp.as_ref().map(|l| l.diagnostics.get(idx)).flatten() {
+                    let _ = self.clipboard.set_text(&diag.message);
+                    self.ide_panel.diag_copied_idx = Some(idx);
+                    self.ide_panel.diag_copied_time = Some(std::time::Instant::now());
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     self.ide_panel.lsp_logs_focused =
                         Some(self.ide_panel.lsp_servers[server_idx].name.to_string());

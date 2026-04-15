@@ -64,8 +64,9 @@ pub enum UiId {
     LspLogArea(usize),
     LspScrollY,
         LspScrollX,
-    LspLogScrollY(usize),
+        LspLogScrollY(usize),
     LspLogScrollX(usize),
+    CopyDiagnostic(usize),
 }
 
 /// Тип UI элемента с его геометрией

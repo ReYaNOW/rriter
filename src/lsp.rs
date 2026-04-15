@@ -1256,14 +1256,17 @@ impl LspManager {
         // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                LspEvent::Diagnostics { path, items, .. } => {
+                                LspEvent::Diagnostics { path, items, .. } => {
                     let incoming_uri = path_to_uri(&path.to_string_lossy());
                     let current_uri = self
                         .current_path
                         .as_ref()
                         .map(|p| path_to_uri(&p.to_string_lossy()));
-                    if Some(incoming_uri) == current_uri {
+
+                    if Some(&incoming_uri) == current_uri.as_ref() {
                         self.diagnostics = items.clone();
+                    } else {
+                        println!("[LSP] Проигнорированы диагностики.\n Входящий путь: {}\n Текущий путь:  {:?}", incoming_uri, current_uri);
                     }
                 }
                 LspEvent::StatusChanged { status, .. } => {
