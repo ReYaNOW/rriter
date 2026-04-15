@@ -1302,12 +1302,18 @@ impl Renderer {
                         x_start_px + avg_adv * 8.0
                     };
                 }
-                let x_start = self.left_padding + x_start_px - render_scroll_x;
+                                let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
 
-                if mx >= x_start && mx <= x_start + squiggle_w && my >= line_y && my <= line_y + self.line_height {
-                    hovered_diag = Some((idx, diag.clone(), x_start, line_y + self.line_height));
+                // Расширяем хитбокс, если мы УЖЕ смотрим на этот pop-up (Hysteresis)
+                let is_active = self.last_hovered_diag == Some(idx);
+                let hit_margin_x = if is_active { 150.0 * s } else { 0.0 };
+                let hit_margin_y = if is_active { 50.0 * s } else { 0.0 };
+
+                if mx >= x_start - hit_margin_x && mx <= x_start + squiggle_w + hit_margin_x && 
+                   my >= line_y - hit_margin_y && my <= line_y + self.line_height + hit_margin_y {
+                    hovered_diag = Some((idx, diag.clone(), x_start, line_y, line_y + self.line_height));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {
@@ -1680,8 +1686,10 @@ impl Renderer {
             self.push_rect(0.0, 0.0, self.width, self.height,[0.0, 0.0, 0.0, 0.6]);
         }
 
-        // --- LSP Diagnostic Tooltip ---
-        if let Some((idx, diag, diag_x, diag_y_bottom)) = hovered_diag {
+                // --- LSP Diagnostic Tooltip ---
+        self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
+
+        if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) = hovered_diag {
             let s = self.scale_factor;
             let pad = 12.0 * s;
 
@@ -1718,16 +1726,19 @@ impl Renderer {
             }
             if !cur_line.is_empty() { lines.push(cur_line); }
 
-            let line_h = 20.0 * s;
+                        let line_h = 20.0 * s;
             let box_h = pad * 2.0 + 24.0 * s + lines.len() as f32 * line_h;
 
             let mut bx = diag_x;
             if bx + box_w > self.width - 20.0 * s {
                 bx = self.width - box_w - 20.0 * s;
             }
-            let mut by = diag_y_bottom + 8.0 * s;
-            if by + box_h > self.height - 20.0 * s {
-                by = diag_y_bottom - box_h - 24.0 * s;
+
+            // Пытаемся показать сверху (на строчку выше)
+            let mut by = line_y_top - box_h - 8.0 * s;
+            // Если сверху не влезает, показываем снизу
+            if by < 0.0 {
+                by = diag_y_bottom + 8.0 * s;
             }
 
             let border_color = match diag.severity {
