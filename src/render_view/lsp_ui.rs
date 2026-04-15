@@ -49,34 +49,33 @@ impl Renderer {
             );
         }
 
-                let get_inner_size = |info: &crate::lsp::LspServerInfo, renderer: &mut Self| -> (f32, f32) {
-            let mut lines = 0;
-            let mut max_w = 0.0f32;
-            let mut skip_until = None;
-            let mut global_line_count = 0;
-            for entry in &info.logs {
-                for line in entry.text.split('\n') {
-                    if let Some(tgt) = skip_until {
-                        if global_line_count < tgt {
-                            global_line_count += 1;
-                            continue;
-                        } else {
-                            skip_until = None;
-                        }
-                    }
-                    lines += 1;
-                    let w = renderer.measure_mono_width(line, 0.7);
+                        let get_inner_size = |info: &crate::lsp::LspServerInfo, renderer: &mut Self| -> (f32, f32) {
+            if let Some(log_ed) = lsp_log_editors.get(info.name) {
+                let mut lines = 0;
+                let mut max_w = 0.0f32;
+                let mut phys_line = 0;
+                let (first, second) = log_ed.text_parts();
+                while phys_line < log_ed.line_offsets.len() {
+                    let start = log_ed.line_offsets[phys_line];
+                    let end = if phys_line + 1 < log_ed.line_offsets.len() {
+                        log_ed.line_offsets[phys_line + 1].saturating_sub(1)
+                    } else {
+                        log_ed.len()
+                    };
+                    let w = renderer.measure_width(first, second, start, end) * 0.7;
                     if w > max_w { max_w = w; }
-
-                    if let Some(ed) = lsp_log_editors.get(info.name) {
-                        if ed.folded_lines.contains(&global_line_count) {
-                            skip_until = Some(ed.foldable_lines[&global_line_count]);
+                    lines += 1;
+                    if log_ed.folded_lines.contains(&phys_line) {
+                        if let Some(&fold_end) = log_ed.foldable_lines.get(&phys_line) {
+                            phys_line = fold_end;
                         }
                     }
-                    global_line_count += 1;
+                    phys_line += 1;
                 }
+                (lines as f32 * 16.0 * s, max_w)
+            } else {
+                (0.0, 0.0)
             }
-            (lines as f32 * 16.0 * s, max_w)
         };
 
         let mut current_y = content_y + 8.0 * s - scroll_y;
@@ -443,172 +442,138 @@ impl Renderer {
                         let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
                         let mut global_line_count = 0;
                         let mut global_byte_off: usize = 0;
-                        let mut skip_until = None;
+                                                let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
 
-                        'entry_loop: for entry in &info.logs {
-                            let mut line_byte_off_in_entry = 0;
-                            for line in entry.text.split('\n') {
-                                if let Some(tgt) = skip_until {
-                                    if global_line_count < tgt {
-                                        global_line_count += 1;
-                                        line_byte_off_in_entry += line.len() + 1;
-                                        continue;
-                                    } else {
-                                        skip_until = None;
-                                    }
-                                }
+                                                                        if let Some(log_ed) = lsp_log_editors.get(info.name) {
+                            let mut phys_line = 0;
+                            let (first, second) = log_ed.text_parts();
+                            let first_len = first.len();
+                            let len = first_len + second.len();
 
-                                if text_y > inter_y2 + line_h {
-                                    break 'entry_loop;
-                                }
+                            let mut entry_idx = 0;
+                            let mut entry_start = 0;
 
-                                if text_y + line_h > inter_y1 {
-                                    let abs_line_start = global_byte_off + line_byte_off_in_entry;
-                                    let abs_line_end = abs_line_start + line.len();
+                            while phys_line < log_ed.line_offsets.len() {
+                                                        let is_folded = log_ed.folded_lines.contains(&phys_line) && log_ed.foldable_lines.contains_key(&phys_line);
+                                                        let fold_end = if is_folded { log_ed.foldable_lines.get(&phys_line).copied() } else { None };
 
-                                    if sel_lo < sel_hi
-                                        && sel_lo <= abs_line_end
-                                        && sel_hi > abs_line_start
-                                    {
-                                        let in_s =
-                                            sel_lo.saturating_sub(abs_line_start).min(line.len());
-                                        let in_e =
-                                            sel_hi.saturating_sub(abs_line_start).min(line.len());
-                                        let in_s = (0..=in_s)
-                                            .rev()
-                                            .find(|&i| line.is_char_boundary(i))
-                                            .unwrap_or(0);
-                                                                                let in_e = (in_e..=line.len())
-                                            .find(|&i| line.is_char_boundary(i))
-                                            .unwrap_or(line.len());
-                                        let x1 = log_bg_x
-                                            + 20.0 * s
-                                            + self.measure_mono_width(&line[..in_s], 0.7)
-                                            - inner_scroll_x;
-                                        let x2 = log_bg_x
-                                            + 20.0 * s
-                                            + self.measure_mono_width(&line[..in_e], 0.7)
-                                            - inner_scroll_x;
-                                        let ry = text_y - 14.0 * s;
-                                        let x1c = x1.max(log_bg_x);
-                                        let x2c = x2.min(log_bg_x + log_bg_w);
-                                        if x2c > x1c {
-                                            self.push_rounded_rect(
-                                                x1c,
-                                                ry,
-                                                x2c - x1c,
-                                                line_h,
-                                                0.0,[0.40, 0.28, 0.72, 0.45],
-                                            );
-                                        }
-                                    }
+                                                        if text_y > inter_y2 + line_h {
+                                                            break;
+                                                        }
 
-                                    let mut current_x = log_bg_x + 20.0 * s - inner_scroll_x;
-                                    let mut i = 0;
-                                    let abs_entry_start = global_byte_off + line_byte_off_in_entry;
-                                    while i < line.len() {
-                                        let abs_byte = abs_entry_start + i;
-                                        let mut color = [0.875, 0.882, 0.902, 1.0];
-                                        let mut chunk_end = line.len();
+                                                        if text_y + line_h > inter_y1 {
+                                                            let start_byte = log_ed.line_offsets[phys_line];
+                                                            let end_byte = if phys_line + 1 < log_ed.line_offsets.len() {
+                                                                log_ed.line_offsets[phys_line + 1].saturating_sub(1)
+                                                            } else {
+                                                                len
+                                                            };
 
-                                        for span in &entry.spans {
-                                            if abs_byte >= span.start && abs_byte < span.end {
-                                                color = span.color;
-                                                chunk_end = chunk_end
-                                                    .min(span.end.saturating_sub(abs_entry_start));
-                                                break;
-                                            } else if span.start > abs_byte {
-                                                chunk_end = chunk_end.min(
-                                                    span.start.saturating_sub(abs_entry_start),
-                                                );
+                                                            if sel_lo < sel_hi && sel_lo <= end_byte && sel_hi >= start_byte {
+                                                                let in_s = sel_lo.saturating_sub(start_byte);
+                                                                let in_e = sel_hi.saturating_sub(start_byte).min(end_byte - start_byte);
+                                                                let x1 = log_bg_x + 20.0 * s + self.measure_width(first, second, start_byte, start_byte + in_s) * 0.7 - inner_scroll_x;
+                                                                let x2 = log_bg_x + 20.0 * s + self.measure_width(first, second, start_byte, start_byte + in_e) * 0.7 - inner_scroll_x;
+                                                                let ry = text_y - 14.0 * s;
+                                                                let x1c = x1.max(log_bg_x);
+                                                                let x2c = x2.min(log_bg_x + log_bg_w);
+                                                                if x2c > x1c {
+                                                                    self.push_rounded_rect(
+                                                                        x1c, ry, x2c - x1c, line_h, 0.0,[0.40, 0.28, 0.72, 0.45],
+                                                                    );
+                                                                }
+                                                            }
+
+                                                            let mut current_x = log_bg_x + 20.0 * s - inner_scroll_x;
+                                                            let mut current_chunk_offset = start_byte;
+
+                                                            while current_chunk_offset < end_byte {
+                                                                let chunk = if current_chunk_offset < first_len {
+                                                                    let s_end = end_byte.min(first_len);
+                                                                    &first[current_chunk_offset..s_end]
+                                                                } else {
+                                                                    let s_start = current_chunk_offset - first_len;
+                                                                    let s_end = end_byte - first_len;
+                                                                    &second[s_start..s_end]
+                                                                };
+
+                                                                                                        for c in chunk.chars() {
+                                            let is_newline = c == '\n';
+                                            let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
+                                            let adv = if is_newline || is_hidden { 0.0 } else { self.char_advance(c) * 0.7 };
+
+                                            if current_x + adv > log_bg_x && current_x < log_bg_x + log_bg_w {
+                                                if !is_newline && !is_hidden && c != ' ' && c != '\t' {
+
+                                                    while entry_idx < info.logs.len() && current_chunk_offset >= entry_start + info.logs[entry_idx].text.len() + 1 {
+                                                        entry_start += info.logs[entry_idx].text.len() + 1;
+                                                        entry_idx += 1;
+                                                    }
+
+                                                    let mut color =[0.875, 0.882, 0.902, 1.0];
+                                                    if entry_idx < info.logs.len() {
+                                                        let rel_offset = current_chunk_offset - entry_start;
+                                                        for span in &info.logs[entry_idx].spans {
+                                                            if rel_offset >= span.start && rel_offset < span.end {
+                                                                color = span.color;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if let Some(g) = self.get_glyph(c) {
+                                                        self.push_quad(
+                                                            current_x + g.offset_x * 0.7,
+                                                            text_y - g.offset_y * 0.7,
+                                                            g.width * 0.7,
+                                                            g.height * 0.7,
+                                                            g.u, g.v, g.uw, g.vh, color, g.is_emoji,
+                                                        );
+                                                    }
+                                                }
                                             }
+                                            current_x += adv;
+                                            current_chunk_offset += c.len_utf8();
                                         }
-                                        // Гарантируем продвижение: chunk_end всегда > i
-                                        let chunk_end = chunk_end.min(line.len()).max(i + 1);
-                                        // Выровнять по границе UTF-8
-                                        let chunk_end = (chunk_end..=line.len())
-                                            .find(|&e| line.is_char_boundary(e))
-                                            .unwrap_or(line.len());
+                                                            }
 
-                                        let text_chunk = &line[i..chunk_end];
-                                        self.draw_string_mono_scaled(
-                                            text_chunk, current_x, text_y, color, 0.7,
-                                        );
-                                        current_x += self.measure_mono_width(text_chunk, 0.7);
-                                        i = chunk_end;
-                                    }
+                                                            let is_foldable = log_ed.foldable_lines.contains_key(&phys_line);
+                                                            if is_foldable {
+                                                                let arrow_str = if is_folded { "▶" } else { "▼" };
+                                                                let icon_x = log_bg_x + 4.0 * s - inner_scroll_x;
+                                                                let is_hovered = ui_registry.register_rect(
+                                                                    crate::ui_system::UiId::LspLogFoldToggle(server_idx, phys_line),
+                                                                    icon_x - 4.0 * s, text_y - 14.0 * s, 16.0 * s, line_h, mx, my
+                                                                );
+                                                                let color = if is_hovered { [0.8, 0.8, 0.9, 1.0] } else {[0.5, 0.5, 0.55, 1.0] };
+                                                                self.draw_string_scaled(arrow_str, icon_x, text_y - 2.0 * s, color, 0.8);
+                                                            }
 
-                                    if let Some(log_ed) = lsp_log_editors.get(info.name) {
-                                        let is_folded =
-                                            log_ed.folded_lines.contains(&global_line_count);
-                                        let is_foldable =
-                                            log_ed.foldable_lines.contains_key(&global_line_count);
-                                                                                if is_foldable {
-                                            let icon =
-                                                if is_folded { "\u{f0115}" } else { "\u{f0114}" };
-                                            let icon_x = log_bg_x + 4.0 * s - inner_scroll_x;
-                                            let is_hovered = ui_registry.register_rect(
-                                                crate::ui_system::UiId::LspLogFoldToggle(server_idx,
-                                                    global_line_count,
-                                                ),
-                                                icon_x,
-                                                text_y - 12.0 * s,
-                                                16.0 * s,
-                                                16.0 * s,
-                                                mx,
-                                                my,
-                                            );
-                                            let color = if is_hovered {
-                                                [0.8, 0.8, 0.9, 1.0]
-                                            } else {
-                                                [0.6, 0.6, 0.7, 1.0]
-                                            };
-                                            self.draw_string_scaled(
-                                                icon, icon_x, text_y, color, 0.75,
-                                            );
-                                        }
-                                                                                if is_folded {
-                                            let btn_w =
-                                                self.measure_ui_width("...", 0.8) + 10.0 * s;
+                                                            if is_folded {
+                                                                let dots_str = "...";
+                                                                let dots_adv = self.measure_ui_width(dots_str, 0.7) + 8.0 * s;
+                                                                let box_x = current_x + 4.0 * s;
 
-                                            ui_registry.register_rect(
-                                                crate::ui_system::UiId::LspLogFoldToggle(
-                                                    server_idx,
-                                                    global_line_count,
-                                                ),
-                                                current_x + 5.0 * s,
-                                                text_y - 12.0 * s,
-                                                btn_w,
-                                                line_h - 2.0 * s,
-                                                mx,
-                                                my,
-                                            );
+                                                                ui_registry.register_rect(
+                                                                    crate::ui_system::UiId::LspLogFoldToggle(server_idx, phys_line),
+                                                                    box_x, text_y - 12.0 * s, dots_adv, line_h - 2.0 * s, mx, my
+                                                                );
 
-                                            self.push_rounded_rect(
-                                                current_x + 5.0 * s,
-                                                text_y - 12.0 * s,
-                                                btn_w,
-                                                line_h - 2.0 * s,
-                                                3.0 * s,
-                                                [1.0, 1.0, 1.0, 0.1],
-                                            );
-                                            self.draw_string_scaled(
-                                                "...",
-                                                current_x + 10.0 * s,
-                                                text_y,[0.8, 0.8, 0.8, 1.0],
-                                                0.8,
-                                            );
-                                            skip_until =
-                                                Some(log_ed.foldable_lines[&global_line_count]);
-                                        }
-                                    }
-                                }
-                                text_y += line_h;
-                                line_byte_off_in_entry += line.len() + 1;
-                                global_line_count += 1;
-                            }
-                            global_byte_off += entry.text.len() + 1;
-                        }
+                                                                self.push_rounded_rect(
+                                                                    box_x, text_y - 12.0 * s, dots_adv, line_h - 2.0 * s, 3.0 * s,
+                                                                    [self.theme.bg[0] + 0.08, self.theme.bg[1] + 0.08, self.theme.bg[2] + 0.12, 1.0]
+                                                                );
+                                                                self.draw_string_scaled(dots_str, box_x + 4.0 * s, text_y, self.theme.fg, 0.7);
+                                                            }
+                                                        }
+
+                                                        if is_folded {
+                                                            phys_line = fold_end.unwrap();
+                                                        }
+                                                        phys_line += 1;
+                                                        text_y += line_h;
+                                                    }
+                                                }
 
                                                 self.flush();
 

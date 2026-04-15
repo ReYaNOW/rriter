@@ -750,73 +750,71 @@ impl App {
                                                         let log_bg_x = card_x + pad_x;
                             let log_bg_y = btn_y2 + btn_h + 10.0 * s;
 
-                            let inner_scroll_y = self.ide_panel.lsp_logs_scroll_y.get(srv.name).map(|ss| ss.current).unwrap_or(0.0).round();
+                                                        let inner_scroll_y = self.ide_panel.lsp_logs_scroll_y.get(srv.name).map(|ss| ss.current).unwrap_or(0.0).round();
                             let inner_scroll_x = self.ide_panel.lsp_logs_scroll_x.get(srv.name).map(|ss| ss.current).unwrap_or(0.0).round();
                             let mut text_y = log_bg_y + 16.0 * s - inner_scroll_y;
-                            let mut global_line_count = 0;
-                            let mut skip_until = None;
                             let line_h = 16.0 * s;
                             let my_drag = position.y as f32;
 
-                            for entry in &srv.logs {
-                                for line in entry.text.split('\n') {
-                                    if let Some(tgt) = skip_until {
-                                        if global_line_count < tgt {
-                                            global_line_count += 1;
-                                            continue;
-                                        } else {
-                                            skip_until = None;
-                                        }
-                                    }
+                            if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(focused_name.as_str()) {
+                                let mut phys_line = 0;
+                                let (first, second) = ed.text_parts();
+                                let first_len = first.len();
+
+                                while phys_line < ed.line_offsets.len() {
+                                    let is_folded = ed.folded_lines.contains(&phys_line);
+                                    let fold_end = if is_folded { ed.foldable_lines.get(&phys_line).copied() } else { None };
 
                                     if my_drag >= text_y - line_h && my_drag <= text_y {
-                                                                                if let Some(ed) = self
-                                            .ide_panel
-                                            .lsp_log_editors
-                                            .get_mut(focused_name.as_str())
-                                        {
-                                            let click_x_in_line =
-                                                (position.x as f32 - log_bg_x - 20.0 * s
-                                                    + inner_scroll_x)
-                                                    .max(0.0);
-                                            let r = self.renderer.as_mut().unwrap();
-                                            let mut best_pos = 0usize;
-                                            let mut best_dist = f32::MAX;
-                                            let mut ci = 0usize;
-                                            for c in line.chars() {
-                                                let x = r.measure_mono_width(&line[..ci], 0.7);
-                                                if (x - click_x_in_line).abs() < best_dist {
-                                                    best_dist = (x - click_x_in_line).abs();
-                                                    best_pos = ci;
-                                                }
-                                                ci += c.len_utf8();
-                                            }
-                                            let x_end = r.measure_mono_width(line, 0.7);
-                                            if (x_end - click_x_in_line).abs() < best_dist {
-                                                best_pos = line.len();
-                                            }
-                                            let line_start_byte =
-                                                ed.line_offsets[global_line_count];
-                                            let byte_off =
-                                                (line_start_byte + best_pos).min(ed.len());
+                                        let start_byte = ed.line_offsets[phys_line];
+                                        let end_byte = if phys_line + 1 < ed.line_offsets.len() {
+                                            ed.line_offsets[phys_line + 1].saturating_sub(1)
+                                        } else {
+                                            ed.len()
+                                        };
 
-                                            if ed.selection_anchor.is_none() {
-                                                ed.selection_anchor = Some(ed.cursor);
+                                        let click_x_in_line = (position.x as f32 - log_bg_x - 20.0 * s + inner_scroll_x).max(0.0);
+                                        let r = self.renderer.as_mut().unwrap();
+
+                                        let mut current_x = 0.0;
+                                        let mut best_dist = click_x_in_line.abs();
+                                        let mut byte_off = start_byte;
+                                        let mut current_chunk_offset = start_byte;
+
+                                        while current_chunk_offset < end_byte {
+                                            let chunk = if current_chunk_offset < first_len {
+                                                &first[current_chunk_offset..end_byte.min(first_len)]
+                                            } else {
+                                                &second[current_chunk_offset - first_len..end_byte - first_len]
+                                            };
+
+                                            for c in chunk.chars() {
+                                                let adv = if c == '\n' || c == '\u{FE0F}' || c == '\u{200D}' { 0.0 } else { r.char_advance(c) * 0.7 };
+                                                let dist = (current_x - click_x_in_line).abs();
+                                                if dist < best_dist {
+                                                    best_dist = dist;
+                                                    byte_off = current_chunk_offset;
+                                                }
+                                                current_x += adv;
+                                                current_chunk_offset += c.len_utf8();
                                             }
-                                            ed.cursor = byte_off;
                                         }
+                                        if (current_x - click_x_in_line).abs() < best_dist {
+                                            byte_off = end_byte;
+                                        }
+
+                                        if ed.selection_anchor.is_none() {
+                                            ed.selection_anchor = Some(byte_off);
+                                        }
+                                        ed.cursor = byte_off;
                                         break;
                                     }
 
-                                    if let Some(ed) = self.ide_panel.lsp_log_editors.get(srv.name) {
-                                        if ed.folded_lines.contains(&global_line_count) {
-                                            skip_until =
-                                                Some(ed.foldable_lines[&global_line_count]);
-                                        }
+                                    if is_folded {
+                                        phys_line = fold_end.unwrap();
                                     }
-
+                                    phys_line += 1;
                                     text_y += line_h;
-                                    global_line_count += 1;
                                 }
                             }
                             break;

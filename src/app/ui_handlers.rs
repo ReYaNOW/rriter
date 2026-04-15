@@ -518,10 +518,15 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-            UiId::LspLogArea(server_idx) => {
+                        UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     self.ide_panel.lsp_logs_focused =
                         Some(self.ide_panel.lsp_servers[server_idx].name.to_string());
+                }
+                if let Some(focused) = &self.ide_panel.lsp_logs_focused {
+                    if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(focused) {
+                        ed.selection_anchor = None;
+                    }
                 }
                 self.is_dragging_lsp_log = true;
                 if let Some(r) = self.renderer.as_ref() {

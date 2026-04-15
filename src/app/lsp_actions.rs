@@ -55,35 +55,32 @@ impl App {
         (inner_total_h + 20.0 * s).clamp(50.0 * s, 300.0 * s)
     }
 
-    pub(crate) fn lsp_server_inner_size(&self, info: &crate::lsp::LspServerInfo, s: f32) -> (f32, f32) {
-        let mut lines = 0;
-        let mut max_w = 0.0f32;
-        let mut skip_until: Option<usize> = None;
-        let mut global_line_count = 0;
-
-        for entry in &info.logs {
-            for line in entry.text.split('\n') {
-                if let Some(tgt) = skip_until {
-                    if global_line_count < tgt {
-                        global_line_count += 1;
-                        continue;
-                    } else {
-                        skip_until = None;
-                    }
-                }
-                lines += 1;
-                let w = line.chars().count() as f32 * 7.5 * s;
+        pub(crate) fn lsp_server_inner_size(&self, info: &crate::lsp::LspServerInfo, s: f32) -> (f32, f32) {
+        if let Some(log_ed) = self.ide_panel.lsp_log_editors.get(info.name) {
+            let mut lines = 0;
+            let mut max_w = 0.0f32;
+            let mut phys_line = 0;
+            while phys_line < log_ed.line_offsets.len() {
+                let start = log_ed.line_offsets[phys_line];
+                let end = if phys_line + 1 < log_ed.line_offsets.len() {
+                    log_ed.line_offsets[phys_line + 1].saturating_sub(1)
+                } else {
+                    log_ed.len()
+                };
+                let w = (end.saturating_sub(start)) as f32 * 7.5 * s;
                 if w > max_w { max_w = w; }
-
-                if let Some(ed) = self.ide_panel.lsp_log_editors.get(info.name) {
-                    if ed.folded_lines.contains(&global_line_count) {
-                        skip_until = Some(ed.foldable_lines[&global_line_count]);
+                lines += 1;
+                if log_ed.folded_lines.contains(&phys_line) {
+                    if let Some(&fold_end) = log_ed.foldable_lines.get(&phys_line) {
+                        phys_line = fold_end;
                     }
                 }
-                global_line_count += 1;
+                phys_line += 1;
             }
+            (lines as f32 * 16.0 * s, max_w)
+        } else {
+            (0.0, 0.0)
         }
-        (lines as f32 * 16.0 * s, max_w)
     }
 
     /// Открывает меню быстрых действий LSP для текущей строки
