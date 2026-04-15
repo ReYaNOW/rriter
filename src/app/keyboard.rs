@@ -283,7 +283,7 @@ impl App {
                 return;
             }
             PhysicalKey::Code(KeyCode::F1) => {
-                self.show_settings = true;
+                self.show_settings = !self.show_settings;
                 self.is_dragging = false;
                 return;
             }
@@ -860,6 +860,10 @@ impl App {
             }
 
             if self.show_settings {
+                if let PhysicalKey::Code(KeyCode::F1) = key_event.physical_key {
+                    self.show_settings = false;
+                    self.window.as_ref().unwrap().request_redraw();
+                }
                 return;
             }
 
