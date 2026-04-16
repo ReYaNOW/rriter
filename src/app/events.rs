@@ -968,8 +968,8 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !merged_edit.changes.is_empty() {
-                            self.apply_workspace_edit(&merged_edit);
+                                                if !merged_edit.changes.is_empty() {
+                            self.apply_workspace_edit(&merged_edit, true);
                         }
                         if let Some(w) = self.window.as_ref() {
                             w.request_redraw();

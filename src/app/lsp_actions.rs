@@ -188,10 +188,10 @@ impl App {
         }
         let item = menu.items[menu.selected.min(menu.items.len() - 1)].clone();
 
-                match item {
+                                match item {
                         crate::app::LspActionItem::CodeAction(action) => {
                 if let Some(edit) = action.edit {
-                    self.apply_workspace_edit(&edit);
+                    self.apply_workspace_edit(&edit, false);
                 }
             }
             crate::app::LspActionItem::AddNoqa { codes } => {
@@ -304,11 +304,11 @@ impl App {
         App::update_window_title(
             self.window.as_ref().unwrap(),
             &self.base_title,
-            self.editor.is_dirty(),
+                        self.editor.is_dirty(),
         );
     }
 
-        pub(crate) fn apply_workspace_edit(&mut self, edit: &crate::lsp::WorkspaceEdit) {
+        pub(crate) fn apply_workspace_edit(&mut self, edit: &crate::lsp::WorkspaceEdit, preserve_cursor: bool) {
         if let Some(path) = &self.file_path {
             if let Some(changes) = edit.changes.get(path) {
                 let text = self.editor.get_full_text();
@@ -323,15 +323,51 @@ impl App {
                 for change in &sorted {
                     let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
                     let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
-                    ops.push((start, end, change.new_text.clone()));
+                                        ops.push((start, end, change.new_text.clone()));
                 }
 
-                                for (start, end, new_text) in ops {
-                    if start <= end {
-                        let (off, len, _) = self.editor.replace_range(start, end, &new_text);
+                let cursor_before = self.editor.cursor;
+                let selection_before = self.editor.selection_anchor;
+
+                for (start, end, new_text) in &ops {
+                    if *start <= *end {
+                        let (off, len, _) = self.editor.replace_range(*start, *end, new_text);
                         self.highlighter.shift_delete(off, len);
-                        self.highlighter.shift_insert(off, new_text.len(), Some(&new_text));
+                                                self.highlighter.shift_insert(off, new_text.len(), Some(new_text));
                     }
+                }
+
+                if preserve_cursor {
+                    let mut cursor_after = cursor_before;
+                    let mut selection_after = selection_before;
+                    for (start, end, new_text) in &ops {
+                        let delta = new_text.len() as isize - (*end - *start) as isize;
+
+                                            if *start <= cursor_after {
+                        if *end <= cursor_after {
+                            cursor_after = ((cursor_after as isize) + delta).max(0) as usize;
+                        } else {
+                            // Курсор внутри измененного блока — пытаемся сохранить относительную позицию
+                            let relative_offset = cursor_after - *start;
+                            cursor_after = (*start + relative_offset).min(*start + new_text.len());
+                        }
+                    }
+
+                    if let Some(mut sel_anchor) = selection_after {
+                        if *start <= sel_anchor {
+                            if *end <= sel_anchor {
+                                sel_anchor = ((sel_anchor as isize) + delta).max(0) as usize;
+                            } else {
+                                let relative_offset = sel_anchor - *start;
+                                sel_anchor =
+                                    (*start + relative_offset).min(*start + new_text.len());
+                            }
+                        }
+                        selection_after = Some(sel_anchor);
+                    }
+                    }
+                    self.editor.cursor = cursor_after;
+                    self.editor.selection_anchor = selection_after;
                 }
 
                 if !self.editor.sync_edits.is_empty() {

@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::fs;
 use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
-// (удаляем строку)
-use tiny_skia;
 
 pub const MAX_VERTICES: usize = 100_000;
 pub const ATLAS_SIZE_W: i32 = 1024;

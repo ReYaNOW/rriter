@@ -272,9 +272,9 @@ impl App {
                             let cursor_line = menu_clone.cursor_line;
                             drop(menu_clone);
                                                         match item {
-                                crate::app::LspActionItem::CodeAction(action) => {
+                                                                crate::app::LspActionItem::CodeAction(action) => {
                                     if let Some(edit) = action.edit {
-                                        self.apply_workspace_edit(&edit);
+                                        self.apply_workspace_edit(&edit, false);
                                     }
                                 }
                                 crate::app::LspActionItem::AddNoqa { codes } => {

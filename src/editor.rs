@@ -816,9 +816,9 @@ impl Editor {
         len
     }
 
-        pub fn replace_range(&mut self, start: usize, end: usize, new_text: &str) -> (usize, usize, String) {
+                pub fn replace_range(&mut self, start: usize, end: usize, new_text: &str) -> (usize, usize, String) {
         self.version += 1;
-        let cursor_before = self.cursor;
+        let cursor_before_op = self.cursor;
 
         let len = end - start;
         let mut res = Vec::with_capacity(len);
@@ -843,13 +843,13 @@ impl Editor {
         self.cursor = start + ins_len;
         self.selection_anchor = None;
 
-        self.push_history(HistoryStep {
+                self.push_history(HistoryStep {
             op: EditOp::Replace {
                 offset: start,
                 old_text: old_text.clone(),
                 new_text: new_text.to_string(),
             },
-            cursor_before,
+            cursor_before: cursor_before_op,
             cursor_after: self.cursor,
         });
 

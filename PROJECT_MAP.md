@@ -100,7 +100,7 @@ FILE src/app/keyboard.rs
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
     MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn handle_main_keyboard_input  [741]
+  pub fn handle_main_keyboard_input  [743]
     CALL main: save_config
     WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
 
@@ -668,41 +668,41 @@ FILE src/renderer.rs
   module: renderer
   types:  Theme, Vertex, GlyphInfo, VisualLine, FontData, Renderer
 
-  pub fn new  [144] -> Self
+  pub fn new  [142] -> Self
 
-  pub fn get_custom_svg_glyph  [461] -> Option<GlyphInfo>
+  pub fn get_custom_svg_glyph  [459] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, max_row_h
 
-  pub fn get_glyph  [528] -> Option<GlyphInfo>
+  pub fn get_glyph  [526] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, glyphs.insert, max_row_h, ui_glyphs.clear
     MATCH: Content::Mask
 
-  pub fn get_ui_glyph  [692] -> Option<GlyphInfo>
+  pub fn get_ui_glyph  [690] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, max_row_h, ui_glyphs.clear, ui_glyphs.insert
     MATCH: Content::Mask
 
-  pub fn resize  [855]
+  pub fn resize  [853]
     WRITE: height, width
 
-  pub fn measure_ui_width  [865] -> f32
+  pub fn measure_ui_width  [863] -> f32
 
-  pub fn char_advance  [878] -> f32
+  pub fn char_advance  [876] -> f32
 
-  pub fn push_quad  [895]
+  pub fn push_quad  [893]
 
-  pub fn load_builtin_icons  [947]
+  pub fn load_builtin_icons  [945]
     CALL widgets: render
     WRITE: icons.insert
     MATCH: IconType::Down
 
-  pub fn push_squiggle  [1126]
+  pub fn push_squiggle  [1124]
 
-  pub fn push_rect  [1179]
+  pub fn push_rect  [1177]
 
-  pub fn push_rounded_rect_gradient  [1183]
+  pub fn push_rounded_rect_gradient  [1181]
 
 ────────────────────────────────────────────────────────────
 

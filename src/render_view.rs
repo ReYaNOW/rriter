@@ -1339,8 +1339,8 @@ impl Renderer {
                     };
                 }
                 let x_start = self.left_padding + x_start_px - render_scroll_x;
-                let x_end = self.left_padding + x_end_px - render_scroll_x;
-                let squiggle_w = (x_end - x_start).max(avg_adv * 2.0);
+                                let x_end = self.left_padding + x_end_px - render_scroll_x;
+                let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
 
                 let top_y = v_line.y_offset - render_scroll_y;
 

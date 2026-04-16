@@ -128,17 +128,18 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_editor_keyboard_input(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            key_event: KeyEvent,
-        ) {
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
-            let shift = self.modifiers.shift_key();
+            pub fn handle_editor_keyboard_input(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        key_event: KeyEvent,
+    ) {
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let shift = self.modifiers.shift_key();
+        let physical_key = key_event.physical_key;
 
-            if self.show_welcome {
-                match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
+        if self.show_welcome {
+            match physical_key {
+                PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
                         self.trigger_file_picker();
                     }
                     PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
@@ -165,18 +166,18 @@ impl App {
                 return;
             }
 
-            if self.autocomplete_active && !self.autocomplete_options.is_empty() {
-                match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::Escape)
-                    | PhysicalKey::Code(KeyCode::ArrowLeft)
-                    | PhysicalKey::Code(KeyCode::ArrowRight) => {
-                        self.autocomplete_active = false;
-                        self.autocomplete_selected_idx = 0;
-                        self.window.as_ref().unwrap().request_redraw();
-                        if matches!(key_event.physical_key, PhysicalKey::Code(KeyCode::Escape)) {
-                            return;
-                        }
+                    if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+            match physical_key {
+                PhysicalKey::Code(KeyCode::Escape)
+                | PhysicalKey::Code(KeyCode::ArrowLeft)
+                | PhysicalKey::Code(KeyCode::ArrowRight) => {
+                    self.autocomplete_active = false;
+                    self.autocomplete_selected_idx = 0;
+                    self.window.as_ref().unwrap().request_redraw();
+                    if matches!(physical_key, PhysicalKey::Code(KeyCode::Escape)) {
+                        return;
                     }
+                }
                     PhysicalKey::Code(KeyCode::ArrowDown) => {
                         self.autocomplete_selected_idx =
                             (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
@@ -202,19 +203,19 @@ impl App {
                 }
             }
 
-            // Alt+Enter — меню быстрых действий LSP
-            if self.modifiers.alt_key() {
-                if let PhysicalKey::Code(KeyCode::Enter) = key_event.physical_key {
-                    self.open_lsp_actions_menu();
-                    return;
-                }
+                    // Alt+Enter — меню быстрых действий LSP
+        if self.modifiers.alt_key() {
+            if let PhysicalKey::Code(KeyCode::Enter) = physical_key {
+                self.open_lsp_actions_menu();
+                return;
             }
+        }
 
-            // Навигация в открытом меню LSP
-            if self.lsp_actions_menu.is_some() {
-                match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::Escape) => {
-                        self.lsp_actions_menu = None;
+                    // Навигация в открытом меню LSP
+        if self.lsp_actions_menu.is_some() {
+            match physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    self.lsp_actions_menu = None;
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
@@ -251,14 +252,14 @@ impl App {
             let mut should_trigger_autocomplete = false;
             let mut should_sync = true;
 
-            let old_cursor_y = self
+                        let old_cursor_y = self
                 .renderer
                 .as_mut()
                 .unwrap()
                 .get_cursor_xy(&self.editor)
                 .1;
 
-            match key_event.physical_key {
+            match physical_key {
                 PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
                     if self.editor.is_dirty() {
                         self.show_action_dialog(event_loop, PendingAction::CloseFile);
@@ -603,11 +604,13 @@ impl App {
                     self.search_results.clear();
                 }
 
-                if should_sync {
+                                if should_sync {
                     if !self.editor.sync_edits.is_empty() {
                         let edits = std::mem::take(&mut self.editor.sync_edits);
+                        let is_backspace_or_delete =
+                            matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete));
                         // LSP didChange — отправляем полный текст только если файл Python и IDE режим
-                        if self.is_ide_mode {
+                        if self.is_ide_mode && !is_backspace_or_delete {
                             if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                                 let text = self.editor.get_full_text();
                                 let ext = self.file_extension.clone();
@@ -662,22 +665,21 @@ impl App {
                 }
             }
 
-            if cursor_moved {
+                        if cursor_moved {
                 let is_arrow = matches!(
-                    key_event.physical_key,
+                    physical_key,
                     PhysicalKey::Code(
                         KeyCode::ArrowUp
                             | KeyCode::ArrowDown
                             | KeyCode::ArrowLeft
                             | KeyCode::ArrowRight
-                    )
-                );
-                let is_page = matches!(
-                    key_event.physical_key,
-                    PhysicalKey::Code(KeyCode::PageUp | KeyCode::PageDown)
-                );
+                    )                                );
+                                let is_page = matches!(
+                                    physical_key,
+                                    PhysicalKey::Code(KeyCode::PageUp | KeyCode::PageDown)
+                                );
 
-                if is_arrow {
+                                if is_arrow {
                     self.scroll_y.anim_speed = 10.0;
                     self.scroll_x.anim_speed = 10.0;
                 } else if is_page {
@@ -689,10 +691,10 @@ impl App {
                 }
 
                 let wh_width = self.window.as_ref().unwrap().inner_size().width as f32;
-                let wh_height = self.window.as_ref().unwrap().inner_size().height as f32;
+                                let wh_height = self.window.as_ref().unwrap().inner_size().height as f32;
 
                 let is_enter_or_backspace = matches!(
-                    key_event.physical_key,
+                    physical_key,
                     PhysicalKey::Code(KeyCode::Enter | KeyCode::Backspace | KeyCode::Delete)
                 );
 
