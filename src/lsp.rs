@@ -1158,15 +1158,16 @@ pub struct LspManager {
     pub diagnostics: Vec<Diagnostic>,
     current_path: Option<PathBuf>,
     /// Статус ruff сервера
-    pub python_status: LspServerStatus,
+        pub python_status: LspServerStatus,
     /// Отключён ли ruff вручную
     pub python_disabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
+    pub suppress_diagnostics: bool,
 }
 
 impl LspManager {
     pub fn new(workspace: Option<PathBuf>) -> Self {
-        LspManager {
+                LspManager {
             python: None,
             workspace,
             diagnostics: Vec::new(),
@@ -1174,6 +1175,7 @@ impl LspManager {
             python_status: LspServerStatus::Disabled,
             python_disabled: false,
             server_logs: HashMap::new(),
+            suppress_diagnostics: false,
         }
     }
 
@@ -1248,7 +1250,8 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1264,7 +1267,8 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
-    pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1323,7 +1327,7 @@ impl LspManager {
         // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                LspEvent::Diagnostics { path, items, .. } => {
+                                LspEvent::Diagnostics { path, items, .. } => {
                     let incoming_uri = path_to_uri(&path.to_string_lossy());
                     let current_uri = self
                         .current_path
@@ -1331,7 +1335,9 @@ impl LspManager {
                         .map(|p| path_to_uri(&p.to_string_lossy()));
 
                     if Some(&incoming_uri) == current_uri.as_ref() {
-                        self.diagnostics = items.clone();
+                        if !self.suppress_diagnostics {
+                            self.diagnostics = items.clone();
+                        }
                     }
                 }
                 LspEvent::StatusChanged { status, .. } => {

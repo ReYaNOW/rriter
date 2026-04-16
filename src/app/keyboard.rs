@@ -133,9 +133,10 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+                let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
+        let is_dot = key_event.logical_key.to_text() == Some(".");
 
         if self.show_welcome {
             match physical_key {
@@ -604,18 +605,25 @@ impl App {
                     self.search_results.clear();
                 }
 
-                                if should_sync {
+                                                                if should_sync {
                     if !self.editor.sync_edits.is_empty() {
                         let edits = std::mem::take(&mut self.editor.sync_edits);
                         let is_backspace_or_delete =
                             matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete));
                         // LSP didChange — отправляем полный текст только если файл Python и IDE режим
-                        if self.is_ide_mode && !is_backspace_or_delete {
-                            if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-                                let text = self.editor.get_full_text();
-                                let ext = self.file_extension.clone();
-                                let path = path.clone();
-                                lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                        if self.is_ide_mode {
+                            if !is_backspace_or_delete && !is_dot {
+                                if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                                    let text = self.editor.get_full_text();
+                                    let ext = self.file_extension.clone();
+                                    let path = path.clone();
+                                    lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                                }
+                            } else {
+                                if let Some(lsp) = &mut self.lsp {
+                                    lsp.diagnostics.clear();
+                                    lsp.suppress_diagnostics = true;
+                                }
                             }
                         }
                         self.highlighter.apply_edits(self.editor.version, edits);

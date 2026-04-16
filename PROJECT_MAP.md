@@ -100,7 +100,7 @@ FILE src/app/keyboard.rs
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
     MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn handle_main_keyboard_input  [743]
+  pub fn handle_main_keyboard_input  [751]
     CALL main: save_config
     WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
 
@@ -466,59 +466,60 @@ FILE src/lsp.rs
     SELF:  json_escape
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-  pub fn new  [1168] -> Self
+  pub fn new  [1169] -> Self
 
-      fn ensure_python  [1181]
+      fn ensure_python  [1183]
     SELF:  start
     WRITE: python, python_status
 
-  pub fn restart_python  [1189]
+  pub fn restart_python  [1191]
     SELF:  start
     WRITE: python, python_status
 
-  pub fn disable_python  [1200]
+  pub fn disable_python  [1202]
     WRITE: diagnostics.clear, python_disabled, python_status, server_logs.clear
 
-  pub fn enable_python  [1211]
+  pub fn enable_python  [1213]
     SELF:  start
     WRITE: python, python_disabled, python_status
 
-  pub fn servers_info  [1226] -> Vec<LspServerInfo>
+  pub fn servers_info  [1228] -> Vec<LspServerInfo>
 
-      fn process_for_ext  [1240] -> Option<&mut LspProcess>
+      fn process_for_ext  [1242] -> Option<&mut LspProcess>
 
-  pub fn notify_open  [1251]
-    WRITE: current_path, diagnostics.clear
+  pub fn notify_open  [1253]
+    WRITE: current_path, diagnostics.clear, suppress_diagnostics
 
-  pub fn notify_change  [1267]
+  pub fn notify_change  [1270]
+    WRITE: suppress_diagnostics
 
-  pub fn notify_close  [1281]
+  pub fn notify_close  [1285]
     WRITE: diagnostics.clear
 
-  pub fn request_code_actions  [1291] -> Option<i32>
+  pub fn request_code_actions  [1295] -> Option<i32>
 
-  pub fn poll  [1316] -> Vec<LspEvent>
+  pub fn poll  [1320] -> Vec<LspEvent>
     SELF:  format_and_highlight_json, path_to_uri
     WRITE: diagnostics, python_status
     MATCH: LspEvent::Diagnostics, LspEvent::Log, LspEvent::StatusChanged
 
-  pub fn diagnostics_for_line  [1361] -> Vec<&Diagnostic>
+  pub fn diagnostics_for_line  [1367] -> Vec<&Diagnostic>
 
-  pub fn request_fix_all  [1369] -> Option<i32>
+  pub fn request_fix_all  [1375] -> Option<i32>
     SELF:  next_id, path_to_uri
 
-  pub fn request_organize_imports  [1387] -> Option<i32>
+  pub fn request_organize_imports  [1393] -> Option<i32>
     SELF:  next_id, path_to_uri
 
-  pub fn shutdown  [1406]
+  pub fn shutdown  [1412]
     WRITE: python_disabled
 
-  pub fn lsp_pos_to_offset  [1418] -> usize
+  pub fn lsp_pos_to_offset  [1424] -> usize
 
-  pub fn apply_workspace_edit_to_text  [1443] -> String
+  pub fn apply_workspace_edit_to_text  [1449] -> String
     SELF:  lsp_pos_to_offset
 
-  pub fn format_and_highlight_json  [1467] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
+  pub fn format_and_highlight_json  [1473] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
     CALL queries: get_folding_query, get_ts_config
 
 ────────────────────────────────────────────────────────────
