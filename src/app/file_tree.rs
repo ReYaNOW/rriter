@@ -113,7 +113,7 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
             let scale = (target as f32) / sz.width().max(sz.height());
             let dx = (target as f32 - sz.width() * scale) / 2.0;
             let dy = (target as f32 - sz.height() * scale) / 2.0;
-                        let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
+            let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
             resvg::render(&tree, transform, &mut pixmap.as_mut());
 
             let mut data = pixmap.take();
@@ -213,7 +213,7 @@ fn scan_dir_parallel(
 
     let (dirs, files) = read_children(&path);
 
-        // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
+    // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
     // это экономит поток-часы на игнорируемых поддеревьях.
     let dirs: Vec<_> = dirs
         .into_iter()
@@ -228,7 +228,7 @@ fn scan_dir_parallel(
     // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
     let mut dir_nodes: Vec<FileNode> = dirs
         .into_par_iter()
-                .flat_map(|(d_name, d_path)| {
+        .flat_map(|(d_name, d_path)| {
             scan_dir_parallel(
                 d_path,
                 d_name,
@@ -242,7 +242,7 @@ fn scan_dir_parallel(
         })
         .collect();
 
-        // Параллельное применение Regex паттернов для подбора иконок файлов
+    // Параллельное применение Regex паттернов для подбора иконок файлов
     let mut file_nodes: Vec<FileNode> = files
         .into_par_iter()
         .map(|(f_name, f_path)| {
@@ -295,12 +295,13 @@ pub fn spawn_scan(
                     .build()
                     .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
 
-                                let name = root
+                let name = root
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| root.to_string_lossy().into_owned());
 
-                let all_patterns_refs: Vec<&str> = user_patterns.iter().map(|s| s.as_str()).collect();
+                let all_patterns_refs: Vec<&str> =
+                    user_patterns.iter().map(|s| s.as_str()).collect();
 
                 scan_dir_parallel(
                     root.clone(),
@@ -453,7 +454,7 @@ impl App {
 
     /// Возвращает индекс узла дерева под экранными координатами (mx, my),
     /// или None если курсор не над областью дерева файлов.
-        pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
+    pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
         if self.show_settings || self.dialog_window.is_some() {
             return None;
         }

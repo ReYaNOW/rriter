@@ -45,7 +45,7 @@ impl Renderer {
         y: f32,
         size: f32,
     ) {
-                if !self.file_icon_cache.contains_key(key) {
+        if !self.file_icon_cache.contains_key(key) {
             let pre_rasterized = crate::app::file_tree::RASTERIZED_ICONS
                 .lock()
                 .unwrap()

@@ -67,3 +67,12 @@ clean:
 
 tree:
 	@tree --filelimit 25 -I 'target' || true
+
+api-tree:
+	@echo "Обновляю карту проекта..."
+	@python3 scripts/make_tree.py
+	@echo "✅ Файл PROJECT_MAP.md готов. (Размер: $$(du -h PROJECT_MAP.md | cut -f1))"
+
+actualize:
+	cargo +nightly fmt
+	make api-tree

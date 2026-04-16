@@ -29,7 +29,8 @@ impl Renderer {
             search_anim_y,
             search_w,
             search_h,
-            6.0 * s,[0.18, 0.20, 0.22, 1.0],
+            6.0 * s,
+            [0.18, 0.20, 0.22, 1.0],
         );
         self.push_rounded_rect(
             search_x - 1.0,
@@ -272,10 +273,10 @@ impl Renderer {
             if search_editor.get_full_text().is_empty() {
                 ("", [0.6, 0.6, 0.6, 1.0])
             } else {
-                ("Нет",[0.95, 0.35, 0.45, 1.0])
+                ("Нет", [0.95, 0.35, 0.45, 1.0])
             }
         } else {
-            (temp_res_text.as_str(),[0.6, 0.6, 0.6, 1.0])
+            (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
         };
 
         if !res_text.is_empty() {

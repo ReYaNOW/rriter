@@ -4,7 +4,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-        pub(crate) fn draw_sticky_lines(
+    pub(crate) fn draw_sticky_lines(
         &mut self,
         editor: &Editor,
         spans: &[ColorSpan],
@@ -150,8 +150,8 @@ impl Renderer {
                     self.theme.minimap_bg[2],
                     alpha,
                 ];
-                let shadow_top =[0.0, 0.0, 0.0, 0.4 * alpha];
-                                                let shadow_bottom =[0.0, 0.0, 0.0, 0.0];
+                let shadow_top = [0.0, 0.0, 0.0, 0.4 * alpha];
+                let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
 
                 let sticky_x = gutter_x + 2.0;
                 let sticky_w = rect_w - sticky_x;
@@ -279,7 +279,7 @@ impl Renderer {
                     self.gl.disable(glow::SCISSOR_TEST);
                 }
 
-                                ui_registry.register_rect(
+                ui_registry.register_rect(
                     crate::ui_system::UiId::StickyLine(start_byte, i),
                     sticky_x,
                     rect_y,
@@ -289,8 +289,13 @@ impl Renderer {
                     self.last_mouse_y,
                 );
 
-                self.sticky_scroll_rects
-                    .push((sticky_x, rect_y, sticky_w, self.line_height, start_byte));
+                self.sticky_scroll_rects.push((
+                    sticky_x,
+                    rect_y,
+                    sticky_w,
+                    self.line_height,
+                    start_byte,
+                ));
             }
             self.flush();
         }

@@ -7,9 +7,13 @@ impl App {
         let is_top = self.ide_panel.slots.iter().any(|sl| {
             sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
         });
-                if is_top {
+        if is_top {
             let wh = self.window.as_ref()?.inner_size().height as f32;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                self.ide_panel.bottom_height * s
+            } else {
+                0.0
+            };
             Some((
                 48.0 * s,
                 32.0 * s,
@@ -48,7 +52,7 @@ impl App {
     }
 
     /// Высота блока логов одного LSP-сервера (0 если не развёрнут)
-                pub(crate) fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32 {
+    pub(crate) fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32 {
         if !self.ide_panel.lsp_logs_expanded.contains(info.name) {
             return 0.0;
         }
@@ -56,7 +60,11 @@ impl App {
         (inner_total_h + 20.0 * s).clamp(50.0 * s, 800.0 * s)
     }
 
-        pub(crate) fn lsp_server_inner_size(&self, info: &crate::lsp::LspServerInfo, s: f32) -> (f32, f32) {
+    pub(crate) fn lsp_server_inner_size(
+        &self,
+        info: &crate::lsp::LspServerInfo,
+        s: f32,
+    ) -> (f32, f32) {
         if let Some(log_ed) = self.ide_panel.lsp_log_editors.get(info.name) {
             let mut lines = 0;
             let mut max_w = 0.0f32;
@@ -69,7 +77,9 @@ impl App {
                     log_ed.len()
                 };
                 let w = (end.saturating_sub(start)) as f32 * 7.5 * s;
-                if w > max_w { max_w = w; }
+                if w > max_w {
+                    max_w = w;
+                }
                 lines += 1;
                 if log_ed.folded_lines.contains(&phys_line) {
                     if let Some(&fold_end) = log_ed.foldable_lines.get(&phys_line) {

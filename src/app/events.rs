@@ -376,14 +376,14 @@ impl ApplicationHandler for App {
                     &mut self.ui_registry,
                 );
 
-                                                self.target_sticky_lines = target_sticky;
+                self.target_sticky_lines = target_sticky;
 
                 // Сбрасываем иконку копирования когда popup диагностики закрывается
                 if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
                     self.ide_panel.diag_copied_idx = None;
                 }
 
-                                // Сбрасываем иконку копирования когда popup диагностики закрывается
+                // Сбрасываем иконку копирования когда popup диагностики закрывается
                 if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
                     self.ide_panel.diag_copied_idx = None;
                 }
@@ -549,11 +549,18 @@ impl ApplicationHandler for App {
                     let s = r.scale_factor;
                     let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-                                        let diag_popup_hovered = self.renderer.as_ref().unwrap()
+                    let diag_popup_hovered = self
+                        .renderer
+                        .as_ref()
+                        .unwrap()
                         .last_diag_popup_rect
-                        .map(|(rx, ry, rw, rh)| mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh)
+                        .map(|(rx, ry, rw, rh)| {
+                            mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh
+                        })
                         .unwrap_or(false);
-                    let mut is_text = !diag_popup_hovered && mx > padding && mx < (window_width - minimap_w - scrollbar_w);
+                    let mut is_text = !diag_popup_hovered
+                        && mx > padding
+                        && mx < (window_width - minimap_w - scrollbar_w);
 
                     if r.max_scroll_x > 0.0 {
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
@@ -711,7 +718,7 @@ impl ApplicationHandler for App {
         if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
         }
-                if self.ide_panel.lsp_scroll_y.update(dt) {
+        if self.ide_panel.lsp_scroll_y.update(dt) {
             needs_redraw = true;
         }
         if self.ide_panel.lsp_scroll_x.update(dt) {

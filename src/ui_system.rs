@@ -52,21 +52,21 @@ pub enum UiId {
     EditorFoldArrow(usize),
     EditorFoldDots(usize),
     StickyLine(usize, usize),
-        EditorScrollbarY,
+    EditorScrollbarY,
     EditorScrollbarX,
     EditorTextBody,
     EditorMinimap,
 
-        // Panels
+    // Panels
     ResizeLeft,
     ResizeBottom,
     BottomPanelBody,
     LspLogArea(usize),
     LspScrollY,
-        LspScrollX,
-        LspLogScrollY(usize),
+    LspScrollX,
+    LspLogScrollY(usize),
     LspLogScrollX(usize),
-        CopyDiagnostic(usize),
+    CopyDiagnostic(usize),
     OpenDiagUrl(usize),
 }
 
@@ -268,7 +268,7 @@ impl UiRegistry {
         hovered
     }
 
-        /// Регистрирует область-блокировщик: поглощает клики, но не меняет курсор.
+    /// Регистрирует область-блокировщик: поглощает клики, но не меняет курсор.
     /// Используется для непрозрачных панелей, перекрывающих редактор.
     pub fn register_blocker(
         &mut self,
@@ -287,7 +287,8 @@ impl UiRegistry {
     }
 
     /// Регистрирует кликабельную область (для элементов дерева файлов, чипов и т.д.)
-    pub fn register_rect(&mut self,
+    pub fn register_rect(
+        &mut self,
         id: UiId,
         x: f32,
         y: f32,

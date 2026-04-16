@@ -268,7 +268,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::LspLogFoldToggle(server_idx, line_idx) => {
+            UiId::LspLogFoldToggle(server_idx, line_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name;
                     if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(name) {
@@ -435,7 +435,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::EditorScrollbarY | UiId::EditorMinimap => {
+            UiId::EditorScrollbarY | UiId::EditorMinimap => {
                 if let Some(r) = self.renderer.as_ref() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
@@ -486,7 +486,7 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-                        // Panels
+            // Panels
             UiId::BottomPanelBody => {
                 // Поглощаем клик — непрозрачная панель блокирует взаимодействие с редактором под ней
             }
@@ -501,34 +501,42 @@ impl App {
             UiId::LspScrollY => {
                 self.ide_panel.lsp_scroll_y.is_dragging = true;
             }
-                        UiId::LspScrollX => {
+            UiId::LspScrollX => {
                 self.ide_panel.lsp_scroll_x.is_dragging = true;
             }
             UiId::LspLogScrollY(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
-                    let scroll = self.ide_panel.lsp_logs_scroll_y.entry(name).or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    let scroll = self
+                        .ide_panel
+                        .lsp_logs_scroll_y
+                        .entry(name)
+                        .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
                     scroll.is_dragging = true;
                 }
             }
             UiId::LspLogScrollX(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
-                    let scroll = self.ide_panel.lsp_logs_scroll_x.entry(name).or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    let scroll = self
+                        .ide_panel
+                        .lsp_logs_scroll_x
+                        .entry(name)
+                        .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
                     scroll.is_dragging = true;
                 }
             }
-                                                UiId::OpenDiagUrl(idx) => {
+            UiId::OpenDiagUrl(idx) => {
                 if let Some(diag) = self.lsp.as_ref().and_then(|l| l.diagnostics.get(idx)) {
                     if let Some(href) = &diag.code_href {
                         let _ = std::process::Command::new("xdg-open").arg(href).spawn();
                     }
                 }
             }
-                        UiId::CopyDiagnostic(idx) => {
+            UiId::CopyDiagnostic(idx) => {
                 if let Some(diag) = self.lsp.as_ref().map(|l| l.diagnostics.get(idx)).flatten() {
                     let _ = self.clipboard.set_text(&diag.message);
-                                        self.ide_panel.diag_copied_idx = Some(idx);
+                    self.ide_panel.diag_copied_idx = Some(idx);
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }

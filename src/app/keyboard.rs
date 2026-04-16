@@ -482,7 +482,7 @@ impl App {
                 cursor_moved = true;
                 is_edit = true;
             }
-                        PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
                 self.editor.select_expand();
                 self.autocomplete_active = false;
             }
@@ -516,7 +516,7 @@ impl App {
                 }
                 cursor_moved = true;
             }
-                        PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+            PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
                 self.editor.select_all();
                 self.autocomplete_active = false;
             }

@@ -15,7 +15,7 @@ impl App {
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
 
-                // Скролл в области проводника файлов — перехватываем до всего остального
+        // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let sb_w = 48.0 * s;
@@ -24,15 +24,26 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
-            let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top);
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                self.ide_panel.bottom_height * s
+            } else {
+                0.0
+            };
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
+            });
 
             let (cx, cy, cw, ch) = if is_top {
                 (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
-                (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
+                (
+                    sb_w,
+                    wh - panel_bottom_h + 1.0 + tab_h,
+                    ww - sb_w,
+                    panel_bottom_h - 1.0 - tab_h,
+                )
             };
 
             if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
