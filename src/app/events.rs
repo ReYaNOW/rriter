@@ -376,7 +376,17 @@ impl ApplicationHandler for App {
                     &mut self.ui_registry,
                 );
 
-                self.target_sticky_lines = target_sticky;
+                                                self.target_sticky_lines = target_sticky;
+
+                // Сбрасываем иконку копирования когда popup диагностики закрывается
+                if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
+                    self.ide_panel.diag_copied_idx = None;
+                }
+
+                                // Сбрасываем иконку копирования когда popup диагностики закрывается
+                if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
+                    self.ide_panel.diag_copied_idx = None;
+                }
 
                 let (mx, my, s, minimap_w) = {
                     let r = self.renderer.as_ref().unwrap();

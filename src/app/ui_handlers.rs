@@ -518,11 +518,17 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-                                    UiId::CopyDiagnostic(idx) => {
+                                                UiId::OpenDiagUrl(idx) => {
+                if let Some(diag) = self.lsp.as_ref().and_then(|l| l.diagnostics.get(idx)) {
+                    if let Some(href) = &diag.code_href {
+                        let _ = std::process::Command::new("xdg-open").arg(href).spawn();
+                    }
+                }
+            }
+                        UiId::CopyDiagnostic(idx) => {
                 if let Some(diag) = self.lsp.as_ref().map(|l| l.diagnostics.get(idx)).flatten() {
                     let _ = self.clipboard.set_text(&diag.message);
-                    self.ide_panel.diag_copied_idx = Some(idx);
-                    self.ide_panel.diag_copied_time = Some(std::time::Instant::now());
+                                        self.ide_panel.diag_copied_idx = Some(idx);
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }

@@ -72,8 +72,10 @@ pub struct Diagnostic {
     pub end_line: u32,
     pub end_col: u32,
     pub severity: DiagSeverity,
-    /// Код ошибки (например "E501", "F401")
+        /// Код ошибки (например "E501", "F401")
     pub code: Option<String>,
+    /// Ссылка на документацию (из codeDescription.href)
+    pub code_href: Option<String>,
     pub message: String,
     pub source: Option<String>,
 }
@@ -382,9 +384,15 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         }
     });
 
-    let source = v
+        let source = v
         .get("source")
         .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+
+    let code_href = v
+        .get("codeDescription")
+        .and_then(|cd| cd.get("href"))
+        .and_then(|h| h.as_str())
         .map(|s| s.to_string());
 
     Some(Diagnostic {
@@ -394,10 +402,10 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         end_col: ec,
         severity,
         code,
+        code_href,
         message,
         source,
-    })
-}
+    })}
 
 fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
     let range = v.get("range")?;

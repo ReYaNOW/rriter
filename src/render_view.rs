@@ -1724,19 +1724,36 @@ impl Renderer {
         self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
 
         if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) = hovered_diag {
-            let s = self.scale_factor;
-            let pad = 12.0 * s;
-            let line_h = 20.0 * s;
+                                    let s = self.scale_factor;
+                                    let pad = 12.0 * s;
+                                    let line_h = 22.0 * s;
 
-            let source_text = format!("({})", diag.source.as_deref().unwrap_or("LSP"));
+                                    // Префикс серый: "(Ruff " или "(LSP)" итд
+            // Суффикс фиолетовый+подчёркнутый: "ARG001)" — только код
+            let source_prefix = match (&diag.source, &diag.code) {
+                (Some(src), Some(_))  => format!("({} ", src),
+                (Some(src), None)     => format!("({})", src),
+                (None,      Some(_))  => "(".to_string(),
+                (None,      None)     => "(LSP)".to_string(),
+            };
+                        let source_suffix = match &diag.code {
+                Some(code) => code.clone(),
+                None       => String::new(),
+            };
+            // Полная строка нужна только для расчёта ширины переноса
+                        let close_paren_w = if source_suffix.is_empty() { 0.0 } else { self.measure_ui_width(")", 1.0) };
+            let source_full_w = self.measure_ui_width(&source_prefix, 1.0)
+                + self.measure_ui_width(&source_suffix, 1.0)
+                + close_paren_w;
             let msg = &diag.message;
 
             let mut lines = Vec::new();
             let mut cur_line = String::new();
-            let max_text_w = 400.0 * s; 
+            // Перенос только если текст действительно длинный
+            let max_text_w = 520.0 * s;
 
             for word in msg.split_whitespace() {
-                let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 0.9);
+                let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 1.0);
                 if w > max_text_w && !cur_line.is_empty() {
                     lines.push(cur_line);
                     cur_line = word.to_string();
@@ -1745,32 +1762,31 @@ impl Renderer {
                     cur_line.push_str(word);
                 }
             }
-            if !cur_line.is_empty() { lines.push(cur_line); }
+            if !cur_line.is_empty() { lines.push(cur_line.clone()); }
 
-            let last_line_w = self.measure_ui_width(&lines.last().unwrap_or(&String::new()), 0.9);
-            let source_w = self.measure_ui_width(&source_text, 0.9);
+            let last_line_w = self.measure_ui_width(lines.last().map(|s| s.as_str()).unwrap_or(""), 1.0);
             let mut source_on_new_line = false;
 
-            if last_line_w + source_w + 10.0 * s > max_text_w {
+            if last_line_w + source_full_w + 10.0 * s > max_text_w {
                 lines.push(String::new());
                 source_on_new_line = true;
             }
 
             let mut box_text_w = 0.0f32;
             for line in &lines {
-                let lw = self.measure_ui_width(line, 0.9);
+                let lw = self.measure_ui_width(line, 1.0);
                 if lw > box_text_w { box_text_w = lw; }
             }
-            if source_on_new_line && source_w > box_text_w {
-                box_text_w = source_w;
+            if source_on_new_line && source_full_w > box_text_w {
+                box_text_w = source_full_w;
             } else if !source_on_new_line {
-                let combined_w = last_line_w + 8.0 * s + source_w;
+                let combined_w = last_line_w + 8.0 * s + source_full_w;
                 if combined_w > box_text_w { box_text_w = combined_w; }
             }
 
             let icon_sz = 20.0 * s;
             let box_w = (box_text_w + pad * 2.0 + icon_sz + 16.0 * s).max(180.0 * s);
-            let box_h = pad * 2.0 + lines.len() as f32 * line_h;
+            let box_h = pad * 2.0 + lines.len() as f32 * line_h + 2.0 * s;
 
             let mut bx = diag_x;
             if bx + box_w > self.width - 20.0 * s {
@@ -1795,29 +1811,80 @@ impl Renderer {
                         self.push_rounded_rect(bx.round() - 1.0, by.round() - 1.0, box_w.round() + 2.0, box_h.round() + 2.0, 6.0 * s, border_color);
                         self.push_rounded_rect(bx.round(), by.round(), box_w.round(), box_h.round(), 6.0 * s, bg_color);
 
-                        let mut text_y = by + pad + 14.0 * s;
+                                                let total_text_h = lines.len() as f32 * line_h;
+                        let mut text_y = (by + (box_h - total_text_h) / 2.0 + line_h * 0.75).round();
                         for (i, line) in lines.iter().enumerate() {
-                            self.draw_string_scaled(&line, (bx + pad).round(), text_y.round(),[0.9, 0.9, 0.9, 1.0], 0.9);
+                            self.draw_string_scaled(&line, (bx + pad).round(), text_y.round(), [0.9, 0.9, 0.9, 1.0], 1.0);
 
-                            if i == lines.len() - 1 {
-                                let line_w = self.measure_ui_width(line, 0.9);
-                                let sx = if source_on_new_line { bx + pad } else { bx + pad + line_w + 8.0 * s };
-                                self.draw_string_scaled(&source_text, sx.round(), text_y.round(),[0.55, 0.55, 0.6, 1.0], 0.9);
+                                                                                    if i == lines.len() - 1 {
+                                let line_w = self.measure_ui_width(line, 1.0);
+                                let sx = if source_on_new_line { (bx + pad).round() } else { (bx + pad + line_w + 8.0 * s).round() };
+                                let sy = text_y.round();
+
+                                // "(Ruff " — всегда серый
+                                let prefix_w = self.measure_ui_width(&source_prefix, 1.0);
+                                self.draw_string_scaled(&source_prefix, sx, sy, [0.55, 0.55, 0.6, 1.0], 1.0);
+
+                                // "ARG001)" — фиолетовый, подчёркнутый, кликабельный
+                                if !source_suffix.is_empty() {
+                                    let sfx_x = sx + prefix_w;
+                                    let sfx_w = self.measure_ui_width(&source_suffix, 1.0);
+                                    let has_href = diag.code_href.is_some();
+
+                                    let sfx_hovered = has_href
+                                        && mx >= sfx_x - 1.0 && mx <= sfx_x + sfx_w + 1.0
+                                        && my >= sy - line_h && my <= sy + 2.0 * s;
+
+                                                                        let sfx_color = if sfx_hovered {
+                                        [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]
+                                    } else {
+                                        [self.theme.sel[0] * 0.85, self.theme.sel[1] * 0.85, self.theme.sel[2] * 0.85, 0.9]
+                                    };
+
+                                                                        if has_href {
+                                        let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
+                                        self.push_rect(sfx_x, sy + 1.0, sfx_w, 1.0, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], ul_alpha]);
+                                    }
+                                    if sfx_hovered { wants_pointer = true; }
+
+                                    self.draw_string_scaled(&source_suffix, sfx_x, sy, sfx_color, 1.0);
+
+                                    // Закрывающая скобка — серая, не кликабельная
+                                    self.draw_string_scaled(")", sfx_x + sfx_w, sy, [0.55, 0.55, 0.6, 1.0], 1.0);
+
+                                    if has_href {
+                                        ui_registry.register_rect(
+                                            crate::ui_system::UiId::OpenDiagUrl(idx),
+                                            sfx_x - 1.0, sy - line_h,
+                                            sfx_w + 2.0, line_h + 2.0 * s,
+                                            mx, my
+                                        );
+                                    }
+                                }
                             }
                             text_y += line_h;
                         }
 
-                        let is_copied = if let Some(copied_idx) = ide_panel.diag_copied_idx {
-                            copied_idx == idx && ide_panel.diag_copied_time.map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false)
-                        } else { false };
-
-                        let btn_x = (bx + box_w - pad - icon_sz).round();
-                        let btn_y = (by + pad - 2.0 * s).round();
+                                                                                                let is_copied = ide_panel.diag_copied_idx == Some(idx);
 
                         let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
                         let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
 
-                        let btn_hovered = mx >= btn_x - 4.0 * s && mx <= btn_x + icon_sz + 4.0 * s && my >= btn_y - 2.0 * s && my <= btn_y + icon_sz + 4.0 * s;
+                        // Blocker регистрируем первым — он ляжет в низ стека,
+                        // интерактивные элементы поверх него будут найдены раньше.
+                        // Сразу сбрасываем текстовый курсор — popup не I-beam зона.
+                        ui_registry.register_blocker(
+                            crate::ui_system::UiId::BottomPanelBody,
+                            bx, by, box_w, box_h, mx, my
+                        );
+                        ui_registry.reset_cursor_state();
+
+                        // Кнопка копирования — строго по центру вертикали
+                        let btn_x = (bx + box_w - pad - icon_sz).round();
+                        let btn_y = (by + (box_h - icon_sz) / 2.0).round();
+
+                        let btn_hovered = mx >= btn_x - 4.0 * s && mx <= btn_x + icon_sz + 4.0 * s
+                            && my >= btn_y - 2.0 * s && my <= btn_y + icon_sz + 4.0 * s;
 
                         if btn_hovered {
                             self.push_rounded_rect(btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, 4.0 * s, [1.0, 1.0, 1.0, 0.1]);
@@ -1825,23 +1892,18 @@ impl Renderer {
                         }
 
                         let icon_type = if is_copied { crate::widgets::IconType::Check } else { crate::widgets::IconType::Copy };
-                        let icon_color = if is_copied {[0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
+                        let icon_color = if is_copied { [0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
 
                         let icon_render_sz = 16.0 * s;
                         let offset = (icon_sz - icon_render_sz) / 2.0;
                         self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
 
-                        // СНАЧАЛА регистрируем фон (Blocker), чтобы он не перехватывал клики по кнопкам
-                        ui_registry.register_blocker(
-                            crate::ui_system::UiId::BottomPanelBody,
-                            bx, by, box_w, box_h, mx, my
-                        );
-
-                        // ЗАТЕМ кнопку копирования (она будет найдена первой, так как поиск идет с конца)
                         ui_registry.register_rect(
                             crate::ui_system::UiId::CopyDiagnostic(idx),
                             btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, mx, my
                         );
+
+                        
                     }
 
         self.flush();
