@@ -549,7 +549,11 @@ impl ApplicationHandler for App {
                     let s = r.scale_factor;
                     let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-                    let mut is_text = mx > padding && mx < (window_width - minimap_w - scrollbar_w);
+                                        let diag_popup_hovered = self.renderer.as_ref().unwrap()
+                        .last_diag_popup_rect
+                        .map(|(rx, ry, rw, rh)| mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh)
+                        .unwrap_or(false);
+                    let mut is_text = !diag_popup_hovered && mx > padding && mx < (window_width - minimap_w - scrollbar_w);
 
                     if r.max_scroll_x > 0.0 {
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;

@@ -1835,11 +1835,11 @@ impl Renderer {
                                         && mx >= sfx_x - 1.0 && mx <= sfx_x + sfx_w + 1.0
                                         && my >= sy - line_h && my <= sy + 2.0 * s;
 
-                                                                        let sfx_color = if sfx_hovered {
-                                        [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]
-                                    } else {
-                                        [self.theme.sel[0] * 0.85, self.theme.sel[1] * 0.85, self.theme.sel[2] * 0.85, 0.9]
-                                    };
+                                                                                                                                            let sfx_color = if sfx_hovered {
+                                                                                                                                                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]
+                                                                                                                                            } else {
+                                                                                                                                                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.85]
+                                                                                                                                            };
 
                                                                         if has_href {
                                         let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
@@ -1865,19 +1865,21 @@ impl Renderer {
                             text_y += line_h;
                         }
 
-                                                                                                let is_copied = ide_panel.diag_copied_idx == Some(idx);
+                                                                                                                        let is_copied = ide_panel.diag_copied_idx == Some(idx);
 
-                        let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
-                        let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
+                                                                                                                        let mx = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_x };
+                                                                                                                        let my = if show_settings || dialog_window_open { -1.0 } else { self.last_mouse_y };
 
-                        // Blocker регистрируем первым — он ляжет в низ стека,
-                        // интерактивные элементы поверх него будут найдены раньше.
-                        // Сразу сбрасываем текстовый курсор — popup не I-beam зона.
-                        ui_registry.register_blocker(
-                            crate::ui_system::UiId::BottomPanelBody,
-                            bx, by, box_w, box_h, mx, my
-                        );
-                        ui_registry.reset_cursor_state();
+                                                                                                                        // Blocker в самом конце — он перекроет EditorTextBody,
+                                                                                                                        // но OpenDiagUrl/CopyDiagnostic зарегистрированы ПОСЛЕ него и найдутся первыми.
+                                                                                                                        ui_registry.register_blocker(
+                                                                                                                            crate::ui_system::UiId::BottomPanelBody,
+                                                                                                                            bx, by, box_w, box_h, mx, my
+                                                                                                                        );
+                        let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
+                        if popup_hovered && !wants_pointer {
+                            ui_registry.reset_cursor_state();
+                        }
 
                         // Кнопка копирования — строго по центру вертикали
                         let btn_x = (bx + box_w - pad - icon_sz).round();
