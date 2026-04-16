@@ -526,11 +526,9 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-            UiId::OpenDiagUrl(idx) => {
-                if let Some(diag) = self.lsp.as_ref().and_then(|l| l.diagnostics.get(idx)) {
-                    if let Some(href) = &diag.code_href {
-                        let _ = std::process::Command::new("xdg-open").arg(href).spawn();
-                    }
+            UiId::OpenDiagUrl(_idx) => {
+                if let Some(href) = self.renderer.last_diag_href.take() {
+                    let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }
             UiId::CopyDiagnostic(idx) => {

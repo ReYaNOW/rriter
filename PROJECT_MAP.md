@@ -1,517 +1,797 @@
-# 🌳 RRiter Signal Map v4.5
-> AI Instructions: Use 'Logic Deps' to track cross-module flow. Utilities are hidden.
+# RRiter PROJECT_MAP
+# AUTO-GENERATED. Команда: make api-tree (python3 gen_project_map.py)
+#
+# pub fn name  [LINE] -> RetType
+#   SELF:  fn1, fn2            <- вызовы fn из этого же файла
+#   CALL module: fn1, fn2      <- вызовы fn из другого файла
+#   WRITE: field, other.push   <- self.field мутации / присваивания
+#   MATCH: Enum::Variant        <- паттерны match-веток
+# enum Name: Var1, Var2         <- варианты enum
 
+FILE src/app/events.rs
+  module: app::events
 
-## 📄 File: src/queries.rs
-### ⚡ fn get_params_query(lang_name: &str) -> Option<&'static str>
-### ⚡ fn get_injection_query(lang_name: &str) -> Option<&'static str>
-### ⚡ fn get_folding_query(lang_name: &str) -> Option<&'static str>
-### ⚡ fn get_ts_config(lang_name: &str) -> Option<(tree_sitter::Language, Vec<&'static str>)>
-### ⚡ fn test_all_tree_sitter_queries_are_valid()
-  - **Logic Deps:** `queries.rs: get_params_query, get_injection_query, get_ts_config, get_folding_query`
-## 📄 File: src/renderer.rs
-#### `struct Theme`
-#### `struct Vertex`
-#### `struct GlyphInfo`
-#### `struct VisualLine`
-#### `struct FontData`
-#### `struct Renderer`
-#### `impl Renderer`
-### ⚡ fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self
-  - **Logic Deps:** `main.rs: main; renderer.rs: get_glyph, load_builtin_icons`
-### ⚡ fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo>
-  - **Logic Deps:** `widgets.rs: render`
-### ⚡ fn get_glyph(&mut self, c: char) -> Option<GlyphInfo>
-  - **Logic Deps:** `widgets.rs: render; renderer.rs: get_custom_svg_glyph`
-### ⚡ fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo>
-  - **Logic Deps:** `widgets.rs: render; renderer.rs: get_custom_svg_glyph`
-### ⚡ fn resize(&mut self, w: u32, h: u32)
-### ⚡ fn measure_ui_width(&mut self, text: &str, scale: f32) -> f32
-  - **Logic Deps:** `renderer.rs: get_ui_glyph`
-### ⚡ fn char_advance(&mut self, c: char) -> f32
-  - **Logic Deps:** `renderer.rs: get_glyph`
-### ⚡ fn push_quad(&mut self, x: f32, y: f32, w: f32, h: f32, u: f32, v: f32, uw: f32, vh: f32, color: [f32; 4], mode: f32,)
-### ⚡ fn load_builtin_icons(&mut self)
-  - **Logic Deps:** `widgets.rs: render`
-### ⚡ fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4])
-### ⚡ fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4])
-  - **Logic Deps:** `renderer.rs: push_quad`
-### ⚡ fn push_rounded_rect_gradient(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, top_color: [f32; 4], bottom_color: [f32; 4],)
-## 📄 File: src/widgets.rs
-#### `enum IconType`
-#### `struct Button`
-#### `impl Button`
-#### `struct IconButton`
-#### `impl IconButton`
-### ⚡ fn is_hovered(&self, mx: f32, my: f32) -> bool
-### ⚡ fn render(&self, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool,) -> bool
-  - **Logic Deps:** `core_text.rs: draw_string_scaled, push_rounded_rect; renderer.rs: measure_ui_width; ui.rs: draw_atlas_icon`
-### ⚡ fn is_hovered(&self, mx: f32, my: f32) -> bool
-### ⚡ fn render(&self, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool,) -> bool
-  - **Logic Deps:** `renderer.rs: push_rect; widgets.rs: is_hovered; core_text.rs: push_rounded_rect; ui.rs: draw_atlas_icon`
-### ⚡ fn get_welcome_buttons(_width: f32, x: f32, y: f32, scale: f32, renderer: &mut Renderer,) -> (Button, Button, Button)
-  - **Logic Deps:** `renderer.rs: measure_ui_width`
-### ⚡ fn get_dialog_buttons(box_x: f32, box_y: f32, box_w: f32, box_h: f32, scale: f32, renderer: &mut Renderer,) -> (Button, Button, Button)
-  - **Logic Deps:** `renderer.rs: measure_ui_width`
-## 📄 File: src/editor.rs
-#### `enum LineModState`
-#### `enum EditOp`
-#### `struct HistoryStep`
-#### `enum UndoRedoDelta`
-#### `struct Editor`
-#### `impl Editor`
-### ⚡ fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>)
-### ⚡ fn is_delimiter(b: u8) -> bool
-### ⚡ fn char_class(b: u8) -> u8
-### ⚡ fn new(capacity: usize) -> Self
-### ⚡ fn shift_folds_insert(&mut self, offset: usize, len: usize)
-### ⚡ fn shift_folds_delete(&mut self, offset: usize, len: usize)
-### ⚡ fn rebuild_line_offsets(&mut self)
-  - **Logic Deps:** `editor.rs: text_parts`
-### ⚡ fn get_line_hashes(&self) -> Vec<u64>
-  - **Logic Deps:** `editor.rs: text_parts`
-### ⚡ fn ensure_indent_cache_updated(&mut self)
-  - **Logic Deps:** `editor.rs: text_parts`
-### ⚡ fn get_cached_indent_levels(&self) -> &[u8]
-### ⚡ fn backspace(&mut self) -> Option<(usize, usize)>
-  - **Logic Deps:** `editor.rs: push_history, update_modifications, is_char_boundary, shift_folds_delete, delete_selection, move_gap, byte_at`
-### ⚡ fn set_original_text(&mut self)
-  - **Logic Deps:** `editor.rs: update_modifications, get_line_hashes`
-### ⚡ fn mark_saved(&mut self)
-  - **Logic Deps:** `editor.rs: update_modifications, get_line_hashes`
-### ⚡ fn is_dirty(&self) -> bool
-### ⚡ fn get_line_modification_state(&self, line: usize) -> Option<LineModState>
-### ⚡ fn update_modifications(&mut self)
-  - **Logic Deps:** `editor.rs: get_diff_info, rebuild_line_offsets, get_line_hashes`
-### ⚡ fn clear_history(&mut self)
-  - **Logic Deps:** `editor.rs: update_modifications`
-### ⚡ fn push_history(&mut self, step: HistoryStep)
-### ⚡ fn undo(&mut self) -> Option<UndoRedoDelta>
-  - **Logic Deps:** `editor.rs: update_modifications, insert_str_internal, shift_folds_delete, move_gap`
-### ⚡ fn redo(&mut self) -> Option<UndoRedoDelta>
-  - **Logic Deps:** `editor.rs: update_modifications, insert_str_internal, shift_folds_delete, move_gap`
-### ⚡ fn text_parts(&self) -> (&str, &str)
-### ⚡ fn get_full_text(&self) -> String
-  - **Logic Deps:** `editor.rs: text_parts`
-### ⚡ fn move_gap(&mut self, target: usize)
-### ⚡ fn insert_str_internal(&mut self, s: &str) -> usize
-  - **Logic Deps:** `editor.rs: shift_folds_insert, move_gap`
-### ⚡ fn insert_str(&mut self, s: &str) -> (Option<(usize, usize)>, usize)
-  - **Logic Deps:** `editor.rs: push_history, update_modifications, insert_str_internal, delete_selection`
-### ⚡ fn delete_selection(&mut self) -> Option<(usize, usize)>
-  - **Logic Deps:** `editor.rs: push_history, update_modifications, shift_folds_delete, move_gap, byte_at`
-### ⚡ fn delete_forward(&mut self) -> Option<(usize, usize)>
-  - **Logic Deps:** `editor.rs: push_history, update_modifications, is_char_boundary, shift_folds_delete, delete_selection, move_gap, byte_at`
-### ⚡ fn delete_word_backward(&mut self) -> Option<(usize, usize)>
-  - **Logic Deps:** `editor.rs: is_delimiter, delete_selection, byte_at`
-### ⚡ fn delete_word_forward(&mut self) -> Option<(usize, usize)>
-  - **Logic Deps:** `editor.rs: is_delimiter, delete_selection, byte_at`
-### ⚡ fn get_auto_indent(&self) -> String
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn select_expand(&mut self)
-  - **Logic Deps:** `editor.rs: byte_at, char_class`
-### ⚡ fn select_word(&mut self)
-  - **Logic Deps:** `editor.rs: byte_at, is_delimiter`
-### ⚡ fn select_line(&mut self)
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn is_char_boundary(&self, index: usize) -> bool
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn byte_at(&self, idx: usize) -> u8
-### ⚡ fn len(&self) -> usize
-### ⚡ fn utf16_col_to_byte_advance(&self, line_idx: usize, mut f: F)
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn get_selection(&self) -> Option<String>
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn select_all(&mut self)
-### ⚡ fn handle_selection(&mut self, shift: bool)
-### ⚡ fn snap_cursor_out_of_fold(&mut self, old_cursor: usize)
-  - **Logic Deps:** `editor.rs: move_end`
-### ⚡ fn move_left(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: snap_cursor_out_of_fold, is_char_boundary, handle_selection`
-### ⚡ fn move_right(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: snap_cursor_out_of_fold, is_char_boundary, handle_selection`
-### ⚡ fn move_word_left(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: snap_cursor_out_of_fold, char_class, handle_selection, byte_at`
-### ⚡ fn move_word_right(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: snap_cursor_out_of_fold, handle_selection, char_class, byte_at`
-### ⚡ fn move_home(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: handle_selection, byte_at`
-### ⚡ fn move_end(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: handle_selection, byte_at`
-### ⚡ fn move_start_of_file(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: handle_selection`
-### ⚡ fn move_end_of_file(&mut self, shift: bool)
-  - **Logic Deps:** `editor.rs: handle_selection`
-### ⚡ fn move_up(&mut self, renderer: &mut Renderer, shift: bool)
-  - **Logic Deps:** `core_text.rs: get_cursor_xy, get_byte_at_xy; editor.rs: handle_selection`
-### ⚡ fn move_down(&mut self, renderer: &mut Renderer, shift: bool)
-  - **Logic Deps:** `core_text.rs: get_cursor_xy, get_byte_at_xy; editor.rs: handle_selection`
-### ⚡ fn set_cursor_at_pos(&mut self, target_x: f32, target_y: f32, renderer: &mut Renderer, is_click: bool,)
-  - **Logic Deps:** `core_text.rs: get_byte_at_xy`
-### ⚡ fn move_page_up(&mut self, renderer: &mut Renderer, shift: bool, step: f32)
-  - **Logic Deps:** `core_text.rs: get_cursor_xy, get_byte_at_xy; editor.rs: handle_selection`
-### ⚡ fn move_page_down(&mut self, renderer: &mut Renderer, shift: bool, step: f32)
-  - **Logic Deps:** `core_text.rs: get_cursor_xy, get_byte_at_xy; editor.rs: handle_selection`
-## 📄 File: src/lsp.rs
-#### `enum LspServerStatus`
-#### `struct LogEntry`
-#### `struct LspServerInfo`
-#### `enum DiagSeverity`
-#### `struct Diagnostic`
-#### `struct TextChange`
-#### `struct WorkspaceEdit`
-#### `enum LspEvent`
-#### `struct CodeAction`
-#### `struct LspServerDef`
-#### `enum Cmd`
-#### `struct SpawnedProcess`
-#### `struct OpenFile`
-#### `struct LspProcess`
-#### `impl LspProcess`
-#### `struct LspManager`
-#### `impl LspManager`
-### ⚡ fn next_id() -> i32
-### ⚡ fn offset_to_lsp_pos(text: &str, offset: usize, line_offsets: &[usize]) -> (u32, u32)
-### ⚡ fn json_escape(s: &str) -> String
-### ⚡ fn path_to_uri(path: &str) -> String
-### ⚡ fn uri_to_path(uri: &str) -> PathBuf
-### ⚡ fn make_initialize(id: i32, workspace: Option<&Path>) -> Vec<u8>
-  - **Logic Deps:** `ui_system.rs: id; lsp.rs: json_escape, path_to_uri`
-### ⚡ fn make_initialized() -> Vec<u8>
-### ⚡ fn make_did_open(uri: &str, lang: &str, version: i32, text: &str) -> Vec<u8>
-  - **Logic Deps:** `lsp.rs: json_escape`
-### ⚡ fn make_did_change_full(uri: &str, version: i32, text: &str) -> Vec<u8>
-  - **Logic Deps:** `lsp.rs: json_escape`
-### ⚡ fn make_did_close(uri: &str) -> Vec<u8>
-  - **Logic Deps:** `lsp.rs: json_escape`
-### ⚡ fn make_code_action(id: i32, uri: &str, sl: u32, sc: u32, el: u32, ec: u32, diag_json: &str,) -> Vec<u8>
-  - **Logic Deps:** `lsp.rs: json_escape`
-### ⚡ fn make_shutdown(id: i32) -> Vec<u8>
-### ⚡ fn make_exit() -> Vec<u8>
-### ⚡ fn write_frame(writer: &mut BufWriter<std::process::ChildStdin>, body: &[u8]) -> bool
-### ⚡ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic>
-### ⚡ fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange>
-### ⚡ fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit
-  - **Logic Deps:** `lsp.rs: uri_to_path`
-### ⚡ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction>
-### ⚡ fn dispatch_frame(body: &[u8], event_tx: &Sender<LspEvent>, server_name: &'static str, out_tx: &Sender<Vec<u8>>,)
-  - **Logic Deps:** `lsp.rs: parse_workspace_edit_value, parse_diagnostic_value, uri_to_path`
-### ⚡ fn spawn_server(def: &'static LspServerDef, workspace: Option<&Path>, event_tx: Sender<LspEvent>,) -> Option<SpawnedProcess>
-  - **Logic Deps:** `lsp.rs: dispatch_frame, write_frame`
-### ⚡ fn send_and_log(out_tx: &Sender<Vec<u8>>, event_tx: &Sender<LspEvent>, server_name: &'static str, msg: Vec<u8>,) -> Result<(), mpsc::SendError<Vec<u8>>>
-### ⚡ fn run_supervisor(def: &'static LspServerDef, workspace: Option<PathBuf>, cmd_rx: Receiver<Cmd>, event_tx: Sender<LspEvent>,)
-  - **Logic Deps:** `lsp.rs: make_initialized, make_did_close, make_shutdown, make_did_open, make_did_change_full, next_id, send_and_log, make_initialize, make_code_action, make_exit, spawn_server`
-### ⚡ fn start(def: &'static LspServerDef, workspace: Option<PathBuf>) -> Self
-  - **Logic Deps:** `lsp.rs: run_supervisor`
-### ⚡ fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32)
-  - **Logic Deps:** `lsp.rs: path_to_uri`
-### ⚡ fn restart(&mut self)
-### ⚡ fn notify_change(&mut self, path: &PathBuf, text: &str, version: i32)
-  - **Logic Deps:** `lsp.rs: path_to_uri`
-### ⚡ fn notify_close(&mut self, path: &PathBuf)
-  - **Logic Deps:** `lsp.rs: path_to_uri`
-### ⚡ fn request_code_actions(&mut self, path: &PathBuf, start_line: u32, start_col: u32, end_line: u32, end_col: u32, diagnostics: &[Diagnostic],) -> i32
-  - **Logic Deps:** `lsp.rs: next_id, encode_diagnostics_json, path_to_uri`
-### ⚡ fn poll(&self) -> Vec<LspEvent>
-### ⚡ fn shutdown(self)
-### ⚡ fn encode_diagnostics_json(diags: &[Diagnostic]) -> String
-  - **Logic Deps:** `lsp.rs: json_escape`
-### ⚡ fn new(workspace: Option<PathBuf>) -> Self
-### ⚡ fn ensure_python(&mut self)
-  - **Logic Deps:** `lsp.rs: start`
-### ⚡ fn restart_python(&mut self)
-  - **Logic Deps:** `lsp.rs: restart, start`
-### ⚡ fn disable_python(&mut self)
-  - **Logic Deps:** `lsp.rs: shutdown`
-### ⚡ fn enable_python(&mut self)
-  - **Logic Deps:** `lsp.rs: notify_open, start`
-### ⚡ fn servers_info(&self) -> Vec<LspServerInfo>
-### ⚡ fn process_for_ext(&mut self, ext: &str) -> Option<&mut LspProcess>
-  - **Logic Deps:** `lsp.rs: ensure_python`
-### ⚡ fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32)
-  - **Logic Deps:** `lsp.rs: process_for_ext`
-### ⚡ fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32)
-  - **Logic Deps:** `lsp.rs: process_for_ext`
-### ⚡ fn notify_close(&mut self, ext: &str)
-  - **Logic Deps:** `lsp.rs: process_for_ext`
-### ⚡ fn request_code_actions(&mut self, ext: &str, start_line: u32, start_col: u32, end_line: u32, end_col: u32, relevant_diags: &[Diagnostic],) -> Option<i32>
-  - **Logic Deps:** `lsp.rs: process_for_ext`
-### ⚡ fn poll(&mut self) -> Vec<LspEvent>
-  - **Logic Deps:** `lsp.rs: path_to_uri, format_and_highlight_json`
-### ⚡ fn diagnostics_for_line(&self, line: u32) -> Vec<&Diagnostic>
-### ⚡ fn request_fix_all(&mut self, ext: &str) -> Option<i32>
-  - **Logic Deps:** `lsp.rs: process_for_ext, next_id, path_to_uri`
-### ⚡ fn shutdown(mut self)
-### ⚡ fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize
-### ⚡ fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &PathBuf) -> String
-  - **Logic Deps:** `lsp.rs: lsp_pos_to_offset`
-### ⚡ fn format_and_highlight_json(raw_text: &str,) -> (
-  String,
-  Vec<crate::highlighter::ColorSpan>,
-  Vec<(usize, usize)>,
-)
-  - **Logic Deps:** `queries.rs: get_folding_query, get_ts_config`
-## 📄 File: src/main.rs
-#### `struct Config`
-#### `impl Default for Config`
-### ⚡ fn default() -> Self
-### ⚡ fn load_recent_files() -> Vec<PathBuf>
-### ⚡ fn save_recent_files(files: &[PathBuf])
-### ⚡ fn save_panel_state(state: &crate::app::IdePanelState)
-### ⚡ fn load_panel_state() -> crate::app::IdePanelState
-### ⚡ fn save_config(config: &Config)
-### ⚡ fn load_config() -> Config
-  - **Logic Deps:** `main.rs: save_config`
-### ⚡ fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32
-### ⚡ fn load_dracula() -> Theme
-  - **Logic Deps:** `main.rs: get_kde_color`
-### ⚡ fn main()
-  - **Logic Deps:** `main.rs: load_recent_files, load_panel_state, save_recent_files, load_config, load_dracula; file_tree.rs: refresh_file_tree, start_file_watcher; editor.rs: insert_str, set_original_text, get_full_text, clear_history; app.rs: is_open; highlighter.rs: reset`
-## 📄 File: src/render_view.rs
-#### `struct ModInterval`
-#### `impl Renderer`
-### ⚡ fn draw(&mut self, editor: &mut Editor, scroll_x: f32, scroll_y: f32, blink_alpha: f32, show_fps: bool, spans: &[ColorSpan], dialog_window_open: bool, is_resizing: bool, search_results: &[(usize, usize)
-  - **Logic Deps:** `ui_system.rs: register_text_input, hovered, register_rect, reset_cursor_state, register_icon_button, wants_pointer, register_blocker; app.rs: any_bottom_open, icon, label, any_top_open, is_open; core_text.rs: update_cache, measure_width, push_rounded_rect, draw_string_mono_scaled, get_max_scroll, draw_string_scaled, measure_mono_width, draw_string; render_view.rs: draw_minimap; widgets.rs: render`
-### ⚡ fn draw_minimap(&mut self, editor: &Editor, spans: &[ColorSpan], render_scroll_y: f32, max_scroll: f32, total_lines: usize, visible_cursor_line: usize,)
-  - **Logic Deps:** `editor.rs: text_parts; renderer.rs: push_rect`
-## 📄 File: src/app.rs
-#### `enum PendingAction`
-#### `enum PanelId`
-#### `impl PanelId`
-#### `enum PanelGroup`
-#### `struct PanelSlot`
-#### `struct PanelDragState`
-#### `enum LspActionItem`
-#### `struct LspActionsMenu`
-#### `struct IdePanelState`
-#### `impl Default for IdePanelState`
-#### `impl IdePanelState`
-#### `struct App`
-#### `impl App`
-### ⚡ fn label(self) -> &'static str
-### ⚡ fn icon(self) -> crate::widgets::IconType
-  - **Logic Deps:** `lsp.rs: CodeAction`
-### ⚡ fn default() -> Self
-### ⚡ fn any_top_open(&self) -> bool
-### ⚡ fn any_bottom_open(&self) -> bool
-### ⚡ fn toggle(&mut self, id: PanelId)
-### ⚡ fn is_open(&self, id: PanelId) -> bool
-### ⚡ fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>>
-### ⚡ fn ensure_cursor_visible(target_scroll_y: &mut f32, target_scroll_x: &mut f32, editor: &Editor, renderer: &mut Renderer, window_width: f32, window_height: f32,)
-  - **Logic Deps:** `core_text.rs: get_max_scroll, get_cursor_xy`
-### ⚡ fn get_current_word_prefix(&self) -> String
-  - **Logic Deps:** `editor.rs: byte_at`
-### ⚡ fn update_autocomplete(&mut self)
-  - **Logic Deps:** `app.rs: get_current_word_prefix, fuzzy_match`
-### ⚡ fn ensure_autocomplete_visible(&mut self)
-  - **Logic Deps:** `scroll.rs: set_target, clamp_target`
-### ⚡ fn apply_autocomplete(&mut self)
-  - **Logic Deps:** `app.rs: get_current_word_prefix, update_window_title; editor.rs: insert_str, is_dirty, backspace; highlighter.rs: shift_delete, shift_insert`
-### ⚡ fn update_search(&mut self)
-  - **Logic Deps:** `editor.rs: get_full_text; lsp.rs: start`
-### ⚡ fn jump_to_search_result(&mut self)
-  - **Logic Deps:** `scroll.rs: clamp_target; core_text.rs: get_max_scroll`
-### ⚡ fn update_window_title(window: &Window, base_title: &str, is_dirty: bool)
-### ⚡ fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction)
-### ⚡ fn close_dialog(&mut self)
-### ⚡ fn close_current_file(&mut self)
-  - **Logic Deps:** `editor.rs: set_original_text; app.rs: update_window_title; highlighter.rs: reset; lsp.rs: notify_close`
-### ⚡ fn trigger_file_picker(&mut self)
-### ⚡ fn trigger_folder_picker(&mut self)
-### ⚡ fn trigger_save_as_picker(&mut self)
-### ⚡ fn save_current_file(&mut self) -> bool
-  - **Logic Deps:** `editor.rs: mark_saved, get_full_text; app.rs: trigger_save_as_picker`
-### ⚡ fn add_recent_file(&mut self, path: PathBuf)
-  - **Logic Deps:** `highlighter.rs: wait_for_first_result, poll; main.rs: save_recent_files`
-### ⚡ fn apply_highlight_results(&mut self)
-### ⚡ fn load_file(&mut self, path: PathBuf, add_to_history: bool)
-  - **Logic Deps:** `lsp.rs: notify_open; highlighter.rs: wait_for_first_result, reset; editor.rs: insert_str, set_original_text, get_full_text, clear_history; app.rs: apply_highlight_results, update_window_title, add_recent_file; main.rs: save_recent_files`
-## 📄 File: src/highlighter.rs
-#### `struct ColorSpan`
-#### `enum SymbolKind`
-#### `struct CompletionItem`
-#### `enum SyncEdit`
-#### `enum HighlighterMessage`
-#### `struct Highlighter`
-#### `struct Scope`
-#### `impl Highlighter`
-### ⚡ fn get_point(text: &str, byte_offset: usize) -> tree_sitter::Point
-### ⚡ fn resolve_color(name: &str, node_text: &str, start_byte: usize, param_scopes: &[Scope],) -> [f32
-### ⚡ fn new() -> Self
-  - **Logic Deps:** `highlighter.rs: resolve_color, flatten_spans, get_point; queries.rs: get_injection_query, get_params_query, get_folding_query, get_ts_config; editor.rs: insert_str, is_char_boundary`
-### ⚡ fn reset(&self, version: u64, text: String, ext: String)
-### ⚡ fn apply_edits(&self, version: u64, edits: Vec<SyncEdit>)
-### ⚡ fn poll(&mut self, current_editor_version: u64) -> bool
-### ⚡ fn wait_for_first_result(&mut self, version: u64, timeout: std::time::Duration) -> bool
-  - **Logic Deps:** `highlighter.rs: poll`
-### ⚡ fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>)
-### ⚡ fn shift_delete(&mut self, offset: usize, len: usize)
-### ⚡ fn get_bracket_color(depth: usize) -> [f32
-### ⚡ fn flatten_spans(mut spans: Vec<ColorSpan>, len: usize, text: &str, byte_colors: &mut Vec<[f32; 4]>, error_ranges: Vec<(usize, usize)
-  - **Logic Deps:** `highlighter.rs: get_bracket_color`
-## 📄 File: src/scroll.rs
-#### `struct ScrollState`
-#### `impl ScrollState`
-### ⚡ fn new(anim_speed: f32) -> Self
-### ⚡ fn update(&mut self, dt: f32) -> bool
-### ⚡ fn clamp_target(&mut self, min: f32, max: f32)
-### ⚡ fn clamp_current(&mut self, min: f32, max: f32)
-### ⚡ fn scroll_by(&mut self, delta: f32)
-### ⚡ fn set_target(&mut self, target: f32)
-### ⚡ fn stop_anim(&mut self)
-## 📄 File: src/ui_system.rs
-#### `enum UiId`
-#### `enum UiElement`
-#### `impl UiElement`
-#### `struct UiRegistry`
-#### `impl UiRegistry`
-### ⚡ fn contains(&self, mx: f32, my: f32) -> bool
-### ⚡ fn id(&self) -> UiId
-### ⚡ fn new() -> Self
-### ⚡ fn clear(&mut self)
-### ⚡ fn mark_overlay_start(&mut self)
-### ⚡ fn find_overlay_at(&self, mx: f32, my: f32) -> Option<UiId>
-  - **Logic Deps:** `ui_system.rs: id`
-### ⚡ fn register_button(&mut self, id: UiId, button: &Button, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool,) -> bool
-  - **Logic Deps:** `widgets.rs: render`
-### ⚡ fn register_icon_button(&mut self, id: UiId, icon_button: &IconButton, renderer: &mut Renderer, mx: f32, my: f32, scale: f32, pressed: bool,) -> bool
-  - **Logic Deps:** `widgets.rs: render`
-### ⚡ fn register_text_input(&mut self, id: UiId, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32,) -> bool
-### ⚡ fn register_blocker(&mut self, id: UiId, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32,) -> bool
-### ⚡ fn register_rect(&mut self, id: UiId, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32,) -> bool
-### ⚡ fn find_at(&self, mx: f32, my: f32) -> Option<UiId>
-  - **Logic Deps:** `ui_system.rs: id`
-### ⚡ fn hovered(&self) -> Option<UiId>
-### ⚡ fn reset_cursor_state(&mut self)
-### ⚡ fn wants_pointer(&self) -> bool
-### ⚡ fn wants_text(&self) -> bool
-### ⚡ fn cursor_code(&self) -> u8
-## 📄 File: src/app/file_icons.rs
-> Определение иконки для файла/папки.
-#### `struct FallbackMatcher`
-### ⚡ fn file_icon_key(name: &str) -> &'static str
-### ⚡ fn folder_icon_key(name: &str) -> &'static str
-### ⚡ fn svg_for_key(key: &str, is_folder: bool) -> &'static [u8]
-## 📄 File: src/app/keyboard.rs
-#### `impl App`
-### ⚡ fn handle_search_keyboard_input(&mut self, key_event: KeyEvent)
-  - **Logic Deps:** `editor.rs: move_left, get_selection, insert_str, select_all, move_home, move_word_left, move_word_right, move_right, delete_selection, delete_forward, backspace, move_end; app.rs: update_search, jump_to_search_result`
-### ⚡ fn handle_editor_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: KeyEvent,)
-  - **Logic Deps:** `editor.rs: move_page_up, delete_word_forward, get_full_text, move_end_of_file, delete_forward, redo, move_word_right, move_right, move_page_down, is_dirty, delete_word_backward, select_all, select_expand, delete_selection, backspace, move_down, move_left, get_auto_indent, get_selection, insert_str, move_start_of_file, move_home, move_up, move_word_left, undo, move_end; app.rs: show_action_dialog, update_autocomplete, jump_to_search_result, close_current_file, apply_autocomplete, ensure_autocomplete_visible, update_search, trigger_file_picker, save_current_file, ensure_cursor_visible, update_window_title; main.rs: save_config; lsp_actions.rs: apply_selected_lsp_action, open_lsp_actions_menu; core_text.rs: get_cursor_xy, get_max_scroll`
-### ⚡ fn handle_main_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: KeyEvent,)
-  - **Logic Deps:** `editor.rs: move_left, delete_word_forward, get_selection, insert_str, delete_word_backward, get_full_text, select_all, move_home, move_word_left, move_word_right, delete_forward, delete_selection, move_right, backspace, move_end; keyboard.rs: handle_search_keyboard_input, handle_editor_keyboard_input; file_tree.rs: refresh_file_tree; main.rs: save_config; app.rs: close_dialog`
-## 📄 File: src/app/file_tree.rs
-> Логика проводника файлов: структуры данных, фоновый скан, методы App.
-#### `struct FileNode`
-#### `impl App`
-### ⚡ fn matches_ignore_pattern(name: &str, patterns: &[&str]) -> bool
-### ⚡ fn pre_rasterize_icon(key: &'static str, is_folder: bool)
-  - **Logic Deps:** `widgets.rs: render; file_icons.rs: svg_for_key`
-### ⚡ fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>)
-### ⚡ fn scan_dir_parallel(path: PathBuf, name: String, depth: usize, expanded: &FxHashSet<PathBuf>, is_root: bool, max_depth: usize, gitignore: &ignore::gitignore::Gitignore, all_patterns: &[&str],) -> Vec<FileNode>
-  - **Logic Deps:** `file_icons.rs: file_icon_key, folder_icon_key; file_tree.rs: matches_ignore_pattern, read_children`
-### ⚡ fn spawn_scan(roots: Vec<PathBuf>, expanded: FxHashSet<PathBuf>, user_patterns: Vec<String>,) -> mpsc::Receiver<Vec<FileNode>>
-  - **Logic Deps:** `file_tree.rs: scan_dir_parallel, pre_rasterize_icon`
-### ⚡ fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()
-### ⚡ fn refresh_file_tree(&mut self)
-  - **Logic Deps:** `file_tree.rs: spawn_scan`
-### ⚡ fn poll_file_tree(&mut self) -> bool
-### ⚡ fn start_file_watcher(&mut self)
-  - **Logic Deps:** `file_tree.rs: spawn_watcher`
-### ⚡ fn handle_file_tree_click(&mut self, node_idx: usize)
-  - **Logic Deps:** `app.rs: load_file; file_tree.rs: refresh_file_tree`
-### ⚡ fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize>
-  - **Logic Deps:** `app.rs: any_top_open, is_open`
-## 📄 File: src/app/lsp_actions.rs
-#### `impl App`
-### ⚡ fn lsp_panel_bounds(&self) -> Option<(f32, f32, f32, f32)>
-  - **Logic Deps:** `app.rs: any_bottom_open`
-### ⚡ fn lsp_panel_total_h(&self, s: f32) -> f32
-  - **Logic Deps:** `lsp_actions.rs: lsp_server_logs_h`
-### ⚡ fn lsp_server_logs_h(&self, info: &crate::lsp::LspServerInfo, s: f32) -> f32
-  - **Logic Deps:** `lsp_actions.rs: lsp_server_inner_size`
-### ⚡ fn lsp_server_inner_size(&self, info: &crate::lsp::LspServerInfo, s: f32,) -> (f32, f32)
-### ⚡ fn open_lsp_actions_menu(&mut self)
-  - **Logic Deps:** `lsp.rs: diagnostics_for_line, request_code_actions; core_text.rs: get_cursor_xy`
-### ⚡ fn apply_selected_lsp_action(&mut self)
-  - **Logic Deps:** `lsp.rs: apply_workspace_edit_to_text, CodeAction; editor.rs: get_full_text; lsp_actions.rs: insert_noqa_comment, apply_full_text_replacement`
-### ⚡ fn insert_noqa_comment(&mut self, line: u32, codes: &[String])
-  - **Logic Deps:** `editor.rs: byte_at, insert_str, is_dirty, get_full_text, delete_forward; app.rs: update_window_title; highlighter.rs: apply_edits, shift_delete, shift_insert; lsp.rs: notify_change`
-### ⚡ fn apply_full_text_replacement(&mut self, new_text: String)
-  - **Logic Deps:** `editor.rs: insert_str, set_original_text; app.rs: update_window_title; highlighter.rs: reset; lsp.rs: notify_change`
-## 📄 File: src/app/ui_handlers.rs
-#### `impl App`
-### ⚡ fn handle_ui_click(&mut self, id: UiId)
-  - **Logic Deps:** `editor.rs: select_word, get_full_text, select_line, insert_str, set_original_text, set_cursor_at_pos; lsp.rs: restart_python, enable_python, request_fix_all, servers_info, disable_python; main.rs: save_config, save_panel_state; app.rs: jump_to_search_result, toggle, trigger_folder_picker, trigger_save_as_picker, update_search, trigger_file_picker, update_window_title, is_open; highlighter.rs: reset`
-## 📄 File: src/app/events.rs
-#### `impl ApplicationHandler for App`
-### ⚡ fn resumed(&mut self, event_loop: &ActiveEventLoop)
-  - **Logic Deps:** `editor.rs: is_dirty; app.rs: update_window_title`
-### ⚡ fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent)
-  - **Logic Deps:** `ui_system.rs: mark_overlay_start, id, find_overlay_at; app.rs: any_bottom_open, show_action_dialog, update_window_title, trigger_file_picker, close_dialog, save_current_file, close_current_file, any_top_open; mouse.rs: handle_main_mouse_input, handle_main_cursor_moved, handle_main_mouse_wheel; editor.rs: is_dirty; lsp_ui.rs: draw_lsp_actions_menu`
-### ⚡ fn about_to_wait(&mut self, event_loop: &ActiveEventLoop)
-  - **Logic Deps:** `lsp.rs: apply_workspace_edit_to_text, servers_info; editor.rs: get_full_text, rebuild_line_offsets, is_dirty, insert_str, set_cursor_at_pos; lsp_actions.rs: apply_full_text_replacement; app.rs: update_autocomplete, load_file, apply_highlight_results, save_current_file, update_window_title, add_recent_file; main.rs: save_config`
-## 📄 File: src/app/mouse.rs
-#### `impl App`
-### ⚡ fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta)
-  - **Logic Deps:** `app.rs: any_bottom_open, is_open; settings_ui.rs: get_faq_max_scroll; lsp_actions.rs: lsp_server_logs_h, lsp_server_inner_size, lsp_panel_total_h, lsp_panel_bounds; renderer.rs: measure_ui_width; core_text.rs: get_max_scroll`
-### ⚡ fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState)
-  - **Logic Deps:** `lsp.rs: apply_workspace_edit_to_text, CodeAction; renderer.rs: get_ui_glyph; scroll.rs: clamp_current, clamp_target; lsp_actions.rs: insert_noqa_comment, apply_full_text_replacement; file_tree.rs: refresh_file_tree`
-### ⚡ fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>)
-  - **Logic Deps:** `renderer.rs: get_ui_glyph, char_advance; editor.rs: text_parts, get_full_text, set_cursor_at_pos; lsp_actions.rs: lsp_server_logs_h, lsp_server_inner_size, lsp_panel_total_h, lsp_panel_bounds; core_text.rs: get_max_scroll; file_tree.rs: file_tree_node_at`
-## 📄 File: src/render_view/core_text.rs
-#### `impl Renderer`
-### ⚡ fn update_cache(&mut self, editor: &Editor, scroll_x: f32, scroll_y: f32, _is_resizing: bool,)
-  - **Logic Deps:** `editor.rs: text_parts, byte_at; renderer.rs: char_advance, measure_ui_width`
-### ⚡ fn get_cursor_xy(&mut self, editor: &Editor) -> (f32, f32)
-  - **Logic Deps:** `editor.rs: text_parts, byte_at; core_text.rs: measure_width; renderer.rs: char_advance, measure_ui_width`
-### ⚡ fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize
-  - **Logic Deps:** `editor.rs: text_parts, byte_at; renderer.rs: char_advance`
-### ⚡ fn measure_width(&mut self, first: &str, second: &str, start: usize, end: usize) -> f32
-  - **Logic Deps:** `renderer.rs: char_advance`
-### ⚡ fn get_max_scroll(&mut self, editor: &Editor, window_height: f32) -> f32
-### ⚡ fn flush(&mut self)
-### ⚡ fn push_vertical_gradient(&mut self, x: f32, y: f32, w: f32, h: f32, top: [f32; 4], bottom: [f32; 4],)
-### ⚡ fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4])
-  - **Logic Deps:** `renderer.rs: get_glyph, push_quad`
-### ⚡ fn draw_string_scaled(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4], scale: f32,)
-  - **Logic Deps:** `renderer.rs: get_ui_glyph, push_quad`
-### ⚡ fn draw_string_mono_scaled(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4], scale: f32,)
-  - **Logic Deps:** `renderer.rs: push_quad, get_glyph`
-### ⚡ fn measure_mono_width(&mut self, text: &str, scale: f32) -> f32
-  - **Logic Deps:** `renderer.rs: char_advance`
-### ⚡ fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4])
-## 📄 File: src/render_view/ui.rs
-#### `impl Renderer`
-### ⚡ fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32)
-  - **Logic Deps:** `renderer.rs: push_quad`
-### ⚡ fn draw_atlas_icon(&mut self, icon: crate::widgets::IconType, x: f32, y: f32, size: f32, color: [f32; 4],)
-  - **Logic Deps:** `renderer.rs: push_quad`
-### ⚡ fn draw_file_icon(&mut self, key: &'static str, _is_folder: bool, x: f32, y: f32, size: f32,)
-  - **Logic Deps:** `renderer.rs: push_quad`
-### ⚡ fn draw_autocomplete(&mut self, x: f32, mut y: f32, options: &[(crate::highlighter::CompletionItem, Vec<usize>)
-  - **Logic Deps:** `core_text.rs: measure_width, draw_string_scaled, push_rounded_rect; renderer.rs: get_glyph, push_quad`
-### ⚡ fn draw_dialog_window(&mut self, base_title: &str) -> bool
-  - **Logic Deps:** `core_text.rs: draw_string_scaled, push_rounded_rect, push_vertical_gradient; ui_system.rs: register_button, wants_pointer; widgets.rs: get_dialog_buttons; ui.rs: draw_atlas_icon`
-### ⚡ fn draw_welcome(&mut self, recent_files: &[std::path::PathBuf], ui_registry: &mut crate::ui_system::UiRegistry,) -> bool
-  - **Logic Deps:** `ui_system.rs: wants_pointer, register_rect, register_button; renderer.rs: push_rect, measure_ui_width; widgets.rs: get_welcome_buttons; ui.rs: draw_icon; core_text.rs: push_vertical_gradient, draw_string_scaled, push_rounded_rect`
-## 📄 File: src/render_view/sticky.rs
-#### `impl Renderer`
-### ⚡ fn draw_sticky_lines(&mut self, editor: &Editor, spans: &[ColorSpan], current_sticky_lines: &[(usize, usize)
-  - **Logic Deps:** `editor.rs: text_parts; renderer.rs: char_advance, push_rect, measure_ui_width, get_glyph, push_quad; ui_system.rs: register_rect; core_text.rs: push_vertical_gradient, draw_string_scaled`
-## 📄 File: src/render_view/search.rs
-#### `impl Renderer`
-### ⚡ fn draw_search_panel(&mut self, search_anim_y: f32, search_editor: &Editor, search_focused: bool, search_case_sensitive: bool, search_results: &[(usize, usize)
-  - **Logic Deps:** `renderer.rs: get_ui_glyph, push_rect, push_quad; ui_system.rs: register_text_input, wants_pointer, register_icon_button; editor.rs: get_full_text; core_text.rs: draw_string_scaled, push_rounded_rect`
-## 📄 File: src/render_view/settings_ui.rs
-#### `impl Renderer`
-### ⚡ fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32
-  - **Logic Deps:** `editor.rs: get_full_text`
-### ⚡ fn draw_settings(&mut self, anim_progress: f32, active_tab: usize, faq_editor: &Editor, scroll_y: f32, ide_workspaces: &[std::path::PathBuf], ide_ignore_patterns: &[String], settings_ignore_editor: &Editor, settings_ignore_focused: bool, settings_ignore_scroll_x: &mut f32, ide_scroll_y: f32, blink_alpha: f32, ui_registry: &mut crate::ui_system::UiRegistry,) -> u8
-  - **Logic Deps:** `widgets.rs: render; renderer.rs: get_ui_glyph, push_rect, measure_ui_width, push_rounded_rect_gradient, push_quad; ui_system.rs: register_text_input, wants_text, wants_pointer, register_rect, reset_cursor_state; editor.rs: get_full_text; settings_ui.rs: get_faq_max_scroll`
-## 📄 File: src/render_view/lsp_ui.rs
-#### `impl Renderer`
-### ⚡ fn draw_lsp_servers_panel(&mut self, content_x: f32, content_y: f32, content_w: f32, content_h: f32, s: f32, ide_panel: &crate::app::IdePanelState, fix_all_active: bool, ui_registry: &mut crate::ui_system::UiRegistry,)
-  - **Logic Deps:** `editor.rs: text_parts; core_text.rs: measure_width, draw_string_scaled, push_rounded_rect; ui_system.rs: register_rect, register_blocker; renderer.rs: char_advance, measure_ui_width, get_glyph, push_quad`
-### ⚡ fn draw_lsp_actions_menu(&mut self, menu: &crate::app::LspActionsMenu, _blink_alpha: f32,) -> bool
-  - **Logic Deps:** `lsp.rs: CodeAction; core_text.rs: draw_string_scaled, push_rounded_rect; renderer.rs: measure_ui_width`
+      fn resumed  [19]
+    CALL app: update_window_title
+    WRITE: gl_config, gl_context, gl_surface, renderer, window
+
+      fn window_event  [102]
+    CALL app: update_window_title
+    CALL main: save_config
+    CALL render_view: draw
+    CALL render_view::core_text: get_cursor_xy, get_max_scroll
+    CALL render_view::lsp_ui: draw_lsp_actions_menu
+    CALL render_view::settings_ui: draw_settings
+    CALL render_view::ui: draw_autocomplete
+    CALL ui_system: id
+    CALL widgets: get_dialog_buttons
+    WRITE: autocomplete_rect, current_cursor, is_focused, is_ready, last_resize_time, modifiers, target_sticky_lines, tried_maximize, ui_registry.clear
+    MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit
+
+      fn about_to_wait  [644]
+    CALL app: update_window_title
+    CALL lsp: apply_workspace_edit_to_text
+    CALL main: save_config
+    CALL render_view::core_text: get_max_scroll
+    WRITE: autocomplete_anim_progress, base_title, current_sticky_lines, file_extension, file_path, ide_workspaces.push, last_blink_state, last_frame, last_resize_time, open_file_rx, open_folder_rx, pending_fix_all_id, save_file_rx, settings_anim_progress, settings_tab, settings_y, sticky_anim_is_adding, sticky_anim_progress
+    MATCH: LspEvent::CodeActions, LspEvent::Diagnostics, LspEvent::Log, LspEvent::ServerReady, LspEvent::StatusChanged
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/file_icons.rs
+  module: app::file_icons
+  types:  FallbackMatcher
+
+  pub fn file_icon_key  [41] -> &'static str
+
+  pub fn folder_icon_key  [82] -> &'static str
+
+  pub fn svg_for_key  [96] -> &'static [u8]
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/file_tree.rs
+  module: app::file_tree
+  types:  FileNode
+
+  pub fn matches_ignore_pattern  [42] -> bool
+
+  pub fn pre_rasterize_icon  [94]
+    CALL app::file_icons: svg_for_key
+    CALL widgets: render
+
+      fn read_children  [135] -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>)
+
+      fn scan_dir_parallel  [178] -> Vec<FileNode>
+    SELF:  matches_ignore_pattern, read_children
+    CALL app::file_icons: file_icon_key, folder_icon_key
+
+  pub fn spawn_scan  [274] -> mpsc::Receiver<Vec<FileNode>>
+    SELF:  pre_rasterize_icon, scan_dir_parallel
+
+  pub fn spawn_watcher  [341]
+
+  pub fn refresh_file_tree  [378]
+    SELF:  spawn_scan
+    WRITE: file_tree_rx
+
+  pub fn poll_file_tree  [406] -> bool
+    WRITE: file_tree_rx
+
+  pub fn start_file_watcher  [422]
+    SELF:  spawn_watcher
+    WRITE: file_tree_notify_rx
+
+  pub fn handle_file_tree_click  [435]
+
+  pub fn file_tree_node_at  [457] -> Option<usize>
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/keyboard.rs
+  module: app::keyboard
+
+  pub fn handle_search_keyboard_input  [8]
+    WRITE: last_action, search_current_idx, search_focused, search_results.clear, show_search
+
+  pub fn handle_editor_keyboard_input  [131]
+    CALL app: ensure_cursor_visible, update_window_title
+    CALL main: save_config
+    CALL render_view::core_text: get_cursor_xy, get_max_scroll
+    WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
+    MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert
+
+  pub fn handle_main_keyboard_input  [709]
+    CALL main: save_config
+    WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/lsp_actions.rs
+  module: app::lsp_actions
+
+  pub fn lsp_panel_bounds  [5] -> Option<(f32, f32, f32, f32)>
+
+  pub fn lsp_panel_total_h  [46] -> f32
+
+  pub fn lsp_server_logs_h  [55] -> f32
+
+  pub fn lsp_server_inner_size  [63] -> (f32, f32)
+
+  pub fn open_lsp_actions_menu  [98]
+    CALL render_view::core_text: get_cursor_xy
+    WRITE: lsp_actions_menu
+
+  pub fn apply_selected_lsp_action  [173]
+    CALL lsp: apply_workspace_edit_to_text
+    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction
+
+  pub fn insert_noqa_comment  [208]
+    CALL app: update_window_title
+
+  pub fn apply_full_text_replacement  [306]
+    CALL app: update_window_title
+    WRITE: editor
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/mouse.rs
+  module: app::mouse
+
+  pub fn handle_main_mouse_wheel  [7]
+    CALL render_view::core_text: get_max_scroll
+    CALL render_view::settings_ui: get_faq_max_scroll
+    CALL renderer: measure_ui_width
+    WRITE: settings_tab
+
+  pub fn handle_main_mouse_input  [252]
+    CALL lsp: apply_workspace_edit_to_text
+    CALL main: save_panel_state
+    CALL render_view::core_text: get_max_scroll
+    CALL renderer: get_ui_glyph
+    WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, last_action, lsp_actions_menu, settings_ignore_focused, show_settings
+    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, UiId::SettingsIdeIgnoreInput
+
+  pub fn handle_main_cursor_moved  [631]
+    CALL render_view::core_text: get_max_scroll
+    CALL renderer: get_ui_glyph
+    WRITE: autocomplete_hovered_idx
+
+────────────────────────────────────────────────────────────
+
+FILE src/app/ui_handlers.rs
+  module: app::ui_handlers
+
+  pub fn handle_ui_click  [9]
+    CALL app: update_window_title
+    CALL main: save_config, save_panel_state
+    WRITE: base_title, click_count, dialog_window, editor, file_extension, file_path, ide_ignore_patterns.push, ide_ignore_patterns.remove, ide_workspaces.remove, is_dragging, is_dragging_lsp_log, is_dragging_search, is_ide_mode, last_click_pos, last_click_time, lsp, pending_fix_all_id, search_case_sensitive, search_current_idx, search_focused, search_results.clear, settings_ignore_editor, settings_ignore_focused, settings_tab, show_search, show_welcome
+    MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit, UiId::BottomPanelBody, UiId::CopyDiagnostic, UiId::DialogCancel, UiId::DialogDiscard, UiId::DialogSave, UiId::EditorFoldArrow, UiId::EditorFoldDots, UiId::EditorMinimap, UiId::EditorScrollbarX, UiId::EditorTextBody, UiId::FileTreeNode, UiId::LspLogArea, UiId::LspLogFoldToggle, UiId::LspLogScrollX, UiId::LspLogScrollY, UiId::LspScrollX, UiId::LspScrollY, UiId::LspServerFixAll, UiId::LspServerLogs, UiId::LspServerRestart, UiId::LspServerStop, UiId::LspServerToggle, UiId::OpenDiagUrl, UiId::ResizeBottom, UiId::ResizeLeft, UiId::SearchCaseToggle, UiId::SearchClose, UiId::SearchInput, UiId::SearchNext, UiId::SearchPrev, UiId::SettingsIdeAddIgnore, UiId::SettingsIdeAddWorkspace, UiId::SettingsIdeIgnoreInput, UiId::SettingsIdeRemoveIgnore, UiId::SettingsIdeRemoveWorkspace, UiId::SettingsTab, UiId::SidebarSlot, UiId::StickyLine, UiId::WelcomeIdeMode, UiId::WelcomeNewFile, UiId::WelcomeOpenFile, UiId::WelcomeRecentFile
+
+────────────────────────────────────────────────────────────
+
+FILE src/app.rs
+  module: app
+  types:  PendingAction, PanelId, PanelGroup, PanelSlot, PanelDragState, LspActionItem, LspActionsMenu, IdePanelState, App
+  enum LspActionItem: CodeAction, AddNoqa, AddNoqaAll
+  enum PanelGroup: Top, Bottom
+  enum PanelId: Explorer, Terminal, Problems, LspServers
+  enum PendingAction: Quit, OpenFile, CloseFile
+
+  pub fn label  [40] -> &'static str
+    MATCH: PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
+
+  pub fn icon  [48] -> crate::widgets::IconType
+    MATCH: PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
+
+      fn default  [128] -> Self
+
+  pub fn any_top_open  [175] -> bool
+
+  pub fn any_bottom_open  [180] -> bool
+
+  pub fn toggle  [185]
+
+  pub fn is_open  [190] -> bool
+
+      fn fuzzy_match  [200] -> Option<Vec<usize>>
+
+  pub fn ensure_cursor_visible  [332]
+
+  pub fn get_current_word_prefix  [369] -> String
+
+  pub fn update_autocomplete  [389]
+    SELF:  fuzzy_match
+    WRITE: autocomplete_active, autocomplete_anim_progress, autocomplete_options, autocomplete_options.clear, autocomplete_selected_idx
+    MATCH: SymbolKind::Class, SymbolKind::Function, SymbolKind::Keyword, SymbolKind::Parameter, SymbolKind::Unknown
+
+  pub fn ensure_autocomplete_visible  [468]
+
+  pub fn apply_autocomplete  [498]
+    SELF:  update_window_title
+    WRITE: autocomplete_active, autocomplete_selected_idx
+
+  pub fn update_search  [532]
+    WRITE: search_current_idx, search_results.clear, search_results.push
+
+  pub fn jump_to_search_result  [588]
+
+  pub fn update_window_title  [614]
+
+  pub fn show_action_dialog  [623]
+    WRITE: dialog_gl_surface, dialog_window, is_dragging, pending_action
+
+  pub fn close_dialog  [665]
+    WRITE: dialog_gl_surface, dialog_window
+
+  pub fn close_current_file  [673]
+    SELF:  update_window_title
+    WRITE: autocomplete_active, base_title, editor, file_path, search_current_idx, search_results.clear, show_search, show_welcome
+
+  pub fn trigger_file_picker  [706]
+    WRITE: open_file_rx
+
+  pub fn trigger_folder_picker  [715]
+    WRITE: open_folder_rx
+
+  pub fn trigger_save_as_picker  [726]
+    WRITE: save_file_rx
+
+  pub fn save_current_file  [738] -> bool
+    MATCH: ErrorKind::PermissionDenied
+
+  pub fn add_recent_file  [775]
+    CALL main: save_recent_files
+    WRITE: recent_files.insert, recent_files.retain, recent_files.truncate
+
+  pub fn apply_highlight_results  [784]
+    WRITE: is_highlighted_once
+
+  pub fn load_file  [814]
+    SELF:  update_window_title
+    CALL main: save_recent_files
+    WRITE: autocomplete_active, base_title, editor, file_extension, file_path, is_highlighted_once, last_sent_version, recent_files.retain, search_current_idx, search_results.clear, show_welcome
+
+────────────────────────────────────────────────────────────
+
+FILE src/editor.rs
+  module: editor
+  types:  LineModState, EditOp, HistoryStep, UndoRedoDelta, Editor
+  enum EditOp: Insert, Delete
+  enum LineModState: ModifiedUnsaved, ModifiedSaved
+  enum UndoRedoDelta: Insert, Delete
+
+      fn get_diff_info  [7] -> (Vec<bool>, Vec<bool>)
+
+      fn is_delimiter  [83] -> bool
+
+      fn char_class  [90] -> u8
+
+  pub fn new  [156] -> Self
+
+  pub fn shift_folds_insert  [185]
+    WRITE: folded_start_bytes
+
+  pub fn shift_folds_delete  [208]
+    WRITE: folded_start_bytes
+
+  pub fn rebuild_line_offsets  [237]
+    WRITE: foldable_lines.clear, foldable_lines.insert, folded_lines.clear, folded_lines.insert, folded_start_bytes.clear, folded_start_bytes.insert, line_offsets, longest_line_idx
+
+      fn get_line_hashes  [307] -> Vec<u64>
+
+  pub fn ensure_indent_cache_updated  [330]
+    WRITE: indent_cache.clear, last_indent_version, version
+
+  pub fn get_cached_indent_levels  [401] -> &[u8]
+
+  pub fn backspace  [405] -> Option<(usize, usize)>
+    WRITE: cursor, selection_anchor, sync_edits.push
+
+  pub fn set_original_text  [478]
+    WRITE: original_hashes, saved_hashes
+
+  pub fn mark_saved  [484]
+    WRITE: saved_hashes
+
+  pub fn is_dirty  [489] -> bool
+
+  pub fn get_line_modification_state  [493] -> Option<LineModState>
+
+  pub fn update_modifications  [497]
+    SELF:  get_diff_info
+    WRITE: deleted_gaps, is_dirty, line_states
+
+  pub fn clear_history  [569]
+    WRITE: history.clear, history_size, redo_stack.clear, sync_edits.clear
+
+      fn push_history  [577]
+    WRITE: history.pop_front, history.push_back, redo_stack.clear
+    MATCH: EditOp::Delete, EditOp::Insert
+
+  pub fn undo  [654] -> Option<UndoRedoDelta>
+    WRITE: cursor, history.pop_back, is_working_history, redo_stack.push_back, selection_anchor
+    MATCH: EditOp::Delete, EditOp::Insert, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert
+
+  pub fn redo  [691] -> Option<UndoRedoDelta>
+    WRITE: cursor, history.push_back, is_working_history, redo_stack.pop_back, selection_anchor
+    MATCH: EditOp::Delete, EditOp::Insert, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert
+
+  pub fn text_parts  [728] -> (&str, &str)
+
+  pub fn get_full_text  [736] -> String
+
+      fn move_gap  [744]
+
+      fn insert_str_internal  [763] -> usize
+    WRITE: data, gap_end, sync_edits.push
+
+  pub fn insert_str  [787] -> (Option<(usize, usize)>, usize)
+    WRITE: selection_anchor
+
+  pub fn delete_selection  [814] -> Option<(usize, usize)>
+    WRITE: cursor, selection_anchor
+
+  pub fn delete_forward  [852] -> Option<(usize, usize)>
+    WRITE: sync_edits.push
+
+  pub fn delete_word_backward  [888] -> Option<(usize, usize)>
+    SELF:  is_delimiter
+    WRITE: cursor, selection_anchor
+
+  pub fn delete_word_forward  [921] -> Option<(usize, usize)>
+    SELF:  is_delimiter
+    WRITE: cursor, selection_anchor
+
+  pub fn get_auto_indent  [955] -> String
+    SELF:  char_class, select_expand
+
+  pub fn select_expand  [985]
+    SELF:  char_class
+
+────────────────────────────────────────────────────────────
+
+FILE src/highlighter.rs
+  module: highlighter
+  types:  ColorSpan, SymbolKind, CompletionItem, SyncEdit, HighlighterMessage, Highlighter, Scope
+  enum HighlighterMessage: Reset, Edits
+  enum SymbolKind: Variable, Function, Class, Parameter, Keyword, Unknown
+  enum SyncEdit: Insert, Delete
+
+      fn get_point  [86] -> tree_sitter::Point
+
+      fn resolve_color  [99] -> [f32; 4]
+
+  pub fn new  [180] -> Self
+    SELF:  get_point
+    CALL queries: get_ts_config
+    MATCH: HighlighterMessage::Edits, HighlighterMessage::Reset, SyncEdit::Delete, SyncEdit::Insert
+
+      fn impl  [996]
+
+────────────────────────────────────────────────────────────
+
+FILE src/lsp.rs
+  module: lsp
+  types:  LspServerStatus, LogEntry, LspServerInfo, DiagSeverity, Diagnostic, TextChange, WorkspaceEdit, LspEvent, CodeAction, LspServerDef, Cmd, SpawnedProcess, OpenFile, LspProcess, LspManager
+  enum Cmd: Restart, Open, Change, Close, CodeAction, Shutdown
+  enum DiagSeverity: Error, Warning, Info, Hint
+  enum LspEvent: Log, Diagnostics, CodeActions, ServerReady, StatusChanged
+  enum LspServerStatus: Starting, Running, Crashed, Disabled
+
+      fn next_id  [30] -> i32
+
+  pub fn offset_to_lsp_pos  [196] -> (u32, u32)
+
+      fn json_escape  [216] -> String
+
+      fn path_to_uri  [235] -> String
+
+      fn uri_to_path  [249] -> PathBuf
+
+      fn make_initialize  [260] -> Vec<u8>
+    SELF:  json_escape, path_to_uri
+    CALL ui_system: id
+
+      fn make_initialized  [283] -> Vec<u8>
+
+      fn make_did_open  [287] -> Vec<u8>
+    SELF:  json_escape
+
+      fn make_did_change_full  [298] -> Vec<u8>
+    SELF:  json_escape
+
+      fn make_did_close  [308] -> Vec<u8>
+    SELF:  json_escape
+
+      fn make_code_action  [316] -> Vec<u8>
+    SELF:  json_escape
+
+      fn make_shutdown  [332] -> Vec<u8>
+
+      fn make_exit  [336] -> Vec<u8>
+
+      fn write_frame  [342] -> bool
+
+      fn parse_diagnostic_value  [354] -> Option<Diagnostic>
+
+      fn parse_text_edit_value  [411] -> Option<TextChange>
+
+      fn parse_workspace_edit_value  [436] -> WorkspaceEdit
+    SELF:  uri_to_path
+
+      fn parse_code_action_value  [472] -> Option<CodeAction>
+
+      fn dispatch_frame  [489]
+    SELF:  parse_diagnostic_value, parse_workspace_edit_value, uri_to_path
+    MATCH: LspEvent::CodeActions, LspEvent::Diagnostics, LspEvent::Log
+
+      fn spawn_server  [628] -> Option<SpawnedProcess>
+    SELF:  dispatch_frame, write_frame
+
+      fn send_and_log  [752] -> Result<(), mpsc::SendError<Vec<u8>>>
+
+      fn run_supervisor  [768]
+    SELF:  make_code_action, make_did_change_full, make_did_close, make_did_open, make_exit, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server
+    MATCH: Cmd::Change, Cmd::Close, Cmd::CodeAction, Cmd::Open, LspEvent::StatusChanged
+
+      fn start  [959] -> Self
+    SELF:  run_supervisor
+
+  pub fn notify_open  [979]
+    SELF:  path_to_uri
+    WRITE: current_uri, open_file_data
+
+  pub fn restart  [992]
+
+  pub fn notify_change  [998]
+    SELF:  path_to_uri
+    WRITE: current_uri
+
+  pub fn notify_close  [1009]
+    SELF:  path_to_uri
+    WRITE: current_uri
+
+  pub fn request_code_actions  [1017] -> i32
+    SELF:  encode_diagnostics_json, next_id, path_to_uri
+
+  pub fn poll  [1045] -> Vec<LspEvent>
+
+  pub fn shutdown  [1057]
+
+      fn encode_diagnostics_json  [1064] -> String
+    SELF:  json_escape
+    MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
+
+  pub fn new  [1112] -> Self
+
+      fn ensure_python  [1125]
+    SELF:  start
+    WRITE: python, python_status
+
+  pub fn restart_python  [1133]
+    SELF:  start
+    WRITE: python, python_status
+
+  pub fn disable_python  [1144]
+    WRITE: diagnostics.clear, python_disabled, python_status, server_logs.clear
+
+  pub fn enable_python  [1155]
+    SELF:  start
+    WRITE: python, python_disabled, python_status
+
+  pub fn servers_info  [1170] -> Vec<LspServerInfo>
+
+      fn process_for_ext  [1184] -> Option<&mut LspProcess>
+
+  pub fn notify_open  [1195]
+    WRITE: current_path, diagnostics.clear
+
+  pub fn notify_change  [1211]
+
+  pub fn notify_close  [1225]
+    WRITE: diagnostics.clear
+
+  pub fn request_code_actions  [1235] -> Option<i32>
+
+  pub fn poll  [1258] -> Vec<LspEvent>
+    SELF:  format_and_highlight_json, path_to_uri
+    WRITE: diagnostics, python_status
+    MATCH: LspEvent::Diagnostics, LspEvent::Log, LspEvent::StatusChanged
+
+  pub fn diagnostics_for_line  [1303] -> Vec<&Diagnostic>
+
+  pub fn request_fix_all  [1311] -> Option<i32>
+    SELF:  next_id, path_to_uri
+
+  pub fn shutdown  [1329]
+    WRITE: python_disabled
+
+  pub fn lsp_pos_to_offset  [1341] -> usize
+
+  pub fn apply_workspace_edit_to_text  [1366] -> String
+    SELF:  lsp_pos_to_offset
+
+  pub fn format_and_highlight_json  [1390] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
+    CALL queries: get_folding_query, get_ts_config
+
+────────────────────────────────────────────────────────────
+
+FILE src/main.rs
+  module: main
+  types:  Config
+
+      fn default  [33] -> Self
+
+  pub fn load_recent_files  [44] -> Vec<PathBuf>
+
+  pub fn save_recent_files  [60]
+
+  pub fn save_panel_state  [74]
+    MATCH: PanelGroup::Bottom, PanelGroup::Top, PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
+
+  pub fn load_panel_state  [104] -> crate::app::IdePanelState
+
+  pub fn save_config  [158]
+
+      fn load_config  [183] -> Config
+
+────────────────────────────────────────────────────────────
+
+FILE src/queries.rs
+  module: queries
+
+  pub fn get_params_query  [3] -> Option<&'static str>
+
+  pub fn get_injection_query  [82] -> Option<&'static str>
+
+  pub fn get_folding_query  [131] -> Option<&'static str>
+
+  pub fn get_ts_config  [336] -> Option<(tree_sitter::Language, Vec<&'static str>)>
+
+      fn test_all_tree_sitter_queries_are_valid  [925]
+    SELF:  get_folding_query, get_injection_query, get_params_query, get_ts_config
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/core_text.rs
+  module: render_view::core_text
+
+  pub fn update_cache  [6]
+    SELF:  draw_string, draw_string_mono_scaled, draw_string_scaled, flush, get_byte_at_xy, get_cursor_xy, get_max_scroll, measure_mono_width, measure_width, push_rounded_rect, push_vertical_gradient
+    WRITE: last_editor_version, last_height, last_scroll_x, last_scroll_y, last_width, vertices.clear, visual_lines.clear, visual_lines.push
+
+  pub fn get_cursor_xy  [209] -> (f32, f32)
+    SELF:  draw_string, draw_string_mono_scaled, draw_string_scaled, flush, get_byte_at_xy, get_max_scroll, measure_mono_width, measure_width, push_rounded_rect, push_vertical_gradient
+    WRITE: vertices.clear
+
+  pub fn get_byte_at_xy  [344] -> usize
+
+  pub fn measure_width  [443] -> f32
+
+  pub fn get_max_scroll  [469] -> f32
+
+  pub fn flush  [488]
+    WRITE: vertices.clear
+
+  pub fn push_vertical_gradient  [530]
+
+  pub fn draw_string  [578]
+
+  pub fn draw_string_scaled  [601]
+
+  pub fn draw_string_mono_scaled  [631]
+
+  pub fn measure_mono_width  [661] -> f32
+
+  pub fn push_rounded_rect  [672]
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/lsp_ui.rs
+  module: render_view::lsp_ui
+
+  pub fn draw_lsp_servers_panel  [6]
+    MATCH: LspServerStatus::Crashed, LspServerStatus::Disabled, LspServerStatus::Running, LspServerStatus::Starting
+
+  pub fn draw_lsp_actions_menu  [780] -> bool
+    MATCH: Cow::Borrowed, Cow::Owned, LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/search.rs
+  module: render_view::search
+
+  pub fn draw_search_panel  [8] -> bool
+    WRITE: last_search_idx, last_search_len, search_res_string, search_res_string.clear, search_scroll_x
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/settings_ui.rs
+  module: render_view::settings_ui
+
+  pub fn get_faq_max_scroll  [6] -> f32
+
+  pub fn draw_settings  [31] -> u8
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/sticky.rs
+  module: render_view::sticky
+
+  pub fn draw_sticky_lines  [7] -> Vec<(usize, usize)>
+    WRITE: sticky_scroll_rects.clear, sticky_scroll_rects.push
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view/ui.rs
+  module: render_view::ui
+
+  pub fn draw_icon  [5]
+
+  pub fn draw_atlas_icon  [17]
+
+  pub fn draw_file_icon  [40]
+    WRITE: file_icon_cache.insert
+
+  pub fn draw_autocomplete  [129] -> (f32, f32, f32, f32)
+    MATCH: SymbolKind::Class, SymbolKind::Function, SymbolKind::Keyword, SymbolKind::Parameter, SymbolKind::Unknown, SymbolKind::Variable
+
+  pub fn draw_dialog_window  [358] -> bool
+    CALL widgets: get_dialog_buttons
+
+  pub fn draw_welcome  [470] -> bool
+    CALL widgets: get_welcome_buttons
+    WRITE: gl.clear
+
+────────────────────────────────────────────────────────────
+
+FILE src/render_view.rs
+  module: render_view
+  types:  ModInterval
+
+  pub fn draw  [22] -> (bool, Vec<(usize, usize)>)
+    WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diag, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
+    MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
+
+      fn draw_minimap  [2078]
+
+────────────────────────────────────────────────────────────
+
+FILE src/renderer.rs
+  module: renderer
+  types:  Theme, Vertex, GlyphInfo, VisualLine, FontData, Renderer
+
+  pub fn new  [143] -> Self
+
+  pub fn get_custom_svg_glyph  [459] -> Option<GlyphInfo>
+    CALL widgets: render
+    WRITE: atlas_x, max_row_h
+
+  pub fn get_glyph  [526] -> Option<GlyphInfo>
+    CALL widgets: render
+    WRITE: atlas_x, atlas_y, glyphs.clear, glyphs.insert, max_row_h, ui_glyphs.clear
+    MATCH: Content::Mask
+
+  pub fn get_ui_glyph  [690] -> Option<GlyphInfo>
+    CALL widgets: render
+    WRITE: atlas_x, atlas_y, glyphs.clear, max_row_h, ui_glyphs.clear, ui_glyphs.insert
+    MATCH: Content::Mask
+
+  pub fn resize  [853]
+    WRITE: height, width
+
+  pub fn measure_ui_width  [863] -> f32
+
+  pub fn char_advance  [876] -> f32
+
+  pub fn push_quad  [893]
+
+  pub fn load_builtin_icons  [945]
+    CALL widgets: render
+    WRITE: icons.insert
+    MATCH: IconType::Down
+
+  pub fn push_squiggle  [1124]
+
+  pub fn push_rect  [1177]
+
+  pub fn push_rounded_rect_gradient  [1181]
+
+────────────────────────────────────────────────────────────
+
+FILE src/scroll.rs
+  module: scroll
+  types:  ScrollState
+
+  pub fn new  [11] -> Self
+
+  pub fn update  [22] -> bool
+    WRITE: current, velocity
+
+  pub fn clamp_target  [47]
+    WRITE: target
+
+  pub fn clamp_current  [51]
+    WRITE: current
+
+  pub fn scroll_by  [55]
+
+  pub fn set_target  [59]
+    WRITE: target
+
+  pub fn stop_anim  [63]
+    WRITE: current, target, velocity
+
+────────────────────────────────────────────────────────────
+
+FILE src/ui_system.rs
+  module: ui_system
+  types:  UiId, UiElement, UiRegistry
+  enum UiElement: Button, IconButton, TextInput, Rect
+  enum UiId: WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile, DialogSave, DialogDiscard, DialogCancel, SettingsTab, SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace, SettingsIdeAddIgnore, SettingsIdeRemoveIgnore, SettingsIdeIgnoreInput, LspServerRestart, LspServerToggle, LspServerStop, LspServerLogs, LspServerFixAll, LspLogFoldToggle, SidebarSlot, FileTreeNode, SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorFoldArrow, EditorFoldDots, StickyLine, EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea, LspScrollY, LspScrollX, LspLogScrollY, LspLogScrollX, CopyDiagnostic, OpenDiagUrl
+
+  pub fn contains  [108] -> bool
+    MATCH: UiElement::Button, UiElement::IconButton, UiElement::Rect, UiElement::TextInput
+
+  pub fn id  [134] -> UiId
+    MATCH: UiElement::Button, UiElement::IconButton, UiElement::Rect, UiElement::TextInput
+
+  pub fn new  [158] -> Self
+
+  pub fn clear  [169]
+    WRITE: elements.clear, hovered, overlay_mark, wants_pointer, wants_text
+
+  pub fn mark_overlay_start  [179]
+    WRITE: overlay_mark
+
+  pub fn find_overlay_at  [185] -> Option<UiId>
+
+  pub fn register_button  [194] -> bool
+    WRITE: elements.push, hovered, wants_pointer
+
+  pub fn register_icon_button  [222] -> bool
+    WRITE: elements.push, hovered, wants_pointer
+
+  pub fn register_text_input  [250] -> bool
+    WRITE: elements.push, hovered, wants_text
+
+  pub fn register_blocker  [273] -> bool
+    WRITE: elements.push
+
+  pub fn register_rect  [290] -> bool
+    WRITE: elements.push, hovered, wants_pointer
+
+  pub fn find_at  [312] -> Option<UiId>
+
+  pub fn hovered  [322] -> Option<UiId>
+
+  pub fn reset_cursor_state  [329]
+    WRITE: wants_pointer, wants_text
+
+  pub fn wants_pointer  [335] -> bool
+
+  pub fn wants_text  [340] -> bool
+
+  pub fn cursor_code  [345] -> u8
+
+────────────────────────────────────────────────────────────
+
+FILE src/widgets.rs
+  module: widgets
+  types:  IconType, Button, IconButton
+  enum IconType: Save, Discard, Cancel, Warning, CaseMatch, Up, Down, Close, Plus, Terminal, Explorer, Problems, LspServers, Copy, Check
+
+  pub fn is_hovered  [34] -> bool
+
+  pub fn render  [38] -> bool
+
+  pub fn is_hovered  [118] -> bool
+
+  pub fn render  [127] -> bool
+
+  pub fn get_welcome_buttons  [216] -> (Button, Button, Button)
+
+  pub fn get_dialog_buttons  [269] -> (Button, Button, Button)
+
+────────────────────────────────────────────────────────────

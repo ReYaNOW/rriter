@@ -70,7 +70,7 @@ tree:
 
 api-tree:
 	@echo "Обновляю карту проекта..."
-	@python3 scripts/make_tree.py
+	@python3 scripts/gen_project_map.py
 	@echo "✅ Файл PROJECT_MAP.md готов. (Размер: $$(du -h PROJECT_MAP.md | cut -f1))"
 
 actualize:

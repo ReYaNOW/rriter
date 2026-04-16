@@ -130,9 +130,13 @@ pub struct Renderer {
     pub phys_to_visual: Vec<usize>,
     pub last_hovered_diag: Option<usize>,
     pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
+    pub last_diag_href: Option<String>,
     pub hide_popups_until_mouse_move: bool,
+    pub diag_hover_timer: f32,
+    pub diag_hover_timer_idx: Option<usize>,
     pub last_known_mouse: (f32, f32),
     pub last_editor_version_for_typing: u64,
+    pub last_draw_instant: Option<std::time::Instant>,
 }
 
 impl Renderer {
@@ -430,9 +434,13 @@ impl Renderer {
                 phys_to_visual: Vec::new(),
                 last_hovered_diag: None,
                 last_diag_popup_rect: None,
+                last_diag_href: None,
                 hide_popups_until_mouse_move: false,
+                diag_hover_timer: 0.0,
+                diag_hover_timer_idx: None,
                 last_known_mouse: (0.0, 0.0),
                 last_editor_version_for_typing: u64::MAX,
+                last_draw_instant: None,
             };
 
             for i in 32..128u8 {

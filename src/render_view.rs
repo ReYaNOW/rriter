@@ -1738,9 +1738,48 @@ impl Renderer {
         if hovered_diag.is_none() {
             self.last_diag_popup_rect = None;
         }
+
+        // dt для таймера popup
+        let now = std::time::Instant::now();
+        let popup_dt = self
+            .last_draw_instant
+            .map(|t| now.duration_since(t).as_secs_f32().min(0.1))
+            .unwrap_or(0.0);
+        self.last_draw_instant = Some(now);
+
+        // Таймер задержки появления popup (0.5s)
+        let hovered_idx = hovered_diag.as_ref().map(|h| h.0);
+        if hovered_idx != self.diag_hover_timer_idx {
+            self.diag_hover_timer_idx = hovered_idx;
+            self.diag_hover_timer = 0.0;
+        } else if hovered_idx.is_some() {
+            self.diag_hover_timer += popup_dt;
+        }
+        let popup_ready = self.diag_hover_timer >= 0.5;
+
+        self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
+        let dt = self
+            .last_frame_time
+            .map(|_| {
+                let now = std::time::Instant::now();
+                now.duration_since(self.last_frame_time.unwrap_or(now))
+                    .as_secs_f32()
+            })
+            .unwrap_or(0.016);
+        let hovered_idx = hovered_diag.as_ref().map(|h| h.0);
+        if hovered_idx != self.diag_hover_timer_idx {
+            self.diag_hover_timer_idx = hovered_idx;
+            self.diag_hover_timer = 0.0;
+        } else if hovered_idx.is_some() {
+            self.diag_hover_timer += dt;
+        }
+        let popup_ready = self.diag_hover_timer >= 0.5;
+
         self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
 
-        if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) = hovered_diag {
+        if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) =
+            hovered_diag.filter(|_| popup_ready)
+        {
             let s = self.scale_factor;
             let pad = 12.0 * s;
             let line_h = 22.0 * s;
@@ -1896,15 +1935,12 @@ impl Renderer {
                             && my >= sy - line_h
                             && my <= sy + 2.0 * s;
 
+                        // Яркий фиолетовый, независимый от темы
+                        let link_color: [f32; 4] = [0.72, 0.52, 1.0, 1.0];
                         let sfx_color = if sfx_hovered {
-                            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]
+                            link_color
                         } else {
-                            [
-                                self.theme.sel[0],
-                                self.theme.sel[1],
-                                self.theme.sel[2],
-                                0.85,
-                            ]
+                            [link_color[0], link_color[1], link_color[2], 0.85]
                         };
 
                         if has_href {
@@ -1914,12 +1950,7 @@ impl Renderer {
                                 sy + 1.0,
                                 sfx_w,
                                 1.0,
-                                [
-                                    self.theme.sel[0],
-                                    self.theme.sel[1],
-                                    self.theme.sel[2],
-                                    ul_alpha,
-                                ],
+                                [link_color[0], link_color[1], link_color[2], ul_alpha],
                             );
                         }
                         if sfx_hovered {
@@ -1938,6 +1969,7 @@ impl Renderer {
                         );
 
                         if has_href {
+                            self.last_diag_href = diag.code_href.clone();
                             ui_registry.register_rect(
                                 crate::ui_system::UiId::OpenDiagUrl(idx),
                                 sfx_x - 1.0,
