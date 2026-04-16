@@ -122,10 +122,26 @@ impl App {
         let menu_x = cx.max(self.renderer.as_ref().unwrap().left_padding);
         let menu_y = cy - self.scroll_y.current + self.renderer.as_ref().unwrap().line_height;
 
-        // Начальные элементы: noqa варианты
+                // Начальные элементы: noqa варианты
         let mut items: Vec<crate::app::LspActionItem> = Vec::new();
 
         if !diags.is_empty() {
+            // Добавляем быстрые фиксы (quickfixes) из диагностики, которые ruff прислал заранее
+            for d in &diags {
+                for qf in &d.quickfixes {
+                    let mut changes = std::collections::HashMap::new();
+                    if let Some(path) = self.file_path.clone() {
+                        changes.insert(path, qf.edits.clone());
+                    }
+                    items.push(crate::app::LspActionItem::CodeAction(crate::lsp::CodeAction {
+                        title: qf.title.clone(),
+                        kind: Some("quickfix".to_string()),
+                        edit: Some(crate::lsp::WorkspaceEdit { changes }),
+                        code: d.code.clone(),
+                    }));
+                }
+            }
+
             // Сначала "Добавить # noqa: CODES" для конкретных кодов
             let codes: Vec<String> = diags.iter().filter_map(|d| d.code.clone()).collect();
             if !codes.is_empty() {
@@ -138,24 +154,16 @@ impl App {
         }
 
         // Запрашиваем code actions от LSP
-        let pending_id = if !diags.is_empty() {
-            if let Some(lsp) = &mut self.lsp {
-                let ext = self.file_extension.clone();
-                let sl = cursor_line;
-                let el = cursor_line;
-                let sc = diags.iter().map(|d| d.start_col).min().unwrap_or(0);
-                let ec = diags.iter().map(|d| d.end_col).max().unwrap_or(0);
-                lsp.request_code_actions(&ext, sl, sc, el, ec, &diags)
-            } else {
-                None
-            }
+                        let pending_id = if let Some(lsp) = &mut self.lsp {
+            let ext = self.file_extension.clone();
+            let (sl, sc) = crate::lsp::offset_to_lsp_pos(&self.editor.get_full_text(), self.editor.cursor, &self.editor.line_offsets);
+            lsp.request_code_actions(&ext, sl, sc, sl, sc, &diags, None)
         } else {
             None
         };
 
-        if items.is_empty() && pending_id.is_none() {
-            return; // нечего показывать
-        }
+        items.push(crate::app::LspActionItem::FixAll);
+        items.push(crate::app::LspActionItem::OrganizeImports);
 
         self.lsp_actions_menu = Some(crate::app::LspActionsMenu {
             cursor_line,
@@ -180,17 +188,10 @@ impl App {
         }
         let item = menu.items[menu.selected.min(menu.items.len() - 1)].clone();
 
-        match item {
-            crate::app::LspActionItem::CodeAction(action) => {
-                if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone()) {
-                    let new_text = crate::lsp::apply_workspace_edit_to_text(
-                        &self.editor.get_full_text(),
-                        &edit,
-                        &path,
-                    );
-                    if new_text != self.editor.get_full_text() {
-                        self.apply_full_text_replacement(new_text);
-                    }
+                match item {
+                        crate::app::LspActionItem::CodeAction(action) => {
+                if let Some(edit) = action.edit {
+                    self.apply_workspace_edit(&edit);
                 }
             }
             crate::app::LspActionItem::AddNoqa { codes } => {
@@ -199,61 +200,83 @@ impl App {
             crate::app::LspActionItem::AddNoqaAll => {
                 self.insert_noqa_comment(menu.cursor_line, &[]);
             }
+            crate::app::LspActionItem::FixAll => {
+                if let Some(lsp) = &mut self.lsp {
+                    if let Some(id) = lsp.request_fix_all(&self.file_extension) {
+                        self.pending_fix_all_id = Some(id);
+                    }
+                }
+            }
+            crate::app::LspActionItem::OrganizeImports => {
+                if let Some(lsp) = &mut self.lsp {
+                    if let Some(id) = lsp.request_organize_imports(&self.file_extension) {
+                        self.pending_fix_all_id = Some(id);
+                    }
+                }
+            }
         }
 
         self.window.as_ref().unwrap().request_redraw();
     }
 
     /// Вставляет/обновляет # noqa комментарий на указанной строке
-    pub(crate) fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
+        pub(crate) fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
         let line = line as usize;
-        let line_end = if line + 1 < self.editor.line_offsets.len() {
-            self.editor.line_offsets[line + 1] - 1 // позиция перед \n
+        let line_start = self.editor.line_offsets.get(line).copied().unwrap_or(0);
+        let line_end_raw = if line + 1 < self.editor.line_offsets.len() {
+            self.editor.line_offsets[line + 1]
         } else {
             self.editor.len()
         };
 
+        let mut actual_end = line_end_raw;
+        while actual_end > line_start {
+            let b = self.editor.byte_at(actual_end - 1);
+            if b == b'\n' || b == b'\r' {
+                actual_end -= 1;
+            } else {
+                break;
+            }
+        }
+
         // Читаем текущую строку
-        let line_start = self.editor.line_offsets.get(line).copied().unwrap_or(0);
-        let mut line_bytes = Vec::with_capacity(line_end - line_start);
-        for i in line_start..line_end {
+        let mut line_bytes = Vec::with_capacity(actual_end - line_start);
+        for i in line_start..actual_end {
             line_bytes.push(self.editor.byte_at(i));
         }
         let line_text = String::from_utf8_lossy(&line_bytes);
 
         // Вычисляем куда вставить
         if let Some(noqa_pos_in_line) = line_text.find("# noqa") {
-            // Уже есть noqa — добавляем коды если нужно
-            if codes.is_empty() {
-                return; // Уже есть # noqa, всё ок
-            }
-            // Парсим существующие коды
             let noqa_byte_start = line_start + noqa_pos_in_line;
-            let noqa_text = &line_text[noqa_pos_in_line..];
-            let existing = if let Some(colon) = noqa_text.find(": ") {
-                noqa_text[colon + 2..]
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
+            let old_noqa_str = &line_text[noqa_pos_in_line..];
+            let chars_to_delete = old_noqa_str.chars().count();
+
+            let new_noqa = if codes.is_empty() {
+                "# noqa".to_string()
             } else {
-                Vec::new()
-            };
+                let existing = if let Some(colon) = old_noqa_str.find(": ") {
+                    old_noqa_str[colon + 2..]
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
 
-            let mut merged = existing.clone();
-            for code in codes {
-                if !merged.contains(code) {
-                    merged.push(code.clone());
+                let mut merged = existing.clone();
+                for code in codes {
+                    if !merged.contains(code) {
+                        merged.push(code.clone());
+                    }
                 }
-            }
-
-            // Заменяем noqa блок
-            let new_noqa = format!("# noqa: {}", merged.join(", "));
-            let old_noqa_len = line_text.len() - noqa_pos_in_line;
+                format!("# noqa: {}", merged.join(", "))
+            };
 
             // Удаляем старый noqa
             self.editor.cursor = noqa_byte_start;
-            for _ in 0..old_noqa_len {
+            for _ in 0..chars_to_delete {
                 let _ = self.editor.delete_forward();
             }
             // Вставляем новый
@@ -266,7 +289,7 @@ impl App {
                 .shift_insert(ins_start, ins_len, Some(&new_noqa));
         } else {
             // Нет noqa — добавляем в конец строки
-            self.editor.cursor = line_end;
+            self.editor.cursor = actual_end;
             let noqa = if codes.is_empty() {
                 "  # noqa".to_string()
             } else {
@@ -302,24 +325,62 @@ impl App {
         );
     }
 
-    /// Заменяет весь текст редактора новым (для workspace edit)
-    pub(crate) fn apply_full_text_replacement(&mut self, new_text: String) {
-        let version = self.editor.version + 1;
-        self.editor = crate::editor::Editor::new(new_text.len() + 8192);
-        self.editor.version = version;
-        let _ = self.editor.insert_str(&new_text);
-        self.editor.cursor = 0;
-        self.editor.set_original_text();
-        self.highlighter
-            .reset(version, new_text.clone(), self.file_extension.clone());
-        if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-            lsp.notify_change(
-                path,
-                &self.file_extension.clone(),
-                &new_text,
-                version as i32,
-            );
+        pub(crate) fn apply_workspace_edit(&mut self, edit: &crate::lsp::WorkspaceEdit) {
+        if let Some(path) = &self.file_path {
+            if let Some(changes) = edit.changes.get(path) {
+                let text = self.editor.get_full_text();
+                let mut sorted = changes.clone();
+                sorted.sort_unstable_by(|a, b| {
+                    b.start_line
+                        .cmp(&a.start_line)
+                        .then(b.start_col.cmp(&a.start_col))
+                });
+
+                let mut ops = Vec::new();
+                for change in &sorted {
+                    let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
+                    let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
+                    ops.push((start, end, change.new_text.clone()));
+                }
+
+                for (start, end, new_text) in ops {
+                    if start <= end {
+                        self.editor.cursor = end;
+                        self.editor.selection_anchor = Some(start);
+                        if let Some((off, len)) = self.editor.delete_selection() {
+                            self.highlighter.shift_delete(off, len);
+                        }
+                        if !new_text.is_empty() {
+                            self.editor.cursor = start;
+                            let (del_info, ins_len) = self.editor.insert_str(&new_text);
+                            if let Some((off, len)) = del_info {
+                                self.highlighter.shift_delete(off, len);
+                            }
+                            self.highlighter
+                                .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&new_text));
+                        }
+                    }
+                }
+
+                if !self.editor.sync_edits.is_empty() {
+                    let edits = std::mem::take(&mut self.editor.sync_edits);
+                    if self.is_ide_mode {
+                        if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                            let text = self.editor.get_full_text();
+                            let ext = self.file_extension.clone();
+                            let path = path.clone();
+                            lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                        }
+                    }
+                    self.highlighter.apply_edits(self.editor.version, edits);
+                }
+
+                App::update_window_title(
+                    self.window.as_ref().unwrap(),
+                    &self.base_title,
+                    self.editor.is_dirty(),
+                );
+            }
         }
-        App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, true);
     }
 }

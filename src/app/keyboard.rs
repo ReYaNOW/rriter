@@ -549,12 +549,14 @@ impl App {
             }
         }
 
-        if cursor_moved && !is_edit {
+                if cursor_moved && !is_edit {
             self.autocomplete_active = false;
             self.autocomplete_selected_idx = 0;
+            self.lsp_actions_menu = None;
         }
 
         if is_edit {
+            self.lsp_actions_menu = None;
             if should_trigger_autocomplete {
                 self.update_autocomplete();
             } else {

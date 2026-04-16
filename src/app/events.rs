@@ -947,16 +947,16 @@ impl ApplicationHandler for App {
                         .map(|id| id == request_id)
                         .unwrap_or(false);
 
-                    if is_for_menu {
-                        // Добавляем code actions в начало меню
+                                        if is_for_menu {
                         if let Some(menu) = &mut self.lsp_actions_menu {
-                            let mut new_items: Vec<crate::app::LspActionItem> = actions
+                            let new_items: Vec<crate::app::LspActionItem> = actions
                                 .into_iter()
-                                .filter(|a| a.edit.is_some())
+                                .filter(|a| a.edit.is_some() && !a.title.to_lowercase().contains("fix all") && !a.title.to_lowercase().contains("organize imports"))
                                 .map(crate::app::LspActionItem::CodeAction)
                                 .collect();
-                            new_items.extend(menu.items.drain(..));
-                            menu.items = new_items;
+                            let mut combined = new_items;
+                            combined.extend(menu.items.drain(..));
+                            menu.items = combined;
                             menu.pending_request_id = None;
                         }
                         if let Some(w) = self.window.as_ref() {
@@ -965,17 +965,9 @@ impl ApplicationHandler for App {
                     } else if self.pending_fix_all_id == Some(request_id) {
                         // Fix All из панели LSP серверов
                         self.pending_fix_all_id = None;
-                        if let Some(action) = actions.into_iter().find(|a| a.edit.is_some()) {
-                            if let (Some(edit), Some(path)) = (action.edit, self.file_path.clone())
-                            {
-                                let new_text = crate::lsp::apply_workspace_edit_to_text(
-                                    &self.editor.get_full_text(),
-                                    &edit,
-                                    &path,
-                                );
-                                if new_text != self.editor.get_full_text() {
-                                    self.apply_full_text_replacement(new_text);
-                                }
+                                                if let Some(action) = actions.into_iter().find(|a| a.edit.is_some()) {
+                            if let Some(edit) = action.edit {
+                                self.apply_workspace_edit(&edit);
                             }
                         }
                         if let Some(w) = self.window.as_ref() {

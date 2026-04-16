@@ -64,6 +64,12 @@ pub enum DiagSeverity {
 }
 
 #[derive(Debug, Clone)]
+pub struct QuickFix {
+    pub title: String,
+    pub edits: Vec<TextChange>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     /// 0-based
     pub start_line: u32,
@@ -78,6 +84,7 @@ pub struct Diagnostic {
     pub code_href: Option<String>,
     pub message: String,
     pub source: Option<String>,
+    pub quickfixes: Vec<QuickFix>,
 }
 
 /// Одна замена текста (из workspace/applyEdit или codeAction)
@@ -130,6 +137,7 @@ pub struct CodeAction {
     pub title: String,
     pub kind: Option<String>,
     pub edit: Option<WorkspaceEdit>,
+    pub code: Option<String>,
 }
 
 // ── Конфигурация LSP-серверов ─────────────────────────────────────────────────
@@ -173,7 +181,7 @@ enum Cmd {
         uri: String,
     },
     /// Запросить codeActions для позиции
-    CodeAction {
+        CodeAction {
         id: i32,
         uri: String,
         start_line: u32,
@@ -182,6 +190,7 @@ enum Cmd {
         end_col: u32,
         /// JSON-encoded массив диагностик для контекста (для ruff это важно)
         diagnostics_json: String,
+        only: Option<Vec<String>>,
     },
     Shutdown,
 }
@@ -321,9 +330,17 @@ fn make_code_action(
     el: u32,
     ec: u32,
     diag_json: &str,
+    only: Option<&[String]>,
 ) -> Vec<u8> {
+    let only_json = match only {
+        Some(arr) => {
+            let vals: Vec<String> = arr.iter().map(|s| format!("\"{}\"", json_escape(s))).collect();
+            format!(r#","only":[{}]"#, vals.join(","))
+        }
+        None => String::new(),
+    };
     let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"context":{{"diagnostics":{diag_json},"only":["quickfix","source.fixAll"]}}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"context":{{"diagnostics":{diag_json}{only_json}}}}}}}"#,
         json_escape(uri)
     );
     body.into_bytes()
@@ -384,7 +401,7 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         }
     });
 
-    let source = v
+        let source = v
         .get("source")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
@@ -394,6 +411,26 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         .and_then(|cd| cd.get("href"))
         .and_then(|h| h.as_str())
         .map(|s| s.to_string());
+
+    let mut quickfixes = Vec::new();
+    if let Some(data) = v.get("data") {
+        if let Some(title) = data.get("title").and_then(|t| t.as_str()) {
+            if let Some(edits_arr) = data.get("edits").and_then(|e| e.as_array()) {
+                let mut edits = Vec::new();
+                for e in edits_arr {
+                    if let Some(tc) = parse_text_edit_value(e) {
+                        edits.push(tc);
+                    }
+                }
+                if !edits.is_empty() {
+                    quickfixes.push(QuickFix {
+                        title: title.to_string(),
+                        edits,
+                    });
+                }
+            }
+        }
+    }
 
     Some(Diagnostic {
         start_line: sl,
@@ -405,6 +442,7 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         code_href,
         message,
         source,
+        quickfixes,
     })
 }
 
@@ -481,7 +519,20 @@ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
         .map(|s| s.to_string());
     let edit = v.get("edit").map(parse_workspace_edit_value);
 
-    Some(CodeAction { title, kind, edit })
+    let mut code = None;
+    if let Some(diags) = v.get("diagnostics").and_then(|d| d.as_array()) {
+        if let Some(first) = diags.first() {
+            if let Some(c) = first.get("code") {
+                if let Some(s) = c.as_str() {
+                    code = Some(s.to_string());
+                } else if let Some(n) = c.as_u64() {
+                    code = Some(n.to_string());
+                }
+            }
+        }
+    }
+
+    Some(CodeAction { title, kind, edit, code })
 }
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
@@ -542,7 +593,7 @@ fn dispatch_frame(
                 }
             }
         }
-        Some("workspace/applyEdit") => {
+                Some("workspace/applyEdit") => {
             if let Some(params) = msg.get("params") {
                 if let Some(edit_obj) = params.get("edit") {
                     let edit = parse_workspace_edit_value(edit_obj);
@@ -550,6 +601,7 @@ fn dispatch_frame(
                         title: "workspace/applyEdit".to_string(),
                         kind: None,
                         edit: Some(edit),
+                        code: None,
                     };
                     let _ = event_tx.send(LspEvent::CodeActions {
                         request_id: -1,
@@ -904,7 +956,7 @@ fn run_supervisor(
                         }
                         open_file = None;
                     }
-                    Ok(Cmd::CodeAction {
+                                        Ok(Cmd::CodeAction {
                         id,
                         uri,
                         start_line,
@@ -912,6 +964,7 @@ fn run_supervisor(
                         end_line,
                         end_col,
                         diagnostics_json,
+                        only,
                     }) => {
                         let msg = make_code_action(
                             id,
@@ -921,6 +974,7 @@ fn run_supervisor(
                             end_line,
                             end_col,
                             &diagnostics_json,
+                            only.as_deref(),
                         );
                         if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                             break 'inner;
@@ -1014,7 +1068,7 @@ impl LspProcess {
 
     /// Запрашивает code actions (быстрые исправления от ruff) для позиции.
     /// Возвращает id запроса — по нему придёт LspEvent::CodeActions.
-    pub fn request_code_actions(
+        pub fn request_code_actions(
         &mut self,
         path: &PathBuf,
         start_line: u32,
@@ -1022,6 +1076,7 @@ impl LspProcess {
         end_line: u32,
         end_col: u32,
         diagnostics: &[Diagnostic],
+        only: Option<Vec<String>>,
     ) -> i32 {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
@@ -1037,6 +1092,7 @@ impl LspProcess {
             end_line,
             end_col,
             diagnostics_json: diag_json,
+            only,
         });
         id
     }
@@ -1232,7 +1288,7 @@ impl LspManager {
     }
 
     /// Запрашивает code actions для позиции/диагностики
-    pub fn request_code_actions(
+        pub fn request_code_actions(
         &mut self,
         ext: &str,
         start_line: u32,
@@ -1240,6 +1296,7 @@ impl LspManager {
         end_line: u32,
         end_col: u32,
         relevant_diags: &[Diagnostic],
+        only: Option<Vec<String>>,
     ) -> Option<i32> {
         let path = self.current_path.clone()?;
         let proc = self.process_for_ext(ext)?;
@@ -1250,6 +1307,7 @@ impl LspManager {
             end_line,
             end_col,
             relevant_diags,
+            only,
         ))
     }
 
@@ -1308,7 +1366,7 @@ impl LspManager {
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-    pub fn request_fix_all(&mut self, ext: &str) -> Option<i32> {
+        pub fn request_fix_all(&mut self, ext: &str) -> Option<i32> {
         let path = self.current_path.clone()?;
         let proc = self.process_for_ext(ext)?;
         let id = next_id();
@@ -1321,6 +1379,25 @@ impl LspManager {
             end_line: u32::MAX,
             end_col: 0,
             diagnostics_json: String::from("[]"),
+            only: Some(vec!["source.fixAll".to_string()]),
+        });
+        Some(id)
+    }
+
+    pub fn request_organize_imports(&mut self, ext: &str) -> Option<i32> {
+        let path = self.current_path.clone()?;
+        let proc = self.process_for_ext(ext)?;
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = proc.cmd_tx.send(Cmd::CodeAction {
+            id,
+            uri,
+            start_line: 0,
+            start_col: 0,
+            end_line: u32::MAX,
+            end_col: 0,
+            diagnostics_json: String::from("[]"),
+            only: Some(vec!["source.organizeImports".to_string()]),
         });
         Some(id)
     }

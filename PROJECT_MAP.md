@@ -30,7 +30,6 @@ FILE src/app/events.rs
 
       fn about_to_wait  [651]
     CALL app: update_window_title
-    CALL lsp: apply_workspace_edit_to_text
     CALL main: save_config
     CALL render_view::core_text: get_max_scroll
     WRITE: autocomplete_anim_progress, base_title, current_sticky_lines, file_extension, file_path, ide_workspaces.push, last_blink_state, last_frame, last_resize_time, open_file_rx, open_folder_rx, pending_fix_all_id, save_file_rx, settings_anim_progress, settings_tab, settings_y, sticky_anim_is_adding, sticky_anim_progress
@@ -101,7 +100,7 @@ FILE src/app/keyboard.rs
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
     MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert
 
-  pub fn handle_main_keyboard_input  [709]
+  pub fn handle_main_keyboard_input  [711]
     CALL main: save_config
     WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
 
@@ -119,19 +118,20 @@ FILE src/app/lsp_actions.rs
   pub fn lsp_server_inner_size  [63] -> (f32, f32)
 
   pub fn open_lsp_actions_menu  [98]
+    CALL lsp: offset_to_lsp_pos
     CALL render_view::core_text: get_cursor_xy
     WRITE: lsp_actions_menu
 
-  pub fn apply_selected_lsp_action  [173]
-    CALL lsp: apply_workspace_edit_to_text
-    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction
+  pub fn apply_selected_lsp_action  [181]
+    WRITE: pending_fix_all_id
+    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports
 
-  pub fn insert_noqa_comment  [208]
+  pub fn insert_noqa_comment  [223]
     CALL app: update_window_title
 
-  pub fn apply_full_text_replacement  [306]
+  pub fn apply_workspace_edit  [328]
     CALL app: update_window_title
-    WRITE: editor
+    CALL lsp: lsp_pos_to_offset
 
 ────────────────────────────────────────────────────────────
 
@@ -142,17 +142,16 @@ FILE src/app/mouse.rs
     CALL render_view::core_text: get_max_scroll
     CALL render_view::settings_ui: get_faq_max_scroll
     CALL renderer: measure_ui_width
-    WRITE: settings_tab
+    WRITE: lsp_actions_menu, settings_tab
 
-  pub fn handle_main_mouse_input  [252]
-    CALL lsp: apply_workspace_edit_to_text
+  pub fn handle_main_mouse_input  [253]
     CALL main: save_panel_state
     CALL render_view::core_text: get_max_scroll
     CALL renderer: get_ui_glyph
-    WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, last_action, lsp_actions_menu, settings_ignore_focused, show_settings
-    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, UiId::SettingsIdeIgnoreInput
+    WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, last_action, lsp_actions_menu, pending_fix_all_id, settings_ignore_focused, show_settings
+    MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports, UiId::SettingsIdeIgnoreInput
 
-  pub fn handle_main_cursor_moved  [631]
+  pub fn handle_main_cursor_moved  [635]
     CALL render_view::core_text: get_max_scroll
     CALL renderer: get_ui_glyph
     WRITE: autocomplete_hovered_idx
@@ -173,7 +172,7 @@ FILE src/app/ui_handlers.rs
 FILE src/app.rs
   module: app
   types:  PendingAction, PanelId, PanelGroup, PanelSlot, PanelDragState, LspActionItem, LspActionsMenu, IdePanelState, App
-  enum LspActionItem: CodeAction, AddNoqa, AddNoqaAll
+  enum LspActionItem: CodeAction, AddNoqa, AddNoqaAll, FixAll, OrganizeImports
   enum PanelGroup: Top, Bottom
   enum PanelId: Explorer, Terminal, Problems, LspServers
   enum PendingAction: Quit, OpenFile, CloseFile
@@ -184,70 +183,70 @@ FILE src/app.rs
   pub fn icon  [48] -> crate::widgets::IconType
     MATCH: PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
 
-      fn default  [128] -> Self
+      fn default  [130] -> Self
 
-  pub fn any_top_open  [175] -> bool
+  pub fn any_top_open  [177] -> bool
 
-  pub fn any_bottom_open  [180] -> bool
+  pub fn any_bottom_open  [182] -> bool
 
-  pub fn toggle  [185]
+  pub fn toggle  [187]
 
-  pub fn is_open  [190] -> bool
+  pub fn is_open  [192] -> bool
 
-      fn fuzzy_match  [200] -> Option<Vec<usize>>
+      fn fuzzy_match  [202] -> Option<Vec<usize>>
 
-  pub fn ensure_cursor_visible  [332]
+  pub fn ensure_cursor_visible  [334]
 
-  pub fn get_current_word_prefix  [369] -> String
+  pub fn get_current_word_prefix  [371] -> String
 
-  pub fn update_autocomplete  [389]
+  pub fn update_autocomplete  [391]
     SELF:  fuzzy_match
     WRITE: autocomplete_active, autocomplete_anim_progress, autocomplete_options, autocomplete_options.clear, autocomplete_selected_idx
     MATCH: SymbolKind::Class, SymbolKind::Function, SymbolKind::Keyword, SymbolKind::Parameter, SymbolKind::Unknown
 
-  pub fn ensure_autocomplete_visible  [468]
+  pub fn ensure_autocomplete_visible  [470]
 
-  pub fn apply_autocomplete  [498]
+  pub fn apply_autocomplete  [500]
     SELF:  update_window_title
     WRITE: autocomplete_active, autocomplete_selected_idx
 
-  pub fn update_search  [532]
+  pub fn update_search  [534]
     WRITE: search_current_idx, search_results.clear, search_results.push
 
-  pub fn jump_to_search_result  [588]
+  pub fn jump_to_search_result  [590]
 
-  pub fn update_window_title  [614]
+  pub fn update_window_title  [616]
 
-  pub fn show_action_dialog  [623]
+  pub fn show_action_dialog  [625]
     WRITE: dialog_gl_surface, dialog_window, is_dragging, pending_action
 
-  pub fn close_dialog  [665]
+  pub fn close_dialog  [667]
     WRITE: dialog_gl_surface, dialog_window
 
-  pub fn close_current_file  [673]
+  pub fn close_current_file  [675]
     SELF:  update_window_title
     WRITE: autocomplete_active, base_title, editor, file_path, search_current_idx, search_results.clear, show_search, show_welcome
 
-  pub fn trigger_file_picker  [706]
+  pub fn trigger_file_picker  [708]
     WRITE: open_file_rx
 
-  pub fn trigger_folder_picker  [715]
+  pub fn trigger_folder_picker  [717]
     WRITE: open_folder_rx
 
-  pub fn trigger_save_as_picker  [726]
+  pub fn trigger_save_as_picker  [728]
     WRITE: save_file_rx
 
-  pub fn save_current_file  [738] -> bool
+  pub fn save_current_file  [740] -> bool
     MATCH: ErrorKind::PermissionDenied
 
-  pub fn add_recent_file  [775]
+  pub fn add_recent_file  [777]
     CALL main: save_recent_files
     WRITE: recent_files.insert, recent_files.retain, recent_files.truncate
 
-  pub fn apply_highlight_results  [784]
+  pub fn apply_highlight_results  [786]
     WRITE: is_highlighted_once
 
-  pub fn load_file  [814]
+  pub fn load_file  [816]
     SELF:  update_window_title
     CALL main: save_recent_files
     WRITE: autocomplete_active, base_title, editor, file_extension, file_path, is_highlighted_once, last_sent_version, recent_files.retain, search_current_idx, search_results.clear, show_welcome
@@ -373,7 +372,7 @@ FILE src/highlighter.rs
 
 FILE src/lsp.rs
   module: lsp
-  types:  LspServerStatus, LogEntry, LspServerInfo, DiagSeverity, Diagnostic, TextChange, WorkspaceEdit, LspEvent, CodeAction, LspServerDef, Cmd, SpawnedProcess, OpenFile, LspProcess, LspManager
+  types:  LspServerStatus, LogEntry, LspServerInfo, DiagSeverity, QuickFix, Diagnostic, TextChange, WorkspaceEdit, LspEvent, CodeAction, LspServerDef, Cmd, SpawnedProcess, OpenFile, LspProcess, LspManager
   enum Cmd: Restart, Open, Change, Close, CodeAction, Shutdown
   enum DiagSeverity: Error, Warning, Info, Hint
   enum LspEvent: Log, Diagnostics, CodeActions, ServerReady, StatusChanged
@@ -381,138 +380,142 @@ FILE src/lsp.rs
 
       fn next_id  [30] -> i32
 
-  pub fn offset_to_lsp_pos  [196] -> (u32, u32)
+  pub fn offset_to_lsp_pos  [205] -> (u32, u32)
 
-      fn json_escape  [216] -> String
+      fn json_escape  [225] -> String
 
-      fn path_to_uri  [235] -> String
+      fn path_to_uri  [244] -> String
 
-      fn uri_to_path  [249] -> PathBuf
+      fn uri_to_path  [258] -> PathBuf
 
-      fn make_initialize  [260] -> Vec<u8>
+      fn make_initialize  [269] -> Vec<u8>
     SELF:  json_escape, path_to_uri
     CALL ui_system: id
 
-      fn make_initialized  [283] -> Vec<u8>
+      fn make_initialized  [292] -> Vec<u8>
 
-      fn make_did_open  [287] -> Vec<u8>
+      fn make_did_open  [296] -> Vec<u8>
     SELF:  json_escape
 
-      fn make_did_change_full  [298] -> Vec<u8>
+      fn make_did_change_full  [307] -> Vec<u8>
     SELF:  json_escape
 
-      fn make_did_close  [308] -> Vec<u8>
+      fn make_did_close  [317] -> Vec<u8>
     SELF:  json_escape
 
-      fn make_code_action  [316] -> Vec<u8>
+      fn make_code_action  [325] -> Vec<u8>
     SELF:  json_escape
 
-      fn make_shutdown  [332] -> Vec<u8>
+      fn make_shutdown  [349] -> Vec<u8>
 
-      fn make_exit  [336] -> Vec<u8>
+      fn make_exit  [353] -> Vec<u8>
 
-      fn write_frame  [342] -> bool
+      fn write_frame  [359] -> bool
 
-      fn parse_diagnostic_value  [354] -> Option<Diagnostic>
+      fn parse_diagnostic_value  [371] -> Option<Diagnostic>
+    SELF:  parse_text_edit_value
 
-      fn parse_text_edit_value  [411] -> Option<TextChange>
+      fn parse_text_edit_value  [449] -> Option<TextChange>
 
-      fn parse_workspace_edit_value  [436] -> WorkspaceEdit
+      fn parse_workspace_edit_value  [474] -> WorkspaceEdit
     SELF:  uri_to_path
 
-      fn parse_code_action_value  [472] -> Option<CodeAction>
+      fn parse_code_action_value  [510] -> Option<CodeAction>
 
-      fn dispatch_frame  [489]
+      fn dispatch_frame  [540]
     SELF:  parse_diagnostic_value, parse_workspace_edit_value, uri_to_path
     MATCH: LspEvent::CodeActions, LspEvent::Diagnostics, LspEvent::Log
 
-      fn spawn_server  [628] -> Option<SpawnedProcess>
+      fn spawn_server  [680] -> Option<SpawnedProcess>
     SELF:  dispatch_frame, write_frame
 
-      fn send_and_log  [752] -> Result<(), mpsc::SendError<Vec<u8>>>
+      fn send_and_log  [804] -> Result<(), mpsc::SendError<Vec<u8>>>
 
-      fn run_supervisor  [768]
+      fn run_supervisor  [820]
     SELF:  make_code_action, make_did_change_full, make_did_close, make_did_open, make_exit, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server
     MATCH: Cmd::Change, Cmd::Close, Cmd::CodeAction, Cmd::Open, LspEvent::StatusChanged
 
-      fn start  [959] -> Self
+      fn start  [1013] -> Self
     SELF:  run_supervisor
 
-  pub fn notify_open  [979]
+  pub fn notify_open  [1033]
     SELF:  path_to_uri
     WRITE: current_uri, open_file_data
 
-  pub fn restart  [992]
+  pub fn restart  [1046]
 
-  pub fn notify_change  [998]
+  pub fn notify_change  [1052]
     SELF:  path_to_uri
     WRITE: current_uri
 
-  pub fn notify_close  [1009]
+  pub fn notify_close  [1063]
     SELF:  path_to_uri
     WRITE: current_uri
 
-  pub fn request_code_actions  [1017] -> i32
+  pub fn request_code_actions  [1071] -> i32
     SELF:  encode_diagnostics_json, next_id, path_to_uri
 
-  pub fn poll  [1045] -> Vec<LspEvent>
+  pub fn poll  [1101] -> Vec<LspEvent>
 
-  pub fn shutdown  [1057]
+  pub fn shutdown  [1113]
 
-      fn encode_diagnostics_json  [1064] -> String
+      fn encode_diagnostics_json  [1120] -> String
     SELF:  json_escape
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-  pub fn new  [1112] -> Self
+  pub fn new  [1168] -> Self
 
-      fn ensure_python  [1125]
+      fn ensure_python  [1181]
     SELF:  start
     WRITE: python, python_status
 
-  pub fn restart_python  [1133]
+  pub fn restart_python  [1189]
     SELF:  start
     WRITE: python, python_status
 
-  pub fn disable_python  [1144]
+  pub fn disable_python  [1200]
     WRITE: diagnostics.clear, python_disabled, python_status, server_logs.clear
 
-  pub fn enable_python  [1155]
+  pub fn enable_python  [1211]
     SELF:  start
     WRITE: python, python_disabled, python_status
 
-  pub fn servers_info  [1170] -> Vec<LspServerInfo>
+  pub fn servers_info  [1226] -> Vec<LspServerInfo>
 
-      fn process_for_ext  [1184] -> Option<&mut LspProcess>
+      fn process_for_ext  [1240] -> Option<&mut LspProcess>
 
-  pub fn notify_open  [1195]
+  pub fn notify_open  [1251]
     WRITE: current_path, diagnostics.clear
 
-  pub fn notify_change  [1211]
+  pub fn notify_change  [1267]
 
-  pub fn notify_close  [1225]
+  pub fn notify_close  [1281]
     WRITE: diagnostics.clear
 
-  pub fn request_code_actions  [1235] -> Option<i32>
+  pub fn request_code_actions  [1291] -> Option<i32>
 
-  pub fn poll  [1258] -> Vec<LspEvent>
+  pub fn poll  [1316] -> Vec<LspEvent>
     SELF:  format_and_highlight_json, path_to_uri
     WRITE: diagnostics, python_status
     MATCH: LspEvent::Diagnostics, LspEvent::Log, LspEvent::StatusChanged
 
-  pub fn diagnostics_for_line  [1303] -> Vec<&Diagnostic>
+  pub fn diagnostics_for_line  [1361] -> Vec<&Diagnostic>
 
-  pub fn request_fix_all  [1311] -> Option<i32>
+  pub fn request_fix_all  [1369] -> Option<i32>
     SELF:  next_id, path_to_uri
 
-  pub fn shutdown  [1329]
+  pub fn request_organize_imports  [1387] -> Option<i32>
+    SELF:  next_id, path_to_uri
+
+  pub fn shutdown  [1406]
     WRITE: python_disabled
 
-  pub fn lsp_pos_to_offset  [1341] -> usize
+  pub fn lsp_pos_to_offset  [1418] -> usize
 
-  pub fn apply_workspace_edit_to_text  [1366] -> String
+  pub fn apply_workspace_edit_to_text  [1443] -> String
     SELF:  lsp_pos_to_offset
 
-  pub fn format_and_highlight_json  [1390] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
+  pub fn format_and_highlight_json  [1467] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
     CALL queries: get_folding_query, get_ts_config
 
 ────────────────────────────────────────────────────────────
@@ -595,7 +598,7 @@ FILE src/render_view/lsp_ui.rs
     MATCH: LspServerStatus::Crashed, LspServerStatus::Disabled, LspServerStatus::Running, LspServerStatus::Starting
 
   pub fn draw_lsp_actions_menu  [780] -> bool
-    MATCH: Cow::Borrowed, Cow::Owned, LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction
+    MATCH: Cow::Borrowed, Cow::Owned, LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports
 
 ────────────────────────────────────────────────────────────
 

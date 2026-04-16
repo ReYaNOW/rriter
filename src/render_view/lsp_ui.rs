@@ -810,9 +810,49 @@ impl Renderer {
             return false;
         }
 
-        let s = self.scale_factor;
+                let s = self.scale_factor;
         let item_h = 36.0 * s;
-        let menu_w = 320.0 * s;
+
+        let mut max_item_w = 320.0 * s;
+        for item in &menu.items {
+            let label_str = match item {
+                crate::app::LspActionItem::CodeAction(action) => {
+                    if let Some(c) = &action.code {
+                        format!("Ruff ({}): {}", c, action.title)
+                    } else {
+                        format!("Ruff: {}", action.title)
+                    }
+                }
+                crate::app::LspActionItem::AddNoqa { codes } => {
+                    if codes.is_empty() {
+                        "Добавить # noqa".to_string()
+                    } else {
+                        format!("Добавить # noqa: {}", codes.join(", "))
+                    }
+                }
+                crate::app::LspActionItem::AddNoqaAll => "Добавить # noqa (отключить все)".to_string(),
+                crate::app::LspActionItem::FixAll => "Ruff: Исправить всё доступное".to_string(),
+                crate::app::LspActionItem::OrganizeImports => "Ruff: Упорядочить импорты".to_string(),
+            };
+
+            let mut w = self.measure_ui_width(&label_str, 0.9) + 60.0 * s;
+            if let crate::app::LspActionItem::CodeAction(action) = item {
+                if let Some(kind) = &action.kind {
+                    let kind_short = if kind.contains("fixAll") {
+                        "fix all"
+                    } else if kind.contains("quickfix") {
+                        "quickfix"
+                    } else {
+                        kind.as_str()
+                    };
+                    w += self.measure_ui_width(kind_short, 0.72) + 20.0 * s;
+                }
+            }
+            if w > max_item_w {
+                max_item_w = w;
+            }
+        }
+        let menu_w = max_item_w;
         let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
 
         // Подгоняем к экрану
@@ -877,35 +917,37 @@ impl Renderer {
                 );
             }
 
-            let (icon_str, label, label_color) = match item {
+                        let (label_str, label_color) = match item {
                 crate::app::LspActionItem::CodeAction(action) => {
-                    let label = action.title.as_str();
-                    ("⚡", label, self.theme.fg)
+                    let s = if let Some(c) = &action.code {
+                        format!("Ruff ({}): {}", c, action.title)
+                    } else {
+                        format!("Ruff: {}", action.title)
+                    };
+                    (std::borrow::Cow::Owned(s), self.theme.fg)
                 }
                 crate::app::LspActionItem::AddNoqa { codes } => {
-                    // временная строка не нужна — выводим отдельно
-                    let _ = codes;
-                    ("🔇", "Добавить # noqa: …", [0.80, 0.75, 0.55, 1.0])
+                    let s = if codes.is_empty() {
+                        "Добавить # noqa".to_string()
+                    } else {
+                        format!("Добавить # noqa: {}", codes.join(", "))
+                    };
+                    (std::borrow::Cow::Owned(s),[0.80, 0.75, 0.55, 1.0])
                 }
-                crate::app::LspActionItem::AddNoqaAll => (
-                    "🔕",
-                    "Добавить # noqa (отключить все)",
-                    [0.65, 0.60, 0.50, 1.0],
-                ),
+                crate::app::LspActionItem::AddNoqaAll => {
+                    (std::borrow::Cow::Borrowed("Добавить # noqa (отключить все)"),[0.65, 0.60, 0.50, 1.0])
+                }
+                crate::app::LspActionItem::FixAll => {
+                    (std::borrow::Cow::Borrowed("Ruff: Исправить всё доступное"),[0.55, 0.95, 0.65, 1.0])
+                }
+                crate::app::LspActionItem::OrganizeImports => {
+                    (std::borrow::Cow::Borrowed("Ruff: Упорядочить импорты"),[0.55, 0.85, 0.95, 1.0])
+                }
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;
-            self.draw_string_scaled(icon_str, mx_pos + 10.0 * s, text_y, label_color, 0.9);
 
-            // Для AddNoqa с кодами — собираем строку из кодов
-            let label_str: std::borrow::Cow<str> = match item {
-                crate::app::LspActionItem::AddNoqa { codes } if !codes.is_empty() => {
-                    let s = format!("Добавить # noqa: {}", codes.join(", "));
-                    std::borrow::Cow::Owned(s)
-                }
-                _ => std::borrow::Cow::Borrowed(label),
-            };
-            self.draw_string_scaled(&label_str, mx_pos + 28.0 * s, text_y, label_color, 0.9);
+            self.draw_string_scaled(&label_str, mx_pos + 12.0 * s, text_y, label_color, 0.9);
 
             // Подсказка по типу действия (quickfix/source)
             if let crate::app::LspActionItem::CodeAction(action) = item {

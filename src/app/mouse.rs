@@ -4,7 +4,8 @@ use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 
 impl App {
-    pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        self.lsp_actions_menu = None;
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let shift = self.modifiers.shift_key();
@@ -249,10 +250,67 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
         if state == ElementState::Pressed {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
+
+            if self.lsp_actions_menu.is_some() {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let mut clicked_inside = false;
+                if let Some(menu) = &self.lsp_actions_menu {
+                    let item_h = 36.0 * s;
+                    let menu_w = 320.0 * s;
+                    let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
+                    if mx >= menu.menu_x && mx <= menu.menu_x + menu_w && my >= menu.menu_y && my <= menu.menu_y + menu_h {
+                        clicked_inside = true;
+                        let rel_y = my - menu.menu_y - 4.0 * s;
+                        let idx = (rel_y / item_h) as usize;
+                        if idx < menu.items.len() {
+                            let menu_clone = self.lsp_actions_menu.take().unwrap();
+                            let item = menu_clone.items[idx].clone();
+                            let cursor_line = menu_clone.cursor_line;
+                            drop(menu_clone);
+                                                        match item {
+                                crate::app::LspActionItem::CodeAction(action) => {
+                                    if let Some(edit) = action.edit {
+                                        self.apply_workspace_edit(&edit);
+                                    }
+                                }
+                                crate::app::LspActionItem::AddNoqa { codes } => {
+                                    self.insert_noqa_comment(cursor_line, &codes);
+                                }
+                                crate::app::LspActionItem::AddNoqaAll => {
+                                    self.insert_noqa_comment(cursor_line, &[]);
+                                }
+                                crate::app::LspActionItem::FixAll => {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        if let Some(id) = lsp.request_fix_all(&self.file_extension) {
+                                            self.pending_fix_all_id = Some(id);
+                                        }
+                                    }
+                                }
+                                crate::app::LspActionItem::OrganizeImports => {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        if let Some(id) = lsp.request_organize_imports(&self.file_extension) {
+                                            self.pending_fix_all_id = Some(id);
+                                        }
+                                    }
+                                }
+                            }
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
+                    }
+                }
+
+                if !clicked_inside {
+                    self.lsp_actions_menu = None;
+                    self.window.as_ref().unwrap().request_redraw();
+                } else {
+                    return;
+                }
+            }
 
             // Глобальная обработка декларативного UI
             if !self.show_welcome && !self.show_settings && self.dialog_window.is_none() {
@@ -268,60 +326,6 @@ impl App {
                         self.handle_ui_click(clicked_id);
                     }
                     return;
-                }
-            }
-        }
-
-        // Клик вне меню LSP — закрываем меню
-        if state == ElementState::Pressed && self.lsp_actions_menu.is_some() {
-            let s = self.renderer.as_ref().unwrap().scale_factor;
-            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-            let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            if let Some(menu) = &self.lsp_actions_menu {
-                let item_h = 36.0 * s;
-                let menu_w = 320.0 * s;
-                let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                let in_menu = mx >= menu.menu_x
-                    && mx <= menu.menu_x + menu_w
-                    && my >= menu.menu_y
-                    && my <= menu.menu_y + menu_h;
-                if in_menu {
-                    // Клик внутри меню — выбираем элемент
-                    let rel_y = my - menu.menu_y - 4.0 * s;
-                    let idx = (rel_y / item_h) as usize;
-                    if idx < menu.items.len() {
-                        let menu_clone = self.lsp_actions_menu.take().unwrap();
-                        let item = menu_clone.items[idx].clone();
-                        let cursor_line = menu_clone.cursor_line;
-                        drop(menu_clone);
-                        match item {
-                            LspActionItem::CodeAction(action) => {
-                                if let (Some(edit), Some(path)) =
-                                    (action.edit, self.file_path.clone())
-                                {
-                                    let new_text = crate::lsp::apply_workspace_edit_to_text(
-                                        &self.editor.get_full_text(),
-                                        &edit,
-                                        &path,
-                                    );
-                                    if new_text != self.editor.get_full_text() {
-                                        self.apply_full_text_replacement(new_text);
-                                    }
-                                }
-                            }
-                            LspActionItem::AddNoqa { codes } => {
-                                self.insert_noqa_comment(cursor_line, &codes);
-                            }
-                            LspActionItem::AddNoqaAll => {
-                                self.insert_noqa_comment(cursor_line, &[]);
-                            }
-                        }
-                        self.window.as_ref().unwrap().request_redraw();
-                        return;
-                    }
-                } else {
-                    self.lsp_actions_menu = None;
-                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
         }

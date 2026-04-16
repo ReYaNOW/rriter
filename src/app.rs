@@ -85,6 +85,8 @@ pub enum LspActionItem {
     AddNoqa { codes: Vec<String> },
     /// Добавить # noqa (отключить все для строки)
     AddNoqaAll,
+    FixAll,
+    OrganizeImports,
 }
 
 /// Состояние всплывающего меню Alt+Enter
