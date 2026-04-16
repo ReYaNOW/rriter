@@ -235,12 +235,14 @@ impl App {
             self.scroll_x.scroll_by(dx);
         }
 
-        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+        let s = self.renderer.as_ref().unwrap().scale_factor;
+        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
         let max_scroll_y = self
             .renderer
             .as_mut()
             .unwrap()
-            .get_max_scroll(&self.editor, wh);
+            .get_max_scroll(&self.editor, wh - tab_bar_h);
         let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
 
         self.scroll_y.clamp_target(0.0, max_scroll_y);
@@ -258,13 +260,15 @@ impl App {
             if self.lsp_actions_menu.is_some() {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let mut clicked_inside = false;
-                if let Some(menu) = &self.lsp_actions_menu {
+                                if let Some(menu) = &self.lsp_actions_menu {
                     let item_h = 36.0 * s;
                     let menu_w = 320.0 * s;
                     let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                    if mx >= menu.menu_x && mx <= menu.menu_x + menu_w && my >= menu.menu_y && my <= menu.menu_y + menu_h {
+                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                    let menu_y = menu.menu_y + tab_bar_h;
+                    if mx >= menu.menu_x && mx <= menu.menu_x + menu_w && my >= menu_y && my <= menu_y + menu_h {
                         clicked_inside = true;
-                        let rel_y = my - menu.menu_y - 4.0 * s;
+                        let rel_y = my - menu_y - 4.0 * s;
                         let idx = (rel_y / item_h) as usize;
                         if idx < menu.items.len() {
                             let menu_clone = self.lsp_actions_menu.take().unwrap();
@@ -1040,7 +1044,7 @@ impl App {
                 / (track_w - thumb_w).max(0.0001);
             self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
             self.scroll_x.current = self.scroll_x.target;
-        } else if self.scroll_y.is_dragging {
+                } else if self.scroll_y.is_dragging {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_click_time).as_millis();
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
@@ -1048,25 +1052,28 @@ impl App {
             if elapsed > 120 || dy > 10.0 {
                 let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
                     * self.renderer.as_ref().unwrap().line_height;
-                let thumb_h = (wh / total_content_height.max(wh) * wh).max(20.0 * s);
-                let track_h = wh;
-                let track_start_y = 0.0;
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                let editor_height = wh - tab_bar_h;
+                let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+                let track_h = editor_height;
+                let track_start_y = tab_bar_h;
 
                 let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
-                    / (track_h - thumb_h).max(0.0001);
+                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)/ (track_h - thumb_h).max(0.0001);
 
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
                 self.scroll_y.anim_speed = 15.0;
             }
-        } else if self.is_dragging && !self.show_settings {
+                } else if self.is_dragging && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
+            let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * self.renderer.as_ref().unwrap().scale_factor };
             self.editor.set_cursor_at_pos(
                 last_mouse_x,
-                last_mouse_y + self.scroll_y.current,
+                last_mouse_y - tab_bar_h + self.scroll_y.current,
                 self.renderer.as_mut().unwrap(),
                 false,
             );

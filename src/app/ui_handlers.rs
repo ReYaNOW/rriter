@@ -353,6 +353,14 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
+                        // Tabs
+            UiId::EditorTab(idx) => {
+                self.switch_to_tab(idx);
+            }
+            UiId::EditorTabClose(idx) => {
+                self.close_tab_at(idx);
+            }
+
             // Editor
             UiId::EditorFoldArrow(phys_idx) => {
                 if self.editor.folded_lines.contains(&phys_idx) {
@@ -473,8 +481,9 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
 
+                                        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * r.scale_factor };
                     self.editor
-                        .set_cursor_at_pos(mx, my + self.scroll_y.current, r, true);
+                        .set_cursor_at_pos(mx, my - tab_bar_h + self.scroll_y.current, r, true);
                 }
 
                 if self.click_count == 2 {

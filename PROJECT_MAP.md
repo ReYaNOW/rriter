@@ -28,7 +28,7 @@ FILE src/app/events.rs
     WRITE: autocomplete_rect, current_cursor, is_focused, is_ready, last_resize_time, modifiers, target_sticky_lines, tried_maximize, ui_registry.clear
     MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit
 
-      fn about_to_wait  [646]
+      fn about_to_wait  [652]
     CALL app: update_window_title
     CALL main: save_config
     CALL render_view::core_text: get_max_scroll
@@ -100,7 +100,7 @@ FILE src/app/keyboard.rs
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
     MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn handle_main_keyboard_input  [751]
+  pub fn handle_main_keyboard_input  [753]
     CALL main: save_config
     WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
 
@@ -144,14 +144,14 @@ FILE src/app/mouse.rs
     CALL renderer: measure_ui_width
     WRITE: lsp_actions_menu, settings_tab
 
-  pub fn handle_main_mouse_input  [253]
+  pub fn handle_main_mouse_input  [255]
     CALL main: save_panel_state
     CALL render_view::core_text: get_max_scroll
     CALL renderer: get_ui_glyph
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, last_action, lsp_actions_menu, pending_fix_all_id, settings_ignore_focused, show_settings
     MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports, UiId::SettingsIdeIgnoreInput
 
-  pub fn handle_main_cursor_moved  [635]
+  pub fn handle_main_cursor_moved  [639]
     CALL render_view::core_text: get_max_scroll
     CALL renderer: get_ui_glyph
     WRITE: autocomplete_hovered_idx
@@ -165,88 +165,105 @@ FILE src/app/ui_handlers.rs
     CALL app: update_window_title
     CALL main: save_config, save_panel_state
     WRITE: base_title, click_count, dialog_window, editor, file_extension, file_path, ide_ignore_patterns.push, ide_ignore_patterns.remove, ide_workspaces.remove, is_dragging, is_dragging_lsp_log, is_dragging_search, is_ide_mode, last_click_pos, last_click_time, lsp, pending_fix_all_id, search_case_sensitive, search_current_idx, search_focused, search_results.clear, settings_ignore_editor, settings_ignore_focused, settings_tab, show_search, show_welcome
-    MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit, UiId::BottomPanelBody, UiId::CopyDiagnostic, UiId::DialogCancel, UiId::DialogDiscard, UiId::DialogSave, UiId::EditorFoldArrow, UiId::EditorFoldDots, UiId::EditorMinimap, UiId::EditorScrollbarX, UiId::EditorTextBody, UiId::FileTreeNode, UiId::LspLogArea, UiId::LspLogFoldToggle, UiId::LspLogScrollX, UiId::LspLogScrollY, UiId::LspScrollX, UiId::LspScrollY, UiId::LspServerFixAll, UiId::LspServerLogs, UiId::LspServerRestart, UiId::LspServerStop, UiId::LspServerToggle, UiId::OpenDiagUrl, UiId::ResizeBottom, UiId::ResizeLeft, UiId::SearchCaseToggle, UiId::SearchClose, UiId::SearchInput, UiId::SearchNext, UiId::SearchPrev, UiId::SettingsIdeAddIgnore, UiId::SettingsIdeAddWorkspace, UiId::SettingsIdeIgnoreInput, UiId::SettingsIdeRemoveIgnore, UiId::SettingsIdeRemoveWorkspace, UiId::SettingsTab, UiId::SidebarSlot, UiId::StickyLine, UiId::WelcomeIdeMode, UiId::WelcomeNewFile, UiId::WelcomeOpenFile, UiId::WelcomeRecentFile
+    MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit, UiId::BottomPanelBody, UiId::CopyDiagnostic, UiId::DialogCancel, UiId::DialogDiscard, UiId::DialogSave, UiId::EditorFoldArrow, UiId::EditorFoldDots, UiId::EditorMinimap, UiId::EditorScrollbarX, UiId::EditorTab, UiId::EditorTabClose, UiId::EditorTextBody, UiId::FileTreeNode, UiId::LspLogArea, UiId::LspLogFoldToggle, UiId::LspLogScrollX, UiId::LspLogScrollY, UiId::LspScrollX, UiId::LspScrollY, UiId::LspServerFixAll, UiId::LspServerLogs, UiId::LspServerRestart, UiId::LspServerStop, UiId::LspServerToggle, UiId::OpenDiagUrl, UiId::ResizeBottom, UiId::ResizeLeft, UiId::SearchCaseToggle, UiId::SearchClose, UiId::SearchInput, UiId::SearchNext, UiId::SearchPrev, UiId::SettingsIdeAddIgnore, UiId::SettingsIdeAddWorkspace, UiId::SettingsIdeIgnoreInput, UiId::SettingsIdeRemoveIgnore, UiId::SettingsIdeRemoveWorkspace, UiId::SettingsTab, UiId::SidebarSlot, UiId::StickyLine, UiId::WelcomeIdeMode, UiId::WelcomeNewFile, UiId::WelcomeOpenFile, UiId::WelcomeRecentFile
 
 ────────────────────────────────────────────────────────────
 
 FILE src/app.rs
   module: app
-  types:  PendingAction, PanelId, PanelGroup, PanelSlot, PanelDragState, LspActionItem, LspActionsMenu, IdePanelState, App
+  types:  EditorTab, PendingAction, PanelId, PanelGroup, PanelSlot, PanelDragState, LspActionItem, LspActionsMenu, IdePanelState, App
   enum LspActionItem: CodeAction, AddNoqa, AddNoqaAll, FixAll, OrganizeImports
   enum PanelGroup: Top, Bottom
   enum PanelId: Explorer, Terminal, Problems, LspServers
   enum PendingAction: Quit, OpenFile, CloseFile
 
-  pub fn label  [40] -> &'static str
+  pub fn label  [55] -> &'static str
     MATCH: PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
 
-  pub fn icon  [48] -> crate::widgets::IconType
+  pub fn icon  [63] -> crate::widgets::IconType
     MATCH: PanelId::Explorer, PanelId::LspServers, PanelId::Problems, PanelId::Terminal
 
-      fn default  [130] -> Self
+      fn default  [145] -> Self
 
-  pub fn any_top_open  [177] -> bool
+  pub fn any_top_open  [192] -> bool
 
-  pub fn any_bottom_open  [182] -> bool
+  pub fn any_bottom_open  [197] -> bool
 
-  pub fn toggle  [187]
+  pub fn toggle  [202]
 
-  pub fn is_open  [192] -> bool
+  pub fn is_open  [207] -> bool
 
-      fn fuzzy_match  [202] -> Option<Vec<usize>>
+      fn fuzzy_match  [217] -> Option<Vec<usize>>
 
-  pub fn ensure_cursor_visible  [334]
+  pub fn sync_active_tab  [352]
+    CALL app::file_icons: file_icon_key
 
-  pub fn get_current_word_prefix  [371] -> String
+  pub fn switch_to_tab  [373]
+    SELF:  update_window_title
+    WRITE: active_tab, autocomplete_active, show_welcome
 
-  pub fn update_autocomplete  [391]
+  pub fn open_new_tab  [388]
+    SELF:  update_window_title
+    WRITE: active_tab, autocomplete_active, show_welcome, tabs.push
+
+  pub fn close_tab_at  [417]
+    SELF:  update_window_title
+    WRITE: active_tab, autocomplete_active, show_welcome, tabs.remove
+
+  pub fn open_file_in_tab  [444]
+
+  pub fn ensure_cursor_visible  [464]
+
+  pub fn get_current_word_prefix  [503] -> String
+
+  pub fn update_autocomplete  [523]
     SELF:  fuzzy_match
     WRITE: autocomplete_active, autocomplete_anim_progress, autocomplete_options, autocomplete_options.clear, autocomplete_selected_idx
     MATCH: SymbolKind::Class, SymbolKind::Function, SymbolKind::Keyword, SymbolKind::Parameter, SymbolKind::Unknown
 
-  pub fn ensure_autocomplete_visible  [470]
+  pub fn ensure_autocomplete_visible  [602]
 
-  pub fn apply_autocomplete  [500]
+  pub fn apply_autocomplete  [632]
     SELF:  update_window_title
     WRITE: autocomplete_active, autocomplete_selected_idx
 
-  pub fn update_search  [534]
+  pub fn update_search  [666]
     WRITE: search_current_idx, search_results.clear, search_results.push
 
-  pub fn jump_to_search_result  [590]
+  pub fn jump_to_search_result  [722]
 
-  pub fn update_window_title  [616]
+  pub fn update_window_title  [748]
 
-  pub fn show_action_dialog  [625]
+  pub fn show_action_dialog  [757]
     WRITE: dialog_gl_surface, dialog_window, is_dragging, pending_action
 
-  pub fn close_dialog  [667]
+  pub fn close_dialog  [799]
     WRITE: dialog_gl_surface, dialog_window
 
-  pub fn close_current_file  [675]
+  pub fn close_current_file  [807]
     SELF:  update_window_title
     WRITE: autocomplete_active, base_title, editor, file_path, search_current_idx, search_results.clear, show_search, show_welcome
 
-  pub fn trigger_file_picker  [708]
+  pub fn trigger_file_picker  [845]
     WRITE: open_file_rx
 
-  pub fn trigger_folder_picker  [717]
+  pub fn trigger_folder_picker  [854]
     WRITE: open_folder_rx
 
-  pub fn trigger_save_as_picker  [728]
+  pub fn trigger_save_as_picker  [865]
     WRITE: save_file_rx
 
-  pub fn save_current_file  [740] -> bool
+  pub fn save_current_file  [877] -> bool
     MATCH: ErrorKind::PermissionDenied
 
-  pub fn add_recent_file  [777]
+  pub fn add_recent_file  [914]
     CALL main: save_recent_files
     WRITE: recent_files.insert, recent_files.retain, recent_files.truncate
 
-  pub fn apply_highlight_results  [786]
+  pub fn apply_highlight_results  [923]
     WRITE: is_highlighted_once
 
-  pub fn load_file  [816]
+  pub fn load_file  [953]
     SELF:  update_window_title
     CALL main: save_recent_files
     WRITE: autocomplete_active, base_title, editor, file_extension, file_path, is_highlighted_once, last_sent_version, recent_files.retain, search_current_idx, search_results.clear, show_welcome
@@ -664,7 +681,10 @@ FILE src/render_view.rs
     WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_cursor_for_popups, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diags, last_hovered_diags.clear, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-      fn draw_minimap  [1965]
+      fn draw_tab_bar  [1973]
+    CALL app::file_icons: file_icon_key
+
+      fn draw_minimap  [2059]
 
 ────────────────────────────────────────────────────────────
 
@@ -739,51 +759,51 @@ FILE src/ui_system.rs
   module: ui_system
   types:  UiId, UiElement, UiRegistry
   enum UiElement: Button, IconButton, TextInput, Rect
-  enum UiId: WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile, DialogSave, DialogDiscard, DialogCancel, SettingsTab, SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace, SettingsIdeAddIgnore, SettingsIdeRemoveIgnore, SettingsIdeIgnoreInput, LspServerRestart, LspServerToggle, LspServerStop, LspServerLogs, LspServerFixAll, LspLogFoldToggle, SidebarSlot, FileTreeNode, SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorFoldArrow, EditorFoldDots, StickyLine, EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea, LspScrollY, LspScrollX, LspLogScrollY, LspLogScrollX, CopyDiagnostic, OpenDiagUrl
+  enum UiId: WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile, DialogSave, DialogDiscard, DialogCancel, SettingsTab, SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace, SettingsIdeAddIgnore, SettingsIdeRemoveIgnore, SettingsIdeIgnoreInput, LspServerRestart, LspServerToggle, LspServerStop, LspServerLogs, LspServerFixAll, LspLogFoldToggle, SidebarSlot, FileTreeNode, SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab, EditorTabClose, EditorFoldArrow, EditorFoldDots, StickyLine, EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea, LspScrollY, LspScrollX, LspLogScrollY, LspLogScrollX, CopyDiagnostic, OpenDiagUrl
 
-  pub fn contains  [108] -> bool
+  pub fn contains  [112] -> bool
     MATCH: UiElement::Button, UiElement::IconButton, UiElement::Rect, UiElement::TextInput
 
-  pub fn id  [134] -> UiId
+  pub fn id  [138] -> UiId
     MATCH: UiElement::Button, UiElement::IconButton, UiElement::Rect, UiElement::TextInput
 
-  pub fn new  [158] -> Self
+  pub fn new  [162] -> Self
 
-  pub fn clear  [169]
+  pub fn clear  [173]
     WRITE: elements.clear, hovered, overlay_mark, wants_pointer, wants_text
 
-  pub fn mark_overlay_start  [179]
+  pub fn mark_overlay_start  [183]
     WRITE: overlay_mark
 
-  pub fn find_overlay_at  [185] -> Option<UiId>
+  pub fn find_overlay_at  [189] -> Option<UiId>
 
-  pub fn register_button  [194] -> bool
+  pub fn register_button  [198] -> bool
     WRITE: elements.push, hovered, wants_pointer
 
-  pub fn register_icon_button  [222] -> bool
+  pub fn register_icon_button  [226] -> bool
     WRITE: elements.push, hovered, wants_pointer
 
-  pub fn register_text_input  [250] -> bool
+  pub fn register_text_input  [254] -> bool
     WRITE: elements.push, hovered, wants_text
 
-  pub fn register_blocker  [273] -> bool
+  pub fn register_blocker  [277] -> bool
     WRITE: elements.push
 
-  pub fn register_rect  [290] -> bool
+  pub fn register_rect  [294] -> bool
     WRITE: elements.push, hovered, wants_pointer
 
-  pub fn find_at  [312] -> Option<UiId>
+  pub fn find_at  [316] -> Option<UiId>
 
-  pub fn hovered  [322] -> Option<UiId>
+  pub fn hovered  [326] -> Option<UiId>
 
-  pub fn reset_cursor_state  [329]
+  pub fn reset_cursor_state  [333]
     WRITE: wants_pointer, wants_text
 
-  pub fn wants_pointer  [335] -> bool
+  pub fn wants_pointer  [339] -> bool
 
-  pub fn wants_text  [340] -> bool
+  pub fn wants_text  [344] -> bool
 
-  pub fn cursor_code  [345] -> u8
+  pub fn cursor_code  [349] -> u8
 
 ────────────────────────────────────────────────────────────
 

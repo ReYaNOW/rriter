@@ -303,7 +303,7 @@ impl ApplicationHandler for App {
             } => {
                 self.handle_main_keyboard_input(event_loop, key_event);
             }
-            WindowEvent::RedrawRequested => {
+                                    WindowEvent::RedrawRequested => {
                 let gl_context = self.gl_context.as_ref().unwrap();
                 let gl_surface = self.gl_surface.as_ref().unwrap();
 
@@ -349,8 +349,11 @@ impl ApplicationHandler for App {
                 // Очищаем UI registry перед новым кадром
                 self.ui_registry.clear();
 
-                let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
-                    &mut self.editor,
+                                                let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(&mut self.editor,
+                    &self.base_title,
+                    self.file_path.as_ref(),
+                    &self.tabs,
+                    self.active_tab,
                     self.scroll_x.current,
                     self.scroll_y.current,
                     blink_alpha,
@@ -434,25 +437,28 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // LSP actions menu — рисуем поверх всего
-                if let Some(menu) = &self.lsp_actions_menu {
+                                // LSP actions menu — рисуем поверх всего
+                if let Some(mut menu) = self.lsp_actions_menu.clone() {
+                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                    menu.menu_y += tab_bar_h;
                     let wants = self
                         .renderer
                         .as_mut()
                         .unwrap()
-                        .draw_lsp_actions_menu(menu, blink_alpha);
+                        .draw_lsp_actions_menu(&menu, blink_alpha);
                     if wants {
                         wants_pointer = true;
                     }
                 }
 
-                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
-                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-                    let render_scroll_y = self.scroll_y.current.round();
-                    let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
-                        cx,
-                        cy - render_scroll_y,
-                        &self.autocomplete_options,
+                                                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+                                                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
+                                                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                                                    let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+                                                    let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
+                                                        cx,
+                                                        cy - render_scroll_y,
+                                                        &self.autocomplete_options,
                         self.autocomplete_selected_idx,
                         self.autocomplete_anim_progress,
                         self.autocomplete_scroll.current,
@@ -769,7 +775,9 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        let target_search_y = if self.show_search { 10.0 } else { -120.0 * s };
+                let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+        let target_search_y = if self.show_search { tab_bar_h + 10.0 * s } else { -120.0 * s };
         let search_diff = target_search_y - self.search_anim_y;
         if search_diff.abs() > 1.5 {
             self.search_anim_y += search_diff * 20.0 * dt;
@@ -807,15 +815,16 @@ impl ApplicationHandler for App {
                         self.scroll_y.target += drag_scroll_delta_y.signum() * speed * dt;
                     }
 
-                    if drag_scroll_delta_x != 0.0 {
+                                        if drag_scroll_delta_x != 0.0 {
                         let drag_amount = drag_scroll_delta_x.abs();
                         let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
                         self.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                     }
 
+                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * self.renderer.as_ref().unwrap().scale_factor };
                     self.editor.set_cursor_at_pos(
                         mx,
-                        my + self.scroll_y.current,
+                        my - tab_bar_h + self.scroll_y.current,
                         self.renderer.as_mut().unwrap(),
                         false,
                     );
@@ -824,12 +833,14 @@ impl ApplicationHandler for App {
             }
         }
 
-        if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
+            let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+            let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
             let max_scroll_y = self
                 .renderer
                 .as_mut()
                 .unwrap()
-                .get_max_scroll(&self.editor, w.inner_size().height as f32);
+                .get_max_scroll(&self.editor, w.inner_size().height as f32 - tab_bar_h);
             self.scroll_y.clamp_target(0.0, max_scroll_y);
             self.scroll_y.clamp_current(0.0, max_scroll_y);
 
@@ -866,11 +877,11 @@ impl ApplicationHandler for App {
             }
         }
 
-        if let Some(rx) = &self.open_file_rx {
+                        if let Some(rx) = &self.open_file_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_file_rx = None;
                 if let Some(path) = result {
-                    self.load_file(path, true);
+                    self.open_file_in_tab(path, true);
                 }
             }
         }

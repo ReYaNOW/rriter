@@ -19,9 +19,13 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-    pub fn draw(
+        pub fn draw(
         &mut self,
         editor: &mut Editor,
+        editor_title: &str,
+        editor_path: Option<&std::path::PathBuf>,
+        tabs: &[crate::app::EditorTab],
+        active_tab: usize,
         scroll_x: f32,
         scroll_y: f32,
         blink_alpha: f32,
@@ -149,10 +153,9 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-        let real_height = self.height;
-        // Нижняя панель полупрозрачная, поэтому текст, скролл и мини-карта
-        // рендерятся на всю высоту окна, проходя ПОД панелью без сжатия.
-        let editor_height = real_height;
+                let real_height = self.height;
+        let tab_bar_h = if show_welcome { 0.0 } else { 38.0 * s };
+        let editor_height = real_height - tab_bar_h;
 
         let target_minimap_w = 119.0 * s;
 
@@ -174,8 +177,8 @@ impl Renderer {
         // включая зону нижней панели (нужно для работы прозрачности панели).
         self.update_cache(editor, scroll_x, scroll_y, is_resizing);
 
-        let render_scroll_x = scroll_x.round();
-        let render_scroll_y = scroll_y.round();
+                let render_scroll_x = scroll_x.round();
+        let render_scroll_y = scroll_y.round() - tab_bar_h;
 
         if self.last_editor_version_for_scroll_x != editor.version
             || (self.last_width - self.width).abs() > 0.5
@@ -309,22 +312,22 @@ impl Renderer {
                 }
             }
 
-            // Левая панель (для групп Top)
+                        // Левая панель (для групп Top)
             if panel_left_w > 0.0 {
                 let panel_x = sb_w;
-                let panel_bg = [
+                let panel_bg =[
                     0.129, // #21
                     0.133, // #22
                     0.173, // #2c
                     1.0,
                 ];
                 // Левая панель не заходит под нижнюю — используем editor_height
-                self.push_rect(panel_x, 0.0, panel_left_w, editor_height, panel_bg);
+                self.push_rect(panel_x, 0.0, panel_left_w, real_height, panel_bg);
                 self.push_rect(
                     panel_x + panel_left_w - 1.0,
                     0.0,
                     1.0,
-                    editor_height,
+                    real_height,
                     [1.0, 1.0, 1.0, 0.12],
                 );
                 // Тонкая линия-разделитель между левой панелью и зоной номеров строк (аналог Indent Guide)
@@ -333,7 +336,7 @@ impl Renderer {
                     sep_x,
                     0.0,
                     1.0,
-                    editor_height,
+                    real_height,
                     [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
                 );
 
@@ -389,25 +392,25 @@ impl Renderer {
 
                 // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
-                if mx >= resize_x - 4.0 * s
+                                if mx >= resize_x - 4.0 * s
                     && mx <= resize_x + 4.0 * s
                     && my >= 0.0
-                    && my <= editor_height
+                    && my <= real_height
                 {
                     self.push_rect(
                         resize_x - 2.0,
                         0.0,
                         2.0,
-                        editor_height,
+                        real_height,
                         [0.60, 0.35, 0.85, 0.4],
                     );
                 }
-                ui_registry.register_rect(
+                                ui_registry.register_rect(
                     crate::ui_system::UiId::ResizeLeft,
                     resize_x - 4.0 * s,
                     0.0,
                     8.0 * s,
-                    editor_height,
+                    real_height,
                     mx,
                     my,
                 );
@@ -418,12 +421,12 @@ impl Renderer {
                         s.id == crate::app::PanelId::LspServers
                             && s.group == crate::app::PanelGroup::Top
                     });
-                    if is_top {
+                                        if is_top {
                         self.draw_lsp_servers_panel(
                             panel_x,
                             title_h,
                             panel_left_w,
-                            editor_height - title_h,
+                            real_height - title_h,
                             s,
                             ide_panel,
                             !lsp_diagnostics.is_empty(),
@@ -433,7 +436,7 @@ impl Renderer {
                 }
 
                 // --- Дерево файлов проводника ---
-                if ide_panel.is_open(crate::app::PanelId::Explorer) {
+                                if ide_panel.is_open(crate::app::PanelId::Explorer) {
                     self.flush();
                     unsafe {
                         self.gl.enable(glow::SCISSOR_TEST);
@@ -441,14 +444,14 @@ impl Renderer {
                             panel_x as i32,
                             0,
                             panel_left_w as i32,
-                            (editor_height - title_h) as i32,
+                            (real_height - title_h) as i32,
                         );
                     }
 
                     let row_h = 28.0 * s;
                     let indent_w = 18.0 * s;
                     let scroll = ide_panel.explorer_scroll.current.round();
-                    let content_h = editor_height - title_h;
+                    let content_h = real_height - title_h;
                     let total_nodes = ide_panel.file_tree_nodes.len();
 
                     let tree_text_scale = 17.0 / 18.0;
@@ -788,18 +791,17 @@ impl Renderer {
         let minimap_x = self.width - minimap_w;
         let scrollbar_x = minimap_x - scrollbar_width;
 
-        ui_registry.register_text_input(
+                ui_registry.register_text_input(
             crate::ui_system::UiId::EditorTextBody,
             self.left_padding,
-            0.0,
+            tab_bar_h,
             scrollbar_x - self.left_padding,
             editor_height,
             mx,
             my,
         );
 
-        let solid_minimap_bg = [
-            self.theme.minimap_bg[0],
+        let solid_minimap_bg =[self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
             self.theme.minimap_bg[2],
             1.0,
@@ -808,11 +810,10 @@ impl Renderer {
         let cursor_line_y = self.baseline_offset - render_scroll_y
             + (visible_cursor_line as f32 * self.line_height);
 
-        if cursor_line_y > -self.line_height * 2.0
-            && cursor_line_y < editor_height + self.line_height
+                if cursor_line_y > -self.line_height * 2.0
+            && cursor_line_y < real_height + self.line_height
         {
-            self.push_rect(
-                self.left_padding,
+            self.push_rect(self.left_padding,
                 cursor_line_y - self.baseline_offset + 2.0,
                 scrollbar_x - self.left_padding,
                 self.line_height,
@@ -1382,7 +1383,7 @@ impl Renderer {
             self.flush();
         }
 
-        let gutter_x = if is_ide_mode {
+                let gutter_x = if is_ide_mode {
             48.0 * s + panel_left_w
         } else {
             0.0
@@ -1390,7 +1391,7 @@ impl Renderer {
         // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
         self.push_rect(
             gutter_x,
-            0.0,
+            tab_bar_h,
             self.left_padding - gutter_x,
             editor_height,
             solid_minimap_bg,
@@ -1399,7 +1400,7 @@ impl Renderer {
         if is_ide_mode && panel_left_w > 0.0 {
             self.push_rect(
                 gutter_x,
-                0.0,
+                tab_bar_h,
                 1.0,
                 editor_height,
                 [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
@@ -1408,7 +1409,7 @@ impl Renderer {
         // Правая граница гаттера (тонкая линия, как у Indent Guide)
         self.push_rect(
             self.left_padding - 1.0,
-            0.0,
+            tab_bar_h,
             1.0,
             editor_height,
             [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
@@ -1455,8 +1456,8 @@ impl Renderer {
             }
         }
 
-        for m in merged {
-            if m.bottom < 0.0 || m.top > editor_height {
+                for m in merged {
+            if m.bottom < 0.0 || m.top > real_height {
                 continue;
             }
             let color = if m.state == crate::editor::LineModState::ModifiedUnsaved {
@@ -1479,7 +1480,7 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(minimap_x, 0.0, minimap_w, editor_height, solid_minimap_bg);
+                                self.push_rect(minimap_x, tab_bar_h, minimap_w, editor_height, solid_minimap_bg);
 
         self.draw_minimap(
             editor,
@@ -1488,22 +1489,23 @@ impl Renderer {
             max_scroll,
             total_lines,
             visible_cursor_line,
+            editor_height,
+            tab_bar_h,
         );
 
-        ui_registry.register_rect(
-            crate::ui_system::UiId::EditorMinimap,
+                ui_registry.register_rect(crate::ui_system::UiId::EditorMinimap,
             minimap_x,
-            0.0,
+            tab_bar_h,
             minimap_w,
             editor_height,
             mx,
             my,
         );
 
-        if self.max_scroll_x > 0.0 {
+                if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
             let track_h_bg = 14.0 * s;
-            let track_y_bg = editor_height - track_h_bg;
+            let track_y_bg = real_height - track_h_bg;
 
             self.push_rect(
                 self.left_padding,
@@ -1518,7 +1520,7 @@ impl Renderer {
             let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
             let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 
-            let thumb_y = editor_height - 10.0 * s;
+            let thumb_y = real_height - 10.0 * s;
             let thumb_h = 6.0 * s;
 
             self.push_rounded_rect(
@@ -1530,13 +1532,19 @@ impl Renderer {
                 [0.7, 0.33, 0.54, 1.0],                        );
                     }
 
-                    // --- 8.5. Линейка диагностики на скроллбаре ---
+                                        // --- 8.5. Линейка диагностики на скроллбаре ---
                     if !is_resizing && is_ide_mode && !dialog_window_open {
                         self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
                     }
 
-                    let target_sticky_lines = self.draw_sticky_lines(
-                        editor,
+                    if !show_welcome {
+                        let tab_x = gutter_x;
+                        let tab_w = self.width - tab_x;
+                        self.draw_tab_bar(tabs, active_tab, editor, editor_title, editor_path, tab_x, 0.0, tab_w, tab_bar_h, s, mx, my, ui_registry);
+                        self.flush();
+                    }
+
+                    let target_sticky_lines = self.draw_sticky_lines(editor,
                         spans,
                         current_sticky_lines,
             render_scroll_y,
@@ -1552,7 +1560,7 @@ impl Renderer {
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
             let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height)
                 .max(20.0 * s);
-            let thumb_y = scroll_ratio_y * (editor_height - thumb_h);
+                        let thumb_y = tab_bar_h + scroll_ratio_y * (editor_height - thumb_h);
             self.push_rounded_rect(
                 scrollbar_x + 1.0 * s,
                 thumb_y,
@@ -1561,10 +1569,10 @@ impl Renderer {
                 (scrollbar_width - 2.0 * s) / 2.0,
                 [0.7, 0.33, 0.54, 0.8],
             );
-            ui_registry.register_rect(
+                        ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarY,
                 scrollbar_x,
-                0.0,
+                tab_bar_h,
                 scrollbar_width,
                 editor_height,
                 self.last_mouse_x,
@@ -1572,12 +1580,12 @@ impl Renderer {
             );
         }
 
-        if self.max_scroll_x > 0.0 {
+                if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
             ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarX,
                 self.left_padding,
-                editor_height - 14.0 * s,
+                real_height - 14.0 * s,
                 track_w,
                 14.0 * s,
                 self.last_mouse_x,
@@ -1962,6 +1970,92 @@ impl Renderer {
         )
     }
 
+        fn draw_tab_bar(
+        &mut self,
+        tabs: &[crate::app::EditorTab],
+        active_tab: usize,
+        editor: &Editor,
+        editor_title: &str,
+        editor_path: Option<&std::path::PathBuf>,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        mx: f32,
+        my: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        self.push_rect(x, y, w, h, [self.theme.bg[0] - 0.02, self.theme.bg[1] - 0.02, self.theme.bg[2] - 0.02, 1.0]);
+
+        let mut current_x = x;
+        let tab_pad = 12.0 * s;
+
+        for (i, tab) in tabs.iter().enumerate() {
+            let is_active = i == active_tab;
+            let title = if is_active {
+                if editor_title.is_empty() { "Безымянный" } else { editor_title }
+            } else {
+                if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title }
+            };
+
+            let title_w = self.measure_ui_width(title, 0.9);
+            let tab_w = tab_pad * 2.0 + 20.0 * s + title_w + 24.0 * s;
+
+            let is_hovered = mx >= current_x && mx <= current_x + tab_w && my >= y && my <= y + h;
+
+            let bg_color = if is_active {
+                [self.theme.bg[0] + 0.05, self.theme.bg[1] + 0.05, self.theme.bg[2] + 0.05, 1.0]
+            } else if is_hovered {[self.theme.bg[0] + 0.02, self.theme.bg[1] + 0.02, self.theme.bg[2] + 0.02, 1.0]
+            } else {[0.0, 0.0, 0.0, 0.0]
+            };
+
+            if bg_color[3] > 0.0 {
+                self.push_rect(current_x, y, tab_w, h, bg_color);
+            }
+
+            if is_active {
+                self.push_rect(current_x, y + h - 2.0 * s, tab_w, 2.0 * s,[0.60, 0.35, 0.85, 1.0]);
+            }
+
+            let is_dirty = if is_active { editor.is_dirty() } else { tab.editor.is_dirty() };
+            if is_dirty {
+                self.draw_string_scaled("●", current_x + 6.0 * s, y + h / 2.0 + 4.0 * s,[0.8, 0.4, 0.4, 1.0], 0.7);
+            }
+
+            let icon_key = if is_active {
+                                                crate::app::file_icons::file_icon_key(&title.to_lowercase())} else {
+                tab.icon_key
+            };
+
+            let icon_y = y + (h - 16.0 * s) / 2.0;
+            self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, 16.0 * s);
+
+            let text_color = if is_active { self.theme.fg } else { [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.6] };
+            self.draw_string_scaled(title, current_x + tab_pad + 20.0 * s, y + h / 2.0 + 5.0 * s, text_color, 0.9);
+
+            if is_active || is_hovered {
+                let close_size = 16.0 * s;
+                let close_x = current_x + tab_w - tab_pad - close_size;
+                let close_y = y + (h - close_size) / 2.0;
+                let close_hovered = mx >= close_x - 4.0 * s && mx <= close_x + close_size + 4.0 * s && my >= close_y - 4.0 * s && my <= close_y + close_size + 4.0 * s;
+
+                let icon_col = if close_hovered {[1.0, 0.4, 0.4, 1.0] } else {[0.6, 0.6, 0.6, 1.0] };
+                if close_hovered {
+                    self.push_rounded_rect(close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, 4.0 * s,[1.0, 1.0, 1.0, 0.1]);
+                }
+                self.draw_atlas_icon(crate::widgets::IconType::Close, close_x, close_y, close_size, icon_col);
+
+                ui_registry.register_rect(crate::ui_system::UiId::EditorTabClose(i), close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, mx, my);
+            }
+
+            ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
+
+            current_x += tab_w + 1.0;
+            self.push_rect(current_x - 1.0, y + h * 0.2, 1.0, h * 0.6,[1.0, 1.0, 1.0, 0.1]);
+        }
+    }
+
     fn draw_minimap(
         &mut self,
         editor: &Editor,
@@ -1970,6 +2064,8 @@ impl Renderer {
         max_scroll: f32,
         total_lines: usize,
         visible_cursor_line: usize,
+        editor_height: f32,
+        tab_bar_h: f32,
     ) {
         let scroll_ratio_y = if max_scroll > 0.0 {
             (render_scroll_y / max_scroll).clamp(0.0, 1.0)
@@ -1979,19 +2075,19 @@ impl Renderer {
 
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
-        let total_lines_f32 = total_lines as f32;
+                let total_lines_f32 = total_lines as f32;
 
-        let minimap_line_h = (self.height / (total_lines_f32 + 2.0).max(200.0))
-            .max(self.height / 1250.0)
+        let minimap_line_h = (editor_height / (total_lines_f32 + 2.0).max(200.0))
+            .max(editor_height / 1250.0)
             .max(1.5);
 
-        let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - self.height).max(0.0);
+        let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
         let current_visible_top_line = render_scroll_y / self.line_height;
         let viewport_y =
-            (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
-        let visible_lines = self.height / self.line_height;
+            tab_bar_h + (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
+        let visible_lines = editor_height / self.line_height;
         let max_viewport_lines = visible_lines.min(total_lines_f32 + 2.0);
         let viewport_h = (max_viewport_lines * minimap_line_h).max(4.0);
 
@@ -2020,8 +2116,8 @@ impl Renderer {
         let mut phys_line = 0;
         let rect_h = minimap_line_h.ceil().max(1.0);
 
-        let view_top = current_minimap_scroll;
-        let view_bottom = current_minimap_scroll + self.height;
+                let view_top = current_minimap_scroll;
+        let view_bottom = current_minimap_scroll + editor_height;
 
         let (first, second) = editor.text_parts();
         let first_len = first.len();
@@ -2049,12 +2145,12 @@ impl Renderer {
                 let mut current_x = minimap_x + 5.0;
                 let mut cur_byte = start_byte;
 
-                let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start) {
+                                let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start) {
                     Ok(idx) => idx,
                     Err(idx) => idx.saturating_sub(1),
                 };
 
-                let y1 = (current_y - current_minimap_scroll).round();
+                let y1 = tab_bar_h + (current_y - current_minimap_scroll).round();
                 let y2 = y1 + rect_h;
 
                 while cur_byte < end_byte {
@@ -2186,8 +2282,8 @@ impl Renderer {
 
         self.flush();
 
-        let y_cursor =
-            (visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll).round();
+                let y_cursor =
+            tab_bar_h + (visible_cursor_line as f32 * minimap_line_h - current_minimap_scroll).round();
         self.push_rect(
             minimap_x,
             y_cursor,

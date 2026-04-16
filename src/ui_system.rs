@@ -48,6 +48,10 @@ pub enum UiId {
     SearchCaseToggle,
     SearchInput,
 
+        // Tabs
+    EditorTab(usize),
+    EditorTabClose(usize),
+
     // Editor
     EditorFoldArrow(usize),
     EditorFoldDots(usize),

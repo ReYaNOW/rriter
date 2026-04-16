@@ -21,6 +21,21 @@ use winit::keyboard::ModifiersState;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
+pub struct EditorTab {
+    pub editor: crate::editor::Editor,
+    pub file_path: Option<PathBuf>,
+    pub base_title: String,
+    pub file_extension: String,
+    pub scroll_y: crate::scroll::ScrollState,
+    pub scroll_x: crate::scroll::ScrollState,
+    pub highlighter: crate::highlighter::Highlighter,
+    pub last_sent_version: u64,
+    pub search_results: Vec<(usize, usize)>,
+    pub search_current_idx: Option<usize>,
+    pub is_highlighted_once: bool,
+    pub icon_key: &'static str,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum PendingAction {
     Quit,
@@ -326,19 +341,136 @@ pub struct App {
     /// Ожидаем ответа на Fix All запрос
     pub pending_fix_all_id: Option<i32>,
 
-    /// Декларативная система UI для автоматической обработки кликов
+        /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,
+
+    pub tabs: Vec<EditorTab>,
+    pub active_tab: usize,
 }
 
 impl App {
-    pub fn ensure_cursor_visible(
+    pub fn sync_active_tab(&mut self) {
+        if self.tabs.is_empty() { return; }
+        let ai = self.active_tab;
+        std::mem::swap(&mut self.editor, &mut self.tabs[ai].editor);
+        std::mem::swap(&mut self.highlighter, &mut self.tabs[ai].highlighter);
+        std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
+        std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
+        std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
+        std::mem::swap(&mut self.scroll_y, &mut self.tabs[ai].scroll_y);
+        std::mem::swap(&mut self.scroll_x, &mut self.tabs[ai].scroll_x);
+        std::mem::swap(&mut self.search_results, &mut self.tabs[ai].search_results);
+        std::mem::swap(&mut self.search_current_idx, &mut self.tabs[ai].search_current_idx);
+        std::mem::swap(&mut self.last_sent_version, &mut self.tabs[ai].last_sent_version);
+        std::mem::swap(&mut self.is_highlighted_once, &mut self.tabs[ai].is_highlighted_once);
+
+                        let icon_key = crate::app::file_icons::file_icon_key(
+            &self.tabs[ai].base_title.to_lowercase(),
+        );
+        self.tabs[ai].icon_key = icon_key;
+    }
+
+    pub fn switch_to_tab(&mut self, new_idx: usize) {
+        if new_idx == self.active_tab || new_idx >= self.tabs.len() {
+            return;
+        }
+        self.sync_active_tab();
+        self.active_tab = new_idx;
+        self.sync_active_tab();
+        self.autocomplete_active = false;
+        self.show_welcome = self.file_path.is_none() && self.editor.len() == 0;
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+            w.request_redraw();
+        }
+    }
+
+    pub fn open_new_tab(&mut self) {
+        self.sync_active_tab();
+        let new_tab = EditorTab {
+            editor: crate::editor::Editor::new(8192),
+            file_path: None,
+            base_title: "Безымянный".to_string(),
+            file_extension: String::new(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            highlighter: crate::highlighter::Highlighter::new(),
+            last_sent_version: u64::MAX,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: false,
+            icon_key: "default_file",
+        };
+        self.tabs.push(new_tab);
+        self.active_tab = self.tabs.len() - 1;
+        self.sync_active_tab();
+
+        self.autocomplete_active = false;
+        self.show_welcome = true;
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, false);
+            w.request_redraw();
+        }
+    }
+
+    pub fn close_tab_at(&mut self, idx: usize) {
+        if self.tabs.len() <= 1 {
+            self.close_current_file();
+            return;
+        }
+
+        if idx == self.active_tab {
+            self.sync_active_tab(); 
+            self.tabs.remove(idx);
+            self.active_tab = if idx > 0 { idx - 1 } else { 0 };
+            self.sync_active_tab(); 
+        } else {
+            self.tabs.remove(idx);
+            if idx < self.active_tab {
+                self.active_tab -= 1;
+            }
+        }
+
+        self.autocomplete_active = false;
+        self.show_welcome = self.file_path.is_none() && self.editor.len() == 0;
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+            w.request_redraw();
+        }
+    }
+
+    pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+        for (i, tab) in self.tabs.iter().enumerate() {
+            if i == self.active_tab {
+                if self.file_path.as_ref() == Some(&path) {
+                    return;
+                }
+            } else {
+                if tab.file_path.as_ref() == Some(&path) {
+                    self.switch_to_tab(i);
+                    return;
+                }
+            }
+        }
+
+        if self.file_path.is_some() || self.editor.is_dirty() || self.editor.len() > 0 {
+            self.open_new_tab();
+        }
+
+        self.load_file(path, add_to_history);
+    }
+        pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,
         target_scroll_x: &mut f32,
         editor: &Editor,
         renderer: &mut Renderer,
         window_width: f32,
         window_height: f32,
+        tab_bar_h: f32,
     ) {
+        let window_height = window_height - tab_bar_h;
         let (cx_screen, cy) = renderer.get_cursor_xy(editor);
 
         if cy - renderer.baseline_offset < *target_scroll_y {
@@ -672,7 +804,12 @@ impl App {
         }
     }
 
-    pub fn close_current_file(&mut self) {
+        pub fn close_current_file(&mut self) {
+        if self.tabs.len() > 1 {
+            self.close_tab_at(self.active_tab);
+            return;
+        }
+
         self.file_path = None;
         self.base_title = "Добро пожаловать".to_string();
         let old_version = self.editor.version;

@@ -506,9 +506,9 @@ impl App {
                     is_edit = true;
                     should_sync = false;
                 }
-                PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
-                    self.editor.select_expand();
-                    self.autocomplete_active = false;
+                                PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+                    self.close_tab_at(self.active_tab);
+                    return;
                 }
                 PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                     if let Some(text) = self.editor.get_selection() {
@@ -728,6 +728,7 @@ impl App {
                     let old_target_y = self.scroll_y.target;
                     let old_target_x = self.scroll_x.target;
 
+                                        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * self.renderer.as_ref().unwrap().scale_factor };
                     App::ensure_cursor_visible(
                         &mut self.scroll_y.target,
                         &mut self.scroll_x.target,
@@ -735,6 +736,7 @@ impl App {
                         self.renderer.as_mut().unwrap(),
                         wh_width,
                         wh_height,
+                        tab_bar_h,
                     );
 
                     if key_event.repeat && !is_arrow && !is_page {

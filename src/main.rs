@@ -480,12 +480,26 @@ F8\tПоказать/скрыть счетчик FPS
             None
         },
         lsp_actions_menu: None,
-        pending_fix_all_id: None,
+                pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
+        tabs: vec![crate::app::EditorTab {
+            editor: Editor::new(8192),
+            file_path: None,
+            base_title: String::new(),
+            file_extension: String::new(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            highlighter: Highlighter::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: false,
+            icon_key: "default_file",
+        }],
+        active_tab: 0,
     };
 
-    app.highlighter.reset(
-        app.editor.version,
+    app.highlighter.reset(app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),
     );
