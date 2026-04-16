@@ -650,6 +650,9 @@ FILE src/render_view/ui.rs
     CALL widgets: get_welcome_buttons
     WRITE: gl.clear
 
+  pub fn draw_diagnostics_ruler  [714]
+    MATCH: DiagSeverity::Error, DiagSeverity::Warning
+
 ────────────────────────────────────────────────────────────
 
 FILE src/render_view.rs
@@ -660,7 +663,7 @@ FILE src/render_view.rs
     WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_cursor_for_popups, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diags, last_hovered_diags.clear, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-      fn draw_minimap  [1961]
+      fn draw_minimap  [1965]
 
 ────────────────────────────────────────────────────────────
 
@@ -668,41 +671,41 @@ FILE src/renderer.rs
   module: renderer
   types:  Theme, Vertex, GlyphInfo, VisualLine, FontData, Renderer
 
-  pub fn new  [142] -> Self
+  pub fn new  [144] -> Self
 
-  pub fn get_custom_svg_glyph  [459] -> Option<GlyphInfo>
+  pub fn get_custom_svg_glyph  [461] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, max_row_h
 
-  pub fn get_glyph  [526] -> Option<GlyphInfo>
+  pub fn get_glyph  [528] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, glyphs.insert, max_row_h, ui_glyphs.clear
     MATCH: Content::Mask
 
-  pub fn get_ui_glyph  [690] -> Option<GlyphInfo>
+  pub fn get_ui_glyph  [692] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, max_row_h, ui_glyphs.clear, ui_glyphs.insert
     MATCH: Content::Mask
 
-  pub fn resize  [853]
+  pub fn resize  [855]
     WRITE: height, width
 
-  pub fn measure_ui_width  [863] -> f32
+  pub fn measure_ui_width  [865] -> f32
 
-  pub fn char_advance  [876] -> f32
+  pub fn char_advance  [878] -> f32
 
-  pub fn push_quad  [893]
+  pub fn push_quad  [895]
 
-  pub fn load_builtin_icons  [945]
+  pub fn load_builtin_icons  [947]
     CALL widgets: render
     WRITE: icons.insert
     MATCH: IconType::Down
 
-  pub fn push_squiggle  [1124]
+  pub fn push_squiggle  [1126]
 
-  pub fn push_rect  [1177]
+  pub fn push_rect  [1179]
 
-  pub fn push_rounded_rect_gradient  [1181]
+  pub fn push_rounded_rect_gradient  [1183]
 
 ────────────────────────────────────────────────────────────
 

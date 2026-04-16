@@ -709,4 +709,64 @@ impl Renderer {
         self.flush();
         ui_registry.wants_pointer()
     }
+
+    /// Рисует индикаторы ошибок и предупреждений слева от скроллбара
+    pub fn draw_diagnostics_ruler(
+        &mut self,
+        editor: &crate::editor::Editor,
+        lsp_diags: &[crate::lsp::Diagnostic],
+        window_height: f32,
+    ) {
+        if lsp_diags.is_empty() || editor.line_offsets.is_empty() {
+            return;
+        }
+
+        let s = self.scale_factor;
+        let minimap_w = self.minimap_width;
+        let max_scroll = self.get_max_scroll(editor, window_height);
+        let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+
+        let total_lines = editor.line_offsets.len() as f32;
+        if total_lines < 1.0 {
+            return;
+        }
+
+        let track_h = window_height;
+
+        // Полоса слева от скроллбара
+        let bar_w = (4.0 * s).max(2.0);
+        let bar_x = self.width - minimap_w - scrollbar_w - bar_w;
+
+        // Группируем, чтобы не рисовать черточки друг на друге
+        let mut lines_with_errors = std::collections::HashSet::new();
+        let mut lines_with_warnings = std::collections::HashSet::new();
+
+                for diag in lsp_diags {
+            match diag.severity {
+                crate::lsp::DiagSeverity::Error => {
+                    lines_with_errors.insert(diag.start_line);
+                }
+                crate::lsp::DiagSeverity::Warning => {
+                    lines_with_warnings.insert(diag.start_line);
+                }
+                _ => {}
+            }
+        }
+
+        let indicator_h = (2.0 * s).max(1.0);
+
+        // Сначала рисуем предупреждения
+        for &line_num in &lines_with_warnings {
+            if !lines_with_errors.contains(&line_num) {
+                let y = (line_num as f32 / total_lines * track_h).round();
+                self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_warn);
+            }
+        }
+
+        // Потом ошибки (поверх)
+        for &line_num in &lines_with_errors {
+            let y = (line_num as f32 / total_lines * track_h).round();
+            self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_error);
+        }
+    }
 }

@@ -1527,14 +1527,18 @@ impl Renderer {
                 thumb_w,
                 thumb_h,
                 3.0 * s,
-                [0.7, 0.33, 0.54, 1.0],
-            );
-        }
+                [0.7, 0.33, 0.54, 1.0],                        );
+                    }
 
-        let target_sticky_lines = self.draw_sticky_lines(
-            editor,
-            spans,
-            current_sticky_lines,
+                    // --- 8.5. Линейка диагностики на скроллбаре ---
+                    if !is_resizing && is_ide_mode && !dialog_window_open {
+                        self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
+                    }
+
+                    let target_sticky_lines = self.draw_sticky_lines(
+                        editor,
+                        spans,
+                        current_sticky_lines,
             render_scroll_y,
             render_scroll_x,
             sticky_anim_progress,
