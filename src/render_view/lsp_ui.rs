@@ -813,41 +813,29 @@ impl Renderer {
                 let s = self.scale_factor;
         let item_h = 36.0 * s;
 
-        let mut max_item_w = 320.0 * s;
+                let mut max_item_w = 320.0 * s;
         for item in &menu.items {
             let label_str = match item {
                 crate::app::LspActionItem::CodeAction(action) => {
                     if let Some(c) = &action.code {
-                        format!("Ruff ({}): {}", c, action.title)
+                        format!("Исправить ({}): {}", c, action.title)
                     } else {
-                        format!("Ruff: {}", action.title)
+                        format!("Исправить: {}", action.title)
                     }
                 }
                 crate::app::LspActionItem::AddNoqa { codes } => {
                     if codes.is_empty() {
-                        "Добавить # noqa".to_string()
+                        "Игнорировать ошибку (# noqa)".to_string()
                     } else {
-                        format!("Добавить # noqa: {}", codes.join(", "))
+                        format!("Игнорировать {} (# noqa)", codes.join(", "))
                     }
                 }
-                crate::app::LspActionItem::AddNoqaAll => "Добавить # noqa (отключить все)".to_string(),
-                crate::app::LspActionItem::FixAll => "Ruff: Исправить всё доступное".to_string(),
-                crate::app::LspActionItem::OrganizeImports => "Ruff: Упорядочить импорты".to_string(),
+                crate::app::LspActionItem::AddNoqaAll => "Игнорировать всё в файле (# noqa)".to_string(),
+                crate::app::LspActionItem::FixAll => "Исправить все доступные ошибки".to_string(),
+                crate::app::LspActionItem::OrganizeImports => "Упорядочить импорты".to_string(),
             };
 
-            let mut w = self.measure_ui_width(&label_str, 0.9) + 60.0 * s;
-            if let crate::app::LspActionItem::CodeAction(action) = item {
-                if let Some(kind) = &action.kind {
-                    let kind_short = if kind.contains("fixAll") {
-                        "fix all"
-                    } else if kind.contains("quickfix") {
-                        "quickfix"
-                    } else {
-                        kind.as_str()
-                    };
-                    w += self.measure_ui_width(kind_short, 0.72) + 20.0 * s;
-                }
-            }
+            let w = self.measure_ui_width(&label_str, 0.9) + 40.0 * s;
             if w > max_item_w {
                 max_item_w = w;
             }
@@ -894,19 +882,46 @@ impl Renderer {
             [0.12, 0.13, 0.17, 1.0],
         );
 
+                let mut prev_group = 0;
         for (i, item) in menu.items.iter().enumerate() {
             let item_y = my_pos + 4.0 * s + i as f32 * item_h;
+
+            let group = match item {
+                crate::app::LspActionItem::CodeAction(_) => 1,
+                crate::app::LspActionItem::AddNoqa { .. } | crate::app::LspActionItem::AddNoqaAll => 2,
+                crate::app::LspActionItem::FixAll | crate::app::LspActionItem::OrganizeImports => 3,
+            };
+
+            if prev_group != 0 && group != prev_group {
+                self.push_rect(
+                    mx_pos + 12.0 * s,
+                    item_y - 1.0,
+                    menu_w - 24.0 * s,
+                    1.5,
+                    [1.0, 1.0, 1.0, 0.08],
+                );
+            }
+            prev_group = group;
 
             let is_selected = i == menu.selected;
             let is_hovered =
                 mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
 
+            let group_color = match group {
+                1 =>[0.38, 0.75, 1.0, 1.0], // Синий для фиксов
+                2 =>[0.75, 0.50, 1.0, 1.0], // Фиолетовый для noqa
+                3 =>[0.45, 0.90, 0.60, 1.0], // Зеленый для глобальных действий
+                _ =>[1.0, 1.0, 1.0, 1.0],
+            };
+
             if is_selected || is_hovered {
-                let hi_color = if is_selected {
-                    [0.30, 0.20, 0.45, 1.0]
-                } else {
-                    [0.20, 0.20, 0.28, 1.0]
-                };
+                let alpha = if is_selected { 0.35 } else { 0.15 };
+                let hi_color = [
+                    group_color[0] * 0.4 + 0.15,
+                    group_color[1] * 0.4 + 0.15,
+                    group_color[2] * 0.4 + 0.15,
+                    alpha,
+                ];
                 self.push_rounded_rect(
                     mx_pos + 3.0 * s,
                     item_y + 1.0,
@@ -917,58 +932,46 @@ impl Renderer {
                 );
             }
 
-                        let (label_str, label_color) = match item {
+            // Цветная полоска группы слева
+            self.push_rounded_rect(
+                mx_pos + 8.0 * s,
+                item_y + 8.0 * s,
+                3.0 * s,
+                item_h - 16.0 * s,
+                1.5 * s,
+                group_color,
+            );
+
+            let (label_str, label_color) = match item {
                 crate::app::LspActionItem::CodeAction(action) => {
                     let s = if let Some(c) = &action.code {
-                        format!("Ruff ({}): {}", c, action.title)
+                        format!("Исправить ({}): {}", c, action.title)
                     } else {
-                        format!("Ruff: {}", action.title)
+                        format!("Исправить: {}", action.title)
                     };
                     (std::borrow::Cow::Owned(s), self.theme.fg)
                 }
                 crate::app::LspActionItem::AddNoqa { codes } => {
                     let s = if codes.is_empty() {
-                        "Добавить # noqa".to_string()
+                        "Игнорировать ошибку (# noqa)".to_string()
                     } else {
-                        format!("Добавить # noqa: {}", codes.join(", "))
+                        format!("Игнорировать {} (# noqa)", codes.join(", "))
                     };
-                    (std::borrow::Cow::Owned(s),[0.80, 0.75, 0.55, 1.0])
+                    (std::borrow::Cow::Owned(s), self.theme.fg)
                 }
                 crate::app::LspActionItem::AddNoqaAll => {
-                    (std::borrow::Cow::Borrowed("Добавить # noqa (отключить все)"),[0.65, 0.60, 0.50, 1.0])
+                    (std::borrow::Cow::Borrowed("Игнорировать всё в файле (# noqa)"), self.theme.fg)
                 }
                 crate::app::LspActionItem::FixAll => {
-                    (std::borrow::Cow::Borrowed("Ruff: Исправить всё доступное"),[0.55, 0.95, 0.65, 1.0])
+                    (std::borrow::Cow::Borrowed("Исправить все доступные ошибки"), group_color)
                 }
                 crate::app::LspActionItem::OrganizeImports => {
-                    (std::borrow::Cow::Borrowed("Ruff: Упорядочить импорты"),[0.55, 0.85, 0.95, 1.0])
+                    (std::borrow::Cow::Borrowed("Упорядочить импорты"), group_color)
                 }
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;
-
-            self.draw_string_scaled(&label_str, mx_pos + 12.0 * s, text_y, label_color, 0.9);
-
-            // Подсказка по типу действия (quickfix/source)
-            if let crate::app::LspActionItem::CodeAction(action) = item {
-                if let Some(kind) = &action.kind {
-                    let kind_short = if kind.contains("fixAll") {
-                        "fix all"
-                    } else if kind.contains("quickfix") {
-                        "quickfix"
-                    } else {
-                        kind.as_str()
-                    };
-                    let kind_w = self.measure_ui_width(kind_short, 0.72);
-                    self.draw_string_scaled(
-                        kind_short,
-                        mx_pos + menu_w - kind_w - 10.0 * s,
-                        text_y,
-                        [0.45, 0.45, 0.45, 1.0],
-                        0.72,
-                    );
-                }
-            }
+            self.draw_string_scaled(&label_str, mx_pos + 18.0 * s, text_y, label_color, 0.9);
         }
 
         self.flush();

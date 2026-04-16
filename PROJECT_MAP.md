@@ -28,7 +28,7 @@ FILE src/app/events.rs
     WRITE: autocomplete_rect, current_cursor, is_focused, is_ready, last_resize_time, modifiers, target_sticky_lines, tried_maximize, ui_registry.clear
     MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit
 
-      fn about_to_wait  [651]
+      fn about_to_wait  [646]
     CALL app: update_window_title
     CALL main: save_config
     CALL render_view::core_text: get_max_scroll
@@ -98,9 +98,9 @@ FILE src/app/keyboard.rs
     CALL main: save_config
     CALL render_view::core_text: get_cursor_xy, get_max_scroll
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_highlighted_once, last_action, last_sent_version, lsp_actions_menu, search_current_idx, search_focused, search_results.clear, show_search, show_settings
-    MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert
+    MATCH: UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn handle_main_keyboard_input  [711]
+  pub fn handle_main_keyboard_input  [741]
     CALL main: save_config
     WRITE: ide_ignore_patterns.push, last_action, settings_ignore_focused, settings_tab, show_fps, show_settings
 
@@ -129,7 +129,7 @@ FILE src/app/lsp_actions.rs
   pub fn insert_noqa_comment  [223]
     CALL app: update_window_title
 
-  pub fn apply_workspace_edit  [328]
+  pub fn apply_workspace_edit  [311]
     CALL app: update_window_title
     CALL lsp: lsp_pos_to_offset
 
@@ -256,9 +256,9 @@ FILE src/app.rs
 FILE src/editor.rs
   module: editor
   types:  LineModState, EditOp, HistoryStep, UndoRedoDelta, Editor
-  enum EditOp: Insert, Delete
+  enum EditOp: Insert, Delete, Replace
   enum LineModState: ModifiedUnsaved, ModifiedSaved
-  enum UndoRedoDelta: Insert, Delete
+  enum UndoRedoDelta: Insert, Delete, Replace
 
       fn get_diff_info  [7] -> (Vec<bool>, Vec<bool>)
 
@@ -266,86 +266,89 @@ FILE src/editor.rs
 
       fn char_class  [90] -> u8
 
-  pub fn new  [156] -> Self
+  pub fn new  [158] -> Self
 
-  pub fn shift_folds_insert  [185]
+  pub fn shift_folds_insert  [187]
     WRITE: folded_start_bytes
 
-  pub fn shift_folds_delete  [208]
+  pub fn shift_folds_delete  [210]
     WRITE: folded_start_bytes
 
-  pub fn rebuild_line_offsets  [237]
+  pub fn rebuild_line_offsets  [239]
     WRITE: foldable_lines.clear, foldable_lines.insert, folded_lines.clear, folded_lines.insert, folded_start_bytes.clear, folded_start_bytes.insert, line_offsets, longest_line_idx
 
-      fn get_line_hashes  [307] -> Vec<u64>
+      fn get_line_hashes  [309] -> Vec<u64>
 
-  pub fn ensure_indent_cache_updated  [330]
+  pub fn ensure_indent_cache_updated  [332]
     WRITE: indent_cache.clear, last_indent_version, version
 
-  pub fn get_cached_indent_levels  [401] -> &[u8]
+  pub fn get_cached_indent_levels  [403] -> &[u8]
 
-  pub fn backspace  [405] -> Option<(usize, usize)>
+  pub fn backspace  [407] -> Option<(usize, usize)>
     WRITE: cursor, selection_anchor, sync_edits.push
 
-  pub fn set_original_text  [478]
+  pub fn set_original_text  [480]
     WRITE: original_hashes, saved_hashes
 
-  pub fn mark_saved  [484]
+  pub fn mark_saved  [486]
     WRITE: saved_hashes
 
-  pub fn is_dirty  [489] -> bool
+  pub fn is_dirty  [491] -> bool
 
-  pub fn get_line_modification_state  [493] -> Option<LineModState>
+  pub fn get_line_modification_state  [495] -> Option<LineModState>
 
-  pub fn update_modifications  [497]
+  pub fn update_modifications  [499]
     SELF:  get_diff_info
     WRITE: deleted_gaps, is_dirty, line_states
 
-  pub fn clear_history  [569]
+  pub fn clear_history  [571]
     WRITE: history.clear, history_size, redo_stack.clear, sync_edits.clear
 
-      fn push_history  [577]
+      fn push_history  [579]
     WRITE: history.pop_front, history.push_back, redo_stack.clear
-    MATCH: EditOp::Delete, EditOp::Insert
+    MATCH: EditOp::Delete, EditOp::Insert, EditOp::Replace
 
-  pub fn undo  [654] -> Option<UndoRedoDelta>
-    WRITE: cursor, history.pop_back, is_working_history, redo_stack.push_back, selection_anchor
-    MATCH: EditOp::Delete, EditOp::Insert, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert
+  pub fn undo  [658] -> Option<UndoRedoDelta>
+    WRITE: cursor, history.pop_back, is_working_history, redo_stack.push_back, selection_anchor, sync_edits.push
+    MATCH: EditOp::Delete, EditOp::Insert, EditOp::Replace, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn redo  [691] -> Option<UndoRedoDelta>
-    WRITE: cursor, history.push_back, is_working_history, redo_stack.pop_back, selection_anchor
-    MATCH: EditOp::Delete, EditOp::Insert, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert
+  pub fn redo  [709] -> Option<UndoRedoDelta>
+    WRITE: cursor, history.push_back, is_working_history, redo_stack.pop_back, selection_anchor, sync_edits.push
+    MATCH: EditOp::Delete, EditOp::Insert, EditOp::Replace, SyncEdit::Delete, UndoRedoDelta::Delete, UndoRedoDelta::Insert, UndoRedoDelta::Replace
 
-  pub fn text_parts  [728] -> (&str, &str)
+  pub fn text_parts  [760] -> (&str, &str)
 
-  pub fn get_full_text  [736] -> String
+  pub fn get_full_text  [768] -> String
 
-      fn move_gap  [744]
+      fn move_gap  [776]
 
-      fn insert_str_internal  [763] -> usize
+      fn insert_str_internal  [795] -> usize
     WRITE: data, gap_end, sync_edits.push
 
-  pub fn insert_str  [787] -> (Option<(usize, usize)>, usize)
+  pub fn replace_range  [819] -> (usize, usize, String)
+    WRITE: cursor, selection_anchor, sync_edits.push
+
+  pub fn insert_str  [860] -> (Option<(usize, usize)>, usize)
     WRITE: selection_anchor
 
-  pub fn delete_selection  [814] -> Option<(usize, usize)>
+  pub fn delete_selection  [887] -> Option<(usize, usize)>
     WRITE: cursor, selection_anchor
 
-  pub fn delete_forward  [852] -> Option<(usize, usize)>
+  pub fn delete_forward  [925] -> Option<(usize, usize)>
     WRITE: sync_edits.push
 
-  pub fn delete_word_backward  [888] -> Option<(usize, usize)>
+  pub fn delete_word_backward  [961] -> Option<(usize, usize)>
     SELF:  is_delimiter
     WRITE: cursor, selection_anchor
 
-  pub fn delete_word_forward  [921] -> Option<(usize, usize)>
+  pub fn delete_word_forward  [994] -> Option<(usize, usize)>
     SELF:  is_delimiter
     WRITE: cursor, selection_anchor
 
-  pub fn get_auto_indent  [955] -> String
+  pub fn get_auto_indent  [1028] -> String
     SELF:  char_class, select_expand
 
-  pub fn select_expand  [985]
+  pub fn select_expand  [1058]
     SELF:  char_class
 
 ────────────────────────────────────────────────────────────
@@ -651,13 +654,13 @@ FILE src/render_view/ui.rs
 
 FILE src/render_view.rs
   module: render_view
-  types:  ModInterval
+  types:  ModInterval, DiagLayout
 
   pub fn draw  [22] -> (bool, Vec<(usize, usize)>)
-    WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diag, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
+    WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_cursor_for_popups, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diags, last_hovered_diags.clear, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-      fn draw_minimap  [2058]
+      fn draw_minimap  [1961]
 
 ────────────────────────────────────────────────────────────
 
@@ -665,41 +668,41 @@ FILE src/renderer.rs
   module: renderer
   types:  Theme, Vertex, GlyphInfo, VisualLine, FontData, Renderer
 
-  pub fn new  [143] -> Self
+  pub fn new  [144] -> Self
 
-  pub fn get_custom_svg_glyph  [459] -> Option<GlyphInfo>
+  pub fn get_custom_svg_glyph  [461] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, max_row_h
 
-  pub fn get_glyph  [526] -> Option<GlyphInfo>
+  pub fn get_glyph  [528] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, glyphs.insert, max_row_h, ui_glyphs.clear
     MATCH: Content::Mask
 
-  pub fn get_ui_glyph  [690] -> Option<GlyphInfo>
+  pub fn get_ui_glyph  [692] -> Option<GlyphInfo>
     CALL widgets: render
     WRITE: atlas_x, atlas_y, glyphs.clear, max_row_h, ui_glyphs.clear, ui_glyphs.insert
     MATCH: Content::Mask
 
-  pub fn resize  [853]
+  pub fn resize  [855]
     WRITE: height, width
 
-  pub fn measure_ui_width  [863] -> f32
+  pub fn measure_ui_width  [865] -> f32
 
-  pub fn char_advance  [876] -> f32
+  pub fn char_advance  [878] -> f32
 
-  pub fn push_quad  [893]
+  pub fn push_quad  [895]
 
-  pub fn load_builtin_icons  [945]
+  pub fn load_builtin_icons  [947]
     CALL widgets: render
     WRITE: icons.insert
     MATCH: IconType::Down
 
-  pub fn push_squiggle  [1124]
+  pub fn push_squiggle  [1126]
 
-  pub fn push_rect  [1177]
+  pub fn push_rect  [1179]
 
-  pub fn push_rounded_rect_gradient  [1181]
+  pub fn push_rounded_rect_gradient  [1183]
 
 ────────────────────────────────────────────────────────────
 

@@ -135,13 +135,18 @@ impl Renderer {
             0.0
         };
 
-        if (self.last_mouse_x, self.last_mouse_y) != self.last_known_mouse {
+                if (self.last_mouse_x, self.last_mouse_y) != self.last_known_mouse {
             self.hide_popups_until_mouse_move = false;
             self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
         }
-        if self.last_editor_version_for_typing != editor.version {
+        if self.last_editor_version_for_typing != editor.version 
+            || self.last_cursor_for_popups != editor.cursor 
+            || (self.last_scroll_y - scroll_y).abs() > 0.1 
+            || (self.last_scroll_x - scroll_x).abs() > 0.1 
+        {
             self.hide_popups_until_mouse_move = true;
             self.last_editor_version_for_typing = editor.version;
+            self.last_cursor_for_popups = editor.cursor;
         }
 
         let real_height = self.height;
@@ -1254,7 +1259,16 @@ impl Renderer {
 
         self.flush();
 
-        let mut hovered_diag = None;
+                        let mut hovered_diags = Vec::new();
+        let mut mouse_in_popup = false;
+        if let Some(rect) = self.last_diag_popup_rect {
+            // Расширяем "зону безопасности" попапа на 40px во все стороны, 
+            // чтобы можно было вести мышь по диагонали от волнистой линии, и он не закрывался.
+            let pad = 40.0 * self.scale_factor;
+            if mx >= rect.0 - pad && mx <= rect.0 + rect.2 + pad && my >= rect.1 - pad && my <= rect.1 + rect.3 + pad {
+                mouse_in_popup = true;
+            }
+        }
 
         // LSP squiggles — волнистые подчёркивания диагностик
         if !lsp_diagnostics.is_empty() {
@@ -1262,11 +1276,11 @@ impl Renderer {
             let render_scroll_x = scroll_x.round();
             for (idx, diag) in lsp_diagnostics.iter().enumerate() {
                 // Цвет по severity
-                let color: [f32; 4] = match diag.severity {
-                    crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.90],
-                    crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 0.90],
-                    crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 0.80],
-                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 0.70],
+                let color:[f32; 4] = match diag.severity {
+                    crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 0.90],
+                    crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 0.90],
+                    crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 0.80],
+                    crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 0.70],
                 };
                 let line = diag.start_line as usize;
                 if line >= editor.line_offsets.len() {
@@ -1345,23 +1359,13 @@ impl Renderer {
                         in_hitbox = true;
                     }
 
-                    if self.last_hovered_diag == Some(idx) {
-                        if let Some(rect) = self.last_diag_popup_rect {
-                            let min_x = x_start.min(rect.0) - 20.0 * s;
-                            let max_x = (x_start + squiggle_w).max(rect.0 + rect.2) + 20.0 * s;
-                            let min_y = squiggle_hit_y_top.min(rect.1) - 20.0 * s;
-                            let max_y = squiggle_hit_y_bottom.max(rect.1 + rect.3) + 20.0 * s;
-
-                            if mx >= min_x && mx <= max_x && my >= min_y && my <= max_y {
-                                in_hitbox = true;
-                            }
-                        }
+                    if mouse_in_popup && self.last_hovered_diags.contains(&idx) {
+                        in_hitbox = true;
                     }
                 }
 
                 if in_hitbox {
-                    hovered_diag =
-                        Some((idx, diag.clone(), x_start, top_y, top_y + self.line_height));
+                    hovered_diags.push((idx, diag.clone(), x_start, top_y, top_y + self.line_height));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {
@@ -1734,12 +1738,12 @@ impl Renderer {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
 
-        // --- LSP Diagnostic Tooltip ---
-        if hovered_diag.is_none() {
+                // --- LSP Diagnostic Tooltip ---
+        if hovered_diags.is_empty() {
             self.last_diag_popup_rect = None;
+            self.last_hovered_diags.clear();
         }
 
-        // dt для таймера popup
         let now = std::time::Instant::now();
         let popup_dt = self
             .last_draw_instant
@@ -1747,304 +1751,203 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        let hovered_idx = hovered_diag.as_ref().map(|h| h.0);
-        if hovered_idx != self.diag_hover_timer_idx {
-            self.diag_hover_timer_idx = hovered_idx;
+        let current_hovered_indices: Vec<usize> = hovered_diags.iter().map(|h| h.0).collect();
+        let first_idx = current_hovered_indices.first().copied();
+
+        if first_idx != self.diag_hover_timer_idx {
+            self.diag_hover_timer_idx = first_idx;
             self.diag_hover_timer = 0.0;
-        } else if hovered_idx.is_some() {
+        } else if first_idx.is_some() {
             self.diag_hover_timer += popup_dt;
         }
         let popup_ready = self.diag_hover_timer >= 0.2;
 
-        self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
+        self.last_hovered_diags = current_hovered_indices;
 
-        if let Some((idx, diag, diag_x, line_y_top, diag_y_bottom)) =
-            hovered_diag.filter(|_| popup_ready)
-        {
+        if popup_ready && !hovered_diags.is_empty() {
             let s = self.scale_factor;
             let pad = 12.0 * s;
             let line_h = 22.0 * s;
-
-            // Префикс серый: "(Ruff " или "(LSP)" итд
-            // Суффикс фиолетовый+подчёркнутый: "ARG001)" — только код
-            let source_prefix = match (&diag.source, &diag.code) {
-                (Some(src), Some(_)) => format!("({} ", src),
-                (Some(src), None) => format!("({})", src),
-                (None, Some(_)) => "(".to_string(),
-                (None, None) => "(LSP)".to_string(),
-            };
-            let source_suffix = match &diag.code {
-                Some(code) => code.clone(),
-                None => String::new(),
-            };
-            // Полная строка нужна только для расчёта ширины переноса
-            let close_paren_w = if source_suffix.is_empty() {
-                0.0
-            } else {
-                self.measure_ui_width(")", 1.0)
-            };
-            let source_full_w = self.measure_ui_width(&source_prefix, 1.0)
-                + self.measure_ui_width(&source_suffix, 1.0)
-                + close_paren_w;
-            let msg = &diag.message;
-
-            let mut lines = Vec::new();
-            let mut cur_line = String::new();
-            // Перенос только если текст действительно длинный
-            let max_text_w = 520.0 * s;
-
-            for word in msg.split_whitespace() {
-                let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 1.0);
-                if w > max_text_w && !cur_line.is_empty() {
-                    lines.push(cur_line);
-                    cur_line = word.to_string();
-                } else {
-                    if !cur_line.is_empty() {
-                        cur_line.push(' ');
-                    }
-                    cur_line.push_str(word);
-                }
-            }
-            if !cur_line.is_empty() {
-                lines.push(cur_line.clone());
-            }
-
-            let last_line_w =
-                self.measure_ui_width(lines.last().map(|s| s.as_str()).unwrap_or(""), 1.0);
-            let mut source_on_new_line = false;
-
-            if last_line_w + source_full_w + 10.0 * s > max_text_w {
-                lines.push(String::new());
-                source_on_new_line = true;
-            }
-
-            let mut box_text_w = 0.0f32;
-            for line in &lines {
-                let lw = self.measure_ui_width(line, 1.0);
-                if lw > box_text_w {
-                    box_text_w = lw;
-                }
-            }
-            if source_on_new_line && source_full_w > box_text_w {
-                box_text_w = source_full_w;
-            } else if !source_on_new_line {
-                let combined_w = last_line_w + 8.0 * s + source_full_w;
-                if combined_w > box_text_w {
-                    box_text_w = combined_w;
-                }
-            }
-
             let icon_sz = 20.0 * s;
-            let box_w = (box_text_w + pad * 2.0 + icon_sz + 16.0 * s).max(180.0 * s);
-            let box_h = pad * 2.0 + lines.len() as f32 * line_h + 2.0 * s;
+            let max_text_w = (self.width - 100.0 * s).max(300.0 * s).min(700.0 * s);
 
-            let mut bx = diag_x;
+            struct DiagLayout {
+                idx: usize,
+                lines: Vec<String>,
+                source_prefix: String,
+                source_suffix: String,
+                has_href: bool,
+                source_on_new_line: bool,
+                total_text_h: f32,
+                severity: crate::lsp::DiagSeverity,
+                is_copied: bool,
+            }
+
+            let mut layouts = Vec::new();
+            let mut global_max_w = 180.0 * s;
+
+            for (idx, diag, _, _, _) in &hovered_diags {
+                let source_prefix = match (&diag.source, &diag.code) {
+                    (Some(src), Some(_)) => format!("({} ", src),
+                    (Some(src), None) => format!("({})", src),
+                    (None, Some(_)) => "(".to_string(),
+                    (None, None) => "(LSP)".to_string(),
+                };
+                let source_suffix = match &diag.code {
+                    Some(code) => code.clone(),
+                    None => String::new(),
+                };
+                let close_paren_w = if source_suffix.is_empty() { 0.0 } else { self.measure_ui_width(")", 1.0) };
+                let source_full_w = self.measure_ui_width(&source_prefix, 1.0) + self.measure_ui_width(&source_suffix, 1.0) + close_paren_w;
+
+                let mut lines = Vec::new();
+                let mut cur_line = String::new();
+                for word in diag.message.split_whitespace() {
+                    let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 1.0);
+                    if w > max_text_w && !cur_line.is_empty() {
+                        lines.push(cur_line);
+                        cur_line = word.to_string();
+                    } else {
+                        if !cur_line.is_empty() { cur_line.push(' '); }
+                        cur_line.push_str(word);
+                    }
+                }
+                if !cur_line.is_empty() { lines.push(cur_line.clone()); }
+
+                let last_line_w = self.measure_ui_width(lines.last().map(|st| st.as_str()).unwrap_or(""), 1.0);
+                let mut source_on_new_line = false;
+
+                if last_line_w + source_full_w + 10.0 * s > max_text_w {
+                    lines.push(String::new());
+                    source_on_new_line = true;
+                }
+
+                let mut box_text_w = 0.0f32;
+                for l in &lines {
+                    let lw = self.measure_ui_width(l, 1.0);
+                    if lw > box_text_w { box_text_w = lw; }
+                }
+                if source_on_new_line && source_full_w > box_text_w {
+                    box_text_w = source_full_w;
+                } else if !source_on_new_line {
+                    let combined_w = last_line_w + 8.0 * s + source_full_w;
+                    if combined_w > box_text_w { box_text_w = combined_w; }
+                }
+
+                let item_w = box_text_w + pad * 2.0 + icon_sz + 16.0 * s;
+                if item_w > global_max_w { global_max_w = item_w; }
+
+                let total_text_h = lines.len() as f32 * line_h;
+                layouts.push(DiagLayout {
+                    idx: *idx,
+                    lines,
+                    source_prefix,
+                    source_suffix,
+                    has_href: diag.code_href.is_some(),
+                    source_on_new_line,
+                    total_text_h,
+                    severity: diag.severity,
+                    is_copied: ide_panel.diag_copied_idx == Some(*idx),
+                });
+            }
+
+            let box_w = global_max_w;
+            let mut total_h = pad * 2.0;
+            for l in &layouts {
+                total_h += l.total_text_h;
+            }
+            total_h += (layouts.len() as f32 - 1.0) * (line_h * 0.5);
+
+            let (_, _, first_diag_x, first_line_y_top, first_diag_y_bottom) = hovered_diags[0];
+            let mut bx = first_diag_x;
             if bx + box_w > self.width - 20.0 * s {
                 bx = self.width - box_w - 20.0 * s;
             }
-
-            let mut by = line_y_top - box_h - 8.0 * s;
+            let mut by = first_line_y_top - total_h - 8.0 * s;
             if by < 0.0 {
-                by = diag_y_bottom + 8.0 * s;
+                by = first_diag_y_bottom + 8.0 * s;
             }
 
-                        self.last_diag_popup_rect = Some((bx, by, box_w, box_h));
+            self.last_diag_popup_rect = Some((bx, by, box_w, total_h));
 
-            let mx = if show_settings || dialog_window_open {
-                -1.0
-            } else {
-                self.last_mouse_x
-            };
-            let my = if show_settings || dialog_window_open {
-                -1.0
-            } else {
-                self.last_mouse_y
-            };
+            ui_registry.register_blocker(crate::ui_system::UiId::BottomPanelBody, bx, by, box_w, total_h, mx, my);
 
-            ui_registry.register_blocker(
-                crate::ui_system::UiId::BottomPanelBody,
-                bx,
-                by,
-                box_w,
-                box_h,
-                mx,
-                my,
-            );
-
-            let border_color = match diag.severity {
-                crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.6],
-                crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 0.6],
-                crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 0.6],
-                crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 0.6],
-            };
-
-            let bg_color = [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                1.0,
-            ];
-            self.push_rounded_rect(
-                bx.round() - 1.0,
-                by.round() - 1.0,
-                box_w.round() + 2.0,
-                box_h.round() + 2.0,
-                6.0 * s,
-                border_color,
-            );
-            self.push_rounded_rect(
-                bx.round(),
-                by.round(),
-                box_w.round(),
-                box_h.round(),
-                6.0 * s,
-                bg_color,
-            );
-
-            let total_text_h = lines.len() as f32 * line_h;
-            let mut text_y = (by + (box_h - total_text_h) / 2.0 + line_h * 0.75).round();
-            for (i, line) in lines.iter().enumerate() {
-                self.draw_string_scaled(
-                    &line,
-                    (bx + pad).round(),
-                    text_y.round(),
-                    [0.9, 0.9, 0.9, 1.0],
-                    1.0,
-                );
-
-                if i == lines.len() - 1 {
-                    let line_w = self.measure_ui_width(line, 1.0);
-                    let sx = if source_on_new_line {
-                        (bx + pad).round()
-                    } else {
-                        (bx + pad + line_w + 8.0 * s).round()
-                    };
-                    let sy = text_y.round();
-
-                    // "(Ruff " — всегда серый
-                    let prefix_w = self.measure_ui_width(&source_prefix, 1.0);
-                    self.draw_string_scaled(&source_prefix, sx, sy, [0.55, 0.55, 0.6, 1.0], 1.0);
-
-                    // "ARG001)" — фиолетовый, подчёркнутый, кликабельный
-                    if !source_suffix.is_empty() {
-                        let sfx_x = sx + prefix_w;
-                        let sfx_w = self.measure_ui_width(&source_suffix, 1.0);
-                        let has_href = diag.code_href.is_some();
-
-                        let sfx_hovered = has_href
-                            && mx >= sfx_x - 1.0
-                            && mx <= sfx_x + sfx_w + 1.0
-                            && my >= sy - line_h
-                            && my <= sy + 2.0 * s;
-
-                        // Яркий фиолетовый, независимый от темы
-                        let link_color: [f32; 4] = [0.72, 0.52, 1.0, 1.0];
-                        let sfx_color = if sfx_hovered {
-                            link_color
-                        } else {
-                            [link_color[0], link_color[1], link_color[2], 0.85]
-                        };
-
-                        if has_href {
-                            let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
-                            self.push_rect(
-                                sfx_x,
-                                sy + 1.0,
-                                sfx_w,
-                                1.0,
-                                [link_color[0], link_color[1], link_color[2], ul_alpha],
-                            );
-                        }
-                        if sfx_hovered {
-                            wants_pointer = true;
-                        }
-
-                        self.draw_string_scaled(&source_suffix, sfx_x, sy, sfx_color, 1.0);
-
-                        // Закрывающая скобка — серая, не кликабельная
-                        self.draw_string_scaled(
-                            ")",
-                            sfx_x + sfx_w,
-                            sy,
-                            [0.55, 0.55, 0.6, 1.0],
-                            1.0,
-                        );
-
-                        if has_href {
-                            self.last_diag_href = diag.code_href.clone();
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::OpenDiagUrl(idx),
-                                sfx_x - 1.0,
-                                sy - line_h,
-                                sfx_w + 2.0,
-                                line_h + 2.0 * s,
-                                mx,
-                                my,
-                            );
-                        }
-                    }
-                }
-                text_y += line_h;
-            }
-
-                        let is_copied = ide_panel.diag_copied_idx == Some(idx);
-
-            let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
+            let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + total_h;
             if popup_hovered && !wants_pointer {
                 ui_registry.reset_cursor_state();
             }
 
-            // Кнопка копирования — строго по центру вертикали
-            let btn_x = (bx + box_w - pad - icon_sz).round();
-            let btn_y = (by + (box_h - icon_sz) / 2.0).round();
+            self.push_rounded_rect(bx.round() - 1.0, by.round() - 1.0, box_w.round() + 2.0, total_h.round() + 2.0, 6.0 * s, [0.4, 0.4, 0.45, 0.6]);
+            self.push_rounded_rect(bx.round(), by.round(), box_w.round(), total_h.round(), 6.0 * s, [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0]);
 
-            let btn_hovered = mx >= btn_x - 4.0 * s
-                && mx <= btn_x + icon_sz + 4.0 * s
-                && my >= btn_y - 2.0 * s
-                && my <= btn_y + icon_sz + 4.0 * s;
+            let mut current_y = by + pad;
 
-            if btn_hovered {
-                self.push_rounded_rect(
-                    btn_x - 4.0 * s,
-                    btn_y - 2.0 * s,
-                    icon_sz + 8.0 * s,
-                    icon_sz + 4.0 * s,
-                    4.0 * s,
-                    [1.0, 1.0, 1.0, 0.1],
-                );
-                wants_pointer = true;
+            for layout in layouts {
+                let border_color = match layout.severity {
+                    crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 1.0],
+                    crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 1.0],
+                    crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 1.0],
+                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 1.0],
+                };
+
+                self.push_rect(bx + 4.0 * s, current_y, 3.0 * s, layout.total_text_h, border_color);
+
+                let mut text_y = current_y + line_h * 0.75;
+                for (i, line) in layout.lines.iter().enumerate() {
+                    self.draw_string_scaled(line, (bx + pad).round(), text_y.round(),[0.9, 0.9, 0.9, 1.0], 1.0);
+
+                    if i == layout.lines.len() - 1 {
+                        let line_w = self.measure_ui_width(line, 1.0);
+                        let sx = if layout.source_on_new_line { (bx + pad).round() } else { (bx + pad + line_w + 8.0 * s).round() };
+                        let sy = text_y.round();
+
+                        let prefix_w = self.measure_ui_width(&layout.source_prefix, 1.0);
+                        self.draw_string_scaled(&layout.source_prefix, sx, sy,[0.55, 0.55, 0.6, 1.0], 1.0);
+
+                        if !layout.source_suffix.is_empty() {
+                            let sfx_x = sx + prefix_w;
+                            let sfx_w = self.measure_ui_width(&layout.source_suffix, 1.0);
+                            let sfx_hovered = layout.has_href && mx >= sfx_x - 1.0 && mx <= sfx_x + sfx_w + 1.0 && my >= sy - line_h && my <= sy + 2.0 * s;
+                            let link_color: [f32; 4] =[0.72, 0.52, 1.0, 1.0];
+                            let sfx_color = if sfx_hovered { link_color } else { [link_color[0], link_color[1], link_color[2], 0.85] };
+
+                            if layout.has_href {
+                                let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
+                                self.push_rect(sfx_x, sy + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], ul_alpha]);
+                                if sfx_hovered { wants_pointer = true; }
+                            }
+                            self.draw_string_scaled(&layout.source_suffix, sfx_x, sy, sfx_color, 1.0);
+                            self.draw_string_scaled(")", sfx_x + sfx_w, sy,[0.55, 0.55, 0.6, 1.0], 1.0);
+
+                            if layout.has_href {
+                                if let Some((_, diag, _, _, _)) = hovered_diags.iter().find(|h| h.0 == layout.idx) {
+                                    self.last_diag_href = diag.code_href.clone();
+                                }
+                                ui_registry.register_rect(crate::ui_system::UiId::OpenDiagUrl(layout.idx), sfx_x - 1.0, sy - line_h, sfx_w + 2.0, line_h + 2.0 * s, mx, my);
+                            }
+                        }
+                    }
+                    text_y += line_h;
+                }
+
+                let btn_x = (bx + box_w - pad - icon_sz).round();
+                let btn_y = (current_y + (layout.total_text_h - icon_sz) / 2.0).round();
+                let btn_hovered = mx >= btn_x - 4.0 * s && mx <= btn_x + icon_sz + 4.0 * s && my >= btn_y - 2.0 * s && my <= btn_y + icon_sz + 4.0 * s;
+
+                if btn_hovered {
+                    self.push_rounded_rect(btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, 4.0 * s, [1.0, 1.0, 1.0, 0.1]);
+                    wants_pointer = true;
+                }
+                let icon_type = if layout.is_copied { crate::widgets::IconType::Check } else { crate::widgets::IconType::Copy };
+                let icon_color = if layout.is_copied {[0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
+                let icon_render_sz = 16.0 * s;
+                let offset = (icon_sz - icon_render_sz) / 2.0;
+                self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
+
+                ui_registry.register_rect(crate::ui_system::UiId::CopyDiagnostic(layout.idx), btn_x - 4.0 * s, btn_y - 2.0 * s, icon_sz + 8.0 * s, icon_sz + 4.0 * s, mx, my);
+
+                current_y += layout.total_text_h + line_h * 0.5;
             }
-
-            let icon_type = if is_copied {
-                crate::widgets::IconType::Check
-            } else {
-                crate::widgets::IconType::Copy
-            };
-            let icon_color = if is_copied {
-                [0.3, 0.9, 0.4, 1.0]
-            } else {
-                self.theme.fg
-            };
-
-            let icon_render_sz = 16.0 * s;
-            let offset = (icon_sz - icon_render_sz) / 2.0;
-            self.draw_atlas_icon(
-                icon_type,
-                btn_x + offset,
-                btn_y + offset,
-                icon_render_sz,
-                icon_color,
-            );
-
-            ui_registry.register_rect(
-                crate::ui_system::UiId::CopyDiagnostic(idx),
-                btn_x - 4.0 * s,
-                btn_y - 2.0 * s,
-                icon_sz + 8.0 * s,
-                icon_sz + 4.0 * s,
-                mx,
-                my,
-            );
         }
 
         self.flush();

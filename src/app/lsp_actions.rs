@@ -158,12 +158,12 @@ impl App {
             let ext = self.file_extension.clone();
             let (sl, sc) = crate::lsp::offset_to_lsp_pos(&self.editor.get_full_text(), self.editor.cursor, &self.editor.line_offsets);
             lsp.request_code_actions(&ext, sl, sc, sl, sc, &diags, None)
-        } else {
+                } else {
             None
         };
 
-        items.push(crate::app::LspActionItem::FixAll);
         items.push(crate::app::LspActionItem::OrganizeImports);
+        items.push(crate::app::LspActionItem::FixAll);
 
         self.lsp_actions_menu = Some(crate::app::LspActionsMenu {
             cursor_line,
@@ -250,9 +250,7 @@ impl App {
         if let Some(noqa_pos_in_line) = line_text.find("# noqa") {
             let noqa_byte_start = line_start + noqa_pos_in_line;
             let old_noqa_str = &line_text[noqa_pos_in_line..];
-            let chars_to_delete = old_noqa_str.chars().count();
-
-            let new_noqa = if codes.is_empty() {
+                        let new_noqa = if codes.is_empty() {
                 "# noqa".to_string()
             } else {
                 let existing = if let Some(colon) = old_noqa_str.find(": ") {
@@ -274,34 +272,19 @@ impl App {
                 format!("# noqa: {}", merged.join(", "))
             };
 
-            // Удаляем старый noqa
-            self.editor.cursor = noqa_byte_start;
-            for _ in 0..chars_to_delete {
-                let _ = self.editor.delete_forward();
-            }
-            // Вставляем новый
-            let ins_start = self.editor.cursor;
-            let (del_info, ins_len) = self.editor.insert_str(&new_noqa);
-            if let Some((off, len)) = del_info {
-                self.highlighter.shift_delete(off, len);
-            }
-            self.highlighter
-                .shift_insert(ins_start, ins_len, Some(&new_noqa));
+                        let (off, len, _) = self.editor.replace_range(noqa_byte_start, actual_end, &new_noqa);
+            self.highlighter.shift_delete(off, len);
+            self.highlighter.shift_insert(off, new_noqa.len(), Some(&new_noqa));
         } else {
             // Нет noqa — добавляем в конец строки
-            self.editor.cursor = actual_end;
             let noqa = if codes.is_empty() {
                 "  # noqa".to_string()
             } else {
                 format!("  # noqa: {}", codes.join(", "))
             };
-            let ins_start = self.editor.cursor;
-            let (del_info, ins_len) = self.editor.insert_str(&noqa);
-            if let Some((off, len)) = del_info {
-                self.highlighter.shift_delete(off, len);
-            }
-            self.highlighter
-                .shift_insert(ins_start, ins_len, Some(&noqa));
+            let (off, len, _) = self.editor.replace_range(actual_end, actual_end, &noqa);
+            self.highlighter.shift_delete(off, len);
+            self.highlighter.shift_insert(off, noqa.len(), Some(&noqa));
         }
 
         // Синхронизируем с LSP и подсветчиком
@@ -343,22 +326,11 @@ impl App {
                     ops.push((start, end, change.new_text.clone()));
                 }
 
-                for (start, end, new_text) in ops {
+                                for (start, end, new_text) in ops {
                     if start <= end {
-                        self.editor.cursor = end;
-                        self.editor.selection_anchor = Some(start);
-                        if let Some((off, len)) = self.editor.delete_selection() {
-                            self.highlighter.shift_delete(off, len);
-                        }
-                        if !new_text.is_empty() {
-                            self.editor.cursor = start;
-                            let (del_info, ins_len) = self.editor.insert_str(&new_text);
-                            if let Some((off, len)) = del_info {
-                                self.highlighter.shift_delete(off, len);
-                            }
-                            self.highlighter
-                                .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&new_text));
-                        }
+                        let (off, len, _) = self.editor.replace_range(start, end, &new_text);
+                        self.highlighter.shift_delete(off, len);
+                        self.highlighter.shift_insert(off, new_text.len(), Some(&new_text));
                     }
                 }
 

@@ -385,13 +385,8 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // Сбрасываем иконку копирования когда popup диагностики закрывается
-                if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
-                    self.ide_panel.diag_copied_idx = None;
-                }
-
-                // Сбрасываем иконку копирования когда popup диагностики закрывается
-                if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
+                                                // Сбрасываем иконку копирования когда popup диагностики закрывается
+                if self.renderer.as_ref().unwrap().last_hovered_diags.is_empty() {
                     self.ide_panel.diag_copied_idx = None;
                 }
 
@@ -962,13 +957,19 @@ impl ApplicationHandler for App {
                         if let Some(w) = self.window.as_ref() {
                             w.request_redraw();
                         }
-                    } else if self.pending_fix_all_id == Some(request_id) {
+                                        } else if self.pending_fix_all_id == Some(request_id) {
                         // Fix All из панели LSP серверов
                         self.pending_fix_all_id = None;
-                                                if let Some(action) = actions.into_iter().find(|a| a.edit.is_some()) {
+                        let mut merged_edit = crate::lsp::WorkspaceEdit::default();
+                        for action in actions {
                             if let Some(edit) = action.edit {
-                                self.apply_workspace_edit(&edit);
+                                for (path, changes) in edit.changes {
+                                    merged_edit.changes.entry(path).or_default().extend(changes);
+                                }
                             }
+                        }
+                        if !merged_edit.changes.is_empty() {
+                            self.apply_workspace_edit(&merged_edit);
                         }
                         if let Some(w) = self.window.as_ref() {
                             w.request_redraw();

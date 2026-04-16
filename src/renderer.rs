@@ -127,16 +127,17 @@ pub struct Renderer {
     /// Кэш SVG-иконок для дерева файлов. Ключ — &'static str из file_icons_map.
     pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
-    pub phys_to_visual: Vec<usize>,
-    pub last_hovered_diag: Option<usize>,
-    pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
-    pub last_diag_href: Option<String>,
-    pub hide_popups_until_mouse_move: bool,
-    pub diag_hover_timer: f32,
-    pub diag_hover_timer_idx: Option<usize>,
-    pub last_known_mouse: (f32, f32),
-    pub last_editor_version_for_typing: u64,
-    pub last_draw_instant: Option<std::time::Instant>,
+            pub phys_to_visual: Vec<usize>,
+        pub last_hovered_diags: Vec<usize>,
+        pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
+        pub last_diag_href: Option<String>,
+        pub hide_popups_until_mouse_move: bool,
+        pub diag_hover_timer: f32,
+        pub diag_hover_timer_idx: Option<usize>,
+        pub last_known_mouse: (f32, f32),
+        pub last_editor_version_for_typing: u64,
+        pub last_cursor_for_popups: usize,
+        pub last_draw_instant: Option<std::time::Instant>,
 }
 
 impl Renderer {
@@ -430,9 +431,9 @@ impl Renderer {
                 icons: HashMap::new(),
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 icon_logo,
-                sticky_scroll_rects: Vec::new(),
+                                sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),
-                last_hovered_diag: None,
+                last_hovered_diags: Vec::new(),
                 last_diag_popup_rect: None,
                 last_diag_href: None,
                 hide_popups_until_mouse_move: false,
@@ -440,6 +441,7 @@ impl Renderer {
                 diag_hover_timer_idx: None,
                 last_known_mouse: (0.0, 0.0),
                 last_editor_version_for_typing: u64::MAX,
+                last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
             };
 
