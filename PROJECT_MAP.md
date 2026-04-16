@@ -28,7 +28,7 @@ FILE src/app/events.rs
     WRITE: autocomplete_rect, current_cursor, is_focused, is_ready, last_resize_time, modifiers, target_sticky_lines, tried_maximize, ui_registry.clear
     MATCH: PendingAction::CloseFile, PendingAction::OpenFile, PendingAction::Quit
 
-      fn about_to_wait  [644]
+      fn about_to_wait  [651]
     CALL app: update_window_title
     CALL lsp: apply_workspace_edit_to_text
     CALL main: save_config
@@ -654,7 +654,7 @@ FILE src/render_view.rs
     WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diag, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-      fn draw_minimap  [2078]
+      fn draw_minimap  [2058]
 
 ────────────────────────────────────────────────────────────
 

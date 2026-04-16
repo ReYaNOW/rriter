@@ -378,6 +378,13 @@ impl ApplicationHandler for App {
 
                 self.target_sticky_lines = target_sticky;
 
+                // Продолжаем рендерить пока tooltip ещё не показан
+                if let Some(r) = self.renderer.as_ref() {
+                    if r.diag_hover_timer > 0.0 && r.diag_hover_timer < 0.2 {
+                        self.window.as_ref().unwrap().request_redraw();
+                    }
+                }
+
                 // Сбрасываем иконку копирования когда popup диагностики закрывается
                 if self.renderer.as_ref().unwrap().last_hovered_diag.is_none() {
                     self.ide_panel.diag_copied_idx = None;

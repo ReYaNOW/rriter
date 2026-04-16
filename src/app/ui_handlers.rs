@@ -527,7 +527,7 @@ impl App {
                 }
             }
             UiId::OpenDiagUrl(_idx) => {
-                if let Some(href) = self.renderer.last_diag_href.take() {
+                if let Some(href) = self.renderer.as_mut().unwrap().last_diag_href.take() {
                     let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }

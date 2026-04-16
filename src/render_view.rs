@@ -1747,7 +1747,6 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        // Таймер задержки появления popup (0.5s)
         let hovered_idx = hovered_diag.as_ref().map(|h| h.0);
         if hovered_idx != self.diag_hover_timer_idx {
             self.diag_hover_timer_idx = hovered_idx;
@@ -1755,25 +1754,7 @@ impl Renderer {
         } else if hovered_idx.is_some() {
             self.diag_hover_timer += popup_dt;
         }
-        let popup_ready = self.diag_hover_timer >= 0.5;
-
-        self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
-        let dt = self
-            .last_frame_time
-            .map(|_| {
-                let now = std::time::Instant::now();
-                now.duration_since(self.last_frame_time.unwrap_or(now))
-                    .as_secs_f32()
-            })
-            .unwrap_or(0.016);
-        let hovered_idx = hovered_diag.as_ref().map(|h| h.0);
-        if hovered_idx != self.diag_hover_timer_idx {
-            self.diag_hover_timer_idx = hovered_idx;
-            self.diag_hover_timer = 0.0;
-        } else if hovered_idx.is_some() {
-            self.diag_hover_timer += dt;
-        }
-        let popup_ready = self.diag_hover_timer >= 0.5;
+        let popup_ready = self.diag_hover_timer >= 0.2;
 
         self.last_hovered_diag = hovered_diag.as_ref().map(|h| h.0);
 
@@ -1867,7 +1848,28 @@ impl Renderer {
                 by = diag_y_bottom + 8.0 * s;
             }
 
-            self.last_diag_popup_rect = Some((bx, by, box_w, box_h));
+                        self.last_diag_popup_rect = Some((bx, by, box_w, box_h));
+
+            let mx = if show_settings || dialog_window_open {
+                -1.0
+            } else {
+                self.last_mouse_x
+            };
+            let my = if show_settings || dialog_window_open {
+                -1.0
+            } else {
+                self.last_mouse_y
+            };
+
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::BottomPanelBody,
+                bx,
+                by,
+                box_w,
+                box_h,
+                mx,
+                my,
+            );
 
             let border_color = match diag.severity {
                 crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.6],
@@ -1985,30 +1987,8 @@ impl Renderer {
                 text_y += line_h;
             }
 
-            let is_copied = ide_panel.diag_copied_idx == Some(idx);
+                        let is_copied = ide_panel.diag_copied_idx == Some(idx);
 
-            let mx = if show_settings || dialog_window_open {
-                -1.0
-            } else {
-                self.last_mouse_x
-            };
-            let my = if show_settings || dialog_window_open {
-                -1.0
-            } else {
-                self.last_mouse_y
-            };
-
-            // Blocker в самом конце — он перекроет EditorTextBody,
-            // но OpenDiagUrl/CopyDiagnostic зарегистрированы ПОСЛЕ него и найдутся первыми.
-            ui_registry.register_blocker(
-                crate::ui_system::UiId::BottomPanelBody,
-                bx,
-                by,
-                box_w,
-                box_h,
-                mx,
-                my,
-            );
             let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
             if popup_hovered && !wants_pointer {
                 ui_registry.reset_cursor_state();
