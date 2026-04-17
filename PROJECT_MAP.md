@@ -686,7 +686,7 @@ FILE src/render_view.rs
       fn draw_tab_bar  [1972]
     CALL app::file_icons: file_icon_key
 
-      fn draw_minimap  [2058]
+      fn draw_minimap  [2067]
 
 ────────────────────────────────────────────────────────────
 

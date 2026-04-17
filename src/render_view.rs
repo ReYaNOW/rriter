@@ -154,7 +154,7 @@ impl Renderer {
         }
 
                 let real_height = self.height;
-        let tab_bar_h = if show_welcome { 0.0 } else { 38.0 * s };
+                let tab_bar_h = if show_welcome { 0.0 } else { 44.0 * s };
         let editor_height = real_height - tab_bar_h;
 
         let target_minimap_w = 119.0 * s;
@@ -1988,7 +1988,7 @@ impl Renderer {
         self.push_rect(x, y, w, h, [self.theme.bg[0] - 0.02, self.theme.bg[1] - 0.02, self.theme.bg[2] - 0.02, 1.0]);
 
         let mut current_x = x;
-        let tab_pad = 12.0 * s;
+                let tab_pad = 14.0 * s;
 
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = i == active_tab;
@@ -1998,8 +1998,9 @@ impl Renderer {
                 if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title }
             };
 
-            let title_w = self.measure_ui_width(title, 0.9);
-            let tab_w = tab_pad * 2.0 + 20.0 * s + title_w + 24.0 * s;
+                                                let title_w = self.measure_ui_width(title, 1.0);
+            let icon_size_tab = 20.0 * s;
+                                                                        let tab_w = tab_pad * 2.0 + icon_size_tab + 5.0 * s + title_w + 26.0 * s;
 
             let is_hovered = mx >= current_x && mx <= current_x + tab_w && my >= y && my <= y + h;
 
@@ -2017,41 +2018,49 @@ impl Renderer {
                 self.push_rect(current_x, y + h - 2.0 * s, tab_w, 2.0 * s,[0.60, 0.35, 0.85, 1.0]);
             }
 
-            let is_dirty = if is_active { editor.is_dirty() } else { tab.editor.is_dirty() };
-            if is_dirty {
-                self.draw_string_scaled("●", current_x + 6.0 * s, y + h / 2.0 + 4.0 * s,[0.8, 0.4, 0.4, 1.0], 0.7);
-            }
+                        let is_dirty = if is_active { editor.is_dirty() } else { tab.editor.is_dirty() };
 
             let icon_key = if is_active {
                                                 crate::app::file_icons::file_icon_key(&title.to_lowercase())} else {
                 tab.icon_key
             };
 
-            let icon_y = y + (h - 16.0 * s) / 2.0;
-            self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, 16.0 * s);
+            let icon_y = y + (h - icon_size_tab) / 2.0;
+            self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
 
             let text_color = if is_active { self.theme.fg } else { [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.6] };
-            self.draw_string_scaled(title, current_x + tab_pad + 20.0 * s, y + h / 2.0 + 5.0 * s, text_color, 0.9);
+                        let text_x = current_x + tab_pad + icon_size_tab + 5.0 * s;
+            self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
 
-                        ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
+                                                                                    ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
 
-            if is_active || is_hovered {
-                let close_size = 16.0 * s;
-                let close_x = current_x + tab_w - tab_pad - close_size;
-                let close_y = y + (h - close_size) / 2.0;
-                let close_hovered = mx >= close_x - 4.0 * s && mx <= close_x + close_size + 4.0 * s && my >= close_y - 4.0 * s && my <= close_y + close_size + 4.0 * s;
+                                                {
+                                                                                                                                                                                                                let close_size = 20.0 * s;
+                                                    let close_x = current_x + tab_w - tab_pad - close_size;
+                                                    let close_y = y + (h - close_size) / 2.0;
+                                                    let close_hovered = mx >= close_x - 4.0 * s && mx <= close_x + close_size + 4.0 * s && my >= close_y - 4.0 * s && my <= close_y + close_size + 4.0 * s;
 
-                let icon_col = if close_hovered {[1.0, 0.4, 0.4, 1.0] } else {[0.6, 0.6, 0.6, 1.0] };
-                if close_hovered {
-                    self.push_rounded_rect(close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, 4.0 * s,[1.0, 1.0, 1.0, 0.1]);
-                }
-                self.draw_atlas_icon(crate::widgets::IconType::Close, close_x, close_y, close_size, icon_col);
+                                                    let show_close = is_active || is_hovered;
+                                                    if show_close {
+                                                        if is_dirty && !close_hovered {
+                                                            // Точка вместо крестика (VS Code стиль)
+                                                            self.draw_string_scaled("●", close_x + close_size / 2.0 - 4.0 * s, close_y + close_size / 2.0 + 4.0 * s, [0.9, 0.9, 0.9, 1.0], 0.8);
+                                                        } else {
+                                                            if close_hovered {
+                                                                self.push_rounded_rect(close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, 4.0 * s, [1.0, 1.0, 1.0, 0.1]);
+                                                            }
+                                                                                                                                                                                    let icon_col = if close_hovered { [1.0, 1.0, 1.0, 1.0] } else { [1.0, 1.0, 1.0, 0.8] };
+                                                            self.draw_atlas_icon(crate::widgets::IconType::Close, close_x, close_y, close_size, icon_col);
+                                                        }
+                                                    }
 
-                ui_registry.register_rect(crate::ui_system::UiId::EditorTabClose(i), close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, mx, my);
+                                                    ui_registry.register_rect(crate::ui_system::UiId::EditorTabClose(i), close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, mx, my);
+                                                }
+
+                        current_x += tab_w + 1.0;
+            if i + 1 < tabs.len() {
+                self.push_rect(current_x - 1.0, y + h * 0.2, 1.0, h * 0.6, [1.0, 1.0, 1.0, 0.1]);
             }
-
-            current_x += tab_w + 1.0;
-            self.push_rect(current_x - 1.0, y + h * 0.2, 1.0, h * 0.6,[1.0, 1.0, 1.0, 0.1]);
         }
     }
 
