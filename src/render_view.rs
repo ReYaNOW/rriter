@@ -1987,8 +1987,8 @@ impl Renderer {
     ) {
         self.push_rect(x, y, w, h, [self.theme.bg[0] - 0.02, self.theme.bg[1] - 0.02, self.theme.bg[2] - 0.02, 1.0]);
 
-        let mut current_x = x;
-                let tab_pad = 14.0 * s;
+                let mut current_x = x;
+                let tab_pad = 16.0 * s;
 
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = i == active_tab;
@@ -1998,9 +1998,9 @@ impl Renderer {
                 if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title }
             };
 
-                                                let title_w = self.measure_ui_width(title, 1.0);
+                                                                                                let title_w = self.measure_ui_width(title, 1.0);
             let icon_size_tab = 20.0 * s;
-                                                                        let tab_w = tab_pad * 2.0 + icon_size_tab + 5.0 * s + title_w + 26.0 * s;
+                                                                        let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
 
             let is_hovered = mx >= current_x && mx <= current_x + tab_w && my >= y && my <= y + h;
 
@@ -2020,24 +2020,24 @@ impl Renderer {
 
                         let is_dirty = if is_active { editor.is_dirty() } else { tab.editor.is_dirty() };
 
-            let icon_key = if is_active {
+                                    let icon_key = if is_active {
                                                 crate::app::file_icons::file_icon_key(&title.to_lowercase())} else {
                 tab.icon_key
             };
 
-            let icon_y = y + (h - icon_size_tab) / 2.0;
+            let icon_y = (y + (h - icon_size_tab) / 2.0 - 1.5 * s).round();
             self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
 
             let text_color = if is_active { self.theme.fg } else { [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.6] };
-                        let text_x = current_x + tab_pad + icon_size_tab + 5.0 * s;
+                        let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
             self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
 
                                                                                     ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
 
-                                                {
+                                                                                                {
                                                                                                                                                                                                                 let close_size = 20.0 * s;
                                                     let close_x = current_x + tab_w - tab_pad - close_size;
-                                                    let close_y = y + (h - close_size) / 2.0;
+                                                    let close_y = (y + (h - close_size) / 2.0 - 1.5 * s).round();
                                                     let close_hovered = mx >= close_x - 4.0 * s && mx <= close_x + close_size + 4.0 * s && my >= close_y - 4.0 * s && my <= close_y + close_size + 4.0 * s;
 
                                                     let show_close = is_active || is_hovered;
