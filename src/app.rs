@@ -97,7 +97,9 @@ pub enum LspActionItem {
     /// Авто-правка от ruff (workspace edit)
     CodeAction(crate::lsp::CodeAction),
     /// Добавить # noqa: CODES к строке
-    AddNoqa { codes: Vec<String> },
+    AddNoqa {
+        codes: Vec<String>,
+    },
     /// Добавить # noqa (отключить все для строки)
     AddNoqaAll,
     FixAll,
@@ -341,7 +343,7 @@ pub struct App {
     /// Ожидаем ответа на Fix All запрос
     pub pending_fix_all_id: Option<i32>,
 
-        /// Декларативная система UI для автоматической обработки кликов
+    /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,
 
     pub tabs: Vec<EditorTab>,
@@ -350,7 +352,9 @@ pub struct App {
 
 impl App {
     pub fn sync_active_tab(&mut self) {
-        if self.tabs.is_empty() { return; }
+        if self.tabs.is_empty() {
+            return;
+        }
         let ai = self.active_tab;
         std::mem::swap(&mut self.editor, &mut self.tabs[ai].editor);
         std::mem::swap(&mut self.highlighter, &mut self.tabs[ai].highlighter);
@@ -360,17 +364,25 @@ impl App {
         std::mem::swap(&mut self.scroll_y, &mut self.tabs[ai].scroll_y);
         std::mem::swap(&mut self.scroll_x, &mut self.tabs[ai].scroll_x);
         std::mem::swap(&mut self.search_results, &mut self.tabs[ai].search_results);
-        std::mem::swap(&mut self.search_current_idx, &mut self.tabs[ai].search_current_idx);
-        std::mem::swap(&mut self.last_sent_version, &mut self.tabs[ai].last_sent_version);
-        std::mem::swap(&mut self.is_highlighted_once, &mut self.tabs[ai].is_highlighted_once);
-
-                        let icon_key = crate::app::file_icons::file_icon_key(
-            &self.tabs[ai].base_title.to_lowercase(),
+        std::mem::swap(
+            &mut self.search_current_idx,
+            &mut self.tabs[ai].search_current_idx,
         );
+        std::mem::swap(
+            &mut self.last_sent_version,
+            &mut self.tabs[ai].last_sent_version,
+        );
+        std::mem::swap(
+            &mut self.is_highlighted_once,
+            &mut self.tabs[ai].is_highlighted_once,
+        );
+
+        let icon_key =
+            crate::app::file_icons::file_icon_key(&self.tabs[ai].base_title.to_lowercase());
         self.tabs[ai].icon_key = icon_key;
     }
 
-        pub fn switch_to_tab(&mut self, new_idx: usize) {
+    pub fn switch_to_tab(&mut self, new_idx: usize) {
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
@@ -445,10 +457,10 @@ impl App {
         }
 
         if idx == self.active_tab {
-            self.sync_active_tab(); 
+            self.sync_active_tab();
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
-            self.sync_active_tab(); 
+            self.sync_active_tab();
         } else {
             self.tabs.remove(idx);
             if idx < self.active_tab {
@@ -485,7 +497,7 @@ impl App {
 
         self.load_file(path, add_to_history);
     }
-        pub fn ensure_cursor_visible(
+    pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,
         target_scroll_x: &mut f32,
         editor: &Editor,
@@ -828,13 +840,13 @@ impl App {
         }
     }
 
-        pub fn close_current_file(&mut self) {
+    pub fn close_current_file(&mut self) {
         if self.tabs.len() > 1 {
             self.close_tab_at(self.active_tab);
             return;
         }
 
-                let path_to_close = self.file_path.take();
+        let path_to_close = self.file_path.take();
         self.base_title = "Добро пожаловать".to_string();
         let old_version = self.editor.version;
         self.editor = Editor::new(8192);
@@ -848,10 +860,10 @@ impl App {
         self.show_search = false;
         self.autocomplete_active = false;
         self.show_welcome = true;
-                if self.is_ide_mode {
+        if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 let ext = self.file_extension.clone();
-                                if let Some(path) = path_to_close {
+                if let Some(path) = path_to_close {
                     lsp.notify_close(&path, &ext);
                 }
             }

@@ -741,7 +741,7 @@ impl Renderer {
         let mut lines_with_errors = std::collections::HashSet::new();
         let mut lines_with_warnings = std::collections::HashSet::new();
 
-                for diag in lsp_diags {
+        for diag in lsp_diags {
             match diag.severity {
                 crate::lsp::DiagSeverity::Error => {
                     lines_with_errors.insert(diag.start_line);

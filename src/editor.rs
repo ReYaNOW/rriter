@@ -105,9 +105,19 @@ pub enum LineModState {
 
 #[derive(Clone)]
 pub enum EditOp {
-    Insert { offset: usize, text: String },
-    Delete { offset: usize, text: String },
-    Replace { offset: usize, old_text: String, new_text: String },
+    Insert {
+        offset: usize,
+        text: String,
+    },
+    Delete {
+        offset: usize,
+        text: String,
+    },
+    Replace {
+        offset: usize,
+        old_text: String,
+        new_text: String,
+    },
 }
 
 #[derive(Clone)]
@@ -633,10 +643,12 @@ impl Editor {
             }
         }
         if !merge {
-                        let size = match &step.op {
+            let size = match &step.op {
                 EditOp::Insert { text, .. } => text.len(),
                 EditOp::Delete { text, .. } => text.len(),
-                EditOp::Replace { old_text, new_text, .. } => old_text.len().max(new_text.len()),
+                EditOp::Replace {
+                    old_text, new_text, ..
+                } => old_text.len().max(new_text.len()),
             };
             if size > 0 {
                 self.history.push_back(step);
@@ -645,10 +657,12 @@ impl Editor {
         }
         while self.history_size > 50 * 1024 * 1024 {
             if let Some(old) = self.history.pop_front() {
-                                let old_size = match &old.op {
+                let old_size = match &old.op {
                     EditOp::Insert { text, .. } => text.len(),
                     EditOp::Delete { text, .. } => text.len(),
-                    EditOp::Replace { old_text, new_text, .. } => old_text.len().max(new_text.len()),
+                    EditOp::Replace {
+                        old_text, new_text, ..
+                    } => old_text.len().max(new_text.len()),
                 };
                 self.history_size -= old_size;
             }
@@ -673,18 +687,25 @@ impl Editor {
                     self.selection_anchor = None;
                     UndoRedoDelta::Delete(*offset, text.len())
                 }
-                                EditOp::Delete { offset, text } => {
+                EditOp::Delete { offset, text } => {
                     self.cursor = *offset;
                     self.selection_anchor = None;
                     self.insert_str_internal(text);
                     UndoRedoDelta::Insert(*offset, text.len(), text.clone())
                 }
-                EditOp::Replace { offset, old_text, new_text } => {
+                EditOp::Replace {
+                    offset,
+                    old_text,
+                    new_text,
+                } => {
                     let len = new_text.len();
                     self.shift_folds_delete(*offset, len);
                     self.move_gap(*offset);
                     self.gap_end += len;
-                    self.sync_edits.push(SyncEdit::Delete { offset: *offset, len });
+                    self.sync_edits.push(SyncEdit::Delete {
+                        offset: *offset,
+                        len,
+                    });
 
                     let ins_len = old_text.len();
                     self.shift_folds_insert(*offset, ins_len);
@@ -716,7 +737,7 @@ impl Editor {
                     self.insert_str_internal(text);
                     UndoRedoDelta::Insert(*offset, text.len(), text.clone())
                 }
-                                EditOp::Delete { offset, text, .. } => {
+                EditOp::Delete { offset, text, .. } => {
                     self.selection_anchor = Some(*offset);
                     self.cursor = step.cursor_before;
                     let len = text.len();
@@ -730,12 +751,19 @@ impl Editor {
                     self.selection_anchor = None;
                     UndoRedoDelta::Delete(*offset, step.cursor_before - *offset)
                 }
-                EditOp::Replace { offset, old_text, new_text } => {
+                EditOp::Replace {
+                    offset,
+                    old_text,
+                    new_text,
+                } => {
                     let len = old_text.len();
                     self.shift_folds_delete(*offset, len);
                     self.move_gap(*offset);
                     self.gap_end += len;
-                    self.sync_edits.push(SyncEdit::Delete { offset: *offset, len });
+                    self.sync_edits.push(SyncEdit::Delete {
+                        offset: *offset,
+                        len,
+                    });
 
                     let ins_len = new_text.len();
                     self.shift_folds_insert(*offset, ins_len);
@@ -816,7 +844,12 @@ impl Editor {
         len
     }
 
-                pub fn replace_range(&mut self, start: usize, end: usize, new_text: &str) -> (usize, usize, String) {
+    pub fn replace_range(
+        &mut self,
+        start: usize,
+        end: usize,
+        new_text: &str,
+    ) -> (usize, usize, String) {
         self.version += 1;
         let cursor_before_op = self.cursor;
 
@@ -831,7 +864,8 @@ impl Editor {
             self.shift_folds_delete(start, len);
             self.move_gap(start);
             self.gap_end += len;
-            self.sync_edits.push(SyncEdit::Delete { offset: start, len });
+            self.sync_edits
+                .push(SyncEdit::Delete { offset: start, len });
         }
 
         let ins_len = new_text.len();
@@ -843,7 +877,7 @@ impl Editor {
         self.cursor = start + ins_len;
         self.selection_anchor = None;
 
-                self.push_history(HistoryStep {
+        self.push_history(HistoryStep {
             op: EditOp::Replace {
                 offset: start,
                 old_text: old_text.clone(),

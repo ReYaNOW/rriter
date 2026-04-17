@@ -181,7 +181,7 @@ enum Cmd {
         uri: String,
     },
     /// Запросить codeActions для позиции
-        CodeAction {
+    CodeAction {
         id: i32,
         uri: String,
         start_line: u32,
@@ -334,7 +334,10 @@ fn make_code_action(
 ) -> Vec<u8> {
     let only_json = match only {
         Some(arr) => {
-            let vals: Vec<String> = arr.iter().map(|s| format!("\"{}\"", json_escape(s))).collect();
+            let vals: Vec<String> = arr
+                .iter()
+                .map(|s| format!("\"{}\"", json_escape(s)))
+                .collect();
             format!(r#","only":[{}]"#, vals.join(","))
         }
         None => String::new(),
@@ -401,7 +404,7 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         }
     });
 
-        let source = v
+    let source = v
         .get("source")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
@@ -532,7 +535,12 @@ fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
         }
     }
 
-    Some(CodeAction { title, kind, edit, code })
+    Some(CodeAction {
+        title,
+        kind,
+        edit,
+        code,
+    })
 }
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
@@ -593,7 +601,7 @@ fn dispatch_frame(
                 }
             }
         }
-                Some("workspace/applyEdit") => {
+        Some("workspace/applyEdit") => {
             if let Some(params) = msg.get("params") {
                 if let Some(edit_obj) = params.get("edit") {
                     let edit = parse_workspace_edit_value(edit_obj);
@@ -956,7 +964,7 @@ fn run_supervisor(
                         }
                         open_file = None;
                     }
-                                        Ok(Cmd::CodeAction {
+                    Ok(Cmd::CodeAction {
                         id,
                         uri,
                         start_line,
@@ -1068,7 +1076,7 @@ impl LspProcess {
 
     /// Запрашивает code actions (быстрые исправления от ruff) для позиции.
     /// Возвращает id запроса — по нему придёт LspEvent::CodeActions.
-        pub fn request_code_actions(
+    pub fn request_code_actions(
         &mut self,
         path: &PathBuf,
         start_line: u32,
@@ -1158,7 +1166,7 @@ pub struct LspManager {
     pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
     current_path: Option<PathBuf>,
     /// Статус ruff сервера
-        pub python_status: LspServerStatus,
+    pub python_status: LspServerStatus,
     /// Отключён ли ruff вручную
     pub python_disabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
@@ -1166,13 +1174,13 @@ pub struct LspManager {
 }
 
 impl LspManager {
-        pub fn new(workspace: Option<PathBuf>) -> Self {
-                    LspManager {
-                python: None,
-                workspace,
-                diagnostics: HashMap::new(),
-                current_path: None,
-                python_status: LspServerStatus::Disabled,
+    pub fn new(workspace: Option<PathBuf>) -> Self {
+        LspManager {
+            python: None,
+            workspace,
+            diagnostics: HashMap::new(),
+            current_path: None,
+            python_status: LspServerStatus::Disabled,
             python_disabled: false,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
@@ -1249,24 +1257,24 @@ impl LspManager {
         }
     }
 
-        /// Уведомляет LSP об открытии файла
-            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
-            self.suppress_diagnostics = false;
-            let abs_path = if path.is_absolute() {
-                path.clone()
-            } else if let Some(ws) = &self.workspace {
-                ws.join(path)
-            } else {
-                std::env::current_dir().unwrap_or_default().join(path)
-            };
-            self.current_path = Some(abs_path.clone());
-            self.diagnostics.remove(&abs_path);
-            if let Some(proc) = self.process_for_ext(ext) {
-                proc.notify_open(&abs_path, text, version);
-            }
+    /// Уведомляет LSP об открытии файла
+    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        self.suppress_diagnostics = false;
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.current_path = Some(abs_path.clone());
+        self.diagnostics.remove(&abs_path);
+        if let Some(proc) = self.process_for_ext(ext) {
+            proc.notify_open(&abs_path, text, version);
         }
+    }
 
-        /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
+    /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
     pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
@@ -1339,7 +1347,7 @@ impl LspManager {
         // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                                            LspEvent::Diagnostics { path, items, .. } => {
+                LspEvent::Diagnostics { path, items, .. } => {
                     if !self.suppress_diagnostics {
                         self.diagnostics.insert(path.clone(), items.clone());
                     }
@@ -1367,7 +1375,7 @@ impl LspManager {
         all
     }
 
-        pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
+    pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1375,7 +1383,10 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        self.diagnostics.get(&abs_path).map(|v| v.as_slice()).unwrap_or(&[])
+        self.diagnostics
+            .get(&abs_path)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Диагностики для текущего файла, отфильтрованные по строке
@@ -1387,7 +1398,7 @@ impl LspManager {
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-        pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+    pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1473,29 +1484,6 @@ pub fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize {
 
 /// Применяет WorkspaceEdit к строке текста (для текущего файла).
 /// Правки должны быть отсортированы с конца файла к началу, чтобы offset'ы не съехали.
-pub fn apply_workspace_edit_to_text(text: &str, edit: &WorkspaceEdit, path: &PathBuf) -> String {
-    let Some(changes) = edit.changes.get(path) else {
-        return text.to_string();
-    };
-
-    // Сортируем правки с конца файла к началу
-    let mut sorted = changes.clone();
-    sorted.sort_unstable_by(|a, b| {
-        b.start_line
-            .cmp(&a.start_line)
-            .then(b.start_col.cmp(&a.start_col))
-    });
-
-    let mut result = text.to_string();
-    for change in &sorted {
-        let start = lsp_pos_to_offset(&result, change.start_line, change.start_col);
-        let end = lsp_pos_to_offset(&result, change.end_line, change.end_col);
-        if start <= end && end <= result.len() {
-            result.replace_range(start..end, &change.new_text);
-        }
-    }
-    result
-}
 
 pub fn format_and_highlight_json(
     raw_text: &str,

@@ -48,7 +48,7 @@ pub enum UiId {
     SearchCaseToggle,
     SearchInput,
 
-        // Tabs
+    // Tabs
     EditorTab(usize),
     EditorTabClose(usize),
 

@@ -272,17 +272,17 @@ fn load_dracula() -> Theme {
     let sel_color =
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
 
-        Theme {
-        bg:[0.156, 0.164, 0.211, 1.0],
-        fg:[0.972, 0.972, 0.949, 1.0],
+    Theme {
+        bg: [0.156, 0.164, 0.211, 1.0],
+        fg: [0.972, 0.972, 0.949, 1.0],
         sel: sel_color,
-        minimap_bg:[0.129, 0.133, 0.172, 1.0],
-        line_num:[0.384, 0.447, 0.643, 1.0],
+        minimap_bg: [0.129, 0.133, 0.172, 1.0],
+        line_num: [0.384, 0.447, 0.643, 1.0],
         minimap_cursor: sel_color,
-        modified_unsaved:[1.0, 0.474, 0.776, 1.0],
-        modified_saved:[0.313, 0.980, 0.482, 1.0],
-        diag_warn:[0.945, 0.980, 0.549, 1.0],
-        diag_error:[1.0, 0.333, 0.333, 1.0],
+        modified_unsaved: [1.0, 0.474, 0.776, 1.0],
+        modified_saved: [0.313, 0.980, 0.482, 1.0],
+        diag_warn: [0.945, 0.980, 0.549, 1.0],
+        diag_error: [1.0, 0.333, 0.333, 1.0],
     }
 }
 
@@ -480,7 +480,7 @@ F8\tПоказать/скрыть счетчик FPS
             None
         },
         lsp_actions_menu: None,
-                pending_fix_all_id: None,
+        pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
         tabs: vec![crate::app::EditorTab {
             editor: Editor::new(8192),
@@ -499,7 +499,8 @@ F8\tПоказать/скрыть счетчик FPS
         active_tab: 0,
     };
 
-    app.highlighter.reset(app.editor.version,
+    app.highlighter.reset(
+        app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),
     );

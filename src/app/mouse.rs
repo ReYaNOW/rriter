@@ -4,7 +4,7 @@ use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 
 impl App {
-        pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+    pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -235,7 +235,7 @@ impl App {
             self.scroll_x.scroll_by(dx);
         }
 
-                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
         let max_scroll_y = self
@@ -252,7 +252,7 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
+    pub fn handle_main_mouse_input(&mut self, _event_loop: &ActiveEventLoop, state: ElementState) {
         if state == ElementState::Pressed {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
@@ -260,13 +260,17 @@ impl App {
             if self.lsp_actions_menu.is_some() {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let mut clicked_inside = false;
-                                if let Some(menu) = &self.lsp_actions_menu {
+                if let Some(menu) = &self.lsp_actions_menu {
                     let item_h = 36.0 * s;
                     let menu_w = 320.0 * s;
                     let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
                     let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
                     let menu_y = menu.menu_y + tab_bar_h;
-                    if mx >= menu.menu_x && mx <= menu.menu_x + menu_w && my >= menu_y && my <= menu_y + menu_h {
+                    if mx >= menu.menu_x
+                        && mx <= menu.menu_x + menu_w
+                        && my >= menu_y
+                        && my <= menu_y + menu_h
+                    {
                         clicked_inside = true;
                         let rel_y = my - menu_y - 4.0 * s;
                         let idx = (rel_y / item_h) as usize;
@@ -275,8 +279,8 @@ impl App {
                             let item = menu_clone.items[idx].clone();
                             let cursor_line = menu_clone.cursor_line;
                             drop(menu_clone);
-                                                        match item {
-                                                                crate::app::LspActionItem::CodeAction(action) => {
+                            match item {
+                                crate::app::LspActionItem::CodeAction(action) => {
                                     if let Some(edit) = action.edit {
                                         self.apply_workspace_edit(&edit, false);
                                     }
@@ -287,24 +291,29 @@ impl App {
                                 crate::app::LspActionItem::AddNoqaAll => {
                                     self.insert_noqa_comment(cursor_line, &[]);
                                 }
-                                                                crate::app::LspActionItem::FixAll => {
-                                                                    if let Some(lsp) = &mut self.lsp {
-                                                                        if let Some(path) = self.file_path.clone() {
-                                                                            if let Some(id) = lsp.request_fix_all(&path, &self.file_extension) {
-                                                                                self.pending_fix_all_id = Some(id);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                crate::app::LspActionItem::OrganizeImports => {
-                                                                    if let Some(lsp) = &mut self.lsp {
-                                                                        if let Some(path) = self.file_path.clone() {
-                                                                            if let Some(id) = lsp.request_organize_imports(&path, &self.file_extension) {
-                                                                                self.pending_fix_all_id = Some(id);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
+                                crate::app::LspActionItem::FixAll => {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        if let Some(path) = self.file_path.clone() {
+                                            if let Some(id) =
+                                                lsp.request_fix_all(&path, &self.file_extension)
+                                            {
+                                                self.pending_fix_all_id = Some(id);
+                                            }
+                                        }
+                                    }
+                                }
+                                crate::app::LspActionItem::OrganizeImports => {
+                                    if let Some(lsp) = &mut self.lsp {
+                                        if let Some(path) = self.file_path.clone() {
+                                            if let Some(id) = lsp.request_organize_imports(
+                                                &path,
+                                                &self.file_extension,
+                                            ) {
+                                                self.pending_fix_all_id = Some(id);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             self.window.as_ref().unwrap().request_redraw();
                             return;
@@ -1048,7 +1057,7 @@ impl App {
                 / (track_w - thumb_w).max(0.0001);
             self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
             self.scroll_x.current = self.scroll_x.target;
-                } else if self.scroll_y.is_dragging {
+        } else if self.scroll_y.is_dragging {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_click_time).as_millis();
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
@@ -1059,22 +1068,29 @@ impl App {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
                 let editor_height = wh - tab_bar_h;
-                let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+                let thumb_h = (editor_height / total_content_height.max(editor_height)
+                    * editor_height)
+                    .max(20.0 * s);
                 let track_h = editor_height;
                 let track_start_y = tab_bar_h;
 
                 let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)/ (track_h - thumb_h).max(0.0001);
+                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
+                    / (track_h - thumb_h).max(0.0001);
 
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
                 self.scroll_y.anim_speed = 15.0;
             }
-                } else if self.is_dragging && !self.show_settings {
+        } else if self.is_dragging && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-            let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * self.renderer.as_ref().unwrap().scale_factor };
+            let tab_bar_h = if self.show_welcome {
+                0.0
+            } else {
+                38.0 * self.renderer.as_ref().unwrap().scale_factor
+            };
             self.editor.set_cursor_at_pos(
                 last_mouse_x,
                 last_mouse_y - tab_bar_h + self.scroll_y.current,

@@ -444,7 +444,7 @@ impl App {
                 self.ide_panel.file_tree_expanded.insert(node.path.clone());
             }
             self.refresh_file_tree();
-                } else {
+        } else {
             self.open_file_in_tab(node.path.clone(), false);
         }
     }

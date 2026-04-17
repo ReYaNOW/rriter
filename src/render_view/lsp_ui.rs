@@ -810,10 +810,10 @@ impl Renderer {
             return false;
         }
 
-                let s = self.scale_factor;
+        let s = self.scale_factor;
         let item_h = 36.0 * s;
 
-                let mut max_item_w = 320.0 * s;
+        let mut max_item_w = 320.0 * s;
         for item in &menu.items {
             let label_str = match item {
                 crate::app::LspActionItem::CodeAction(action) => {
@@ -830,7 +830,9 @@ impl Renderer {
                         format!("Игнорировать {} (# noqa)", codes.join(", "))
                     }
                 }
-                crate::app::LspActionItem::AddNoqaAll => "Игнорировать всё в файле (# noqa)".to_string(),
+                crate::app::LspActionItem::AddNoqaAll => {
+                    "Игнорировать всё в файле (# noqa)".to_string()
+                }
                 crate::app::LspActionItem::FixAll => "Исправить все доступные ошибки".to_string(),
                 crate::app::LspActionItem::OrganizeImports => "Упорядочить импорты".to_string(),
             };
@@ -882,13 +884,14 @@ impl Renderer {
             [0.12, 0.13, 0.17, 1.0],
         );
 
-                let mut prev_group = 0;
+        let mut prev_group = 0;
         for (i, item) in menu.items.iter().enumerate() {
             let item_y = my_pos + 4.0 * s + i as f32 * item_h;
 
             let group = match item {
                 crate::app::LspActionItem::CodeAction(_) => 1,
-                crate::app::LspActionItem::AddNoqa { .. } | crate::app::LspActionItem::AddNoqaAll => 2,
+                crate::app::LspActionItem::AddNoqa { .. }
+                | crate::app::LspActionItem::AddNoqaAll => 2,
                 crate::app::LspActionItem::FixAll | crate::app::LspActionItem::OrganizeImports => 3,
             };
 
@@ -908,10 +911,10 @@ impl Renderer {
                 mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
 
             let group_color = match group {
-                1 =>[0.38, 0.75, 1.0, 1.0], // Синий для фиксов
-                2 =>[0.75, 0.50, 1.0, 1.0], // Фиолетовый для noqa
-                3 =>[0.45, 0.90, 0.60, 1.0], // Зеленый для глобальных действий
-                _ =>[1.0, 1.0, 1.0, 1.0],
+                1 => [0.38, 0.75, 1.0, 1.0],  // Синий для фиксов
+                2 => [0.75, 0.50, 1.0, 1.0],  // Фиолетовый для noqa
+                3 => [0.45, 0.90, 0.60, 1.0], // Зеленый для глобальных действий
+                _ => [1.0, 1.0, 1.0, 1.0],
             };
 
             if is_selected || is_hovered {
@@ -959,15 +962,18 @@ impl Renderer {
                     };
                     (std::borrow::Cow::Owned(s), self.theme.fg)
                 }
-                crate::app::LspActionItem::AddNoqaAll => {
-                    (std::borrow::Cow::Borrowed("Игнорировать всё в файле (# noqa)"), self.theme.fg)
-                }
-                crate::app::LspActionItem::FixAll => {
-                    (std::borrow::Cow::Borrowed("Исправить все доступные ошибки"), group_color)
-                }
-                crate::app::LspActionItem::OrganizeImports => {
-                    (std::borrow::Cow::Borrowed("Упорядочить импорты"), group_color)
-                }
+                crate::app::LspActionItem::AddNoqaAll => (
+                    std::borrow::Cow::Borrowed("Игнорировать всё в файле (# noqa)"),
+                    self.theme.fg,
+                ),
+                crate::app::LspActionItem::FixAll => (
+                    std::borrow::Cow::Borrowed("Исправить все доступные ошибки"),
+                    group_color,
+                ),
+                crate::app::LspActionItem::OrganizeImports => (
+                    std::borrow::Cow::Borrowed("Упорядочить импорты"),
+                    group_color,
+                ),
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;

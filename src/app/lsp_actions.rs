@@ -106,14 +106,16 @@ impl App {
             .partition_point(|&o| o <= cursor)
             .saturating_sub(1) as u32;
 
-                // Собираем диагностики текущей строки
-        let diags: Vec<crate::lsp::Diagnostic> = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
-            lsp.diagnostics_for_line(path, cursor_line)
-                .into_iter()
-                .cloned()
-                .collect()} else {
-            Vec::new()
-        };
+        // Собираем диагностики текущей строки
+        let diags: Vec<crate::lsp::Diagnostic> =
+            if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
+                lsp.diagnostics_for_line(path, cursor_line)
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
         // Вычисляем позицию меню (под курсором)
         let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
@@ -121,7 +123,7 @@ impl App {
         let menu_x = cx.max(self.renderer.as_ref().unwrap().left_padding);
         let menu_y = cy - self.scroll_y.current + self.renderer.as_ref().unwrap().line_height;
 
-                // Начальные элементы: noqa варианты
+        // Начальные элементы: noqa варианты
         let mut items: Vec<crate::app::LspActionItem> = Vec::new();
 
         if !diags.is_empty() {
@@ -132,12 +134,14 @@ impl App {
                     if let Some(path) = self.file_path.clone() {
                         changes.insert(path, qf.edits.clone());
                     }
-                    items.push(crate::app::LspActionItem::CodeAction(crate::lsp::CodeAction {
-                        title: qf.title.clone(),
-                        kind: Some("quickfix".to_string()),
-                        edit: Some(crate::lsp::WorkspaceEdit { changes }),
-                        code: d.code.clone(),
-                    }));
+                    items.push(crate::app::LspActionItem::CodeAction(
+                        crate::lsp::CodeAction {
+                            title: qf.title.clone(),
+                            kind: Some("quickfix".to_string()),
+                            edit: Some(crate::lsp::WorkspaceEdit { changes }),
+                            code: d.code.clone(),
+                        },
+                    ));
                 }
             }
 
@@ -152,12 +156,16 @@ impl App {
             items.push(crate::app::LspActionItem::AddNoqaAll);
         }
 
-                // Запрашиваем code actions от LSP
-                        let pending_id = if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+        // Запрашиваем code actions от LSP
+        let pending_id = if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
             let ext = self.file_extension.clone();
-            let (sl, sc) = crate::lsp::offset_to_lsp_pos(&self.editor.get_full_text(), self.editor.cursor, &self.editor.line_offsets);
+            let (sl, sc) = crate::lsp::offset_to_lsp_pos(
+                &self.editor.get_full_text(),
+                self.editor.cursor,
+                &self.editor.line_offsets,
+            );
             lsp.request_code_actions(path, &ext, sl, sc, sl, sc, &diags, None)
-                } else {
+        } else {
             None
         };
 
@@ -187,8 +195,8 @@ impl App {
         }
         let item = menu.items[menu.selected.min(menu.items.len() - 1)].clone();
 
-                                match item {
-                        crate::app::LspActionItem::CodeAction(action) => {
+        match item {
+            crate::app::LspActionItem::CodeAction(action) => {
                 if let Some(edit) = action.edit {
                     self.apply_workspace_edit(&edit, false);
                 }
@@ -199,7 +207,7 @@ impl App {
             crate::app::LspActionItem::AddNoqaAll => {
                 self.insert_noqa_comment(menu.cursor_line, &[]);
             }
-                        crate::app::LspActionItem::FixAll => {
+            crate::app::LspActionItem::FixAll => {
                 if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                     if let Some(id) = lsp.request_fix_all(path, &self.file_extension) {
                         self.pending_fix_all_id = Some(id);
@@ -219,7 +227,7 @@ impl App {
     }
 
     /// Вставляет/обновляет # noqa комментарий на указанной строке
-        pub(crate) fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
+    pub(crate) fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
         let line = line as usize;
         let line_start = self.editor.line_offsets.get(line).copied().unwrap_or(0);
         let line_end_raw = if line + 1 < self.editor.line_offsets.len() {
@@ -249,7 +257,7 @@ impl App {
         if let Some(noqa_pos_in_line) = line_text.find("# noqa") {
             let noqa_byte_start = line_start + noqa_pos_in_line;
             let old_noqa_str = &line_text[noqa_pos_in_line..];
-                        let new_noqa = if codes.is_empty() {
+            let new_noqa = if codes.is_empty() {
                 "# noqa".to_string()
             } else {
                 let existing = if let Some(colon) = old_noqa_str.find(": ") {
@@ -271,9 +279,12 @@ impl App {
                 format!("# noqa: {}", merged.join(", "))
             };
 
-                        let (off, len, _) = self.editor.replace_range(noqa_byte_start, actual_end, &new_noqa);
+            let (off, len, _) = self
+                .editor
+                .replace_range(noqa_byte_start, actual_end, &new_noqa);
             self.highlighter.shift_delete(off, len);
-            self.highlighter.shift_insert(off, new_noqa.len(), Some(&new_noqa));
+            self.highlighter
+                .shift_insert(off, new_noqa.len(), Some(&new_noqa));
         } else {
             // Нет noqa — добавляем в конец строки
             let noqa = if codes.is_empty() {
@@ -303,11 +314,15 @@ impl App {
         App::update_window_title(
             self.window.as_ref().unwrap(),
             &self.base_title,
-                        self.editor.is_dirty(),
+            self.editor.is_dirty(),
         );
     }
 
-        pub(crate) fn apply_workspace_edit(&mut self, edit: &crate::lsp::WorkspaceEdit, preserve_cursor: bool) {
+    pub(crate) fn apply_workspace_edit(
+        &mut self,
+        edit: &crate::lsp::WorkspaceEdit,
+        preserve_cursor: bool,
+    ) {
         if let Some(path) = &self.file_path {
             if let Some(changes) = edit.changes.get(path) {
                 let text = self.editor.get_full_text();
@@ -320,9 +335,10 @@ impl App {
 
                 let mut ops = Vec::new();
                 for change in &sorted {
-                    let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
+                    let start =
+                        crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
                     let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
-                                        ops.push((start, end, change.new_text.clone()));
+                    ops.push((start, end, change.new_text.clone()));
                 }
 
                 let cursor_before = self.editor.cursor;
@@ -332,7 +348,8 @@ impl App {
                     if *start <= *end {
                         let (off, len, _) = self.editor.replace_range(*start, *end, new_text);
                         self.highlighter.shift_delete(off, len);
-                                                self.highlighter.shift_insert(off, new_text.len(), Some(new_text));
+                        self.highlighter
+                            .shift_insert(off, new_text.len(), Some(new_text));
                     }
                 }
 
@@ -342,28 +359,29 @@ impl App {
                     for (start, end, new_text) in &ops {
                         let delta = new_text.len() as isize - (*end - *start) as isize;
 
-                                            if *start <= cursor_after {
-                        if *end <= cursor_after {
-                            cursor_after = ((cursor_after as isize) + delta).max(0) as usize;
-                        } else {
-                            // Курсор внутри измененного блока — пытаемся сохранить относительную позицию
-                            let relative_offset = cursor_after - *start;
-                            cursor_after = (*start + relative_offset).min(*start + new_text.len());
-                        }
-                    }
-
-                    if let Some(mut sel_anchor) = selection_after {
-                        if *start <= sel_anchor {
-                            if *end <= sel_anchor {
-                                sel_anchor = ((sel_anchor as isize) + delta).max(0) as usize;
+                        if *start <= cursor_after {
+                            if *end <= cursor_after {
+                                cursor_after = ((cursor_after as isize) + delta).max(0) as usize;
                             } else {
-                                let relative_offset = sel_anchor - *start;
-                                sel_anchor =
+                                // Курсор внутри измененного блока — пытаемся сохранить относительную позицию
+                                let relative_offset = cursor_after - *start;
+                                cursor_after =
                                     (*start + relative_offset).min(*start + new_text.len());
                             }
                         }
-                        selection_after = Some(sel_anchor);
-                    }
+
+                        if let Some(mut sel_anchor) = selection_after {
+                            if *start <= sel_anchor {
+                                if *end <= sel_anchor {
+                                    sel_anchor = ((sel_anchor as isize) + delta).max(0) as usize;
+                                } else {
+                                    let relative_offset = sel_anchor - *start;
+                                    sel_anchor =
+                                        (*start + relative_offset).min(*start + new_text.len());
+                                }
+                            }
+                            selection_after = Some(sel_anchor);
+                        }
                     }
                     self.editor.cursor = cursor_after;
                     self.editor.selection_anchor = selection_after;

@@ -303,7 +303,7 @@ impl ApplicationHandler for App {
             } => {
                 self.handle_main_keyboard_input(event_loop, key_event);
             }
-                                    WindowEvent::RedrawRequested => {
+            WindowEvent::RedrawRequested => {
                 let gl_context = self.gl_context.as_ref().unwrap();
                 let gl_surface = self.gl_surface.as_ref().unwrap();
 
@@ -340,16 +340,17 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                                                                                                let lsp_diags = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
-                                                                                    lsp.get_diagnostics(path)
-                                                                                } else {
-                                                                                    &[]
-                                                                                };
+                let lsp_diags = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
+                    lsp.get_diagnostics(path)
+                } else {
+                    &[]
+                };
 
-                                                                                // Очищаем UI registry перед новым кадром```
+                // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
 
-                                                let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(&mut self.editor,
+                let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
+                    &mut self.editor,
                     &self.base_title,
                     self.file_path.as_ref(),
                     &self.tabs,
@@ -388,8 +389,14 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                                                // Сбрасываем иконку копирования когда popup диагностики закрывается
-                if self.renderer.as_ref().unwrap().last_hovered_diags.is_empty() {
+                // Сбрасываем иконку копирования когда popup диагностики закрывается
+                if self
+                    .renderer
+                    .as_ref()
+                    .unwrap()
+                    .last_hovered_diags
+                    .is_empty()
+                {
                     self.ide_panel.diag_copied_idx = None;
                 }
 
@@ -437,7 +444,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                                // LSP actions menu — рисуем поверх всего
+                // LSP actions menu — рисуем поверх всего
                 if let Some(mut menu) = self.lsp_actions_menu.clone() {
                     let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
                     menu.menu_y += tab_bar_h;
@@ -451,14 +458,14 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                                                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
-                                                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-                                                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
-                                                    let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
-                                                    let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
-                                                        cx,
-                                                        cy - render_scroll_y,
-                                                        &self.autocomplete_options,
+                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
+                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                    let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+                    let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
+                        cx,
+                        cy - render_scroll_y,
+                        &self.autocomplete_options,
                         self.autocomplete_selected_idx,
                         self.autocomplete_anim_progress,
                         self.autocomplete_scroll.current,
@@ -775,9 +782,17 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+        let s = self
+            .renderer
+            .as_ref()
+            .map(|r| r.scale_factor)
+            .unwrap_or(1.0);
         let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
-        let target_search_y = if self.show_search { tab_bar_h + 10.0 * s } else { -120.0 * s };
+        let target_search_y = if self.show_search {
+            tab_bar_h + 10.0 * s
+        } else {
+            -120.0 * s
+        };
         let search_diff = target_search_y - self.search_anim_y;
         if search_diff.abs() > 1.5 {
             self.search_anim_y += search_diff * 20.0 * dt;
@@ -815,13 +830,17 @@ impl ApplicationHandler for App {
                         self.scroll_y.target += drag_scroll_delta_y.signum() * speed * dt;
                     }
 
-                                        if drag_scroll_delta_x != 0.0 {
+                    if drag_scroll_delta_x != 0.0 {
                         let drag_amount = drag_scroll_delta_x.abs();
                         let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
                         self.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                     }
 
-                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * self.renderer.as_ref().unwrap().scale_factor };
+                    let tab_bar_h = if self.show_welcome {
+                        0.0
+                    } else {
+                        38.0 * self.renderer.as_ref().unwrap().scale_factor
+                    };
                     self.editor.set_cursor_at_pos(
                         mx,
                         my - tab_bar_h + self.scroll_y.current,
@@ -833,8 +852,12 @@ impl ApplicationHandler for App {
             }
         }
 
-                if let Some(w) = self.window.as_ref() {
-            let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+        if let Some(w) = self.window.as_ref() {
+            let s = self
+                .renderer
+                .as_ref()
+                .map(|r| r.scale_factor)
+                .unwrap_or(1.0);
             let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
             let max_scroll_y = self
                 .renderer
@@ -877,7 +900,7 @@ impl ApplicationHandler for App {
             }
         }
 
-                        if let Some(rx) = &self.open_file_rx {
+        if let Some(rx) = &self.open_file_rx {
             if let Ok(result) = rx.try_recv() {
                 self.open_file_rx = None;
                 if let Some(path) = result {
@@ -953,11 +976,15 @@ impl ApplicationHandler for App {
                         .map(|id| id == request_id)
                         .unwrap_or(false);
 
-                                        if is_for_menu {
+                    if is_for_menu {
                         if let Some(menu) = &mut self.lsp_actions_menu {
                             let new_items: Vec<crate::app::LspActionItem> = actions
                                 .into_iter()
-                                .filter(|a| a.edit.is_some() && !a.title.to_lowercase().contains("fix all") && !a.title.to_lowercase().contains("organize imports"))
+                                .filter(|a| {
+                                    a.edit.is_some()
+                                        && !a.title.to_lowercase().contains("fix all")
+                                        && !a.title.to_lowercase().contains("organize imports")
+                                })
                                 .map(crate::app::LspActionItem::CodeAction)
                                 .collect();
                             let mut combined = new_items;
@@ -968,7 +995,7 @@ impl ApplicationHandler for App {
                         if let Some(w) = self.window.as_ref() {
                             w.request_redraw();
                         }
-                                        } else if self.pending_fix_all_id == Some(request_id) {
+                    } else if self.pending_fix_all_id == Some(request_id) {
                         // Fix All из панели LSP серверов
                         self.pending_fix_all_id = None;
                         let mut merged_edit = crate::lsp::WorkspaceEdit::default();
@@ -979,7 +1006,7 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                                                if !merged_edit.changes.is_empty() {
+                        if !merged_edit.changes.is_empty() {
                             self.apply_workspace_edit(&merged_edit, true);
                         }
                         if let Some(w) = self.window.as_ref() {

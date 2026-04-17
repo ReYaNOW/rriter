@@ -75,4 +75,4 @@ api-map:
 
 actualize:
 	cargo +nightly fmt
-	make api-tree
+	make api-map

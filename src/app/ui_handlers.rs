@@ -258,11 +258,13 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::LspServerFixAll(idx) => {
+            UiId::LspServerFixAll(idx) => {
                 if let Some(lsp) = &mut self.lsp {
                     if idx < self.ide_panel.lsp_servers.len() {
                         if let Some(path) = self.file_path.clone() {
-                            if let Some(request_id) = lsp.request_fix_all(&path, &self.file_extension) {
+                            if let Some(request_id) =
+                                lsp.request_fix_all(&path, &self.file_extension)
+                            {
                                 self.pending_fix_all_id = Some(request_id);
                             }
                         }
@@ -355,7 +357,7 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
-                        // Tabs
+            // Tabs
             UiId::EditorTab(idx) => {
                 self.switch_to_tab(idx);
             }
@@ -483,9 +485,17 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
 
-                                        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * r.scale_factor };
-                    self.editor
-                        .set_cursor_at_pos(mx, my - tab_bar_h + self.scroll_y.current, r, true);
+                    let tab_bar_h = if self.show_welcome {
+                        0.0
+                    } else {
+                        38.0 * r.scale_factor
+                    };
+                    self.editor.set_cursor_at_pos(
+                        mx,
+                        my - tab_bar_h + self.scroll_y.current,
+                        r,
+                        true,
+                    );
                 }
 
                 if self.click_count == 2 {
@@ -537,10 +547,12 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-                        UiId::OpenDiagUrl(_idx) => {
+            UiId::OpenDiagUrl(_idx) => {
                 if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
                     #[cfg(target_os = "windows")]
-                    let _ = std::process::Command::new("cmd").args(["/c", "start", "", &href]).spawn();
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/c", "start", "", &href])
+                        .spawn();
                     #[cfg(target_os = "macos")]
                     let _ = std::process::Command::new("open").arg(&href).spawn();
                     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -548,7 +560,9 @@ impl App {
                 }
             }
             UiId::CopyDiagnostic(idx) => {
-                                if let Some(diag) = self.file_path.as_ref()
+                if let Some(diag) = self
+                    .file_path
+                    .as_ref()
                     .and_then(|p| self.lsp.as_ref().and_then(|l| l.diagnostics.get(p)))
                     .and_then(|diags| diags.get(idx))
                 {
