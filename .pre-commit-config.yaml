@@ -1,8 +1,8 @@
 repos:
   - repo: local
     hooks:
-      - id: api-tree
+      - id: api-map
         name: Generate Project Map
-        entry: bash -c 'make api-tree && git add PROJECT_MAP.md'
+        entry: bash -c 'make api-map && git add PROJECT_MAP.xml'
         language: system
         pass_filenames: false

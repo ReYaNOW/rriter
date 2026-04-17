@@ -1,50 +1,34 @@
 #!/usr/bin/env python3
-"""gen_project_map.py — генератор PROJECT_MAP.md для RRiter."""
-import re, sys
+"""gen_project_map.py — генератор идеального PROJECT_MAP.xml (структуры + логика)."""
+import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 SRC_DIR = Path("src")
 
-# Шум — stdlib примитивы не интересны как вызовы
-NOISE = {
-    "unwrap","expect","map","and_then","or_else","ok","err","is_some","is_none",
-    "len","is_empty","collect","clone","to_string","as_str","as_bytes","chars",
-    "bytes","lines","split","trim","starts_with","ends_with","replace",
-    "println","eprintln","print","eprint","min","max","abs","clamp","round",
-    "floor","ceil","sqrt","from","into","default","get","set","remove","entry",
-    "or_insert","lock","read","write","send","recv","try_recv","sort","sort_by",
-    "sort_unstable_by_key","dedup","retain","extend","drain","parse","to_owned",
-    "borrow","as_ref","as_mut","zip","enumerate","filter","flat_map","for_each",
-    "any","all","first","last","next","peekable","take","skip","map_err",
-    "unwrap_or","unwrap_or_else","unwrap_or_default","ok_or","ok_or_else",
-    "transpose","flatten","chain","rev","sum","product","count","position",
-    "find","fold","reduce","with_capacity","resize","truncate","swap",
-    "contains_key","get_mut","values","keys","iter_mut","values_mut","to_vec",
-    "join","splitn","split_once","strip_prefix","strip_suffix",
-    "to_ascii_lowercase","to_uppercase","is_ascii","is_alphabetic","is_numeric",
-    "is_alphanumeric","is_whitespace","saturating_add","saturating_sub",
-    "checked_add","checked_sub","wrapping_add","wrapping_sub","pow",
-    "min_by","max_by","min_by_key","max_by_key","copied","cloned","unzip",
-    "partition","scan","take_while","skip_while","step_by","windows","chunks",
-    "split_at","new","drop","hash","is_char_boundary","iter","into_iter",
-    "contains","format","insert",
-}
-
-_SKIP_VARIANTS = {
-    'None','Some','Ok','Err','True','False','WindowEvent','KeyEvent',
-    'PhysicalKey','MouseScrollDelta','ElementState','ModifiersState',
+STD_CALLS = {
+    "unwrap", "expect", "map", "and_then", "or_else", "ok", "err", "is_some", "is_none",
+    "len", "is_empty", "collect", "clone", "to_string", "as_str", "as_bytes", "chars",
+    "bytes", "lines", "split", "trim", "starts_with", "ends_with", "replace",
+    "min", "max", "abs", "clamp", "round", "floor", "ceil", "sqrt", "from", "into",
+    "default", "get", "set", "remove", "entry", "or_insert", "lock", "read", "write",
+    "send", "recv", "try_recv", "sort", "sort_by", "dedup", "retain", "extend", "drain",
+    "parse", "to_owned", "borrow", "as_ref", "as_mut", "zip", "enumerate", "filter",
+    "flat_map", "for_each", "any", "all", "first", "last", "next", "take", "skip",
+    "unwrap_or", "unwrap_or_default", "sum", "count", "find", "fold",
+    "push", "pop", "insert", "clear", "push_back", "pop_back", "push_front", "pop_front"
 }
 
 def short_path(p): return str(p).replace("\\", "/")
 def module_name(sp): return sp.removeprefix("src/").removesuffix(".rs").replace("/", "::")
 
-# ── Очистка строк/комментариев ────────────────────────────────────────────────
-
 def strip_strings_and_comments(src):
     result = list(src)
     i = 0; n = len(src)
     while i < n:
+        if src[i] == "'" and i+2 < n and src[i+2] == "'":
+            result[i+1] = ' '; i += 3; continue
         if src[i] == '/' and i+1 < n and src[i+1] == '/':
             j = i
             while j < n and src[j] != '\n': result[j] = ' '; j += 1
@@ -57,16 +41,6 @@ def strip_strings_and_comments(src):
                 if src[j] != '\n': result[j] = ' '
                 j += 1
             i = j; continue
-        if src[i] == 'r' and i+1 < n and src[i+1] in '#"':
-            hashes = 0; j = i+1
-            while j < n and src[j] == '#': hashes += 1; j += 1
-            if j < n and src[j] == '"':
-                close = '"' + '#'*hashes
-                end = src.find(close, j+1)
-                end = (end + len(close)) if end != -1 else n
-                for k in range(i, end):
-                    if result[k] != '\n': result[k] = ' '
-                i = end; continue
         if src[i] == '"':
             result[i] = ' '; j = i+1
             while j < n:
@@ -87,15 +61,13 @@ def extract_body(src, brace_pos):
         i += 1
     return src[brace_pos+1:i-1], i
 
-# ── Функции ───────────────────────────────────────────────────────────────────
-
 FN_RE = re.compile(
     r'^([ \t]*)(pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)([^{]*)\{',
     re.MULTILINE
 )
 
 def extract_functions(src_clean, src_orig):
-    fns = []
+    fns =[]
     for m in FN_RE.finditer(src_clean):
         brace_pos = m.end()-1
         body, _ = extract_body(src_clean, brace_pos)
@@ -107,210 +79,167 @@ def extract_functions(src_clean, src_orig):
         ret_m = re.search(r'->\s*(.+?)(?:\s+where\b.*)?$', sig_clean)
         ret = ret_m.group(1).strip() if ret_m else ""
         line_no = src_orig[:sig_start].count('\n') + 1
-        fns.append({"name": name, "ret": ret, "is_pub": is_pub,
-                    "body": body, "line": line_no})
+        fns.append({"name": name, "ret": ret, "is_pub": is_pub, "body": body, "line": line_no})
     return fns
 
-# ── Типы ─────────────────────────────────────────────────────────────────────
+def extract_structs_enums(src_clean):
+    types = {}
+    
+    # 1. Обычные структуры и энумы: struct App { ... }
+    pat_block = re.compile(r'(?:pub\s+)?(?:struct|enum)\s+([a-zA-Z0-9_]+)[^{]*\{([^}]*)\}')
+    for m in pat_block.finditer(src_clean):
+        name = m.group(1)
+        body = m.group(2)
+        # Ужимаем пробелы и убираем pub
+        body = re.sub(r'\s+', ' ', body).replace('pub ', '').strip()
+        if body.endswith(','): body = body[:-1]
+        types[name] = f"{{ {body} }}"
 
-def extract_structs_enums(src):
-    pat = re.compile(r'(?:^|\n)\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s+(\w+)')
-    return list(dict.fromkeys(m.group(1) for m in pat.finditer(src)))
+    # 2. Кортежные структуры: struct Color(f32, f32);
+    pat_tuple = re.compile(r'(?:pub\s+)?struct\s+([a-zA-Z0-9_]+)[^(]*\(([^)]+)\)\s*;')
+    for m in pat_tuple.finditer(src_clean):
+        name = m.group(1)
+        body = m.group(2)
+        body = re.sub(r'\s+', ' ', body).replace('pub ', '').strip()
+        types[name] = f"({body})"
 
-ENUM_VARIANT_RE = re.compile(r'^\s*([A-Z][A-Za-z0-9_]*)', re.MULTILINE)
+    return types
 
-def extract_enum_variants(src_clean, src_orig):
-    result = {}
-    enum_re = re.compile(r'(?:pub\s+)?enum\s+(\w+)[^{]*\{')
-    for m in enum_re.finditer(src_clean):
-        enum_name = m.group(1)
-        body, _ = extract_body(src_clean, m.end()-1)
-        variants = [v.group(1) for v in ENUM_VARIANT_RE.finditer(body)
-                    if v.group(1) not in _SKIP_VARIANTS]
-        if variants:
-            result[enum_name] = variants
-    return result
+CALL_RE = re.compile(r'\b(\w+)::(\w+)\s*\(|\b(\w+)\s*\(')
+SELF_ACCESS_RE = re.compile(r'\bself\.([a-zA-Z0-9_]+)\s*(\()?')
+SELF_MUTATE_RE = re.compile(r'\bself\.([a-zA-Z0-9_]+)\.(push|pop|clear|insert|extend|retain|remove|truncate|sort|drain|push_back|pop_back)\b')
+SELF_ASSIGN_RE = re.compile(r'\bself\.([a-zA-Z0-9_]+)\s*=[^=]')
 
-# ── Вызовы fn проекта ─────────────────────────────────────────────────────────
+def analyze_function_body(body, known_fns):
+    analysis = {"calls": set(), "self_calls": set(), "reads": set(), "writes": set()}
 
-# Ловим: word( или word.word( или word.word.word(
-# Для фильтрации stdlib-вызовов на полях структуры нужно знать
-# полный префикс. Берём до 2 уровней: a.b.fn( — это stdlib на поле.
-CALL_RE = re.compile(r'(?:(\w+)\s*\.\s*)?(\w+)\s*\.\s*(\w+)\s*\(|(?:(\w+)\s*\.\s*)?(\w+)\s*\(')
-
-def extract_calls(body, known):
-    seen = {}
     for m in CALL_RE.finditer(body):
-        if m.group(3) is not None:
-            # Форма a.b.fn( — fn вызывается на поле b объекта a → это stdlib, пропускаем
-            continue
-        recv = m.group(4) or ""
-        fn_name = m.group(5)
-        if fn_name in NOISE or fn_name not in known:
-            continue
-        seen[(recv, fn_name)] = True
-    return list(seen.keys())
+        module, fn1, fn2 = m.groups()
+        fn_name = fn1 or fn2
+        if fn_name and fn_name in known_fns and fn_name not in STD_CALLS:
+            call_str = f"{module}::{fn_name}" if module else fn_name
+            analysis["calls"].add(call_str)
 
-def group_by_file(calls, fn_to_file):
+    for m in SELF_ACCESS_RE.finditer(body):
+        name = m.group(1)
+        is_call = m.group(2) == '('
+        if is_call:
+            if name in known_fns: 
+                 analysis["self_calls"].add(name)
+        else:
+            analysis["reads"].add(name)
+
+    for m in SELF_ASSIGN_RE.finditer(body):
+        analysis["writes"].add(f"{m.group(1)}=")
+
+    for m in SELF_MUTATE_RE.finditer(body):
+        analysis["writes"].add(f"{m.group(1)}.{m.group(2)}()")
+
+    analysis["reads"] -= {w.split('.')[0].replace('=', '') for w in analysis["writes"]}
+    analysis["calls"] -= analysis["self_calls"]
+
+    for key in analysis: analysis[key] = sorted(list(analysis[key]))
+    return analysis
+
+def group_calls(calls, fn_to_file, fn_to_module):
     result = defaultdict(list)
-    for _, fn_name in calls:
-        for f in fn_to_file.get(fn_name, []):
-            if fn_name not in result[f]:
-                result[f].append(fn_name)
+    for call_str in calls:
+        if '::' in call_str:
+            module, fn_name = call_str.split('::', 1)
+            for path, mod_name in fn_to_module.items():
+                if mod_name.endswith(module):
+                     if fn_name not in result[path]: result[path].append(fn_name)
+        else:
+            fn_name = call_str
+            for f in fn_to_file.get(fn_name,[]):
+                 if fn_name not in result[f]: result[f].append(fn_name)
     return dict(result)
 
-# ── self.field мутации ────────────────────────────────────────────────────────
-# Ловим:
-#   self.field = ...          (присваивание)
-#   self.field.push(...)      (мутирующий метод на поле)
-#   self.field.clear()
-#   self.field.pop()
-#   self.field.insert(...)
-#   self.field.extend(...)
-#   self.field.retain(...)
-#   self.field.remove(...)
-#   self.field.truncate(...)
-#   self.field.sort...()
-#   self.field.dedup()
-#   self.field.drain(...)
-
-SELF_ASSIGN_RE = re.compile(r'\bself\.(\w+)\s*=\s*')  # self.field =
-SELF_MUTATE_RE = re.compile(
-    r'\bself\.(\w+)\.'
-    r'(push|pop|clear|insert|extend|retain|remove|truncate|sort(?:_by|_unstable_by_key)?|dedup|drain|push_back|pop_back|push_front|pop_front)\s*\('
-)
-
-def extract_self_mutations(body):
-    fields = {}
-    for m in SELF_ASSIGN_RE.finditer(body):
-        fields[m.group(1)] = True
-    for m in SELF_MUTATE_RE.finditer(body):
-        field = m.group(1)
-        method = m.group(2)
-        fields[f"{field}.{method}"] = True
-    return sorted(fields.keys())
-
-# ── Match паттерны ────────────────────────────────────────────────────────────
-
-MATCH_PAT_RE = re.compile(
-    r'\b([A-Z][A-Za-z0-9_]+)::([A-Z][A-Za-z0-9_]+)\s*(?:=>|\{|\()'
-)
-
-def extract_match_arms(body):
-    found = {}
-    match_re = re.compile(r'\bmatch\b[^{]*\{')
-    for m in match_re.finditer(body):
-        match_body, _ = extract_body(body, m.end()-1)
-        for arm in MATCH_PAT_RE.finditer(match_body):
-            e, v = arm.group(1), arm.group(2)
-            if e not in _SKIP_VARIANTS and v not in _SKIP_VARIANTS:
-                found[f"{e}::{v}"] = True
-    return sorted(found.keys())
-
-# ── Сборка ────────────────────────────────────────────────────────────────────
-
-def collect_files():
-    return sorted(p for p in SRC_DIR.rglob("*.rs") if "test" not in p.name)
-
 def build():
-    files = collect_files()
-    file_data = []
+    files = sorted(p for p in SRC_DIR.rglob("*.rs") if "test" not in p.name)
+    file_data =[]
     fn_to_file = defaultdict(list)
     all_fn_names = set()
+    fn_to_module = {}
 
     for path in files:
         src_orig = path.read_text(encoding="utf-8", errors="replace")
         src_clean = strip_strings_and_comments(src_orig)
         sp = short_path(path)
-        structs = extract_structs_enums(src_orig)
-        enum_variants = extract_enum_variants(src_clean, src_orig)
+        fn_to_module[sp] = module_name(sp)
+
+        structs = extract_structs_enums(src_clean)
         fns = extract_functions(src_clean, src_orig)
+        
         for fn in fns:
             fn_to_file[fn["name"]].append(sp)
             all_fn_names.add(fn["name"])
-        file_data.append({"sp": sp, "structs": structs, "fns": fns,
-                          "enum_variants": enum_variants,
-                          "src_orig": src_orig, "src_clean": src_clean})
+            
+        file_data.append({"sp": sp, "structs": structs, "fns": fns})
 
     for fd in file_data:
         for fn in fd["fns"]:
-            calls = extract_calls(fn["body"], all_fn_names)
-            calls = [(r, n) for r, n in calls if n != fn["name"]]
-            fn["calls"] = group_by_file(calls, fn_to_file)
-            fn["match_arms"] = extract_match_arms(fn["body"])
-            fn["mutations"] = extract_self_mutations(fn["body"])
-
+            analysis = analyze_function_body(fn["body"], all_fn_names)
+            analysis["calls"] = group_calls([c for c in analysis["calls"] if c != fn["name"]], fn_to_file, fn_to_module)
+            fn.update(analysis)
     return file_data
 
-# ── Рендер ────────────────────────────────────────────────────────────────────
+def escape_xml(s):
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
-SEP = "─" * 60
-
-def render(file_data):
-    out = []
-    out.append("# RRiter PROJECT_MAP")
-    out.append("# AUTO-GENERATED. Команда: make api-tree (python3 gen_project_map.py)")
-    out.append("#")
-    out.append("# pub fn name  [LINE] -> RetType")
-    out.append("#   SELF:  fn1, fn2            <- вызовы fn из этого же файла")
-    out.append("#   CALL module: fn1, fn2      <- вызовы fn из другого файла")
-    out.append("#   WRITE: field, other.push   <- self.field мутации / присваивания")
-    out.append("#   MATCH: Enum::Variant        <- паттерны match-веток")
-    out.append("# enum Name: Var1, Var2         <- варианты enum")
-    out.append("")
-
+def create_xml(file_data):
+    lines =['<?xml version="1.0" encoding="utf-8"?>', '<project_map>']
+    
     for fd in file_data:
-        sp = fd["sp"]
-        fns = fd["fns"]
-        structs = fd["structs"]
-        enum_variants = fd.get("enum_variants", {})
-        if not fns and not structs:
-            continue
-
-        out.append(f"FILE {sp}")
-        out.append(f"  module: {module_name(sp)}")
-        if structs:
-            out.append(f"  types:  {', '.join(structs)}")
-        for ename, variants in sorted(enum_variants.items()):
-            out.append(f"  enum {ename}: {', '.join(variants)}")
-        out.append("")
-
-        for fn in fns:
-            pub = "pub " if fn["is_pub"] else "    "
-            ret = f" -> {fn['ret']}" if fn["ret"] else ""
-            out.append(f"  {pub}fn {fn['name']}  [{fn['line']}]{ret}")
-
-            calls = fn.get("calls", {})
-            same = sorted(calls.get(sp, []))
-            other = {k: sorted(v) for k, v in calls.items() if k != sp}
-            arms  = fn.get("match_arms", [])
-            muts  = fn.get("mutations", [])
-
-            if same:  out.append(f"    SELF:  {', '.join(same)}")
-            for of, names in sorted(other.items()):
-                out.append(f"    CALL {module_name(of)}: {', '.join(names)}")
-            if muts:  out.append(f"    WRITE: {', '.join(muts)}")
-            if arms:  out.append(f"    MATCH: {', '.join(arms)}")
-            out.append("")
-
-        out.append(SEP)
-        out.append("")
-
-    return "\n".join(out)
-
-# ── Main ─────────────────────────────────────────────────────────────────────
+        if not fd["fns"] and not fd["structs"]: continue
+        mod_name = module_name(fd["sp"])
+        lines.append(f'  <mod path="{fd["sp"]}" name="{mod_name}">')
+        
+        if fd["structs"]:
+            for t_name, t_body in sorted(fd["structs"].items()):
+                # Записываем сжатое тело структуры (с типами!)
+                lines.append(f'    <type name="{t_name}">{escape_xml(t_body)}</type>')
+        
+        for fn in sorted(fd["fns"], key=lambda x: x['line']):
+            attrs = [f'name="{fn["name"]}"', f'line="{fn["line"]}"']
+            if fn["is_pub"]: attrs.append('pub="true"')
+            if fn["ret"]: attrs.append(f'ret="{escape_xml(fn["ret"])}"')
+            
+            if fn["reads"]: attrs.append(f'reads="{escape_xml(", ".join(fn["reads"]))}"')
+            if fn["writes"]: attrs.append(f'writes="{escape_xml(", ".join(fn["writes"]))}"')
+            
+            calls_list =[]
+            if fn["self_calls"]:
+                calls_list.append(f"self: {', '.join(fn['self_calls'])}")
+            for mod_path, called_fns in sorted(fn["calls"].items()):
+                target_mod = "self" if mod_path == fd["sp"] else module_name(mod_path)
+                calls_list.append(f"{target_mod}: {', '.join(sorted(called_fns))}")
+                
+            if calls_list:
+                attrs.append(f'calls="{escape_xml("; ".join(calls_list))}"')
+                
+            lines.append(f'    <fn {" ".join(attrs)} />')
+            
+        lines.append('  </mod>')
+    
+    lines.append('</project_map>')
+    return "\n".join(lines)
 
 def main():
     if not SRC_DIR.exists():
         print(f"ERROR: {SRC_DIR} не найдена. Запускай из корня проекта.", file=sys.stderr)
         sys.exit(1)
+        
+    print("Генерация плотного дерева проекта...")
     file_data = build()
-    text = render(file_data)
-    with open("PROJECT_MAP.md", "w", encoding="utf-8") as f:
-        f.write(text)
+    xml_text = create_xml(file_data)
+    
+    out_file = "PROJECT_MAP.xml"
+    with open(out_file, "w", encoding="utf-8") as f:
+        f.write(xml_text)
+        
     total_fns = sum(len(fd["fns"]) for fd in file_data)
-    print(f"✓ PROJECT_MAP.md обновлён — {len(file_data)} файлов, {total_fns} функций")
+    print(f"✓ {out_file} успешно сгенерирован (Ультра-компактный формат) — {len(file_data)} файлов, {total_fns} функций")
 
 if __name__ == "__main__":
     main()
-# (патч применяется отдельно)
