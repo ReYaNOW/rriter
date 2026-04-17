@@ -93,8 +93,10 @@ pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
     let cache = RASTERIZED_ICONS.lock().unwrap();
-    if cache.contains_key(key) {
-        return;
+    if let Some(state) = cache.get(key) {
+        if state.is_some() {
+            return;
+        }
     }
     drop(cache); // Не блокируем другие потоки во время рендеринга
 

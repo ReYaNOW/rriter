@@ -552,7 +552,6 @@ F8\tПоказать/скрыть счетчик FPS
 
                                 let (saved_tabs, saved_active) = load_open_tabs();
         if !saved_tabs.is_empty() {
-            app.show_welcome = false;
             if has_file_arg {
             for path_opt in saved_tabs {
                 if let Some(p) = path_opt {
@@ -566,6 +565,7 @@ F8\tПоказать/скрыть счетчик FPS
             }
             app.switch_to_tab(0);
                         } else {
+            let initial_show_welcome = app.show_welcome;
             let mut first = true;
             for path_opt in saved_tabs {
                 if let Some(p) = path_opt {
@@ -578,33 +578,25 @@ F8\tПоказать/скрыть счетчик FPS
                     }
                 } else {
                     if first {
-                        // Первый таб уже пустой, ничего не делаем
                         first = false;
                     } else {
                         app.open_new_tab();
                     }
                 }
             }
-                                    if saved_active < app.tabs.len() {
-                                        app.switch_to_tab(saved_active);
-                                    }
-                                }
+            if saved_active < app.tabs.len() {
+                app.switch_to_tab(saved_active);
+            }
+            app.show_welcome = initial_show_welcome;
+        }
                             }
 
-                            app.sync_active_tab();
-
-                            // После восстановления вкладок show_welcome мог быть выставлен open_new_tab().
-                            // Корректируем: если активный таб имеет файл — show_welcome = false.
-                                if !has_file_arg {
-                                    app.show_welcome = true;
-                                } else {
-                                    app.show_welcome = app.file_path.is_none() && app.editor.len() == 0;
-                                }
-
-                                if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
-                                    app.base_title = "Добро пожаловать".to_string();
-                                    app.sync_active_tab();
-                                }
+                            // Убрали принудительное изменение show_welcome, чтобы Welcome экран всегда отображался
+                            // даже если загружены табы, пока пользователь не выберет действие.
+                            
+                            if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
+                                app.base_title = "Добро пожаловать".to_string();
+                            }
 
                                 if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
         app.refresh_file_tree();

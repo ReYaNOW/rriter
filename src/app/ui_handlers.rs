@@ -12,34 +12,33 @@ impl App {
             UiId::WelcomeNewFile => {
                 self.show_welcome = false;
                 self.is_ide_mode = false;
-                self.file_path = None;
-                self.base_title = "Безымянный".to_string();
-                let old_version = self.editor.version;
-                self.editor = Editor::new(8192);
-                self.editor.version = old_version + 1;
-                self.editor.set_original_text();
-                self.editor.sync_edits.clear();
-                self.highlighter
-                    .reset(self.editor.version, "".to_string(), "".to_string());
+                if self.file_path.is_some() || self.editor.is_dirty() || self.editor.len() > 0 {
+                    self.open_new_tab();
+                } else {
+                    self.file_path = None;
+                    self.base_title = "Безымянный".to_string();
+                    let old_version = self.editor.version;
+                    self.editor = Editor::new(8192);
+                    self.editor.version = old_version + 1;
+                    self.editor.set_original_text();
+                    self.editor.sync_edits.clear();
+                    self.highlighter
+                        .reset(self.editor.version, "".to_string(), "".to_string());
+                }
                 App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::WelcomeOpenFile => {
+                self.show_welcome = false;
                 self.is_ide_mode = false;
                 self.trigger_file_picker();
             }
                         UiId::WelcomeIdeMode => {
-                self.show_welcome = true;
+                self.show_welcome = false;
                 self.is_ide_mode = true;
-                self.file_path = None;
-                self.base_title = "Добро пожаловать".to_string();
-                let old_version = self.editor.version;
-                self.editor = Editor::new(8192);
-                self.editor.version = old_version + 1;
-                self.editor.set_original_text();
-                self.editor.sync_edits.clear();
-                self.highlighter
-                    .reset(self.editor.version, "".to_string(), "".to_string());
+                if self.base_title == "Добро пожаловать" || self.base_title.is_empty() {
+                    self.base_title = "Безымянный".to_string();
+                }
 
                 if !self.ide_workspaces.is_empty() {
                     self.ide_panel.toggle(crate::app::PanelId::Explorer);
@@ -60,36 +59,10 @@ impl App {
             UiId::WelcomeRecentFile(idx) => {
                 if idx < self.recent_files.len() {
                     let path = self.recent_files[idx].clone();
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        self.show_welcome = false;
-                        self.file_path = Some(path.clone());
-                        self.base_title = path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let ext = path
-                            .extension()
-                            .map(|e| e.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        self.file_extension = ext.clone();
-
-                        let old_version = self.editor.version;
-                        self.editor = Editor::new(content.len() + 8192);
-                        let _ = self.editor.insert_str(&content);
-                        self.editor.cursor = 0;
-                        self.editor.version = old_version + 1;
-                        self.editor.set_original_text();
-                        self.editor.sync_edits.clear();
-                        self.highlighter.reset(self.editor.version, content, ext);
-
-                        App::update_window_title(
-                            self.window.as_ref().unwrap(),
-                            &self.base_title,
-                            false,
-                        );
-                        self.window.as_ref().unwrap().request_redraw();
-                    }
+                    self.show_welcome = false;
+                    self.is_ide_mode = false;
+                    self.open_file_in_tab(path, true);
+                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
 

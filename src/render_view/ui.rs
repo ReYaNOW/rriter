@@ -46,56 +46,67 @@ impl Renderer {
         size: f32,
     ) {
         if !self.file_icon_cache.contains_key(key) {
-            let pre_rasterized = crate::app::file_tree::RASTERIZED_ICONS
-                .lock()
-                .unwrap()
-                .remove(key)
-                .flatten();
-
-            if let Some(data) = pre_rasterized {
-                let target = 64i32;
-                let tex = unsafe {
-                    let tex = self.gl.create_texture().unwrap();
-                    self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                    self.gl.tex_image_2d(
-                        glow::TEXTURE_2D,
-                        0,
-                        glow::RGBA8 as i32,
-                        target,
-                        target,
-                        0,
-                        glow::RGBA,
-                        glow::UNSIGNED_BYTE,
-                        glow::PixelUnpackData::Slice(Some(&data)),
-                    );
-                    self.gl.generate_mipmap(glow::TEXTURE_2D);
-                    self.gl.tex_parameter_i32(
-                        glow::TEXTURE_2D,
-                        glow::TEXTURE_MIN_FILTER,
-                        glow::LINEAR_MIPMAP_LINEAR as i32,
-                    );
-                    self.gl.tex_parameter_i32(
-                        glow::TEXTURE_2D,
-                        glow::TEXTURE_MAG_FILTER,
-                        glow::LINEAR as i32,
-                    );
-                    self.gl.tex_parameter_i32(
-                        glow::TEXTURE_2D,
-                        glow::TEXTURE_WRAP_S,
-                        glow::CLAMP_TO_EDGE as i32,
-                    );
-                    self.gl.tex_parameter_i32(
-                        glow::TEXTURE_2D,
-                        glow::TEXTURE_WRAP_T,
-                        glow::CLAMP_TO_EDGE as i32,
-                    );
-                    self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                    tex
-                };
-                self.file_icon_cache.insert(key, tex);
+            let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
+            
+            if let Some(state) = cache.get(key) {
+                if let Some(data) = state {
+                    let data_clone = data.clone();
+                    cache.remove(key); // Remove only when we are consuming it
+                    drop(cache);
+                    
+                    let target = 64i32;
+                    let tex = unsafe {
+                        let tex = self.gl.create_texture().unwrap();
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                        self.gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            glow::RGBA8 as i32,
+                            target,
+                            target,
+                            0,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(Some(&data_clone)),
+                        );
+                        self.gl.generate_mipmap(glow::TEXTURE_2D);
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MIN_FILTER,
+                            glow::LINEAR_MIPMAP_LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MAG_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_S,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        self.gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_T,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                        tex
+                    };
+                    self.file_icon_cache.insert(key, tex);
+                } else {
+                    // It's currently loading (None). Do nothing and wait.
+                    return;
+                }
             } else {
-                // Иконка еще не растеризована фоновым потоком.
-                // Возвращаемся без блокировки UI! Фоновый поток пришлет сигнал, когда закончит.
+                // Not in cache at all. Mark as loading and spawn a thread.
+                cache.insert(key, None);
+                drop(cache);
+                
+                std::thread::spawn(move || {
+                    // This function handles rendering the SVG and storing Some(data) back
+                    crate::app::file_tree::pre_rasterize_icon(key, _is_folder);
+                });
                 return;
             }
         }
