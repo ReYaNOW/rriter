@@ -1271,9 +1271,8 @@ impl Renderer {
             }
         }
 
-        // LSP squiggles — волнистые подчёркивания диагностик
+                // LSP squiggles — волнистые подчёркивания диагностик
         if !lsp_diagnostics.is_empty() {
-            let render_scroll_y = scroll_y.round();
             let render_scroll_x = scroll_x.round();
             for (idx, diag) in lsp_diagnostics.iter().enumerate() {
                 // Цвет по severity

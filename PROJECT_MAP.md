@@ -683,10 +683,10 @@ FILE src/render_view.rs
     WRITE: diag_hover_timer, diag_hover_timer_idx, fps, fps_string, fps_string.clear, frame_count, gl.clear, hide_popups_until_mouse_move, last_cursor_for_popups, last_diag_href, last_diag_popup_rect, last_draw_instant, last_editor_version_for_scroll_x, last_editor_version_for_typing, last_frame_time, last_hovered_diags, last_hovered_diags.clear, last_known_mouse, left_padding, max_scroll_x, minimap_width, phys_to_visual.clear, time_acc, visual_lines.clear
     MATCH: DiagSeverity::Error, DiagSeverity::Hint, DiagSeverity::Info, DiagSeverity::Warning
 
-      fn draw_tab_bar  [1973]
+      fn draw_tab_bar  [1972]
     CALL app::file_icons: file_icon_key
 
-      fn draw_minimap  [2059]
+      fn draw_minimap  [2058]
 
 ────────────────────────────────────────────────────────────
 
