@@ -71,11 +71,15 @@ pub fn save_recent_files(files: &[PathBuf]) {
     let _ = std::fs::write(&path, content);
 }
 
-pub fn load_open_tabs() -> (Vec<Option<PathBuf>>, usize) {
+pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
     path.push("RRiter");
-    path.push("tabs.txt");
+    if is_ide {
+        path.push("tabs_ide.txt");
+    } else {
+        path.push("tabs.txt");
+    }
     let mut tabs = Vec::new();
     let mut active = 0;
     if let Ok(content) = std::fs::read_to_string(&path) {
@@ -94,12 +98,16 @@ pub fn load_open_tabs() -> (Vec<Option<PathBuf>>, usize) {
     (tabs, active)
 }
 
-pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize) {
+pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
     path.push("RRiter");
     let _ = std::fs::create_dir_all(&path);
-    path.push("tabs.txt");
+    if is_ide {
+        path.push("tabs_ide.txt");
+    } else {
+        path.push("tabs.txt");
+    }
     let mut lines = Vec::new();
     lines.push(active_tab.to_string());
     for tab in tabs {
@@ -526,11 +534,7 @@ F8\tПоказать/скрыть счетчик FPS
         lsp_actions_menu: None,
         pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
-        // IDE режим: начинаем без вкладок, пустой скрин покажет cowsay.
-        // Обычный режим: одна пустая вкладка (показывается welcome экран).
-        tabs: if is_ide_mode {
-            Vec::new()
-        } else {
+                tabs: if is_ide_mode {
             vec![crate::app::EditorTab {
                 editor: Editor::new(8192),
                 file_path: None,
@@ -545,6 +549,8 @@ F8\tПоказать/скрыть счетчик FPS
                 is_highlighted_once: false,
                 icon_key: "default_file",
             }]
+        } else {
+            Vec::new()
         },
         active_tab: 0,
     };
@@ -556,59 +562,48 @@ F8\tПоказать/скрыть счетчик FPS
     );
     app.last_sent_version = app.editor.version;
 
-                                let (saved_tabs, saved_active) = load_open_tabs();
-        if !saved_tabs.is_empty() {
-            if has_file_arg {
-            for path_opt in saved_tabs {
-                if let Some(p) = path_opt {
-                    if Some(&p) != app.file_path.as_ref() {
-                        app.open_new_tab();
-                        app.load_file(p, false);
+                                                                let (saved_tabs, saved_active) = load_open_tabs(is_ide_mode);
+        if app.is_ide_mode {
+            let valid_paths: Vec<PathBuf> = saved_tabs.into_iter().filter_map(|p| p).collect();
+            if !valid_paths.is_empty() {
+                if has_file_arg {
+                    for p in valid_paths {
+                        if Some(&p) != app.file_path.as_ref() {
+                            app.open_new_tab();
+                            app.load_file(p, false);
+                        }
                     }
+                    app.switch_to_tab(0);
                 } else {
-                    app.open_new_tab();
-                }
-            }
-            app.switch_to_tab(0);
+                    let mut first = true;
+                    for p in valid_paths {
+                        if first {
+                            first = false;
+                            app.load_file(p, false);
                         } else {
-            let initial_show_welcome = app.show_welcome;
-            let mut first = true;
-            for path_opt in saved_tabs {
-                if let Some(p) = path_opt {
-                    if first {
-                        // В IDE режиме tabs пустые — нужно создать вкладку перед загрузкой
-                        if app.is_ide_mode && app.tabs.is_empty() {
                             app.open_new_tab();
+                            app.load_file(p, false);
                         }
-                        app.load_file(p, false);
-                        first = false;
-                    } else {
-                        app.open_new_tab();
-                        app.load_file(p, false);
                     }
-                } else {
-                    if first {
-                        first = false;
+                    if saved_active < app.tabs.len() {
+                        app.switch_to_tab(saved_active);
                     } else {
-                        if !app.is_ide_mode {
-                            app.open_new_tab();
-                        }
+                        app.switch_to_tab(0);
                     }
                 }
+            } else if !has_file_arg {
+                app.tabs.clear();
+                app.show_welcome = true;
             }
-            if saved_active < app.tabs.len() {
-                app.switch_to_tab(saved_active);
+        } else {
+            if !has_file_arg {
+                app.show_welcome = true;
             }
-            app.show_welcome = initial_show_welcome;
         }
-                            }
 
-                            // Убрали принудительное изменение show_welcome, чтобы Welcome экран всегда отображался
-                            // даже если загружены табы, пока пользователь не выберет действие.
-                            
-                            if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
-                                app.base_title = "Добро пожаловать".to_string();
-                            }
+        if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
+            app.base_title = "Добро пожаловать".to_string();
+        }
 
                                 if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
         app.refresh_file_tree();

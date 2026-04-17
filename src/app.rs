@@ -351,9 +351,10 @@ pub struct App {
 }
 
 impl App {
-        pub fn save_tabs_state(&mut self) {
+                pub fn save_tabs_state(&mut self) {
+        if !self.is_ide_mode { return; }
         self.sync_active_tab();
-        crate::save_open_tabs(&self.tabs, self.active_tab);
+        crate::save_open_tabs(&self.tabs, self.active_tab, self.is_ide_mode);
         self.sync_active_tab();
     }
 
@@ -393,7 +394,8 @@ impl App {
         self.tabs[ai].icon_key = icon_key;
     }
 
-    pub fn switch_to_tab(&mut self, new_idx: usize) {
+        pub fn switch_to_tab(&mut self, new_idx: usize) {
+        if !self.is_ide_mode || self.tabs.is_empty() { return; }
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
@@ -432,7 +434,42 @@ impl App {
         self.save_tabs_state();
     }
 
-    pub fn open_new_tab(&mut self) {
+        pub fn open_new_tab(&mut self) {
+        if !self.is_ide_mode {
+            self.close_current_file();
+            return;
+        }
+
+        if self.tabs.is_empty() {
+            self.editor = crate::editor::Editor::new(8192);
+            self.file_path = None;
+            self.base_title = "Безымянный".to_string();
+            self.file_extension = String::new();
+            self.tabs.push(EditorTab {
+                editor: crate::editor::Editor::new(8192),
+                file_path: None,
+                base_title: String::new(),
+                file_extension: String::new(),
+                scroll_y: crate::scroll::ScrollState::new(15.0),
+                scroll_x: crate::scroll::ScrollState::new(15.0),
+                highlighter: crate::highlighter::Highlighter::new(),
+                last_sent_version: 0,
+                search_results: Vec::new(),
+                search_current_idx: None,
+                is_highlighted_once: false,
+                icon_key: "default_file",
+            });
+            self.active_tab = 0;
+            self.show_welcome = false;
+            self.autocomplete_active = false;
+            if let Some(w) = self.window.as_ref() {
+                App::update_window_title(w, &self.base_title, false);
+                w.request_redraw();
+            }
+            self.save_tabs_state();
+            return;
+        }
+
         self.sync_active_tab();
         let new_tab = EditorTab {
             editor: crate::editor::Editor::new(8192),
@@ -450,38 +487,25 @@ impl App {
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
-                self.sync_active_tab();
+        self.sync_active_tab();
 
         self.autocomplete_active = false;
-        self.show_welcome = if self.is_ide_mode { false } else { self.tabs.len() <= 1 };
+        self.show_welcome = false;
 
-                if let Some(w) = self.window.as_ref() {
+        if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
             w.request_redraw();
         }
         self.save_tabs_state();
     }
 
-    pub fn close_tab_at(&mut self, idx: usize) {
+        pub fn close_tab_at(&mut self, idx: usize) {
+        if !self.is_ide_mode {
+            self.close_current_file();
+            return;
+        }
+
         if self.tabs.len() <= 1 {
-            if self.is_ide_mode {
-                // IDE: разрешаем закрыть последнюю вкладку (tabs будет пустым)
-                self.sync_active_tab();
-                if let Some(lsp) = &mut self.lsp {
-                    if let Some(path) = &self.file_path {
-                        lsp.notify_close(path, &self.file_extension);
-                    }
-                }
-                self.tabs.clear();
-                self.autocomplete_active = false;
-                self.show_welcome = false;
-                if let Some(w) = self.window.as_ref() {
-                    App::update_window_title(w, "RRiter", false);
-                    w.request_redraw();
-                }
-                self.save_tabs_state();
-                return;
-            }
             self.close_current_file();
             return;
         }
@@ -508,7 +532,12 @@ impl App {
         self.save_tabs_state();
     }
 
-    pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+        pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+        if !self.is_ide_mode {
+            self.load_file(path, add_to_history);
+            return;
+        }
+
         for (i, tab) in self.tabs.iter().enumerate() {
             if i == self.active_tab {
                 if self.file_path.as_ref() == Some(&path) {
@@ -522,7 +551,7 @@ impl App {
             }
         }
 
-        if self.file_path.is_some() || self.editor.is_dirty() || self.editor.len() > 0 {
+                if self.tabs.is_empty() || self.file_path.is_some() || self.editor.is_dirty() || self.editor.len() > 0 {
             self.open_new_tab();
         }
 
@@ -871,8 +900,8 @@ impl App {
         }
     }
 
-    pub fn close_current_file(&mut self) {
-        if self.tabs.len() > 1 {
+        pub fn close_current_file(&mut self) {
+        if self.is_ide_mode && self.tabs.len() > 1 {
             self.close_tab_at(self.active_tab);
             return;
         }
@@ -891,6 +920,9 @@ impl App {
         self.show_search = false;
         self.autocomplete_active = false;
         self.show_welcome = true;
+
+        self.file_extension = String::new();
+
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 let ext = self.file_extension.clone();
@@ -898,6 +930,7 @@ impl App {
                     lsp.notify_close(&path, &ext);
                 }
             }
+            self.tabs.clear();
         }
 
         self.scroll_y.current = 0.0;
@@ -905,7 +938,7 @@ impl App {
         self.scroll_x.current = 0.0;
         self.scroll_x.target = 0.0;
 
-                if let Some(w) = self.window.as_ref() {
+        if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
             w.request_redraw();
         }

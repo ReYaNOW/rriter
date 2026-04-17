@@ -798,20 +798,63 @@ impl Renderer {
             [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
         );
 
-        let cow_lines = [
-            " _________________________ ",
-            "< Открой файл и погнали!  >",
-            " ------------------------- ",
-            "        \\   ^__^           ",
-            "         \\  (oo)\\_______   ",
-            "            (__)\\       )\\/\\",
-            "                ||----w |  ",
-            "                ||     || ",
+        let arts: &[&[&str]] = &[
+            &[
+                " _________________________ ",
+                "< Открой файл и погнали!  >",
+                " ------------------------- ",
+                "        \\   ^__^           ",
+                "         \\  (oo)\\_______   ",
+                "            (__)\\       )\\/\\",
+                "                ||----w |  ",
+                "                ||     || ",
+            ],
+            &[
+                " ________________________________ ",
+                "< Мяу! Код сам себя не напишет... >",
+                " -------------------------------- ",
+                "  \\",
+                "   \\   /\\_/\\",
+                "      ( o.o )",
+                "       > ^ <",
+            ],
+            &[
+                " _________________________ ",
+                "< Прыгаем в код!           >",
+                " ------------------------- ",
+                "   \\",
+                "    \\   //",
+                "       ( ' )",
+                "      /  _  \\",
+                "     (__)(_)(__)",
+            ],
+            &[
+                " _________________________ ",
+                "< Судо, открой файл!       >",
+                " ------------------------- ",
+                "   \\",
+                "    \\    .--.",
+                "        |o_o |",
+                "        |:_/ |",
+                "       //   \\ \\",
+                "      (|     | )",
+                "     /'\\_   _/`\\",
+                "     \\___)=(___/",
+            ],
         ];
+
+        if !self.was_empty_ide {
+            self.was_empty_ide = true;
+            let epoch = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as usize;
+            self.empty_ide_art_idx = epoch % arts.len();
+        }
+        let current_art = arts[self.empty_ide_art_idx];
 
         let hint_lines = [
             "Ctrl+O  — открыть файл",
-            "Ctrl+N  — новый файл (Ctrl+T)",
             "Кликни в дереве файлов слева",
         ];
 
@@ -819,30 +862,30 @@ impl Renderer {
         let mono_scale = 0.95_f32;
         let line_h = 22.0 * s;
 
-        let cow_total_h = cow_lines.len() as f32 * line_h;
+        let art_total_h = current_art.len() as f32 * line_h;
         let hint_gap = 32.0 * s;
         let hint_total_h = hint_lines.len() as f32 * (line_h + 4.0 * s);
-        let total_block_h = cow_total_h + hint_gap + hint_total_h;
+        let total_block_h = art_total_h + hint_gap + hint_total_h;
 
         let start_y = (editor_h - total_block_h) / 2.0;
 
-        // Рисуем корову
-        let cow_color = [0.55_f32, 0.50, 0.75, 0.9];
-        for (i, line) in cow_lines.iter().enumerate() {
+        // Рисуем арт
+        let art_color = [0.55_f32, 0.50, 0.75, 0.9];
+        for (i, line) in current_art.iter().enumerate() {
             let lw = self.measure_ui_width(line, mono_scale);
             let lx = (editor_x + (editor_w - lw) / 2.0).round();
             let ly = (start_y + i as f32 * line_h + line_h * 0.75).round();
-            self.draw_string_scaled(line, lx, ly, cow_color, mono_scale);
+            self.draw_string_scaled(line, lx, ly, art_color, mono_scale);
         }
 
         // Разделитель
-        let sep_y = start_y + cow_total_h + hint_gap / 2.0;
+        let sep_y = start_y + art_total_h + hint_gap / 2.0;
         let sep_w = 200.0 * s;
         let sep_x = editor_x + (editor_w - sep_w) / 2.0;
         self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.06]);
 
         // Подсказки
-        let hint_y_start = start_y + cow_total_h + hint_gap;
+        let hint_y_start = start_y + art_total_h + hint_gap;
         for (i, line) in hint_lines.iter().enumerate() {
             let lw = self.measure_ui_width(line, 0.9);
             let lx = (editor_x + (editor_w - lw) / 2.0).round();

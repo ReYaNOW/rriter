@@ -138,6 +138,9 @@ pub struct Renderer {
     pub last_editor_version_for_typing: u64,
     pub last_cursor_for_popups: usize,
     pub last_draw_instant: Option<std::time::Instant>,
+
+    pub was_empty_ide: bool,
+    pub empty_ide_art_idx: usize,
 }
 
 impl Renderer {
@@ -440,10 +443,12 @@ impl Renderer {
                 diag_hover_timer: 0.0,
                 diag_hover_timer_idx: None,
                 last_known_mouse: (0.0, 0.0),
-                last_editor_version_for_typing: u64::MAX,
+                last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
-            };
+                was_empty_ide: false,
+                empty_ide_art_idx: 0,
+                };
 
             for i in 32..128u8 {
                 let c = i as char;

@@ -595,6 +595,8 @@ impl Renderer {
         if is_ide_mode && tabs.is_empty() {
             self.draw_empty_ide(panel_left_w);
             return (false, Vec::new());
+        } else {
+            self.was_empty_ide = false;
         }
 
         let first_len = first.len();

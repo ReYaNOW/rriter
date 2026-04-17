@@ -41,6 +41,39 @@ impl App {
                 self.tabs.retain(|t| t.file_path.is_some() || t.editor.len() > 0);
                 self.active_tab = self.active_tab.min(self.tabs.len().saturating_sub(1));
 
+                let (saved_tabs, saved_active) = crate::load_open_tabs(true);
+                let valid_paths: Vec<std::path::PathBuf> = saved_tabs.into_iter().flatten().collect();
+                let had_tabs = !self.tabs.is_empty();
+
+                if !valid_paths.is_empty() {
+                    for p in valid_paths {
+                        if had_tabs {
+                            if !self.tabs.iter().any(|t| t.file_path.as_ref() == Some(&p)) && Some(&p) != self.file_path.as_ref() {
+                                self.open_new_tab();
+                                self.load_file(p, false);
+                            }
+                        } else {
+                            if self.tabs.is_empty() {
+                                self.open_new_tab();
+                                self.load_file(p, false);
+                            } else {
+                                self.open_new_tab();
+                                self.load_file(p, false);
+                            }
+                        }
+                    }
+                    if !had_tabs {
+                        if saved_active < self.tabs.len() {
+                            self.switch_to_tab(saved_active);
+                        } else if !self.tabs.is_empty() {
+                            self.switch_to_tab(0);
+                        }
+                    } else {
+                        // Switch back to the first tab (which was the active one before opening new tabs)
+                        self.switch_to_tab(0);
+                    }
+                }
+
                 if !self.ide_workspaces.is_empty() {
                     self.ide_panel.toggle(crate::app::PanelId::Explorer);
                     self.refresh_file_tree();
