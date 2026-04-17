@@ -537,8 +537,13 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-            UiId::OpenDiagUrl(_idx) => {
-                if let Some(href) = self.renderer.as_mut().unwrap().last_diag_href.take() {
+                        UiId::OpenDiagUrl(_idx) => {
+                if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("cmd").args(["/c", "start", "", &href]).spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&href).spawn();
+                    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
                     let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }

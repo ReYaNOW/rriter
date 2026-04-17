@@ -115,42 +115,42 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 
 # HERE IS INFO ABOUT PROJECT AND WHO YOU ARE
-Кто ты: Строгий опытный программист, твои приоритеты (от главных к менее главным):
-    1) Плавный ui с максимальным fps (если работаешь с ui)
-    2) Максимальная возможная оптимизация (не в угоду плавности или стабильности)
-    3) Читаемый и поддерживаемый код
+You: Strict, experienced programmer. Priorities (most to least important):
+    1) Smooth UI with maximum FPS (if working UI)
+    2) Maximum possible optimization (without sacrificing smoothness or stability)
+    3) Readable, maintainable code
 
-Для проверки успешноности сборки используй ```make fast```
+Check successful build: ```make fast```
 
-## 🗺 Использование PROJECT_MAP.xml (ОБЯЗАТЕЛЬНО К ПРОЧТЕНИЮ)
+## 🗺 Use PROJECT_MAP.xml (MANDATORY)
 
-В корне проекта лежит `PROJECT_MAP.xml` — это твоя «карта местности». Генерируется автоматически через `make api-map` (скрипт `gen_project_map.py`).
+Project root has `PROJECT_MAP.xml`—your "map terrain." Generated automatically via `make api-map` (`gen_project_map.py` script).
 ---
 
-## 🦀 Интеграция с Rust-Analyzer (MCP)
+## 🦀 Rust-Analyzer Integration (MCP)
 
-Если тебе доступен инструмент `rust-analyzer` через MCP (Model Context Protocol) или терминал:
-1. **Диагностика:** Вместо гадания, почему код не компилируется, используй `rust-analyzer diagnostics`.
-2. **Навигация:** Если в `PROJECT_MAP.xml` связь неочевидна, используй `find_definitions` или `find_references`.
-3. **Type Checking:** Всегда проверяй сложные Rust-типы и lifetimes через анализатор, прежде чем предлагать финальный патч. Это экономит циклы «исправил - упало - исправил».
-
----
-
-## 🏛 Философия и Принципы
-
-RRiter создается как "редактор здорового человека". Мы отвергаем современный тренд создания редакторов на базе Electron, JVM или тяжелых UI-фреймворков, которые потребляют гигабайты оперативной памяти и сотни мегабайт на диске. 
-
-Наши заповеди:
-1. **Никаких DOM-деревьев (Immediate Mode GUI).** Интерфейс не хранит свое состояние. Каждый кадр (60-144 раз в секунду) мы заново спрашиваем: "где сейчас мышь?", "какой текст в редакторе?", и пересчитываем координаты.
-2. **GPU-центричность (Data-Oriented).** Процессор только вычисляет координаты вершин (структура `Vertex`). Вся реальная отрисовка уходит в видеокарту единым куском (батчинг) через вызовы OpenGL. 
-3. **Асинхронность тяжелых задач.** Парсинг AST (Tree-sitter) — тяжелая задача. Чтобы редактор не "фризил" при наборе текста, синтаксис считается в изолированном фоновом потоке.
-4. **Контроль над памятью.** В критическом цикле отрисовки `draw()` запрещены динамические аллокации (никаких `vec![]` или `.to_string()`, если их можно избежать). Буферы переиспользуются через `.clear()`.
+If access `rust-analyzer` via MCP (Model Context Protocol) or terminal:
+1. **Diagnostics:** Instead guess why code not compile, use `rust-analyzer diagnostics`.
+2. **Navigation:** If `PROJECT_MAP.xml` connection not obvious, use `find_definitions` or `find_references`.
+3. **Type Checking:** Always check complex Rust types, lifetimes with analyzer before final patch. Saves 'fix-crash-fix' cycles.
 
 ---
 
-## 📂 Глубокий разбор структуры проекта
+## 🏛 Philosophy, Principles
 
-Проект разделен на несколько независимых, но тесно взаимодействующих подсистем.
+RRiter created as "sane editor." Reject modern trend: editors based on Electron, JVM, or heavy UI frameworks consuming gigabytes RAM, hundreds megabytes disk.
+
+Commandments:
+1. **No DOM trees (Immediate Mode GUI).** Interface not store own state. Every frame (60-144 times/second), ask anew: "where mouse now?", "what text in editor?", and recalculate coordinates.
+2. **GPU-centric (Data-Oriented).** Processor only calculates vertex coordinates (`Vertex` struct). All actual rendering sent to GPU single piece (batching) through OpenGL calls.
+3. **Asynchronous heavy tasks.** AST parsing (Tree-sitter) heavy task. Prevent editor freeze while typing, syntax processed isolated background thread.
+4. **Memory control.** Critical `draw()` rendering loop, dynamic allocations forbidden (no `vec![]` or `.to_string()` if avoidable). Buffers reused via `.clear()`.
+
+---
+
+## 📂 Deep Project Structure
+
+Project divided into several independent, tightly coupled subsystems.
 
 ```text
 .
@@ -177,20 +177,20 @@ RRiter создается как "редактор здорового челов
     │   └── JetBrainsMono-Regular.ttf
     ├── highlighter.rs
     ├── icons
-    │   ├── ... (иконки)
+    │   ├── ... (icons)
     ├── main.rs
     ├── queries.rs
     ├── renderer.rs
-    ├── render_view         <-- Папка с модулями отрисовки
+    ├── render_view         <-- Folder with rendering modules
     │   ├── core_text.rs
     │   ├── lsp_ui.rs
-    │   ├── search.rs       (НОВОЕ: Панель поиска)
+    │   ├── search.rs       (NEW: Search panel)
     │   ├── settings_ui.rs
-    │   ├── sticky.rs       (НОВОЕ: "Липкие" заголовки)
+    │   ├── sticky.rs       (NEW: "Sticky" headers)
     │   └── ui.rs
-    ├── render_view.rs      <-- Главный файл-дирижер рендера
+    ├── render_view.rs      <-- Main render orchestrator file
     ├── scroll.rs
-    ├── ui_system.rs        <-- Декларативная система UI
+    ├── ui_system.rs        <-- Declarative UI system
     ├── widgets.rs
     └── ...
 
@@ -199,28 +199,28 @@ RRiter создается как "редактор здорового челов
 
 ---
 
-## 🎯 Подсистема 0: Декларативная UI система (`ui_system.rs` + `app/ui_handlers.rs`)
+## 🎯 Subsystem 0: Declarative UI System (`ui_system.rs` + `app/ui_handlers.rs`)
 
-**ВАЖНО:** Это новая архитектурная подсистема, добавленная для устранения дублирования кода между `input.rs` и `render_view/ui.rs`.
+**IMPORTANT:** New architectural subsystem added eliminate code duplication between `input.rs`, `render_view/ui.rs`.
 
-### Проблема, которую решает система
+### Problem System Solves
 
-До внедрения этой системы каждая кнопка требовала:
-1. Вручную прописывать координаты в `render_view/ui.rs`
-2. Вручную прописывать обработку клика в `app/input.rs`
-3. Дублировать логику проверки hover-состояния
-4. Синхронизировать изменения между двумя файлами
+Before system, every button required:
+1. Manually write coordinates in `render_view/ui.rs`
+2. Manually write click handling logic in `app/input.rs`
+3. Duplicate hover state check logic
+4. Synchronize changes between two files
 
-Это приводило к:
-- Огромным файлам (input.rs > 3000 строк)
-- Ошибкам рассинхронизации (кнопка рисуется, но не кликается)
-- Дублированию кода для каждой кнопки
+Led to:
+- Huge files (input.rs > 3000 lines)
+- Desynchronization errors (button drawn but not clickable)
+- Code duplication every button
 
-### Как работает новая система
+### How New System Works
 
-#### 1. Регистрация UI элементов (`ui_system.rs`)
+#### 1. Register UI Elements (`ui_system.rs`)
 
-Структура `UiRegistry` — это реестр всех UI элементов на текущем кадре.
+`UiRegistry` struct registry all UI elements for current frame.
 
 ```rust
 pub struct UiRegistry {
@@ -231,18 +231,18 @@ pub struct UiRegistry {
 }
 ```
 
-**Жизненный цикл:**
-1. В начале кадра вызывается `ui_registry.clear()`
-2. При отрисовке каждой кнопки вызывается `ui_registry.register_button(id, &button, ...)`
-3. Система автоматически:
-   - Отрисовывает кнопку через `button.render()`
-   - Проверяет hover
-   - Сохраняет геометрию для обработки кликов
-   - Устанавливает нужный курсор (pointer/text/arrow)
+**Lifecycle:**
+1. Frame start, `ui_registry.clear()` called.
+2. Each button drawn, `ui_registry.register_button(id, &button, ...)` called.
+3. System automatically:
+   - Renders button via `button.render()`
+   - Checks hover
+   - Saves geometry for click handling
+   - Sets appropriate cursor (pointer/text/arrow)
 
-#### 2. Уникальные идентификаторы (`UiId`)
+#### 2. Unique Identifiers (`UiId`)
 
-Каждый UI элемент имеет уникальный ID:
+Every UI element has unique ID:
 
 ```rust
 pub enum UiId {
@@ -256,9 +256,9 @@ pub enum UiId {
 }
 ```
 
-#### 3. Централизованная обработка (`app/ui_handlers.rs`)
+#### 3. Centralized Handling (`app/ui_handlers.rs`)
 
-Вся логика кликов живет в одном месте:
+All click logic one place:
 
 ```rust
 impl App {
@@ -266,10 +266,10 @@ impl App {
         match id {
             UiId::WelcomeNewFile => {
                 self.show_welcome = false;
-                // ... логика создания нового файла
+                // ... logic for creating a new file
             }
             UiId::DialogSave => {
-                // ... логика сохранения
+                // ... save logic
             }
             // ...
         }
@@ -277,19 +277,19 @@ impl App {
 }
 ```
 
-### Как добавить новую кнопку
+### How Add New Button
 
-**Старый способ (НЕ ИСПОЛЬЗУЙ):**
-1. Открыть `render_view/ui.rs`, найти нужное место
-2. Вручную вычислить координаты кнопки
-3. Вызвать `button.render()` и сохранить результат hover
-4. Открыть `app/input.rs`, найти обработчик кликов
-5. Добавить проверку `if mx >= x && mx <= x+w && my >= y && my <= y+h`
-6. Написать логику действия
+**Old Way (DO NOT USE):**
+1. Open `render_view/ui.rs`, find right place.
+2. Manually calculate button coordinates.
+3. Call `button.render()`, save hover result.
+4. Open `app/input.rs`, find click handler.
+5. Add check `if mx >= x && mx <= x+w && my >= y && my <= y+h`.
+6. Write action logic.
 
-**Новый способ (ИСПОЛЬЗУЙ ВСЕГДА):**
+**New Way (ALWAYS USE):**
 
-1. **Добавить ID в `ui_system.rs`:**
+1. **Add ID `ui_system.rs`:**
 ```rust
 pub enum UiId {
     // ...
@@ -297,10 +297,10 @@ pub enum UiId {
 }
 ```
 
-2. **Зарегистрировать кнопку при отрисовке:**
+2. **Register button during rendering:**
 ```rust
-// В render_view/ui.rs или где рисуется UI
-let button = Button { x, y, w, h, text: "Моя кнопка".to_string(), ... };
+// In render_view/ui.rs or where UI drawn
+let button = Button { x, y, w, h, text: "My Button".to_string(), ... };
 self.ui_registry.register_button(
     UiId::MyNewButton,
     &button,
@@ -309,14 +309,14 @@ self.ui_registry.register_button(
 );
 ```
 
-3. **Добавить обработчик в `app/ui_handlers.rs`:**
+3. **Add handler `app/ui_handlers.rs`:**
 ```rust
 impl App {
     pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
             // ...
             UiId::MyNewButton => {
-                // Твоя логика
+                // Your logic here
                 self.window.as_ref().unwrap().request_redraw();
             }
         }
@@ -324,193 +324,180 @@ impl App {
 }
 ```
 
-4. **Обработать клик в `app/input.rs`:**
+4. **Handle click `app/input.rs`:**
 ```rust
 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
     self.handle_ui_click(clicked_id);
 }
 ```
 
-**Всё!** Координаты, hover, курсор — всё обрабатывается автоматически.
+**Done!** Coordinates, hover, cursor—everything handled automatically.
 
-### Преимущества системы
+### System Advantages
 
-1. **DRY (Don't Repeat Yourself):** Логика кнопки описывается один раз
-2. **Автоматический курсор:** Система сама определяет, когда показывать pointer/text
-3. **Безопасность:** Невозможно забыть обработать клик (компилятор заставит добавить ветку в match)
-4. **Читаемость:** Вся логика UI в одном месте (`ui_handlers.rs`)
-5. **Производительность:** Нет overhead, всё inline в release-сборке
+1. **DRY (Don't Repeat Yourself):** Button logic described once.
+2. **Automatic Cursor:** System determines when show pointer/text cursor.
+3. **Safety:** Impossible forget handle click (compiler forces match arm).
+4. **Readability:** All UI logic one place (`ui_handlers.rs`).
+5. **Performance:** No overhead, everything inlined release build.
 
-### Важные замечания
+### Important Notes
 
-- `UiRegistry` очищается каждый кадр (`clear()`)
-- Регистрация элементов происходит в порядке отрисовки (последние — поверх)
-- `find_at()` ищет с конца массива (верхние элементы имеют приоритет)
-- Система работает в IMGUI-стиле: нет сохраненного состояния между кадрами
+- `UiRegistry` cleared every frame (`clear()`).
+- Elements registered rendering order (last ones top).
+- `find_at()` searches from array end (top elements priority).
+- System works IMGUI style: no saved state between frames.
 
 ---
 
-## 🧠 Подсистема 1: Текстовый движок (`editor.rs`)
+## 🧠 Subsystem 1: Text Engine (`editor.rs`)
 
-В основе редактора лежит структура данных **Gap Buffer (Буфер с зазором)**.
-Вместо обычного `String` весь текст лежит в плоском массиве `Vec<u8>`. Внутри массива есть "дырка" (зазор) между `gap_start` и `gap_end`.
+Editor core: **Gap Buffer** data structure. Instead regular `String`, all text resides flat `Vec<u8>`. Inside array, "gap" between `gap_start`, `gap_end`.
 
-### Как работает Gap Buffer
-Курсор всегда находится на левой границе зазора (`gap_start`).
+### How Gap Buffer Works
+Cursor always at left gap boundary (`gap_start`).
 ```text
-Текст: "Hello, World!"
-Массив: [H, e, l, l, o, ,,  , _, _, _, _, _, W, o, r, l, d, !]
+Text: "Hello, World!"
+Array: [H, e, l, l, o, ,,  , _, _, _, _, _, W, o, r, l, d, !]
                               ^             ^
                           gap_start      gap_end
 ```
-Когда пользователь печатает символ, он просто пишется в `data[gap_start]`, а `gap_start` сдвигается вправо. Это дает **O(1)** для вставки и удаления текста на месте курсора.
-Если курсор перемещается, мы физически "передвигаем" зазор по массиву (копируя байты через высокооптимизированный `copy_within`), чтобы зазор снова оказался под курсором.
+User types character, it written `data[gap_start]`, `gap_start` moved right. Provides **O(1)** for insert, delete text at cursor. If cursor moves, we physically move gap along array (copying bytes with optimized `copy_within`), so gap again under cursor.
 
-### Индексация строк (`line_offsets`)
-Чтобы не искать символ `\n` каждый раз, когда нужно перерисовать экран, `Editor` поддерживает массив `line_offsets`. 
-Например, `line_offsets[5]` возвращает байтовый индекс начала 6-й строки. Это позволяет нам за **O(log N)** (бинарным поиском) находить, какая строка находится под курсором или на определенной Y-координате.
+### Line Indexing (`line_offsets`)
+Avoid searching `\n` every screen redraw, `Editor` maintains `line_offsets` array. Example: `line_offsets[5]` returns byte index of 6th line start. Allows find line under cursor or at specific Y-coordinate **O(log N)** time (via binary search).
 
-### История (Undo/Redo)
-Мы не сохраняем снимки всего текста. В `history` складываются операции `EditOp` (Insert или Delete).
-Движок умеет "умно склеивать" посимвольный ввод в одно действие. Если вы быстро напечатали слово "hello", оно склеится в один `Insert { text: "hello" }`, чтобы `Ctrl+Z` отменял его целиком, а не по одной букве.
+### History (Undo/Redo)
+No save snapshots entire text. Instead, `EditOp` operations (Insert or Delete) pushed to `history`. Engine smartly glues character-by-character input into single action. If you type "hello" quickly, merged into single `Insert { text: "hello" }`, so `Ctrl+Z` undoes entire word, not one letter.
 
 ---
 
-## 🎨 Подсистема 2: Рендеринг (`renderer.rs`, `render_view.rs` и `render_view/*`)
+## 🎨 Subsystem 2: Rendering (`renderer.rs`, `render_view.rs`, and `render_view/*`)
 
-Рендеринг в RRiter строится вокруг концепции **Batching (Пакетирование)**.
-Вместо того чтобы рисовать каждую букву отдельным вызовом к GPU (что катастрофически медленно), мы собираем данные в один массив вершин `self.vertices` и отправляем их разом.
+RRiter rendering built around **Batching**. Instead draw each letter with separate GPU call (catastrophically slow), we gather all data into single vertex array `self.vertices`, send all at once.
 
-### Структура Вершины (Vertex)
-Каждая вершина имеет строго определенный формат в памяти (совпадает с разметкой в шейдере):
+### Vertex Structure
+Each vertex has strictly defined memory layout (matches shader layout):
 ```rust
 pub struct Vertex {
-    pub pos: [f32; 2],        // Экранные координаты (X, Y)
-    pub uv: [f32; 2],         // Координаты в атласе (текстуре)
-    pub color: [f32; 4],      // RGBA цвет
-    pub mode: f32,            // Режим рендеринга (Текст, Шум, SDF)
-    pub sdf_params: [f32; 3], // Параметры для математики шейдеров (размеры, радиусы)
+    pub pos: [f32; 2],        // Screen coordinates (X, Y)
+    pub uv: [f32; 2],         // Atlas (texture) coordinates
+    pub color: [f32; 4],      // RGBA color
+    pub mode: f32,            // Rendering mode (Text, Noise, SDF)
+    pub sdf_params: [f32; 3], // Parameters for shader math (sizes, radii)
 }
 ```
 
-### Шейдеры и SDF (Signed Distance Fields)
-В `Renderer::new` компилируются GLSL шейдеры. Фрагментный шейдер обрабатывает переменную `mode`:
-* `mode == 1.0` (Текст): Берет цвет из текстуры шрифта.
-* `mode == 2.0` (Шум): Вычисляет микро-шум на основе координат. Это устраняет эффект "banding" (ступенчатые градиенты) на темных фонах.
-* `mode == 3.0` (SDF Rounded Rects): Рисует идеально гладкие прямоугольники с закругленными углами. Вместо генерации кучи геометрии на процессоре, мы передаем 4 вершины и в шейдере вычисляем математическую дистанцию до края прямоугольника. Функция `smoothstep` делает края сглаженными на уровне субпикселей.
+### Shaders and SDF (Signed Distance Fields)
+GLSL shaders compiled in `Renderer::new`. Fragment shader processes `mode` variable:
+* `mode == 1.0` (Text): Takes color from font texture.
+* `mode == 2.0` (Noise): Calculates micro-noise based on coordinates. Eliminates "banding" effect (stepped gradients) on dark backgrounds.
+* `mode == 3.0` (SDF Rounded Rects): Draws perfectly smooth rounded rectangles. Instead generate ton geometry on CPU, pass 4 vertices, calculate mathematical distance to rectangle edge in shader. `smoothstep` function creates anti-aliased edges at sub-pixel level.
 
-### Атлас шрифтов (Swash)
-Текст рендерится через библиотеку `swash`. 
-1. При попытке нарисовать символ 'A', движок проверяет HashMap `glyphs`.
-2. Если символа нет, `swash` растеризует его из TTF-файла.
-3. Растеризованное изображение копируется в огромную текстуру `2048x2048` (Атлас).
-4. Мы сохраняем UV-координаты символа в атласе и его метрики (ширину, смещение).
-Далее отрисовка 'A' — это просто два треугольника, текстурированные нужным кусочком атласа.
+### Font Atlas (Swash)
+Text rendered using `swash` library.
+1. Attempt draw character 'A', engine checks `glyphs` HashMap.
+2. If character not present, `swash` rasterizes it from TTF file.
+3. Rasterized image copied into huge `2048x2048` texture (Atlas).
+4. Save character UV coordinates in atlas, its metrics (width, offset).
+Then, drawing 'A' just two triangles textured with correct atlas piece.
 
-### Жизненный цикл кадра и файловая структура (`render_view.rs` & `render_view/`)
-Метод `draw()` в `render_view.rs` — это главный дирижер сборки кадра. Он отвечает за общую последовательность, но делегирует сложную логику отрисовки специализированным под-модулям, чтобы избежать превращения в "God Function".
+### Frame Lifecycle and File Structure (`render_view.rs` & `render_view/`)
+`draw()` method in `render_view.rs` main frame assembly orchestrator. Responsible for overall sequence but delegates complex rendering logic to specialized sub-modules, avoids 'God Function'.
 
-**Файловая структура подсистемы:**
-- `renderer.rs`: Низкоуровневая обертка над OpenGL. Хранит буферы вершин (`Vec<Vertex>`), шейдеры, текстуры. Содержит методы для "рисования примитивов": `push_quad`, `push_rounded_rect` и т.д. Не знает о существовании редактора, только о геометрии.
-- `render_view.rs`: Высокоуровневый дирижер. Содержит главный метод `draw()`. Вызывает `update_cache()` для подготовки визуальных строк, а затем передает управление специализированным модулям.
-- `render_view/core_text.rs`: Отвечает за самую важную часть — рендеринг текста, курсора, выделения, подсветки скобок и одинаковых слов.
-- `render_view/sticky.rs` (Новое): Реализует логику "липких" заголовков. Анализирует уровни вложенности кода, определяет, какие строки должны "прилипнуть" к верху экрана, и отрисовывает их с анимацией.
-- `render_view/search.rs` (Новое): Инкапсулирует всю логику рендера панели поиска (Ctrl+F), включая ее текстовое поле, кнопки и отображение результатов.
-- `render_view/ui.rs`, `lsp_ui.rs`, `settings_ui.rs`: Отвечают за другие части интерфейса, такие как диалоговые окна, иконки, диагностики LSP и окно настроек.
+**Subsystem File Structure:**
+- `renderer.rs`: Low-level wrapper around OpenGL. Holds vertex buffers (`Vec<Vertex>`), shaders, textures. Contains methods for "drawing primitives": `push_quad`, `push_rounded_rect`, etc. Knows nothing about editor, only geometry.
+- `render_view.rs`: High-level orchestrator. Contains main `draw()` method. Calls `update_cache()` prepare visual lines, then passes control specialized modules.
+- `render_view/core_text.rs`: Responsible for most important part—rendering text, cursor, selections, bracket highlighting, identical word highlighting.
+- `render_view/sticky.rs` (New): Implements 'sticky' headers logic. Analyzes code nesting levels, determines which lines "stick" to screen top, renders them with animation.
+- `render_view/search.rs` (New): Encapsulates all rendering logic for search panel (Ctrl+F), including text field, buttons, result display.
+- `render_view/ui.rs`, `lsp_ui.rs`, `settings_ui.rs`: Responsible for other interface parts, like dialog boxes, icons, LSP diagnostics, settings window.
 
-**Последовательность отрисовки в `draw()`:**
-1. Подготовка: `update_cache()` разбивает байты на визуальные строки (`VisualLine`), обрабатывая фолдинг (свертывание кода).
-2. Слой IDE: Отрисовываются панели (сайдбар, дерево файлов, нижняя панель).
-3. Основной слой: Рендерится фон, гаттер, номера строк, и затем вызывается `core_text.rs` для отрисовки самого текста.
-4. Декорации: Вызываются `draw_minimap`, `draw_sticky_lines` (из `sticky.rs`), скроллбары.
-5. Оверлеи: Поверх всего рисуются панели, которые могут перекрывать контент, например, `draw_search_panel` (из `search.rs`) или окно настроек.
-6. Отправка на GPU: Массив вершин `flush()`-ится в видеокарту.
+**Rendering Sequence in `draw()`:**
+1. Preparation: `update_cache()` splits bytes into visual lines (`VisualLine`), handles code folding.
+2. IDE Layer: Panels drawn (sidebar, file tree, bottom panel).
+3. Main Layer: Background, gutter, line numbers rendered, then `core_text.rs` called draw text itself.
+4. Decorations: `draw_minimap`, `draw_sticky_lines` (from `sticky.rs`), scrollbars called.
+5. Overlays: Panels that overlap content, like `draw_search_panel` (from `search.rs`) or settings window, drawn on top.
+6. Dispatch GPU: Vertex array `flush()`-ed to graphics card.
 
 ---
 
-## 🌳 Подсистема 3: Синтаксис и Tree-sitter (`highlighter.rs`)
+## 🌳 Subsystem 3: Syntax, Tree-sitter (`highlighter.rs`)
 
-Подсветка синтаксиса в RRiter основана на **Tree-sitter** — инкрементальном парсере, который строит абстрактное синтаксическое дерево (AST) всего файла.
+RRiter syntax highlighting based on **Tree-sitter**—incremental parser builds abstract syntax tree (AST) of entire file.
 
-### Фоновый поток
-Tree-sitter быстр, но парсинг файла на 10 000 строк может занять 10-30 мс. В главном потоке это вызвало бы "заикание" при наборе текста.
-Поэтому `Highlighter` запускает отдельный поток. 
-Главный поток через канал (`mpsc::Sender`) шлет сообщения `HighlighterMessage::Edits`.
-Фоновый поток применяет эти правки, перепарсивает AST и выполняет запросы (`queries.rs`). Обратно в главный поток возвращается список "спанов" (отрезков с цветами) и данных автодополнения.
+### Background Thread
+Tree-sitter fast, but parsing 10,000-line file takes 10-30 ms. Main thread, this cause typing stutter. Therefore, `Highlighter` runs separate thread. Main thread sends `HighlighterMessage::Edits` messages through channel (`mpsc::Sender`). Background thread applies edits, re-parses AST, executes queries (`queries.rs`). List "spans" (ranges with colors), autocomplete data sent back main thread.
 
-### Запросы (Queries) и Языковые инъекции
-Логика "каким цветом что красить" живет в `queries.rs`. Это Lisp-подобные запросы:
+### Queries and Language Injections
+Logic for "what color how" lives in `queries.rs`. These are Lisp-like queries:
 ```scheme
 (function_declaration name: (identifier) @function)
 ```
-Система также поддерживает **Language Injections (Инъекции)**. Например, если в JS файле есть `html\`<div></div>\``, Tree-sitter находит этот блок, мы инициализируем второй парсер для HTML и накладываем цвета HTML поверх строки JS.
+System also supports **Language Injections**. Example, if JS file contains `html\`<div></div>\``, Tree-sitter finds block, we initialize second HTML parser, overlay HTML colors on JS string.
 
-### Сдвиг цветов (Shift logic)
-Так как фоновый поток работает асинхронно, результаты его работы всегда немного запаздывают.
-Чтобы выделение не "уезжало", когда вы печатаете текст, главный поток имеет методы `shift_insert` и `shift_delete`. 
-Если вы вставили 5 символов, главный поток сдвигает все известные ему цвета на 5 байт вправо. Когда фоновый поток заканчивает работу, он присылает новые, актуальные цвета.
+### Color Shifting (Shift Logic)
+Background thread asynchronous, its results always slightly delayed. Prevent highlighting 'drifting' while you type, main thread has `shift_insert`, `shift_delete` methods. If you insert 5 characters, main thread shifts all known colors 5 bytes right. When background thread finishes, it sends new, up-to-date colors.
 
 ---
 
-## ⚡ Подсистема 4: Интерфейс и События (`app/events.rs` & `app/input.rs`)
+## ⚡ Subsystem 4: Interface and Events (`app/events.rs` & `app/input.rs`)
 
-### Скроллинг и Физика (`scroll.rs`)
-Вся математика кинетического скролла (экспоненциальное затухание) вынесена в единую структуру `ScrollState`.
-Она инкапсулирует текущую позицию, целевую (`target`), скорость (`velocity`) и динамически меняет скорость анимации (`anim_speed`):
-* `anim_speed = 7.0` — долгое, маслянистое скольжение (идеально для колесика мыши).
-* `anim_speed = 15.0` — четкое и отзывчивое движение (драг скроллбара, переходы стрелками).
-* `anim_speed = 25.0` — мгновенная реакция (прыжки при печати текста).
-Эта структура переиспользуется для главного экрана, миникарты, меню автодополнения и окна настроек, гарантируя единый премиальный опыт во всем редакторе.
+### Scrolling and Physics (`scroll.rs`)
+All mathematics for kinetic scrolling (exponential decay) encapsulated in single `ScrollState` struct. Encapsulates current position, target (`target`), velocity (`velocity`), dynamically changes animation speed (`anim_speed`):
+* `anim_speed = 7.0` — long, buttery smooth glide (ideal for mouse wheel).
+* `anim_speed = 15.0` — crisp, responsive movement (dragging scrollbar, moving with arrow keys).
+* `anim_speed = 25.0` — instantaneous reaction (jumps while typing).
+Struct reused for main screen, minimap, autocomplete menu, settings window, ensuring consistent premium experience throughout editor.
 
-### Главный цикл (`events.rs`)
-Основан на `winit`. Метод `window_event` реагирует на ресайз, потерю фокуса и движение мыши.
-Интеграция "физики" (вызовы `scroll.update(dt)`) живет в методе `about_to_wait`.
+### The Main Loop (`events.rs`)
+Based on `winit`. `window_event` method reacts to resizing, focus loss, mouse movement. "Physics" integration (calls to `scroll.update(dt)`) lives in `about_to_wait` method.
 
-### Обработка ввода (`input.rs`)Здесь реализована машина состояний для клавиатуры и мыши.
-* **Мышь:** Управление выделением (drag), скроллбарами, миникартой, кликами по кнопкам интерфейса. Реализована обработка двойного (выделение слова) и тройного клика (выделение строки).
-* **Клавиатура:** Огромный `match` блок. Он фильтрует нажатия: если открыт поиск — события уходят в `search_editor`. Если активно автодополнение — стрелки вверх/вниз перехватываются меню. Иначе события уходят в главный `Editor`.
-
----
-
-## 🚀 Подсистема 5: Режим IDE и Система Панелей
-
-RRiter поддерживает два режима работы: чистый редактор (Zen-mode) и режим IDE. Режим IDE добавляет боковую панель инструментов (Сайдбар), левую панель (для дерева файлов, поиска и т.д.) и нижнюю панель (терминал, вывод, проблемы).
-
-### Сайдбар и Слоты (Кнопки)
-Сайдбар всегда имеет фиксированную ширину (48px по умолчанию) и занимает всю высоту окна (`real_height`).
-Инструменты внутри сайдбара абстрагированы в концепцию **Слотов (`PanelSlot`)**.
-Каждый слот имеет:
-1. `id` (уникальный идентификатор: Explorer, Search, Git и т.д.)
-2. `group` (Привязка: `Top` — открываются в левой вертикальной панели, `Bottom` — открываются в нижней горизонтальной панели).
-3. `open` (Флаг состояния: открыта ли сейчас эта панель).
-
-Реализовано правило **взаимоисключения**: при открытии инструмента из группы `Top`, все остальные инструменты группы `Top` автоматически сворачиваются.
-
-### Drag & Drop (Сортировка кнопок)
-Пользователь может перетаскивать кнопки на сайдбаре (DnD). 
-Логика перетаскивания реализована математически (IM-GUI стиль): вместо сложной работы с DOM-индексами, при завершении перетаскивания (`ElementState::Released`) всем кнопкам назначаются виртуальные Y-координаты. 
-- Для статичных кнопок — это их штатные расчетные позиции на экране.
-- Для перетаскиваемой кнопки — это текущая Y-координата курсора мыши.
-После этого массивы кнопок (`top_items` и `bottom_items`) просто сортируются по этой виртуальной координате (группа Top — сверху вниз, группа Bottom — снизу вверх), и глобальный массив слотов пересобирается.
-
-### Хитбоксы и UX Кнопок (Закон Фиттса)
-Для обеспечения премиального ощущения (Premium Feel) при наведении, хитбоксы (области клика) кнопок на левой панели вычисляются особым образом. Даже если сама иконка и внутренний фон имеют размер 36x36px, активная зона перехвата мыши принудительно расширяется до квадрата шириной 48x48px. Это позволяет пользователю кликать в самый левый край экрана, не выцеливая иконку, что напрямую реализует закон Фиттса для UX. Это контролируется параметром `active_square_width` у `IconButton`.
-
-### Рендеринг и Полупрозрачность панелей
-Отрисовка панелей построена на слоях (Layers):
-* **Текстовый движок** всегда рендерится на полную высоту окна (`real_height`). Матрица проекции и `gl.viewport` никогда не сжимаются при открытии панелей.
-* **Левая панель** (`panel_left_w`) рисуется непрозрачной, сдвигая начало координат отрисовки текста (`left_padding`), чтобы текст "уступал" ей место.
-* **Нижняя панель** (`panel_bottom_h`) рисуется строго поверх текста и имеет полупрозрачный градиентный фон (Alpha Blend). Текст и скроллбары плавно "уходят" под нее, создавая современный эффект многослойности интерфейса.
+### Input Handling (`input.rs`)
+State machine for keyboard, mouse implemented here.
+* **Mouse:** Manages selection (drag), scrollbars, minimap, UI button clicks. Handles double-click (select word), triple-click (select line).
+* **Keyboard:** Huge `match` block. Filters key presses: if search open, events go to `search_editor`. If autocomplete active, up/down arrows intercepted by menu. Otherwise, events go main `Editor`.
 
 ---
 
-## 🚫 Строгие правила кодирования
+## 🚀 Subsystem 5: IDE Mode and Panel System
 
-При работе с этой кодовой базой необходимо соблюдать дисциплину.
+RRiter supports two operation modes: pure editor (Zen mode), IDE mode. IDE mode adds side toolbar (Sidebar), left panel (file tree, search, etc.), bottom panel (terminal, output, problems).
 
-1. **Производительность рендер-цикла:** Метод `Renderer::draw` и его саб-методы вызываются 60-144 раза в секунду. Внутри них **КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО**:
-   - Читать файлы с диска (`fs::read`).
-   - Делать дорогие системные вызовы.
-   - Аллоцировать большие строки (`format!()` допустим только для счетчиков типа FPS или поиска, но лучше использовать `std::fmt::Write` поверх переиспользуемой `String`, как это сделано для `fps_string`).
-2. **Никаких Runtime Unwraps:** Код не должен падать (`panic!`). Не используйте `.unwrap()` при парсинге, математике или доступе к буферу. Если буфер обмена недоступен — игнорируйте. Если мышь вышла за границу массива — используйте `.saturating_sub()` или `.clamp()`.
-3. **Не смешивайте логику рендера и состояний:** Если виджет меняет цвет при наведении, это делает `Renderer`. Но если виджет должен выполнить действие (например, сохранить файл), эту логику выполняет `app/ui_handlers.rs`. Отрисовка не должна менять глобальное состояние редактора (исключение — кеширование).
+### Sidebar and Slots (Buttons)
+Sidebar always has fixed width (48px default), takes full window height (`real_height`). Sidebar tools abstracted into **Slots (`PanelSlot`)** concept.
+Each slot has:
+1. `id` (unique identifier: Explorer, Search, Git, etc.)
+2. `group` (Association: `Top` — opens left vertical panel, `Bottom` — opens bottom horizontal panel).
+3. `open` (State flag: if panel currently open).
+
+**Mutual exclusion** rule implemented: when tool from `Top` group opened, all other `Top` group tools automatically closed.
+
+### Drag & Drop (Button Sorting)
+User can drag, drop sidebar buttons (DnD). Drag logic implemented mathematically (IM-GUI style): instead complex work with DOM indices, when drag ends (`ElementState::Released`), all buttons assigned virtual Y-coordinates.
+- Static buttons: their standard calculated screen positions.
+- Dragged button: current Y-coordinate of mouse cursor.
+After, button arrays (`top_items`, `bottom_items`) sorted by virtual coordinate (Top group top to bottom, Bottom group bottom to top), global slots array reassembled.
+
+### Hitboxes and Button UX (Fitts's Law)
+Ensure premium feel, hitboxes (clickable areas) of left panel buttons calculated special way. Even if icon, inner background 36x36px, active mouse capture area forcibly expanded 48x48px square. Allows user click very left screen edge without precise icon target, direct Fitts's Law UX implementation. Controlled by `active_square_width` parameter of `IconButton`.
+
+### Rendering and Panel Translucency
+Panel rendering built on layers:
+* **Text engine** always renders full window height (`real_height`). Projection matrix, `gl.viewport` never shrunk when panels open.
+* **Left panel** (`panel_left_w`) drawn opaquely, shifting text rendering origin (`left_padding`) so text "makes way".
+* **Bottom panel** (`panel_bottom_h`) drawn strictly on text top, has semi-transparent gradient background (Alpha Blend). Text, scrollbars smoothly "disappear" under it, creating modern layered interface effect.
+
+---
+
+## 🚫 Strict Coding Rules
+
+Discipline required with this codebase.
+
+1. **Render Loop Performance:** `Renderer::draw` method, sub-methods called 60-144 times/second. Inside them, **STRICTLY FORBIDDEN**:
+   - Read files from disk (`fs::read`).
+   - Make expensive system calls.
+   - Allocate large strings (`format!()` permissible only for counters like FPS or search, but better use `std::fmt::Write` on reusable `String`, like `fps_string`).
+2. **No Runtime Unwraps:** Code must not crash (`panic!`). No `.unwrap()` when parsing, doing math, accessing buffer. If clipboard unavailable, ignore. If mouse out of array bounds, use `.saturating_sub()` or `.clamp()`.
+3. **No Mix Render, State Logic:** If widget changes color on hover, `Renderer` does that. But if widget needs perform action (e.g., save file), that logic handled by `app/ui_handlers.rs`. Rendering should not change global editor state (caching exception).
