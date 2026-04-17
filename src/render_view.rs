@@ -19,7 +19,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-    pub fn draw(
+        pub fn draw(
         &mut self,
         editor: &mut Editor,
         editor_title: &str,
@@ -50,7 +50,7 @@ impl Renderer {
         lsp_diagnostics: &[crate::lsp::Diagnostic],
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> (bool, Vec<(usize, usize)>) {
-        if show_welcome {
+        if show_welcome && !is_ide_mode {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
         }
 
@@ -1555,7 +1555,42 @@ impl Renderer {
             self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
         }
 
-        if !show_welcome {
+                if show_welcome && is_ide_mode {
+            let anim_w = self.width - gutter_x;
+            let anim_h = self.height - panel_bottom_h;
+            self.push_rect(gutter_x, 0.0, anim_w, anim_h, [0.173, 0.180, 0.224, 1.0]);
+
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::BottomPanelBody,
+                gutter_x, 0.0, anim_w, anim_h,
+                mx, my,
+            );
+
+            let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f32();
+                        let text = "RRiter";
+            let sub_text = "Нет открытых файлов";
+            let scale_t = 3.0;
+            let scale_sub = 1.2;
+            let text_w = self.measure_ui_width(text, scale_t).max(self.measure_ui_width(sub_text, scale_sub));
+            let text_h = 70.0 * s;
+
+            let eff_w = (anim_w - text_w).max(1.0);
+            let eff_h = (anim_h - text_h).max(1.0);
+            let px = (t * 100.0 * s) % (eff_w * 2.0);
+            let rx = if px < eff_w { px } else { eff_w * 2.0 - px };
+            let py = (t * 75.0 * s) % (eff_h * 2.0);
+            let ry = if py < eff_h { py } else { eff_h * 2.0 - py };
+
+            let r = (t * 2.0).sin() * 0.2 + 0.6;
+            let g = (t * 3.0).sin() * 0.2 + 0.6;
+            let b = (t * 5.0).sin() * 0.2 + 0.8;
+
+            let draw_x = gutter_x + rx;
+            let draw_y = ry + 40.0 * s;
+            self.draw_string_scaled(text, draw_x, draw_y, [r, g, b, 1.0], scale_t);
+            self.draw_string_scaled(sub_text, draw_x, draw_y + 30.0 * s, [0.5, 0.5, 0.6, 1.0], scale_sub);
+            self.flush();
+        } else if !show_welcome {
             let tab_x = gutter_x;
             let tab_w = self.width - tab_x;
             self.draw_tab_bar(
@@ -1576,17 +1611,21 @@ impl Renderer {
             self.flush();
         }
 
-        let target_sticky_lines = self.draw_sticky_lines(
-            editor,
-            spans,
-            current_sticky_lines,
-            render_scroll_y,
-            render_scroll_x,
-            sticky_anim_progress,
-            sticky_anim_is_adding,
-            gutter_x,
-            ui_registry,
-        );
+        let target_sticky_lines = if show_welcome {
+            Vec::new()
+        } else {
+            self.draw_sticky_lines(
+                editor,
+                spans,
+                current_sticky_lines,
+                render_scroll_y,
+                render_scroll_x,
+                sticky_anim_progress,
+                sticky_anim_is_adding,
+                gutter_x,
+                ui_registry,
+            )
+        };
 
         if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
@@ -2139,13 +2178,13 @@ impl Renderer {
         )
     }
 
-    fn draw_tab_bar(
+        fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
         editor: &Editor,
         editor_title: &str,
-        editor_path: Option<&std::path::PathBuf>,
+        _editor_path: Option<&std::path::PathBuf>,
         x: f32,
         y: f32,
         w: f32,

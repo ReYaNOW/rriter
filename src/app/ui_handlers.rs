@@ -28,11 +28,11 @@ impl App {
                 self.is_ide_mode = false;
                 self.trigger_file_picker();
             }
-            UiId::WelcomeIdeMode => {
-                self.show_welcome = false;
+                        UiId::WelcomeIdeMode => {
+                self.show_welcome = true;
                 self.is_ide_mode = true;
                 self.file_path = None;
-                self.base_title = "Режим IDE".to_string();
+                self.base_title = "Добро пожаловать".to_string();
                 let old_version = self.editor.version;
                 self.editor = Editor::new(8192);
                 self.editor.version = old_version + 1;

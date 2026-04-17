@@ -71,6 +71,47 @@ pub fn save_recent_files(files: &[PathBuf]) {
     let _ = std::fs::write(&path, content);
 }
 
+pub fn load_open_tabs() -> (Vec<Option<PathBuf>>, usize) {
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+    path.push("tabs.txt");
+    let mut tabs = Vec::new();
+    let mut active = 0;
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let mut lines = content.lines();
+        if let Some(first) = lines.next() {
+            active = first.parse().unwrap_or(0);
+        }
+        for line in lines {
+            if line.is_empty() {
+                tabs.push(None);
+            } else {
+                tabs.push(Some(PathBuf::from(line)));
+            }
+        }
+    }
+    (tabs, active)
+}
+
+pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize) {
+    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    path.push(".config");
+    path.push("RRiter");
+    let _ = std::fs::create_dir_all(&path);
+    path.push("tabs.txt");
+    let mut lines = Vec::new();
+    lines.push(active_tab.to_string());
+    for tab in tabs {
+        if let Some(p) = &tab.file_path {
+            lines.push(p.to_string_lossy().into_owned());
+        } else {
+            lines.push(String::new());
+        }
+    }
+    let _ = std::fs::write(&path, lines.join("\n"));
+}
+
 pub fn save_panel_state(state: &crate::app::IdePanelState) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -287,18 +328,19 @@ fn load_dracula() -> Theme {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+        let args: Vec<String> = env::args().collect();
     let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
+    let has_file_arg = args.iter().skip(1).any(|a| a != "--ide" && a != "ide");
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
     let mut file_path = None;
-    let show_welcome = args.len() <= 1 && !is_ide_cli;
+        let show_welcome = !has_file_arg;
 
     let mut recent_files = load_recent_files();
 
-    if args.len() > 1 {
-        let path = &args[1];
+    if has_file_arg {
+        let path = args.iter().skip(1).find(|a| *a != "--ide" && *a != "ide").unwrap();
         if let Ok(content) = std::fs::read_to_string(path) {
             initial_text = content;
             let f_path = std::path::Path::new(path);
@@ -373,11 +415,14 @@ F8\tПоказать/скрыть счетчик FPS
     faq_editor.cursor = 0;
     faq_editor.selection_anchor = None;
 
-    let event_loop = EventLoop::new().unwrap();
+            let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
     let highlighter = Highlighter::new();
+
+    let ide_panel_state = crate::load_panel_state();
+    let is_ide_mode = is_ide_cli;
 
     let mut app = App {
         gl_config: None,
@@ -420,10 +465,10 @@ F8\tПоказать/скрыть счетчик FPS
         open_file_rx: None,
         save_file_rx: None,
 
-        show_welcome,
+                show_welcome,
         recent_files,
 
-        is_ide_mode: is_ide_cli,
+        is_ide_mode,
         ide_workspaces: config.ide_workspaces.clone(),
         ide_ignore_patterns: config.ide_ignore_patterns.clone(),
         settings_ignore_editor: Editor::new(128),
@@ -463,18 +508,17 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-        show_settings: false,
+                show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,
         settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
-        ide_panel: crate::load_panel_state(),
+        ide_panel: ide_panel_state,
         file_tree_rx: None,
         file_tree_notify_rx: None,
-        lsp: if is_ide_cli {
-            Some(crate::lsp::LspManager::new(
-                config.ide_workspaces.first().cloned(),
+        lsp: if is_ide_mode {
+            Some(crate::lsp::LspManager::new(config.ide_workspaces.first().cloned(),
             ))
         } else {
             None
@@ -499,18 +543,70 @@ F8\tПоказать/скрыть счетчик FPS
         active_tab: 0,
     };
 
-    app.highlighter.reset(
+        app.highlighter.reset(
         app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),
     );
     app.last_sent_version = app.editor.version;
 
-    if app.show_welcome {
-        app.base_title = "Добро пожаловать".to_string();
-    }
+                                let (saved_tabs, saved_active) = load_open_tabs();
+        if !saved_tabs.is_empty() {
+            app.show_welcome = false;
+            if has_file_arg {
+            for path_opt in saved_tabs {
+                if let Some(p) = path_opt {
+                    if Some(&p) != app.file_path.as_ref() {
+                        app.open_new_tab();
+                        app.load_file(p, false);
+                    }
+                } else {
+                    app.open_new_tab();
+                }
+            }
+            app.switch_to_tab(0);
+                        } else {
+            let mut first = true;
+            for path_opt in saved_tabs {
+                if let Some(p) = path_opt {
+                    if first {
+                        app.load_file(p, false);
+                        first = false;
+                    } else {
+                        app.open_new_tab();
+                        app.load_file(p, false);
+                    }
+                } else {
+                    if first {
+                        // Первый таб уже пустой, ничего не делаем
+                        first = false;
+                    } else {
+                        app.open_new_tab();
+                    }
+                }
+            }
+                                    if saved_active < app.tabs.len() {
+                                        app.switch_to_tab(saved_active);
+                                    }
+                                }
+                            }
 
-    if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
+                            app.sync_active_tab();
+
+                            // После восстановления вкладок show_welcome мог быть выставлен open_new_tab().
+                            // Корректируем: если активный таб имеет файл — show_welcome = false.
+                                if !has_file_arg {
+                                    app.show_welcome = true;
+                                } else {
+                                    app.show_welcome = app.file_path.is_none() && app.editor.len() == 0;
+                                }
+
+                                if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
+                                    app.base_title = "Добро пожаловать".to_string();
+                                    app.sync_active_tab();
+                                }
+
+                                if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
         app.refresh_file_tree();
         app.start_file_watcher();
     }

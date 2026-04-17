@@ -351,6 +351,12 @@ pub struct App {
 }
 
 impl App {
+        pub fn save_tabs_state(&mut self) {
+        self.sync_active_tab();
+        crate::save_open_tabs(&self.tabs, self.active_tab);
+        self.sync_active_tab();
+    }
+
     pub fn sync_active_tab(&mut self) {
         if self.tabs.is_empty() {
             return;
@@ -372,13 +378,18 @@ impl App {
             &mut self.last_sent_version,
             &mut self.tabs[ai].last_sent_version,
         );
-        std::mem::swap(
+                std::mem::swap(
             &mut self.is_highlighted_once,
             &mut self.tabs[ai].is_highlighted_once,
         );
 
+        let title_to_use = if self.base_title.len() > self.tabs[ai].base_title.len() {
+            &self.base_title
+        } else {
+            &self.tabs[ai].base_title
+        };
         let icon_key =
-            crate::app::file_icons::file_icon_key(&self.tabs[ai].base_title.to_lowercase());
+            crate::app::file_icons::file_icon_key(&title_to_use.to_lowercase());
         self.tabs[ai].icon_key = icon_key;
     }
 
@@ -407,18 +418,18 @@ impl App {
                         path,
                         &self.file_extension,
                         &text,
-                        self.editor.version as i32,
-                    );
-                }
-            }
-        }
+                        self.editor.version as i32,                                        );
+                                    }
+                                }
+                            }
 
-        self.autocomplete_active = false;
-        self.show_welcome = self.file_path.is_none() && self.editor.len() == 0;
-        if let Some(w) = self.window.as_ref() {
+                            self.autocomplete_active = false;
+                            self.show_welcome = self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+                                    if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
+        self.save_tabs_state();
     }
 
     pub fn open_new_tab(&mut self) {
@@ -439,15 +450,16 @@ impl App {
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
-        self.sync_active_tab();
+                self.sync_active_tab();
 
         self.autocomplete_active = false;
-        self.show_welcome = true;
+        self.show_welcome = self.tabs.len() <= 1;
 
-        if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
             w.request_redraw();
         }
+        self.save_tabs_state();
     }
 
     pub fn close_tab_at(&mut self, idx: usize) {
@@ -463,18 +475,19 @@ impl App {
             self.sync_active_tab();
         } else {
             self.tabs.remove(idx);
-            if idx < self.active_tab {
+                        if idx < self.active_tab {
                 self.active_tab -= 1;
             }
         }
 
         self.autocomplete_active = false;
-        self.show_welcome = self.file_path.is_none() && self.editor.len() == 0;
+        self.show_welcome = self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
 
-        if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
+        self.save_tabs_state();
     }
 
     pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
@@ -874,10 +887,11 @@ impl App {
         self.scroll_x.current = 0.0;
         self.scroll_x.target = 0.0;
 
-        if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
             w.request_redraw();
         }
+        self.save_tabs_state();
     }
 
     pub fn trigger_file_picker(&mut self) {
@@ -915,9 +929,10 @@ impl App {
     pub fn save_current_file(&mut self) -> bool {
         if let Some(path) = self.file_path.clone() {
             let content = self.editor.get_full_text();
-            match std::fs::write(&path, &content) {
+                        match std::fs::write(&path, &content) {
                 Ok(_) => {
                     self.editor.mark_saved();
+                    self.save_tabs_state();
                     return true;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -933,9 +948,10 @@ impl App {
                         if let Some(mut stdin) = child.stdin.take() {
                             let _ = stdin.write_all(content.as_bytes());
                         }
-                        if let Ok(status) = child.wait() {
+                                                if let Ok(status) = child.wait() {
                             if status.success() {
                                 self.editor.mark_saved();
+                                self.save_tabs_state();
                                 return true;
                             }
                         }
@@ -1050,10 +1066,11 @@ impl App {
                         );
                     }
                 }
-                if let Some(w) = self.window.as_ref() {
+                                if let Some(w) = self.window.as_ref() {
                     App::update_window_title(w, &self.base_title, false);
                     w.request_redraw();
                 }
+                self.save_tabs_state();
             }
             Err(_) => {
                 self.recent_files.retain(|p| p != &path);

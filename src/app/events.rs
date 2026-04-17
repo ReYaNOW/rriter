@@ -1119,9 +1119,9 @@ impl ApplicationHandler for App {
             }
         }
 
-        let is_highlighting = !self.is_highlighted_once;
+                let is_highlighting = !self.is_highlighted_once;
 
-        if needs_redraw {
+        if needs_redraw || (self.show_welcome && self.is_ide_mode) {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();
             }
