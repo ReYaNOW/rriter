@@ -36,9 +36,10 @@ impl App {
                         UiId::WelcomeIdeMode => {
                 self.show_welcome = false;
                 self.is_ide_mode = true;
-                if self.base_title == "Добро пожаловать" || self.base_title.is_empty() {
-                    self.base_title = "Безымянный".to_string();
-                }
+                // Удаляем пустые вкладки без файла и содержимого (появляются при старте без --ide)
+                self.sync_active_tab();
+                self.tabs.retain(|t| t.file_path.is_some() || t.editor.len() > 0);
+                self.active_tab = self.active_tab.min(self.tabs.len().saturating_sub(1));
 
                 if !self.ide_workspaces.is_empty() {
                     self.ide_panel.toggle(crate::app::PanelId::Explorer);

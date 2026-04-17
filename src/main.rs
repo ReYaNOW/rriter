@@ -526,20 +526,26 @@ F8\tПоказать/скрыть счетчик FPS
         lsp_actions_menu: None,
         pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
-        tabs: vec![crate::app::EditorTab {
-            editor: Editor::new(8192),
-            file_path: None,
-            base_title: String::new(),
-            file_extension: String::new(),
-            scroll_y: crate::scroll::ScrollState::new(15.0),
-            scroll_x: crate::scroll::ScrollState::new(15.0),
-            highlighter: Highlighter::new(),
-            last_sent_version: 0,
-            search_results: Vec::new(),
-            search_current_idx: None,
-            is_highlighted_once: false,
-            icon_key: "default_file",
-        }],
+        // IDE режим: начинаем без вкладок, пустой скрин покажет cowsay.
+        // Обычный режим: одна пустая вкладка (показывается welcome экран).
+        tabs: if is_ide_mode {
+            Vec::new()
+        } else {
+            vec![crate::app::EditorTab {
+                editor: Editor::new(8192),
+                file_path: None,
+                base_title: String::new(),
+                file_extension: String::new(),
+                scroll_y: crate::scroll::ScrollState::new(15.0),
+                scroll_x: crate::scroll::ScrollState::new(15.0),
+                highlighter: Highlighter::new(),
+                last_sent_version: 0,
+                search_results: Vec::new(),
+                search_current_idx: None,
+                is_highlighted_once: false,
+                icon_key: "default_file",
+            }]
+        },
         active_tab: 0,
     };
 
@@ -570,6 +576,10 @@ F8\tПоказать/скрыть счетчик FPS
             for path_opt in saved_tabs {
                 if let Some(p) = path_opt {
                     if first {
+                        // В IDE режиме tabs пустые — нужно создать вкладку перед загрузкой
+                        if app.is_ide_mode && app.tabs.is_empty() {
+                            app.open_new_tab();
+                        }
                         app.load_file(p, false);
                         first = false;
                     } else {
@@ -580,7 +590,9 @@ F8\tПоказать/скрыть счетчик FPS
                     if first {
                         first = false;
                     } else {
-                        app.open_new_tab();
+                        if !app.is_ide_mode {
+                            app.open_new_tab();
+                        }
                     }
                 }
             }

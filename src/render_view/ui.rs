@@ -780,4 +780,76 @@ impl Renderer {
             self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_error);
         }
     }
+    /// Рисует весёлый cowsay-экран когда в IDE-режиме нет открытых вкладок.
+    /// Сайдбар уже нарисован до вызова, рисуем только зону редактора.
+    pub fn draw_empty_ide(&mut self, panel_left_w: f32) {
+        let s = self.scale_factor;
+        let sb_w = 48.0 * s;
+        let editor_x = sb_w + panel_left_w;
+        let editor_w = self.width - editor_x;
+        let editor_h = self.height;
+
+        // Фон области редактора
+        self.push_rect(
+            editor_x,
+            0.0,
+            editor_w,
+            editor_h,
+            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+        );
+
+        let cow_lines = [
+            " _________________________ ",
+            "< Открой файл и погнали!  >",
+            " ------------------------- ",
+            "        \\   ^__^           ",
+            "         \\  (oo)\\_______   ",
+            "            (__)\\       )\\/\\",
+            "                ||----w |  ",
+            "                ||     || ",
+        ];
+
+        let hint_lines = [
+            "Ctrl+O  — открыть файл",
+            "Ctrl+N  — новый файл (Ctrl+T)",
+            "Кликни в дереве файлов слева",
+        ];
+
+        // Измеряем ширину для центрирования
+        let mono_scale = 0.95_f32;
+        let line_h = 22.0 * s;
+
+        let cow_total_h = cow_lines.len() as f32 * line_h;
+        let hint_gap = 32.0 * s;
+        let hint_total_h = hint_lines.len() as f32 * (line_h + 4.0 * s);
+        let total_block_h = cow_total_h + hint_gap + hint_total_h;
+
+        let start_y = (editor_h - total_block_h) / 2.0;
+
+        // Рисуем корову
+        let cow_color = [0.55_f32, 0.50, 0.75, 0.9];
+        for (i, line) in cow_lines.iter().enumerate() {
+            let lw = self.measure_ui_width(line, mono_scale);
+            let lx = (editor_x + (editor_w - lw) / 2.0).round();
+            let ly = (start_y + i as f32 * line_h + line_h * 0.75).round();
+            self.draw_string_scaled(line, lx, ly, cow_color, mono_scale);
+        }
+
+        // Разделитель
+        let sep_y = start_y + cow_total_h + hint_gap / 2.0;
+        let sep_w = 200.0 * s;
+        let sep_x = editor_x + (editor_w - sep_w) / 2.0;
+        self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.06]);
+
+        // Подсказки
+        let hint_y_start = start_y + cow_total_h + hint_gap;
+        for (i, line) in hint_lines.iter().enumerate() {
+            let lw = self.measure_ui_width(line, 0.9);
+            let lx = (editor_x + (editor_w - lw) / 2.0).round();
+            let ly = (hint_y_start + i as f32 * (line_h + 4.0 * s) + line_h * 0.75).round();
+            self.draw_string_scaled(line, lx, ly, [0.45, 0.45, 0.52, 1.0], 0.9);
+        }
+
+        self.flush();
+    }
 }

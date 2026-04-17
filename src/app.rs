@@ -453,7 +453,7 @@ impl App {
                 self.sync_active_tab();
 
         self.autocomplete_active = false;
-        self.show_welcome = self.tabs.len() <= 1;
+        self.show_welcome = if self.is_ide_mode { false } else { self.tabs.len() <= 1 };
 
                 if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
@@ -464,6 +464,24 @@ impl App {
 
     pub fn close_tab_at(&mut self, idx: usize) {
         if self.tabs.len() <= 1 {
+            if self.is_ide_mode {
+                // IDE: разрешаем закрыть последнюю вкладку (tabs будет пустым)
+                self.sync_active_tab();
+                if let Some(lsp) = &mut self.lsp {
+                    if let Some(path) = &self.file_path {
+                        lsp.notify_close(path, &self.file_extension);
+                    }
+                }
+                self.tabs.clear();
+                self.autocomplete_active = false;
+                self.show_welcome = false;
+                if let Some(w) = self.window.as_ref() {
+                    App::update_window_title(w, "RRiter", false);
+                    w.request_redraw();
+                }
+                self.save_tabs_state();
+                return;
+            }
             self.close_current_file();
             return;
         }

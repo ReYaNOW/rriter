@@ -591,6 +591,12 @@ impl Renderer {
             }
         }
 
+        // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
+        if is_ide_mode && tabs.is_empty() {
+            self.draw_empty_ide(panel_left_w);
+            return (false, Vec::new());
+        }
+
         let first_len = first.len();
         let len = first_len + second.len();
 
