@@ -258,11 +258,13 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::LspServerFixAll(idx) => {
+                        UiId::LspServerFixAll(idx) => {
                 if let Some(lsp) = &mut self.lsp {
                     if idx < self.ide_panel.lsp_servers.len() {
-                        if let Some(request_id) = lsp.request_fix_all(&self.file_extension) {
-                            self.pending_fix_all_id = Some(request_id);
+                        if let Some(path) = self.file_path.clone() {
+                            if let Some(request_id) = lsp.request_fix_all(&path, &self.file_extension) {
+                                self.pending_fix_all_id = Some(request_id);
+                            }
                         }
                     }
                 }
@@ -541,7 +543,10 @@ impl App {
                 }
             }
             UiId::CopyDiagnostic(idx) => {
-                if let Some(diag) = self.lsp.as_ref().map(|l| l.diagnostics.get(idx)).flatten() {
+                                if let Some(diag) = self.file_path.as_ref()
+                    .and_then(|p| self.lsp.as_ref().and_then(|l| l.diagnostics.get(p)))
+                    .and_then(|diags| diags.get(idx))
+                {
                     let _ = self.clipboard.set_text(&diag.message);
                     self.ide_panel.diag_copied_idx = Some(idx);
                 }

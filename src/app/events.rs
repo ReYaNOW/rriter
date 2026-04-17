@@ -340,13 +340,13 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                let lsp_diags = self
-                    .lsp
-                    .as_ref()
-                    .map(|l| l.diagnostics.as_slice())
-                    .unwrap_or(&[]);
+                                                                                                let lsp_diags = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
+                                                                                    lsp.get_diagnostics(path)
+                                                                                } else {
+                                                                                    &[]
+                                                                                };
 
-                // Очищаем UI registry перед новым кадром
+                                                                                // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
 
                                                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(&mut self.editor,

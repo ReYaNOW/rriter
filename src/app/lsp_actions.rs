@@ -106,13 +106,12 @@ impl App {
             .partition_point(|&o| o <= cursor)
             .saturating_sub(1) as u32;
 
-        // Собираем диагностики текущей строки
-        let diags: Vec<crate::lsp::Diagnostic> = if let Some(lsp) = &self.lsp {
-            lsp.diagnostics_for_line(cursor_line)
+                // Собираем диагностики текущей строки
+        let diags: Vec<crate::lsp::Diagnostic> = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
+            lsp.diagnostics_for_line(path, cursor_line)
                 .into_iter()
                 .cloned()
-                .collect()
-        } else {
+                .collect()} else {
             Vec::new()
         };
 
@@ -153,11 +152,11 @@ impl App {
             items.push(crate::app::LspActionItem::AddNoqaAll);
         }
 
-        // Запрашиваем code actions от LSP
-                        let pending_id = if let Some(lsp) = &mut self.lsp {
+                // Запрашиваем code actions от LSP
+                        let pending_id = if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
             let ext = self.file_extension.clone();
             let (sl, sc) = crate::lsp::offset_to_lsp_pos(&self.editor.get_full_text(), self.editor.cursor, &self.editor.line_offsets);
-            lsp.request_code_actions(&ext, sl, sc, sl, sc, &diags, None)
+            lsp.request_code_actions(path, &ext, sl, sc, sl, sc, &diags, None)
                 } else {
             None
         };
@@ -200,16 +199,16 @@ impl App {
             crate::app::LspActionItem::AddNoqaAll => {
                 self.insert_noqa_comment(menu.cursor_line, &[]);
             }
-            crate::app::LspActionItem::FixAll => {
-                if let Some(lsp) = &mut self.lsp {
-                    if let Some(id) = lsp.request_fix_all(&self.file_extension) {
+                        crate::app::LspActionItem::FixAll => {
+                if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                    if let Some(id) = lsp.request_fix_all(path, &self.file_extension) {
                         self.pending_fix_all_id = Some(id);
                     }
                 }
             }
             crate::app::LspActionItem::OrganizeImports => {
-                if let Some(lsp) = &mut self.lsp {
-                    if let Some(id) = lsp.request_organize_imports(&self.file_extension) {
+                if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                    if let Some(id) = lsp.request_organize_imports(path, &self.file_extension) {
                         self.pending_fix_all_id = Some(id);
                     }
                 }

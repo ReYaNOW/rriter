@@ -1154,8 +1154,8 @@ fn encode_diagnostics_json(diags: &[Diagnostic]) -> String {
 pub struct LspManager {
     python: Option<LspProcess>,
     workspace: Option<PathBuf>,
-    /// Актуальные диагностики текущего файла
-    pub diagnostics: Vec<Diagnostic>,
+    /// Актуальные диагностики для каждого открытого файла
+    pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
     current_path: Option<PathBuf>,
     /// Статус ruff сервера
         pub python_status: LspServerStatus,
@@ -1166,13 +1166,13 @@ pub struct LspManager {
 }
 
 impl LspManager {
-    pub fn new(workspace: Option<PathBuf>) -> Self {
-                LspManager {
-            python: None,
-            workspace,
-            diagnostics: Vec::new(),
-            current_path: None,
-            python_status: LspServerStatus::Disabled,
+        pub fn new(workspace: Option<PathBuf>) -> Self {
+                    LspManager {
+                python: None,
+                workspace,
+                diagnostics: HashMap::new(),
+                current_path: None,
+                python_status: LspServerStatus::Disabled,
             python_disabled: false,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
@@ -1249,25 +1249,25 @@ impl LspManager {
         }
     }
 
-    /// Уведомляет LSP об открытии файла
-        pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
-        self.suppress_diagnostics = false;
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = &self.workspace {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.current_path = Some(abs_path.clone());
-        self.diagnostics.clear();
-        if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_open(&abs_path, text, version);
+        /// Уведомляет LSP об открытии файла
+            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+            self.suppress_diagnostics = false;
+            let abs_path = if path.is_absolute() {
+                path.clone()
+            } else if let Some(ws) = &self.workspace {
+                ws.join(path)
+            } else {
+                std::env::current_dir().unwrap_or_default().join(path)
+            };
+            self.current_path = Some(abs_path.clone());
+            self.diagnostics.remove(&abs_path);
+            if let Some(proc) = self.process_for_ext(ext) {
+                proc.notify_open(&abs_path, text, version);
+            }
         }
-    }
 
-    /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
-        pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
+    pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -1282,18 +1282,24 @@ impl LspManager {
     }
 
     /// Уведомляет LSP о закрытии файла
-    pub fn notify_close(&mut self, ext: &str) {
-        if let Some(path) = self.current_path.take() {
-            if let Some(proc) = self.process_for_ext(ext) {
-                proc.notify_close(&path);
-            }
+    pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        if let Some(proc) = self.process_for_ext(ext) {
+            proc.notify_close(&abs_path);
         }
-        self.diagnostics.clear();
+        self.diagnostics.remove(&abs_path);
     }
 
     /// Запрашивает code actions для позиции/диагностики
-        pub fn request_code_actions(
+    pub fn request_code_actions(
         &mut self,
+        path: &PathBuf,
         ext: &str,
         start_line: u32,
         start_col: u32,
@@ -1302,10 +1308,16 @@ impl LspManager {
         relevant_diags: &[Diagnostic],
         only: Option<Vec<String>>,
     ) -> Option<i32> {
-        let path = self.current_path.clone()?;
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
         let proc = self.process_for_ext(ext)?;
         Some(proc.request_code_actions(
-            &path,
+            &abs_path,
             start_line,
             start_col,
             end_line,
@@ -1327,17 +1339,9 @@ impl LspManager {
         // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                                LspEvent::Diagnostics { path, items, .. } => {
-                    let incoming_uri = path_to_uri(&path.to_string_lossy());
-                    let current_uri = self
-                        .current_path
-                        .as_ref()
-                        .map(|p| path_to_uri(&p.to_string_lossy()));
-
-                    if Some(&incoming_uri) == current_uri.as_ref() {
-                        if !self.suppress_diagnostics {
-                            self.diagnostics = items.clone();
-                        }
+                                            LspEvent::Diagnostics { path, items, .. } => {
+                    if !self.suppress_diagnostics {
+                        self.diagnostics.insert(path.clone(), items.clone());
                     }
                 }
                 LspEvent::StatusChanged { status, .. } => {
@@ -1363,20 +1367,37 @@ impl LspManager {
         all
     }
 
+        pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.diagnostics.get(&abs_path).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
     /// Диагностики для текущего файла, отфильтрованные по строке
-    pub fn diagnostics_for_line(&self, line: u32) -> Vec<&Diagnostic> {
-        self.diagnostics
+    pub fn diagnostics_for_line(&self, path: &PathBuf, line: u32) -> Vec<&Diagnostic> {
+        self.get_diagnostics(path)
             .iter()
             .filter(move |d| d.start_line == line)
             .collect()
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-        pub fn request_fix_all(&mut self, ext: &str) -> Option<i32> {
-        let path = self.current_path.clone()?;
+        pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
         let proc = self.process_for_ext(ext)?;
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(&abs_path.to_string_lossy());
         let _ = proc.cmd_tx.send(Cmd::CodeAction {
             id,
             uri,
@@ -1390,11 +1411,17 @@ impl LspManager {
         Some(id)
     }
 
-    pub fn request_organize_imports(&mut self, ext: &str) -> Option<i32> {
-        let path = self.current_path.clone()?;
+    pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
         let proc = self.process_for_ext(ext)?;
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(&abs_path.to_string_lossy());
         let _ = proc.cmd_tx.send(Cmd::CodeAction {
             id,
             uri,

@@ -2034,6 +2034,8 @@ impl Renderer {
             let text_color = if is_active { self.theme.fg } else { [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.6] };
             self.draw_string_scaled(title, current_x + tab_pad + 20.0 * s, y + h / 2.0 + 5.0 * s, text_color, 0.9);
 
+                        ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
+
             if is_active || is_hovered {
                 let close_size = 16.0 * s;
                 let close_x = current_x + tab_w - tab_pad - close_size;
@@ -2048,8 +2050,6 @@ impl Renderer {
 
                 ui_registry.register_rect(crate::ui_system::UiId::EditorTabClose(i), close_x - 4.0 * s, close_y - 4.0 * s, close_size + 8.0 * s, close_size + 8.0 * s, mx, my);
             }
-
-            ui_registry.register_rect(crate::ui_system::UiId::EditorTab(i), current_x, y, tab_w, h, mx, my);
 
             current_x += tab_w + 1.0;
             self.push_rect(current_x - 1.0, y + h * 0.2, 1.0, h * 0.6,[1.0, 1.0, 1.0, 0.1]);

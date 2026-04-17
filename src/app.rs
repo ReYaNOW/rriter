@@ -370,13 +370,37 @@ impl App {
         self.tabs[ai].icon_key = icon_key;
     }
 
-    pub fn switch_to_tab(&mut self, new_idx: usize) {
+        pub fn switch_to_tab(&mut self, new_idx: usize) {
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
+
+        let old_path = self.file_path.clone();
+        let old_ext = self.file_extension.clone();
+
         self.sync_active_tab();
         self.active_tab = new_idx;
         self.sync_active_tab();
+
+        if self.is_ide_mode {
+            if let Some(lsp) = &mut self.lsp {
+                if let Some(path) = old_path {
+                    if self.file_path.as_ref() != Some(&path) {
+                        lsp.notify_close(&path, &old_ext);
+                    }
+                }
+                if let Some(path) = &self.file_path {
+                    let text = self.editor.get_full_text();
+                    lsp.notify_open(
+                        path,
+                        &self.file_extension,
+                        &text,
+                        self.editor.version as i32,
+                    );
+                }
+            }
+        }
+
         self.autocomplete_active = false;
         self.show_welcome = self.file_path.is_none() && self.editor.len() == 0;
         if let Some(w) = self.window.as_ref() {
@@ -810,7 +834,7 @@ impl App {
             return;
         }
 
-        self.file_path = None;
+                let path_to_close = self.file_path.take();
         self.base_title = "Добро пожаловать".to_string();
         let old_version = self.editor.version;
         self.editor = Editor::new(8192);
@@ -824,10 +848,12 @@ impl App {
         self.show_search = false;
         self.autocomplete_active = false;
         self.show_welcome = true;
-        if self.is_ide_mode {
+                if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 let ext = self.file_extension.clone();
-                lsp.notify_close(&ext);
+                                if let Some(path) = path_to_close {
+                    lsp.notify_close(&path, &ext);
+                }
             }
         }
 

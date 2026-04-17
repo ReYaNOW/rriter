@@ -444,11 +444,8 @@ impl App {
                 self.ide_panel.file_tree_expanded.insert(node.path.clone());
             }
             self.refresh_file_tree();
-        } else {
-            // Не перезагружаем файл, если он уже открыт
-            if self.file_path.as_deref() != Some(node.path.as_path()) {
-                self.load_file(node.path.clone(), false);
-            }
+                } else {
+            self.open_file_in_tab(node.path.clone(), false);
         }
     }
 

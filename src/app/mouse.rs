@@ -287,20 +287,24 @@ impl App {
                                 crate::app::LspActionItem::AddNoqaAll => {
                                     self.insert_noqa_comment(cursor_line, &[]);
                                 }
-                                crate::app::LspActionItem::FixAll => {
-                                    if let Some(lsp) = &mut self.lsp {
-                                        if let Some(id) = lsp.request_fix_all(&self.file_extension) {
-                                            self.pending_fix_all_id = Some(id);
-                                        }
-                                    }
-                                }
-                                crate::app::LspActionItem::OrganizeImports => {
-                                    if let Some(lsp) = &mut self.lsp {
-                                        if let Some(id) = lsp.request_organize_imports(&self.file_extension) {
-                                            self.pending_fix_all_id = Some(id);
-                                        }
-                                    }
-                                }
+                                                                crate::app::LspActionItem::FixAll => {
+                                                                    if let Some(lsp) = &mut self.lsp {
+                                                                        if let Some(path) = self.file_path.clone() {
+                                                                            if let Some(id) = lsp.request_fix_all(&path, &self.file_extension) {
+                                                                                self.pending_fix_all_id = Some(id);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                crate::app::LspActionItem::OrganizeImports => {
+                                                                    if let Some(lsp) = &mut self.lsp {
+                                                                        if let Some(path) = self.file_path.clone() {
+                                                                            if let Some(id) = lsp.request_organize_imports(&path, &self.file_extension) {
+                                                                                self.pending_fix_all_id = Some(id);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
                             }
                             self.window.as_ref().unwrap().request_redraw();
                             return;

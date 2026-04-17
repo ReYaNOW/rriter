@@ -83,7 +83,7 @@ FILE src/app/file_tree.rs
 
   pub fn handle_file_tree_click  [435]
 
-  pub fn file_tree_node_at  [457] -> Option<usize>
+  pub fn file_tree_node_at  [454] -> Option<usize>
 
 ────────────────────────────────────────────────────────────
 
@@ -122,14 +122,14 @@ FILE src/app/lsp_actions.rs
     CALL render_view::core_text: get_cursor_xy
     WRITE: lsp_actions_menu
 
-  pub fn apply_selected_lsp_action  [181]
+  pub fn apply_selected_lsp_action  [180]
     WRITE: pending_fix_all_id
     MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports
 
-  pub fn insert_noqa_comment  [223]
+  pub fn insert_noqa_comment  [222]
     CALL app: update_window_title
 
-  pub fn apply_workspace_edit  [311]
+  pub fn apply_workspace_edit  [310]
     CALL app: update_window_title
     CALL lsp: lsp_pos_to_offset
 
@@ -151,7 +151,7 @@ FILE src/app/mouse.rs
     WRITE: autocomplete_active, autocomplete_selected_idx, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, last_action, lsp_actions_menu, pending_fix_all_id, settings_ignore_focused, show_settings
     MATCH: LspActionItem::AddNoqa, LspActionItem::AddNoqaAll, LspActionItem::CodeAction, LspActionItem::FixAll, LspActionItem::OrganizeImports, UiId::SettingsIdeIgnoreInput
 
-  pub fn handle_main_cursor_moved  [639]
+  pub fn handle_main_cursor_moved  [643]
     CALL render_view::core_text: get_max_scroll
     CALL renderer: get_ui_glyph
     WRITE: autocomplete_hovered_idx
@@ -202,68 +202,68 @@ FILE src/app.rs
     SELF:  update_window_title
     WRITE: active_tab, autocomplete_active, show_welcome
 
-  pub fn open_new_tab  [388]
+  pub fn open_new_tab  [412]
     SELF:  update_window_title
     WRITE: active_tab, autocomplete_active, show_welcome, tabs.push
 
-  pub fn close_tab_at  [417]
+  pub fn close_tab_at  [441]
     SELF:  update_window_title
     WRITE: active_tab, autocomplete_active, show_welcome, tabs.remove
 
-  pub fn open_file_in_tab  [444]
+  pub fn open_file_in_tab  [468]
 
-  pub fn ensure_cursor_visible  [464]
+  pub fn ensure_cursor_visible  [488]
 
-  pub fn get_current_word_prefix  [503] -> String
+  pub fn get_current_word_prefix  [527] -> String
 
-  pub fn update_autocomplete  [523]
+  pub fn update_autocomplete  [547]
     SELF:  fuzzy_match
     WRITE: autocomplete_active, autocomplete_anim_progress, autocomplete_options, autocomplete_options.clear, autocomplete_selected_idx
     MATCH: SymbolKind::Class, SymbolKind::Function, SymbolKind::Keyword, SymbolKind::Parameter, SymbolKind::Unknown
 
-  pub fn ensure_autocomplete_visible  [602]
+  pub fn ensure_autocomplete_visible  [626]
 
-  pub fn apply_autocomplete  [632]
+  pub fn apply_autocomplete  [656]
     SELF:  update_window_title
     WRITE: autocomplete_active, autocomplete_selected_idx
 
-  pub fn update_search  [666]
+  pub fn update_search  [690]
     WRITE: search_current_idx, search_results.clear, search_results.push
 
-  pub fn jump_to_search_result  [722]
+  pub fn jump_to_search_result  [746]
 
-  pub fn update_window_title  [748]
+  pub fn update_window_title  [772]
 
-  pub fn show_action_dialog  [757]
+  pub fn show_action_dialog  [781]
     WRITE: dialog_gl_surface, dialog_window, is_dragging, pending_action
 
-  pub fn close_dialog  [799]
+  pub fn close_dialog  [823]
     WRITE: dialog_gl_surface, dialog_window
 
-  pub fn close_current_file  [807]
+  pub fn close_current_file  [831]
     SELF:  update_window_title
-    WRITE: autocomplete_active, base_title, editor, file_path, search_current_idx, search_results.clear, show_search, show_welcome
+    WRITE: autocomplete_active, base_title, editor, search_current_idx, search_results.clear, show_search, show_welcome
 
-  pub fn trigger_file_picker  [845]
+  pub fn trigger_file_picker  [871]
     WRITE: open_file_rx
 
-  pub fn trigger_folder_picker  [854]
+  pub fn trigger_folder_picker  [880]
     WRITE: open_folder_rx
 
-  pub fn trigger_save_as_picker  [865]
+  pub fn trigger_save_as_picker  [891]
     WRITE: save_file_rx
 
-  pub fn save_current_file  [877] -> bool
+  pub fn save_current_file  [903] -> bool
     MATCH: ErrorKind::PermissionDenied
 
-  pub fn add_recent_file  [914]
+  pub fn add_recent_file  [940]
     CALL main: save_recent_files
     WRITE: recent_files.insert, recent_files.retain, recent_files.truncate
 
-  pub fn apply_highlight_results  [923]
+  pub fn apply_highlight_results  [949]
     WRITE: is_highlighted_once
 
-  pub fn load_file  [953]
+  pub fn load_file  [979]
     SELF:  update_window_title
     CALL main: save_recent_files
     WRITE: autocomplete_active, base_title, editor, file_extension, file_path, is_highlighted_once, last_sent_version, recent_files.retain, search_current_idx, search_results.clear, show_welcome
@@ -505,38 +505,40 @@ FILE src/lsp.rs
       fn process_for_ext  [1242] -> Option<&mut LspProcess>
 
   pub fn notify_open  [1253]
-    WRITE: current_path, diagnostics.clear, suppress_diagnostics
+    WRITE: current_path, diagnostics.remove, suppress_diagnostics
 
   pub fn notify_change  [1270]
     WRITE: suppress_diagnostics
 
   pub fn notify_close  [1285]
-    WRITE: diagnostics.clear
+    WRITE: diagnostics.remove
 
-  pub fn request_code_actions  [1295] -> Option<i32>
+  pub fn request_code_actions  [1300] -> Option<i32>
 
-  pub fn poll  [1320] -> Vec<LspEvent>
-    SELF:  format_and_highlight_json, path_to_uri
-    WRITE: diagnostics, python_status
+  pub fn poll  [1332] -> Vec<LspEvent>
+    SELF:  format_and_highlight_json
+    WRITE: diagnostics.insert, python_status
     MATCH: LspEvent::Diagnostics, LspEvent::Log, LspEvent::StatusChanged
 
-  pub fn diagnostics_for_line  [1367] -> Vec<&Diagnostic>
+  pub fn get_diagnostics  [1370] -> &[Diagnostic]
 
-  pub fn request_fix_all  [1375] -> Option<i32>
+  pub fn diagnostics_for_line  [1382] -> Vec<&Diagnostic>
+
+  pub fn request_fix_all  [1390] -> Option<i32>
     SELF:  next_id, path_to_uri
 
-  pub fn request_organize_imports  [1393] -> Option<i32>
+  pub fn request_organize_imports  [1414] -> Option<i32>
     SELF:  next_id, path_to_uri
 
-  pub fn shutdown  [1412]
+  pub fn shutdown  [1439]
     WRITE: python_disabled
 
-  pub fn lsp_pos_to_offset  [1424] -> usize
+  pub fn lsp_pos_to_offset  [1451] -> usize
 
-  pub fn apply_workspace_edit_to_text  [1449] -> String
+  pub fn apply_workspace_edit_to_text  [1476] -> String
     SELF:  lsp_pos_to_offset
 
-  pub fn format_and_highlight_json  [1473] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
+  pub fn format_and_highlight_json  [1500] -> ( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )
     CALL queries: get_folding_query, get_ts_config
 
 ────────────────────────────────────────────────────────────
