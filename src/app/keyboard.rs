@@ -1,4 +1,5 @@
 use crate::app::{App, PendingAction};
+use crate::editor::Editor;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -262,26 +263,40 @@ impl App {
 
         match physical_key {
             PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
-                if self.editor.is_dirty() {
-                    self.show_action_dialog(event_loop, PendingAction::CloseFile);
+                if self.is_ide_mode {
+                    // TODO: Спросить о сохранении несохраненных вкладок
+                    // Закрываем все вкладки и возвращаемся на Welcome Screen
+
+                    // 1. Уведомить LSP о закрытии всех файлов
+                    self.sync_active_tab(); // Синхронизируем последнюю активную вкладку
+                    if let Some(lsp) = &mut self.lsp {
+                        for tab in &self.tabs {
+                            if let Some(p) = &tab.file_path {
+                                lsp.notify_close(p, &tab.file_extension);
+                            }
+                        }
+                    }
+
+                    // 2. Очистить все вкладки и сбросить состояние редактора до "пустого"
+                    self.tabs.clear();
+                    self.active_tab = 0;
+                    self.file_path = None;
+                    self.base_title = "Добро пожаловать".to_string();
+                    self.editor = Editor::new(8192);
+                    self.editor.set_original_text();
+                    self.highlighter
+                        .reset(self.editor.version, "".to_string(), "".to_string());
+                    self.show_welcome = true;
+                    self.autocomplete_active = false;
+                    self.scroll_y.stop_anim();
+                    self.scroll_x.stop_anim();
+                    self.save_tabs_state();
                 } else {
-                    let w = self.window.as_ref().unwrap();
-                    let maximized = w.is_maximized();
-                    let (width, height) = if maximized {
-                        (self.window_width, self.window_height)
+                    if self.editor.is_dirty() {
+                        self.show_action_dialog(event_loop, PendingAction::CloseFile);
                     } else {
-                        let scale = w.scale_factor();
-                        let size = w.inner_size().to_logical::<f64>(scale);
-                        (size.width, size.height)
-                    };
-                    crate::save_config(&crate::Config {
-                        window_width: width,
-                        window_height: height,
-                        maximized,
-                        ide_workspaces: self.ide_workspaces.clone(),
-                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                    });
-                    self.close_current_file();
+                        self.close_current_file();
+                    }
                 }
                 return;
             }
@@ -506,7 +521,7 @@ impl App {
                 is_edit = true;
                 should_sync = false;
             }
-            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+            PhysicalKey::Code(KeyCode::Digit4) if ctrl => {
                 self.close_tab_at(self.active_tab);
                 return;
             }
