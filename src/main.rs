@@ -440,6 +440,7 @@ F8\tПоказать/скрыть счетчик FPS
         dialog_window: None,
         dialog_gl_surface: None,
         settings_scroll: crate::scroll::ScrollState::new(15.0),
+        tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor,
         clipboard: Clipboard::new().unwrap_or_else(|_| Clipboard::new().unwrap()),

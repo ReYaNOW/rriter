@@ -225,6 +225,19 @@ impl App {
             return;
         }
 
+        let s = self.renderer.as_ref().unwrap().scale_factor;
+        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+        
+        let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if my >= 0.0 && my <= tab_bar_h && !self.tabs.is_empty() {
+            self.tab_scroll.anim_speed = 7.0;
+            self.tab_scroll.scroll_by(dy);
+            let max_scroll = self.renderer.as_ref().unwrap().max_tab_scroll_x;
+            self.tab_scroll.clamp_target(0.0, max_scroll);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         self.scroll_y.anim_speed = 7.0;
         self.scroll_x.anim_speed = 7.0;
 

@@ -575,6 +575,54 @@ impl Renderer {
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
+    pub fn push_horizontal_gradient(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        left: [f32; 4],
+        right: [f32; 4],
+    ) {
+        let x1 = x.round();
+        let y1 = y.round();
+        let x2 = x1 + w.round();
+        let y2 = y1 + h.round();
+
+        let sdf_params = [0.0, 0.0, 0.0];
+
+        let v1 = crate::renderer::Vertex {
+            pos: [x1, y1],
+            uv: [0.0, 0.0],
+            color: left,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v2 = crate::renderer::Vertex {
+            pos: [x2, y1],
+            uv: [0.0, 0.0],
+            color: right,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v3 = crate::renderer::Vertex {
+            pos: [x2, y2],
+            uv: [0.0, 0.0],
+            color: right,
+            mode: 2.0,
+            sdf_params,
+        };
+        let v4 = crate::renderer::Vertex {
+            pos: [x1, y2],
+            uv: [0.0, 0.0],
+            color: left,
+            mode: 2.0,
+            sdf_params,
+        };
+
+        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+    }
+
     pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {

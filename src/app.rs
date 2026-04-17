@@ -244,6 +244,7 @@ pub struct App {
     pub dialog_window: Option<Window>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
     pub settings_scroll: crate::scroll::ScrollState,
+    pub tab_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
     pub editor: Editor,
     pub clipboard: Clipboard,

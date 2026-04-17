@@ -378,6 +378,7 @@ impl ApplicationHandler for App {
                     self.show_settings,
                     lsp_diags,
                     &mut self.ui_registry,
+                    self.tab_scroll.current,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -710,6 +711,10 @@ impl ApplicationHandler for App {
         }
 
         if self.scroll_x.update(dt) {
+            needs_redraw = true;
+        }
+        
+        if self.tab_scroll.update(dt) {
             needs_redraw = true;
         }
 

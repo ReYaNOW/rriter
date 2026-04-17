@@ -109,6 +109,7 @@ pub struct Renderer {
     pub last_scroll_y: f32,
     pub last_scroll_x: f32,
     pub max_scroll_x: f32,
+    pub max_tab_scroll_x: f32,
     pub last_editor_version_for_scroll_x: u64,
 
     pub last_frame_time: Option<std::time::Instant>,
@@ -422,6 +423,7 @@ impl Renderer {
                 last_scroll_y: 0.0,
                 last_scroll_x: 0.0,
                 max_scroll_x: 0.0,
+                max_tab_scroll_x: 0.0,
                 last_editor_version_for_scroll_x: u64::MAX,
                 fps: 0.0,
                 frame_count: 0,

@@ -1,5 +1,14 @@
 # Rules for AI Assistant
 
+Allowed commands:
+1) read files (only in project)
+2) find files (only in project)
+3) change files (only in project)
+4) create only .rs, .py, .dart files (only in project)
+5) delete only .rs, .py, .dart files ( only in project)
+5) other specific commands - make test, make fast.
+THATS IT. Git commands or any other ARE NOT ALLOWED FOR YOU.
+
 # HOW TO THINK AND HOW TO SPEAK
 ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".
 
