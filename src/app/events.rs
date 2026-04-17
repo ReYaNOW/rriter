@@ -378,7 +378,7 @@ impl ApplicationHandler for App {
                     self.show_settings,
                     lsp_diags,
                     &mut self.ui_registry,
-                    self.tab_scroll.current,
+                    self.tab_scroll.current.round(),
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -713,7 +713,7 @@ impl ApplicationHandler for App {
         if self.scroll_x.update(dt) {
             needs_redraw = true;
         }
-        
+
         if self.tab_scroll.update(dt) {
             needs_redraw = true;
         }
@@ -1124,7 +1124,7 @@ impl ApplicationHandler for App {
             }
         }
 
-                let is_highlighting = !self.is_highlighted_once;
+        let is_highlighting = !self.is_highlighted_once;
 
         if needs_redraw || (self.show_welcome && self.is_ide_mode) {
             if let Some(w) = self.window.as_ref() {

@@ -591,28 +591,28 @@ impl Renderer {
 
         let sdf_params = [0.0, 0.0, 0.0];
 
-        let v1 = crate::renderer::Vertex {
+        let v1 = Vertex {
             pos: [x1, y1],
             uv: [0.0, 0.0],
             color: left,
             mode: 2.0,
             sdf_params,
         };
-        let v2 = crate::renderer::Vertex {
+        let v2 = Vertex {
             pos: [x2, y1],
             uv: [0.0, 0.0],
             color: right,
             mode: 2.0,
             sdf_params,
         };
-        let v3 = crate::renderer::Vertex {
+        let v3 = Vertex {
             pos: [x2, y2],
             uv: [0.0, 0.0],
             color: right,
             mode: 2.0,
             sdf_params,
         };
-        let v4 = crate::renderer::Vertex {
+        let v4 = Vertex {
             pos: [x1, y2],
             uv: [0.0, 0.0],
             color: left,

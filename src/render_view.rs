@@ -19,7 +19,7 @@ pub struct ModInterval {
 }
 
 impl Renderer {
-        pub fn draw(
+    pub fn draw(
         &mut self,
         editor: &mut Editor,
         editor_title: &str,
@@ -1566,23 +1566,32 @@ impl Renderer {
             self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
         }
 
-                if show_welcome && is_ide_mode {
+        if show_welcome && is_ide_mode {
             let anim_w = self.width - gutter_x;
             let anim_h = self.height - panel_bottom_h;
             self.push_rect(gutter_x, 0.0, anim_w, anim_h, [0.173, 0.180, 0.224, 1.0]);
 
             ui_registry.register_blocker(
                 crate::ui_system::UiId::BottomPanelBody,
-                gutter_x, 0.0, anim_w, anim_h,
-                mx, my,
+                gutter_x,
+                0.0,
+                anim_w,
+                anim_h,
+                mx,
+                my,
             );
 
-            let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f32();
-                        let text = "RRiter";
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f32();
+            let text = "RRiter";
             let sub_text = "Нет открытых файлов";
             let scale_t = 3.0;
             let scale_sub = 1.2;
-            let text_w = self.measure_ui_width(text, scale_t).max(self.measure_ui_width(sub_text, scale_sub));
+            let text_w = self
+                .measure_ui_width(text, scale_t)
+                .max(self.measure_ui_width(sub_text, scale_sub));
             let text_h = 70.0 * s;
 
             let eff_w = (anim_w - text_w).max(1.0);
@@ -1599,7 +1608,13 @@ impl Renderer {
             let draw_x = gutter_x + rx;
             let draw_y = ry + 40.0 * s;
             self.draw_string_scaled(text, draw_x, draw_y, [r, g, b, 1.0], scale_t);
-            self.draw_string_scaled(sub_text, draw_x, draw_y + 30.0 * s, [0.5, 0.5, 0.6, 1.0], scale_sub);
+            self.draw_string_scaled(
+                sub_text,
+                draw_x,
+                draw_y + 30.0 * s,
+                [0.5, 0.5, 0.6, 1.0],
+                scale_sub,
+            );
             self.flush();
         } else if !show_welcome {
             let tab_x = gutter_x;
@@ -1636,6 +1651,7 @@ impl Renderer {
                 sticky_anim_is_adding,
                 gutter_x,
                 ui_registry,
+                tab_bar_h,
             )
         };
 
@@ -2190,7 +2206,7 @@ impl Renderer {
         )
     }
 
-        fn draw_tab_bar(
+    fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
@@ -2207,14 +2223,15 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
     ) {
-        let sidebar_bg = [0.173, 0.180, 0.224, 1.0];
-        self.push_rect(x, y, w, h, sidebar_bg);
+        let tab_bar_bg = self.theme.minimap_bg;
+        self.push_rect(x, y, w, h, tab_bar_bg);
 
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             let sy = (self.height - (y + h)).round() as i32;
-            self.gl.scissor(x.round() as i32, sy, w.round() as i32, h.round() as i32);
+            self.gl
+                .scissor(x.round() as i32, sy, w.round() as i32, h.round() as i32);
         }
 
         let mut current_x = x - tab_scroll_x;
@@ -2246,12 +2263,7 @@ impl Renderer {
                 && my <= y + h;
 
             let bg_color = if is_active {
-                [
-                    self.theme.bg[0],
-                    self.theme.bg[1],
-                    self.theme.bg[2],
-                    1.0,
-                ]
+                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0]
             } else if is_hovered {
                 [
                     self.theme.bg[0] + 0.02,
@@ -2295,7 +2307,7 @@ impl Renderer {
             let text_color = if is_active {
                 self.theme.fg
             } else {
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.6]
+                self.theme.line_num
             };
             let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
             self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
@@ -2317,7 +2329,7 @@ impl Renderer {
                 let close_size = 20.0 * s;
                 let close_x = current_x + tab_w - tab_pad - close_size;
                 let close_y = (y + (h - close_size) / 2.0 - 1.5 * s).round();
-                
+
                 let close_rect_x = close_x - 4.0 * s;
                 let close_rect_y = close_y - 4.0 * s;
                 let close_rect_w = close_size + 8.0 * s;
@@ -2389,26 +2401,32 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        let fade_w = 30.0 * s;
-        if tab_scroll_x > 0.0 {
-            self.push_horizontal_gradient(
-                x,
-                y,
-                fade_w,
-                h,
-                sidebar_bg,
-                [sidebar_bg[0], sidebar_bg[1], sidebar_bg[2], 0.0],
-            );
+        let base_shadow_alpha = 0.4;
+        let transparent = [0.0, 0.0, 0.0, 0.0];
+        let fade_w = 40.0 * s;
+
+        // Левое затемнение с плавным появлением
+        let left_alpha = (tab_scroll_x / fade_w).clamp(0.0, 1.0) * base_shadow_alpha;
+        if left_alpha > 0.001 {
+            let shadow_color = [0.0, 0.0, 0.0, left_alpha];
+            self.push_horizontal_gradient(x, y, fade_w, h, shadow_color, transparent);
         }
-        if self.max_tab_scroll_x > 0.0 && tab_scroll_x < self.max_tab_scroll_x {
-            self.push_horizontal_gradient(
-                x + w - fade_w,
-                y,
-                fade_w,
-                h,
-                [sidebar_bg[0], sidebar_bg[1], sidebar_bg[2], 0.0],
-                sidebar_bg,
-            );
+
+        // Правое затемнение с плавным появлением
+        if self.max_tab_scroll_x > 0.0 {
+            let right_alpha = ((self.max_tab_scroll_x - tab_scroll_x) / fade_w).clamp(0.0, 1.0)
+                * base_shadow_alpha;
+            if right_alpha > 0.001 {
+                let shadow_color = [0.0, 0.0, 0.0, right_alpha];
+                self.push_horizontal_gradient(
+                    x + w - fade_w,
+                    y,
+                    fade_w,
+                    h,
+                    transparent,
+                    shadow_color,
+                );
+            }
         }
     }
 

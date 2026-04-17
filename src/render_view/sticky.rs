@@ -15,6 +15,7 @@ impl Renderer {
         anim_is_adding: bool,
         gutter_x: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        tab_bar_h: f32,
     ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
         let mut active_ranges = Vec::new();
@@ -94,7 +95,7 @@ impl Renderer {
             let v_sl = self.phys_to_visual.get(sl).copied().unwrap_or(0);
             let v_el = self.phys_to_visual.get(el).copied().unwrap_or(0);
 
-            let slot_y = depth as f32 * self.line_height;
+            let slot_y = depth as f32 * self.line_height + tab_bar_h;
             let line_y = v_sl as f32 * self.line_height - render_scroll_y;
             let push_y = (v_el + 1) as f32 * self.line_height - render_scroll_y;
 
@@ -116,7 +117,7 @@ impl Renderer {
 
             for i in 0..current_sticky_lines.len() {
                 let slot_y = i as f32 * self.line_height;
-                y_positions[i] = slot_y;
+                y_positions[i] = slot_y + tab_bar_h;
             }
 
             let s = self.scale_factor;
