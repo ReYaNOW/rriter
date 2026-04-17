@@ -330,7 +330,7 @@ impl App {
             }
 
             // Глобальная обработка декларативного UI
-            if !self.show_welcome && !self.show_settings && self.dialog_window.is_none() {
+            if !self.show_settings && self.dialog_window.is_none() {
                 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
                     if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
@@ -433,20 +433,6 @@ impl App {
             return;
         }
 
-        if self.show_welcome {
-            if state == ElementState::Pressed {
-                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
-
-                // Используем UI registry для обработки кликов
-                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
-                    self.handle_ui_click(clicked_id);
-                }
-            }
-            self.window.as_ref().unwrap().request_redraw();
-            return;
-        }
-
         if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
@@ -503,9 +489,9 @@ impl App {
                         };
 
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let btn_size = 36.0 * s;
-                        let btn_gap = 8.0 * s;
-                        let top_start_y = 6.0 * s;
+                        let btn_size = 48.0 * s;
+                        let btn_gap = 0.0;
+                        let top_start_y = 0.0;
 
                         let mut top_items = Vec::new();
                         let mut bottom_items = Vec::new();
@@ -528,7 +514,6 @@ impl App {
                                     top_idx += 1;
                                 } else {
                                     let y = wh
-                                        - 6.0 * s
                                         - btn_size
                                         - bottom_idx as f32 * (btn_size + btn_gap);
                                     bottom_items.push((y, slot));
@@ -654,11 +639,6 @@ impl App {
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
 
         if self.dialog_window.is_some() {
-            return;
-        }
-
-        if self.show_welcome {
-            self.window.as_ref().unwrap().request_redraw();
             return;
         }
 

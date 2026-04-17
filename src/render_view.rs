@@ -390,30 +390,7 @@ impl Renderer {
                     }
                 }
 
-                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
-                let resize_x = panel_x + panel_left_w;
-                if mx >= resize_x - 4.0 * s
-                    && mx <= resize_x + 4.0 * s
-                    && my >= 0.0
-                    && my <= real_height
-                {
-                    self.push_rect(
-                        resize_x - 2.0,
-                        0.0,
-                        2.0,
-                        real_height,
-                        [0.60, 0.35, 0.85, 0.4],
-                    );
-                }
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::ResizeLeft,
-                    resize_x - 4.0 * s,
-                    0.0,
-                    8.0 * s,
-                    real_height,
-                    mx,
-                    my,
-                );
+                // (Ручка ресайза была здесь, перенесена в конец блока левой панели)
 
                 // --- LSP серверы ---
                 if ide_panel.is_open(crate::app::PanelId::LspServers) {
@@ -588,6 +565,31 @@ impl Renderer {
                         self.gl.disable(glow::SCISSOR_TEST);
                     }
                 }
+
+                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                let resize_x = panel_x + panel_left_w;
+                if mx >= resize_x - 4.0 * s
+                    && mx <= resize_x + 4.0 * s
+                    && my >= 0.0
+                    && my <= real_height
+                {
+                    self.push_rect(
+                        resize_x - 2.0,
+                        0.0,
+                        2.0,
+                        real_height,
+                        [0.60, 0.35, 0.85, 0.4],
+                    );
+                }
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::ResizeLeft,
+                    resize_x - 4.0 * s,
+                    0.0,
+                    8.0 * s,
+                    real_height,
+                    mx,
+                    my,
+                );
             }
         }
 
