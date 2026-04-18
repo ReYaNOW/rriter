@@ -567,10 +567,10 @@ impl Renderer {
                     }
                 }
 
-                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
-                if mx >= resize_x - 4.0 * s
-                    && mx <= resize_x + 4.0 * s
+                if mx >= resize_x - 8.0 * s
+                    && mx <= resize_x + 8.0 * s
                     && my >= 0.0
                     && my <= real_height
                 {
@@ -578,19 +578,9 @@ impl Renderer {
                         resize_x - 2.0,
                         0.0,
                         2.0,
-                        real_height,
-                        [0.60, 0.35, 0.85, 0.4],
+                        real_height,[0.60, 0.35, 0.85, 0.4],
                     );
                 }
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::ResizeLeft,
-                    resize_x - 4.0 * s,
-                    0.0,
-                    8.0 * s,
-                    real_height,
-                    mx,
-                    my,
-                );
             }
         }
 
@@ -1799,19 +1789,10 @@ impl Renderer {
                 tx += tw;
             }
 
-            // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
-            if my >= panel_y - 4.0 * s && my <= panel_y + 4.0 * s && mx >= panel_x {
-                self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
+                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+            if my >= panel_y - 8.0 * s && my <= panel_y + 8.0 * s && mx >= panel_x {
+                self.push_rect(panel_x, panel_y, panel_w, 2.0,[0.60, 0.35, 0.85, 0.4]);
             }
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ResizeBottom,
-                panel_x,
-                panel_y - 4.0 * s,
-                panel_w,
-                8.0 * s,
-                mx,
-                my,
-            );
 
             // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
@@ -2197,7 +2178,33 @@ impl Renderer {
             }
         }
 
-        self.flush();
+                self.flush();
+
+        // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
+        if is_ide_mode && panel_left_w > 0.0 {
+            let resize_x = 48.0 * s + panel_left_w;
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ResizeLeft,
+                resize_x - 8.0 * s,
+                0.0,
+                16.0 * s,
+                real_height,
+                mx,
+                my,
+            );
+        }
+        if is_ide_mode && panel_bottom_h > 0.0 {
+            let panel_y = self.height - panel_bottom_h;
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ResizeBottom,
+                48.0 * s,
+                panel_y - 8.0 * s,
+                self.width - 48.0 * s,
+                16.0 * s,
+                mx,
+                my,
+            );
+        }
 
         (
             wants_pointer | ui_registry.wants_pointer(),
