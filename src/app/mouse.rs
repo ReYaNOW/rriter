@@ -60,6 +60,39 @@ impl App {
             }
         }
 
+                                if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
+            let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top);
+            let sb_w = 48.0 * s;
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+
+            let (cx, cy, cw, ch) = if is_top {
+                let panel_left_w = self.ide_panel.left_width * s;
+                let title_h = 32.0 * s;
+                (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+            } else {
+                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                let tab_h = 32.0 * s;
+                (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
+            };
+
+            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                self.ide_panel.problems_scroll.anim_speed = 7.0;
+                self.ide_panel.problems_scroll.scroll_by(dy);
+                let row_h = 24.0 * s;
+                let total_h = self.ide_panel.flat_diags.len() as f32 * row_h;
+                let track_h = ch - 40.0 * s;
+                let max_scroll = (total_h - track_h).max(0.0);
+                self.ide_panel.problems_scroll.clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
@@ -342,8 +375,57 @@ impl App {
                 }
             }
 
-            // Глобальная обработка декларативного UI
+                                    // Глобальная обработка декларативного UI
             if !self.show_settings && self.dialog_window.is_none() {
+                if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {
+                    let s = self.renderer.as_ref().unwrap().scale_factor;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
+                    let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top);
+                    let sb_w = 48.0 * s;
+                    let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+
+                    let (cx, cy, cw, ch) = if is_top {
+                        let panel_left_w = self.ide_panel.left_width * s;
+                        let title_h = 32.0 * s;
+                        (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+                    } else {
+                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                        let tab_h = 32.0 * s;
+                        (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
+                    };
+
+                    if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                        let scroll_x = cx + cw - 12.0 * s;
+                        if mx >= scroll_x {
+                            let item_h = 24.0 * s;
+                            let total_h = self.ide_panel.flat_diags.len() as f32 * item_h;
+                            let track_h = ch - 40.0 * s;
+                            if total_h > track_h {
+                                let max_scroll = total_h - track_h;
+                                let scroll_ratio = (self.ide_panel.problems_scroll.current / max_scroll).clamp(0.0, 1.0);
+                                let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
+                                let list_y = cy + 40.0 * s;
+                                let thumb_y = list_y + scroll_ratio * (track_h - thumb_h);
+
+                                if my >= thumb_y && my <= thumb_y + thumb_h {
+                                    self.ide_panel.problems_scroll.is_dragging = true;
+                                    self.ide_panel.problems_scroll.drag_offset = my - thumb_y;
+                                    return;
+                                } else if my >= list_y && my <= list_y + track_h {
+                                    self.ide_panel.problems_scroll.anim_speed = 15.0;
+                                    self.ide_panel.problems_scroll.drag_offset = thumb_h / 2.0;
+                                    let new_ratio = (my - list_y - thumb_h / 2.0) / (track_h - thumb_h).max(1.0);
+                                    self.ide_panel.problems_scroll.target = (new_ratio * max_scroll).clamp(0.0, max_scroll);
+                                    self.ide_panel.problems_scroll.is_dragging = true;
+                                    self.window.as_ref().unwrap().request_redraw();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
                     if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
@@ -567,7 +649,8 @@ impl App {
             self.autocomplete_scroll.is_dragging = false;
             self.scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_x.is_dragging = false;
-            self.ide_panel.lsp_scroll_y.is_dragging = false;
+                        self.ide_panel.lsp_scroll_y.is_dragging = false;
+            self.ide_panel.problems_scroll.is_dragging = false;
             for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
                 scroll.is_dragging = false;
             }
@@ -737,9 +820,31 @@ impl App {
             }
         }
 
-        // Hover над узлами дерева файлов
+                        // Hover над узлами дерева файлов
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
-            let new_hover = self.file_tree_node_at(position.x as f32, position.y as f32);
+            let mut new_hover = self.file_tree_node_at(position.x as f32, position.y as f32);
+
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top);
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+
+                        let (ecx, ecy, ecw, ech) = if is_top {
+                let panel_left_w = self.ide_panel.left_width * s;
+                let title_h = 32.0 * s;
+                (48.0 * s, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+            } else {
+                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                let tab_h = 32.0 * s;
+                (48.0 * s, wh - panel_bottom_h + 1.0 + tab_h, ww - 48.0 * s, panel_bottom_h - 1.0 - tab_h)
+            };
+
+            let px = position.x as f32;
+            let py = position.y as f32;
+            if px < ecx || px > ecx + ecw || py < ecy || py > ecy + ech {
+                new_hover = None;
+            }
+
             if new_hover != self.ide_panel.file_tree_hovered_idx {
                 self.ide_panel.file_tree_hovered_idx = new_hover;
                 self.window.as_ref().unwrap().request_redraw();
@@ -925,6 +1030,24 @@ impl App {
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
             }
+                } else if self.ide_panel.problems_scroll.is_dragging {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let bottom_h = self.ide_panel.bottom_height * s;
+            let cy = wh - bottom_h;
+
+            let item_h = 24.0 * s;
+            let total_h = self.ide_panel.flat_diags.len() as f32 * item_h;
+            let track_h = bottom_h - 40.0 * s;
+            let max_scroll = (total_h - track_h).max(0.0);
+            let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
+            let list_y = cy + 40.0 * s;
+
+            let ratio = (position.y as f32 - list_y - self.ide_panel.problems_scroll.drag_offset) / (track_h - thumb_h).max(0.0001);
+            self.ide_panel.problems_scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+            self.ide_panel.problems_scroll.current = self.ide_panel.problems_scroll.target;
+            self.window.as_ref().unwrap().request_redraw();
+            return;
         } else if self.ide_panel.lsp_scroll_y.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some((_, cy, _, ch)) = self.lsp_panel_bounds() {

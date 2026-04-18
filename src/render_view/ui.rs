@@ -896,7 +896,7 @@ impl Renderer {
         self.flush();
     }
 
-        pub fn draw_problems_panel(
+                pub fn draw_problems_panel(
         &mut self,
         content_x: f32,
         content_y: f32,
@@ -907,19 +907,7 @@ impl Renderer {
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
-        self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (content_y + content_h)).round() as i32;
-            self.gl.scissor(
-                content_x.round() as i32,
-                sy,
-                content_w.round() as i32,
-                content_h.round() as i32,
-            );
-        }
-
-                let pad_x = 12.0 * s;
+        let pad_x = 12.0 * s;
         let text_scale = 0.92;
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
@@ -928,39 +916,64 @@ impl Renderer {
         let tab_y = content_y + 8.0 * s;
         let tab_h = 24.0 * s;
 
-        let tabs = ["Текущий файл", "Все"];
+        let tabs =["Текущий файл", "Все"];
         for (i, t) in tabs.iter().enumerate() {
             let tw = self.measure_ui_width(t, text_scale) + 16.0 * s;
             let is_active = ide_panel.problems_tab == i;
-            let bg = if is_active {[1.0, 1.0, 1.0, 0.15] } else {[1.0, 1.0, 1.0, 0.0] };
-            let fg = if is_active { self.theme.fg } else {[0.6, 0.6, 0.6, 1.0] };
+            let bg = if is_active {[1.0, 1.0, 1.0, 0.12] } else {[1.0, 1.0, 1.0, 0.0] };
+            let fg = if is_active { self.theme.fg } else {[0.65, 0.65, 0.65, 1.0] };
 
             let is_hovered = ui_registry.register_rect(
                 crate::ui_system::UiId::ProblemsTab(i),
                 tab_x, tab_y, tw, tab_h,
                 mx, my
             );
+
             if is_active || is_hovered {
-                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.08] } else { bg };
-                self.push_rounded_rect(tab_x, tab_y, tw, tab_h, 4.0 * s, draw_bg);
+                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.06] } else { bg };
+                self.push_rounded_rect(tab_x.round(), tab_y.round(), tw, tab_h, 4.0 * s, draw_bg);
             }
-            self.draw_string_scaled(t, tab_x + 8.0 * s, tab_y + tab_h / 2.0 + 4.0 * s, fg, text_scale);
+
+            if is_active {
+                self.push_rect(tab_x.round(), (tab_y + tab_h).round(), tw, 2.0 * s,[0.741, 0.576, 0.976, 1.0]);
+            }
+
+            self.draw_string_scaled(t, tab_x + 8.0 * s, (tab_y + tab_h / 2.0 + 4.0 * s).round(), fg, text_scale);
             tab_x += tw + 8.0 * s;
         }
 
-        let list_y = tab_y + tab_h + 8.0 * s;
+        let header_bottom_y = tab_y + tab_h + 2.0 * s;
+        self.push_rect(content_x, header_bottom_y.round(), content_w, 1.0,[1.0, 1.0, 1.0, 0.08]);
+
+        self.flush();
+
+        let list_y = header_bottom_y + 6.0 * s;
+        let list_h = content_h - (list_y - content_y);
+
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (list_y + list_h)).round() as i32;
+            self.gl.scissor(
+                content_x.round() as i32,
+                sy,
+                content_w.round() as i32,
+                list_h.round() as i32,
+            );
+        }
+
+        let scroll_y = ide_panel.problems_scroll.current.round();
 
         if ide_panel.flat_diags.is_empty() {
             let hint = "Нет ляпов";
             let tw = self.measure_ui_width(hint, text_scale);
             self.draw_string_scaled(
                 hint,
-                (content_x + (content_w - tw) / 2.0).round(),
+                content_x + (content_w - tw) / 2.0,
                 (list_y + 32.0 * s).round(),[0.45, 0.45, 0.45, 1.0],
                 text_scale,
             );
         } else {
-            let mut current_y = list_y;
+            let mut current_y = list_y - scroll_y;
             let item_h = 24.0 * s;
 
             for (idx, (path, diag_idx)) in ide_panel.flat_diags.iter().enumerate() {
@@ -974,17 +987,17 @@ impl Renderer {
                     let icon_x = content_x + pad_x;
                     let icon_y = current_y + (item_h - icon_sz) / 2.0;
 
-                    ui_registry.register_rect(
+                                        ui_registry.register_rect(
                         crate::ui_system::UiId::ProblemJump(idx),
                         content_x,
                         current_y,
-                        content_w,
+                        content_w - 14.0 * s,
                         item_h,
                         self.last_mouse_x,
                         self.last_mouse_y,
                     );
                     if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx)) {
-                        self.push_rect(content_x, current_y, content_w, item_h, [1.0, 1.0, 1.0, 0.05]);
+                        self.push_rect(content_x, current_y, content_w - 14.0 * s, item_h, [1.0, 1.0, 1.0, 0.05]);
                     }
 
                     let (icon, color) = match diag.severity {
@@ -1006,13 +1019,13 @@ impl Renderer {
                         format!("Строка {}: ", diag.start_line + 1)
                     };
 
-                    let prefix_w = self.measure_ui_width(&prefix, text_scale);
-                    self.draw_string_scaled(&prefix, text_x, text_y, self.theme.fg, text_scale);
+                                                                                let prefix_w = self.measure_ui_width(&prefix, text_scale).round();
+                    self.draw_string_scaled(&prefix, text_x.round(), text_y.round(), self.theme.fg, text_scale);
 
-                    let mut current_tx = text_x + prefix_w;
-                    let msg_w = self.measure_ui_width(&msg, text_scale);
-                    self.draw_string_scaled(&msg, current_tx, text_y, self.theme.fg, text_scale);
-                    current_tx += msg_w + self.measure_ui_width(" ", text_scale);
+                    let mut current_tx = text_x.round() + prefix_w;
+                    let msg_w = self.measure_ui_width(&msg, text_scale).round();
+                    self.draw_string_scaled(&msg, current_tx, text_y.round(), self.theme.fg, text_scale);
+                    current_tx += msg_w + self.measure_ui_width(" ", text_scale).round();
 
                     let source_prefix = match (&diag.source, &diag.code) {
                         (Some(src), Some(_)) => format!("({} ", src),
@@ -1025,21 +1038,20 @@ impl Renderer {
                         None => String::new(),
                     };
 
-                    let p_w = self.measure_ui_width(&source_prefix, text_scale);
-                    self.draw_string_scaled(&source_prefix, current_tx, text_y, [0.55, 0.55, 0.6, 1.0], text_scale);
+                    let p_w = self.measure_ui_width(&source_prefix, text_scale).round();
+                    self.draw_string_scaled(&source_prefix, current_tx, text_y.round(),[0.55, 0.55, 0.6, 1.0], text_scale);
 
                     if !source_suffix.is_empty() {
                         let sfx_x = current_tx + p_w;
-                        let sfx_w = self.measure_ui_width(&source_suffix, text_scale);
-                        let link_color = [0.72, 0.52, 1.0, 1.0];
+                        let sfx_w = self.measure_ui_width(&source_suffix, text_scale).round();
+                        let link_color =[0.72, 0.52, 1.0, 1.0];
                         let sfx_color = if diag.code_href.is_some() {
                             link_color
-                        } else {
-                            [link_color[0], link_color[1], link_color[2], 0.85]
+                        } else {[link_color[0], link_color[1], link_color[2], 0.85]
                         };
 
-                        self.draw_string_scaled(&source_suffix, sfx_x, text_y, sfx_color, text_scale);
-                        self.draw_string_scaled(")", sfx_x + sfx_w, text_y, [0.55, 0.55, 0.6, 1.0], text_scale);
+                        self.draw_string_scaled(&source_suffix, sfx_x, text_y.round(), sfx_color, text_scale);
+                        self.draw_string_scaled(")", sfx_x + sfx_w, text_y.round(),[0.55, 0.55, 0.6, 1.0], text_scale);
 
                         if diag.code_href.is_some() {
                             ui_registry.register_rect(
@@ -1052,14 +1064,31 @@ impl Renderer {
                                 self.last_mouse_y,
                             );
                             if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemUrl(idx)) {
-                                self.push_rect(sfx_x, text_y + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.9]);
+                                self.push_rect(sfx_x, text_y.round() + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.9]);
                             } else {
-                                self.push_rect(sfx_x, text_y + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.55]);
+                                self.push_rect(sfx_x, text_y.round() + 1.0, sfx_w, 1.0,[link_color[0], link_color[1], link_color[2], 0.55]);
                             }
                         }
                     }
                 }
                 current_y += item_h;
+            }
+
+            let total_h = ide_panel.flat_diags.len() as f32 * item_h;
+            let track_h = content_h - 40.0 * s;
+            if total_h > track_h {
+                let max_scroll = total_h - track_h;
+                let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
+                let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
+                let thumb_y = list_y + scroll_ratio * (track_h - thumb_h);
+
+                self.push_rounded_rect(
+                    content_x + content_w - 12.0 * s,
+                    thumb_y.round(),
+                    6.0 * s,
+                    thumb_h,
+                    3.0 * s,[0.45, 0.45, 0.55, 0.5],
+                );
             }
         }
 

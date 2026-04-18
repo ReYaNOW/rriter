@@ -1286,7 +1286,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-        pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -1296,7 +1296,6 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         self.current_path = Some(abs_path.clone());
-        self.diagnostics.remove(&abs_path);
         let ws = self.workspace.clone();
         if let Some(proc) = self.process_for_ext(ext) {
             proc.notify_open(&abs_path, text, version, ws.as_ref());
@@ -1319,7 +1318,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP о закрытии файла
-    pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
+        pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1330,7 +1329,6 @@ impl LspManager {
         if let Some(proc) = self.process_for_ext(ext) {
             proc.notify_close(&abs_path);
         }
-        self.diagnostics.remove(&abs_path);
     }
 
     /// Запрашивает code actions для позиции/диагностики

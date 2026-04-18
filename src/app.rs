@@ -140,9 +140,10 @@ pub struct IdePanelState {
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
             pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
         pub lsp_logs_focused: Option<String>,
-                pub diag_copied_idx: Option<usize>,
+                        pub diag_copied_idx: Option<usize>,
         pub problems_tab: usize,
         pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+        pub problems_scroll: crate::scroll::ScrollState,
     }
 
     impl Default for IdePanelState {
@@ -187,9 +188,10 @@ pub struct IdePanelState {
                             lsp_logs_scroll_y: FxHashMap::default(),
                 lsp_logs_scroll_x: FxHashMap::default(),
                                 lsp_logs_focused: None,
-                diag_copied_idx: None,
+                                diag_copied_idx: None,
                 problems_tab: 0,
                 flat_diags: Vec::new(),
+                problems_scroll: crate::scroll::ScrollState::new(15.0),
             }
         }
     }
@@ -489,24 +491,16 @@ impl App {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
         }
-        if new_idx == self.active_tab || new_idx >= self.tabs.len() {
+                if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
-
-        let old_path = self.file_path.clone();
-        let old_ext = self.file_extension.clone();
 
         self.sync_active_tab();
         self.active_tab = new_idx;
         self.sync_active_tab();
 
-        if self.is_ide_mode {
+                if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
-                if let Some(path) = old_path {
-                    if self.file_path.as_ref() != Some(&path) {
-                        lsp.notify_close(&path, &old_ext);
-                    }
-                }
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();
                     lsp.notify_open(

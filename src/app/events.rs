@@ -768,7 +768,10 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             }
         }
-        if self.ide_panel.explorer_scroll.update(dt) {
+                if self.ide_panel.explorer_scroll.update(dt) {
+            needs_redraw = true;
+        }
+        if self.ide_panel.problems_scroll.update(dt) {
             needs_redraw = true;
         }
         if self.ide_panel.lsp_scroll_y.update(dt) {

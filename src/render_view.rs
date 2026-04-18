@@ -507,17 +507,11 @@ impl Renderer {
                                 }
                             }
 
-                            let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                            let mut color: [f32; 4] = if node.is_ignored {[0.973, 0.584, 0.502, 0.8]
+                                                        let text_y = row_y + row_h / 2.0 + 5.5 * s;
+                            let color: [f32; 4] = if node.is_ignored {[0.973, 0.584, 0.502, 0.8]
                             } else if node.is_dir {[0.78, 0.68, 1.0, 1.0]
                             } else {[0.651, 0.686, 0.918, 1.0]
                             };
-
-                            if has_error {
-                                color = self.theme.diag_error;
-                            } else if has_warn {
-                                color = self.theme.diag_warn;
-                            }
 
                             let icon_size = 20.0 * s;
                             let icon_y = row_y + (row_h - icon_size) / 2.0;
@@ -527,10 +521,8 @@ impl Renderer {
                                 let arrow_str = if node.is_expanded { "▼" } else { "▶" };
                                 let arrow_x = indent_x - 2.0 * s;
                                 let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
-                                let arrow_color = if node.is_ignored {
-                                    [0.973, 0.584, 0.502, 0.6]
-                                } else {
-                                    [0.78, 0.68, 1.0, 0.7]
+                                let arrow_color = if node.is_ignored {[0.973, 0.584, 0.502, 0.6]
+                                } else {[0.78, 0.68, 1.0, 0.7]
                                 };
                                 self.draw_string_scaled(
                                     arrow_str,
@@ -548,13 +540,19 @@ impl Renderer {
                                     icon_y,
                                     icon_size,
                                 );
+                                let text_x = dir_icon_x + icon_size + 4.0 * s;
                                 self.draw_string_scaled(
                                     &node.name,
-                                    dir_icon_x + icon_size + 4.0 * s,
+                                    text_x,
                                     text_y,
                                     color,
                                     tree_text_scale,
                                 );
+                                if has_error || has_warn {
+                                    let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
+                                    let sq_color = if has_error { self.theme.diag_error } else { self.theme.diag_warn };
+                                    self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                                }
                             } else {
                                 let file_icon_x = indent_x + 10.0 * s;
                                 self.draw_file_icon(
@@ -564,13 +562,19 @@ impl Renderer {
                                     icon_y,
                                     icon_size,
                                 );
+                                let text_x = file_icon_x + icon_size + 4.0 * s;
                                 self.draw_string_scaled(
                                     &node.name,
-                                    file_icon_x + icon_size + 4.0 * s,
+                                    text_x,
                                     text_y,
                                     color,
                                     tree_text_scale,
                                 );
+                                if has_error || has_warn {
+                                    let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
+                                    let sq_color = if has_error { self.theme.diag_error } else { self.theme.diag_warn };
+                                    self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                                }
                             }
                         }
 
