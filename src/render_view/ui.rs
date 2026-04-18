@@ -896,14 +896,15 @@ impl Renderer {
         self.flush();
     }
 
-    pub fn draw_problems_panel(
+        pub fn draw_problems_panel(
         &mut self,
         content_x: f32,
         content_y: f32,
         content_w: f32,
         content_h: f32,
         s: f32,
-        lsp_diagnostics: &[crate::lsp::Diagnostic],
+        lsp: Option<&crate::lsp::LspManager>,
+        ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
         self.flush();
@@ -918,29 +919,56 @@ impl Renderer {
             );
         }
 
-        let pad_x = 12.0 * s;
+                let pad_x = 12.0 * s;
         let text_scale = 0.92;
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
 
-        if lsp_diagnostics.is_empty() {
+        let mut tab_x = content_x + pad_x;
+        let tab_y = content_y + 8.0 * s;
+        let tab_h = 24.0 * s;
+
+        let tabs = ["Текущий файл", "Все"];
+        for (i, t) in tabs.iter().enumerate() {
+            let tw = self.measure_ui_width(t, text_scale) + 16.0 * s;
+            let is_active = ide_panel.problems_tab == i;
+            let bg = if is_active {[1.0, 1.0, 1.0, 0.15] } else {[1.0, 1.0, 1.0, 0.0] };
+            let fg = if is_active { self.theme.fg } else {[0.6, 0.6, 0.6, 1.0] };
+
+            let is_hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::ProblemsTab(i),
+                tab_x, tab_y, tw, tab_h,
+                mx, my
+            );
+            if is_active || is_hovered {
+                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.08] } else { bg };
+                self.push_rounded_rect(tab_x, tab_y, tw, tab_h, 4.0 * s, draw_bg);
+            }
+            self.draw_string_scaled(t, tab_x + 8.0 * s, tab_y + tab_h / 2.0 + 4.0 * s, fg, text_scale);
+            tab_x += tw + 8.0 * s;
+        }
+
+        let list_y = tab_y + tab_h + 8.0 * s;
+
+        if ide_panel.flat_diags.is_empty() {
             let hint = "Нет ляпов";
             let tw = self.measure_ui_width(hint, text_scale);
             self.draw_string_scaled(
                 hint,
                 (content_x + (content_w - tw) / 2.0).round(),
-                (content_y + 32.0 * s).round(),
-                [0.45, 0.45, 0.45, 1.0],
+                (list_y + 32.0 * s).round(),[0.45, 0.45, 0.45, 1.0],
                 text_scale,
             );
         } else {
-            let mut current_y = content_y + 8.0 * s;
+            let mut current_y = list_y;
             let item_h = 24.0 * s;
 
-            let mut sorted_diags: Vec<_> = lsp_diagnostics.iter().enumerate().collect();
-            sorted_diags.sort_by(|(_, a), (_, b)| {
-                a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col))
-            });
-
-            for (idx, diag) in sorted_diags {
+            for (idx, (path, diag_idx)) in ide_panel.flat_diags.iter().enumerate() {
+                let diag = if let Some(l) = lsp {
+                    if let Some(d) = l.get_diagnostics(path).get(*diag_idx) {
+                        d
+                    } else { continue; }
+                } else { continue; };
                 if current_y + item_h > content_y && current_y < content_y + content_h {
                     let icon_sz = 16.0 * s;
                     let icon_x = content_x + pad_x;
@@ -970,8 +998,13 @@ impl Renderer {
                     let text_x = icon_x + icon_sz + 8.0 * s;
                     let text_y = current_y + item_h * 0.7;
 
-                    let msg = diag.message.lines().next().unwrap_or("").replace("\t", " ");
-                    let prefix = format!("Строка {}: ", diag.start_line + 1);
+                                        let msg = diag.message.lines().next().unwrap_or("").replace("\t", " ");
+                    let prefix = if ide_panel.problems_tab == 1 {
+                        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+                        format!("{} {}: ", file_name, diag.start_line + 1)
+                    } else {
+                        format!("Строка {}: ", diag.start_line + 1)
+                    };
 
                     let prefix_w = self.measure_ui_width(&prefix, text_scale);
                     self.draw_string_scaled(&prefix, text_x, text_y, self.theme.fg, text_scale);

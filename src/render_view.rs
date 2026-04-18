@@ -44,13 +44,19 @@ impl Renderer {
         current_sticky_lines: &[(usize, usize)],
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
-        is_ide_mode: bool,
+                is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
-        lsp_diagnostics: &[crate::lsp::Diagnostic],
+        lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
     ) -> (bool, Vec<(usize, usize)>) {
+        let lsp_diagnostics = if let Some(l) = lsp {
+            if let Some(p) = editor_path { l.get_diagnostics(p) } else { &[] }
+        } else {
+            &[]
+        };
+
         if show_welcome && !is_ide_mode {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
         }
@@ -479,14 +485,39 @@ impl Renderer {
                             }
 
                             let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                                                        let mut has_error = false;
+                            let mut has_warn = false;
+                            if !node.is_ignored {
+                                if let Some(l) = lsp {
+                                    for (p, diags) in &l.diagnostics {
+                                        if !diags.is_empty() && p.starts_with(&node.path) {
+                                            for d in diags {
+                                                if d.severity == crate::lsp::DiagSeverity::Error {
+                                                    has_error = true;
+                                                    break;
+                                                } else if d.severity == crate::lsp::DiagSeverity::Warning {
+                                                    has_warn = true;
+                                                }
+                                            }
+                                            if has_error {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                            let color: [f32; 4] = if node.is_ignored {
-                                [0.973, 0.584, 0.502, 0.8] // DRACULA_ORANGE (dimmed)
-                            } else if node.is_dir {
-                                [0.78, 0.68, 1.0, 1.0]
-                            } else {
-                                [0.651, 0.686, 0.918, 1.0] // #a6afea
+                            let mut color: [f32; 4] = if node.is_ignored {[0.973, 0.584, 0.502, 0.8]
+                            } else if node.is_dir {[0.78, 0.68, 1.0, 1.0]
+                            } else {[0.651, 0.686, 0.918, 1.0]
                             };
+
+                            if has_error {
+                                color = self.theme.diag_error;
+                            } else if has_warn {
+                                color = self.theme.diag_warn;
+                            }
 
                             let icon_size = 20.0 * s;
                             let icon_y = row_y + (row_h - icon_size) / 2.0;
@@ -1812,14 +1843,15 @@ impl Renderer {
                             !lsp_diagnostics.is_empty(),
                             ui_registry,
                         );
-                    } else if slot.id == crate::app::PanelId::Problems {
+                                        } else if slot.id == crate::app::PanelId::Problems {
                         self.draw_problems_panel(
                             panel_x,
                             content_y,
                             panel_w,
                             content_h,
                             s,
-                            lsp_diagnostics,
+                            lsp,
+                            ide_panel,
                             ui_registry,
                         );
                     } else {

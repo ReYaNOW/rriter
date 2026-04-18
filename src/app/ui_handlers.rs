@@ -499,6 +499,10 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
+                        UiId::ProblemsTab(idx) => {
+                self.ide_panel.problems_tab = idx;
+                self.window.as_ref().unwrap().request_redraw();
+            }
             UiId::OpenDiagUrl(_idx) => {
                 if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
                     #[cfg(target_os = "windows")]
@@ -511,11 +515,11 @@ impl App {
                     let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }
-            UiId::ProblemUrl(idx) => {
-                if let Some(path) = &self.file_path {
+                        UiId::ProblemUrl(idx) => {
+                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if let Some(lsp) = &self.lsp {
                         let diags = lsp.get_diagnostics(path);
-                        if let Some(diag) = diags.get(idx) {
+                        if let Some(diag) = diags.get(*diag_idx) {
                             if let Some(href) = &diag.code_href {
                                 #[cfg(target_os = "windows")]
                                 let _ = std::process::Command::new("cmd")
@@ -531,10 +535,13 @@ impl App {
                 }
             }
             UiId::ProblemJump(idx) => {
-                if let Some(path) = &self.file_path {
+                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx).cloned() {
+                    if self.file_path.as_ref() != Some(&path) {
+                        self.open_file_in_tab(path.clone(), true);
+                    }
                     if let Some(lsp) = &self.lsp {
-                        let diags = lsp.get_diagnostics(path);
-                        if let Some(diag) = diags.get(idx) {
+                        let diags = lsp.get_diagnostics(&path);
+                        if let Some(diag) = diags.get(diag_idx) {
                             let line = diag.start_line as usize;
                             if line < self.editor.line_offsets.len() {
                                 self.editor.cursor = self.editor.line_offsets[line] + diag.start_col as usize;
@@ -573,15 +580,12 @@ impl App {
                     }
                 }
             }
-            UiId::CopyDiagnostic(idx) => {
-                if let Some(diag) = self
-                    .file_path
-                    .as_ref()
-                    .and_then(|p| self.lsp.as_ref().and_then(|l| l.diagnostics.get(p)))
-                    .and_then(|diags| diags.get(idx))
-                {
-                    let _ = self.clipboard.set_text(&diag.message);
-                    self.ide_panel.diag_copied_idx = Some(idx);
+                        UiId::CopyDiagnostic(idx) => {
+                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
+                    if let Some(diag) = self.lsp.as_ref().and_then(|l| l.diagnostics.get(path)).and_then(|diags| diags.get(*diag_idx)) {
+                        let _ = self.clipboard.set_text(&diag.message);
+                        self.ide_panel.diag_copied_idx = Some(idx);
+                    }
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }

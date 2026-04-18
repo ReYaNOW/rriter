@@ -349,14 +349,31 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                let lsp_diags = if let (Some(lsp), Some(path)) = (&self.lsp, &self.file_path) {
-                    lsp.get_diagnostics(path)
-                } else {
-                    &[]
-                };
-
-                // Очищаем UI registry перед новым кадром```
+                                // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
+
+                self.ide_panel.flat_diags.clear();
+                if let Some(lsp) = &self.lsp {
+                    if self.ide_panel.problems_tab == 0 {
+                        if let Some(p) = &self.file_path {
+                            let mut diags = lsp.get_diagnostics(p).iter().enumerate().collect::<Vec<_>>();
+                            diags.sort_by(|(_, a), (_, b)| a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col)));
+                            for (i, _) in diags {
+                                self.ide_panel.flat_diags.push((p.clone(), i));
+                            }
+                        }
+                    } else {
+                        let mut paths: Vec<_> = lsp.diagnostics.keys().collect();
+                        paths.sort();
+                        for p in paths {
+                            let mut diags = lsp.get_diagnostics(p).iter().enumerate().collect::<Vec<_>>();
+                            diags.sort_by(|(_, a), (_, b)| a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col)));
+                            for (i, _) in diags {
+                                self.ide_panel.flat_diags.push(((*p).clone(), i));
+                            }
+                        }
+                    }
+                }
 
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
@@ -384,8 +401,8 @@ impl ApplicationHandler for App {
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
                     &self.ide_panel,
-                    self.show_settings,
-                    lsp_diags,
+                                        self.show_settings,
+                    self.lsp.as_ref(),
                     &mut self.ui_registry,
                     self.tab_scroll.current.round(),
                 );
@@ -737,7 +754,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        // Watcher сигнализирует об изменениях на диске — обновляем дерево
+                // Watcher сигнализирует об изменениях на диске — обновляем дерево
         {
             let mut fs_changed = false;
             if let Some(rx) = &self.file_tree_notify_rx {
@@ -747,6 +764,7 @@ impl ApplicationHandler for App {
             }
             if fs_changed {
                 self.refresh_file_tree();
+                self.check_external_changes();
                 needs_redraw = true;
             }
         }

@@ -70,10 +70,11 @@ pub enum UiId {
     LspScrollX,
     LspLogScrollY(usize),
     LspLogScrollX(usize),
-    CopyDiagnostic(usize),
+        CopyDiagnostic(usize),
     OpenDiagUrl(usize),
     ProblemJump(usize),
     ProblemUrl(usize),
+    ProblemsTab(usize),
 }
 
 /// Тип UI элемента с его геометрией

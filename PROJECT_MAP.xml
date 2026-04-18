@@ -3,7 +3,7 @@
   <mod path="src/app/events.rs" name="app::events">
     <fn name="resumed" line="19" reads="base_title, editor, theme, window_height, window_width" writes="gl_config=, gl_context=, gl_surface=, renderer=, window=" calls="editor: is_dirty, new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
     <fn name="window_event" line="102" reads="active_tab, autocomplete_active, autocomplete_anim_progress, autocomplete_hovered_idx, autocomplete_options, autocomplete_scroll, autocomplete_selected_idx, base_title, current_sticky_lines, dialog_gl_surface, dialog_window, editor, faq_editor, file_path, gl_context, gl_surface, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, last_blink_state, lsp, lsp_actions_menu, pending_action, recent_files, renderer, scroll_x, scroll_y, search_anim_y, search_case_sensitive, search_current_idx, search_editor, search_focused, search_results, settings_anim_progress, settings_ide_scroll, settings_ignore_editor, settings_ignore_focused, settings_ignore_scroll_x, settings_scroll, settings_tab, should_maximize, show_fps, show_search, show_settings, show_welcome, sticky_anim_is_adding, sticky_anim_progress, tab_scroll, tabs, theme, window, window_height, window_width" writes="autocomplete_rect=, current_cursor=, is_focused=, is_ready=, last_resize_time=, modifiers=, target_sticky_lines=, tried_maximize=, ui_registry.clear()" calls="self: close_current_file, close_dialog, handle_main_cursor_moved, handle_main_keyboard_input, handle_main_mouse_input, handle_main_mouse_wheel, save_current_file, show_action_dialog, trigger_file_picker; app: any_bottom_open, any_top_open; editor: is_dirty; lsp: get_diagnostics; render_view: draw; render_view::core_text: get_cursor_xy, get_max_scroll; render_view::lsp_ui: draw_lsp_actions_menu; render_view::settings_ui: draw_settings; render_view::ui: draw_autocomplete, draw_dialog_window; renderer: resize; ui_system: id, mark_overlay_start; widgets: get_dialog_buttons, is_hovered" />
-    <fn name="about_to_wait" line="669" reads="autocomplete_active, autocomplete_scroll, editor, file_tree_notify_rx, highlighter, ide_ignore_patterns, ide_panel, is_dragging, is_focused, is_highlighted_once, is_ide_mode, last_action, lsp, lsp_actions_menu, renderer, scroll_x, scroll_y, search_anim_y, settings_ide_scroll, settings_scroll, settings_tab, show_search, show_settings, show_welcome, tab_scroll, target_sticky_lines, window, window_height, window_width" writes="autocomplete_anim_progress=, base_title=, current_sticky_lines=, file_extension=, file_path=, ide_workspaces.push(), last_blink_state=, last_frame=, last_resize_time=, open_file_rx=, open_folder_rx=, pending_fix_all_id=, run_ide_on_startup=, save_file_rx=, settings_anim_progress=, settings_y=, sticky_anim_is_adding=, sticky_anim_progress=" calls="self: add_recent_file, apply_highlight_results, apply_workspace_edit, enter_ide_mode, open_file_in_tab, poll_file_tree, refresh_file_tree, save_current_file, start_file_watcher, update_autocomplete; editor: get_full_text, insert_str, is_dirty, rebuild_line_offsets, set_cursor_at_pos; highlighter: poll, reset; lsp: poll, servers_info; render_view::core_text: get_max_scroll; scroll: clamp_current, clamp_target, update; ui_system: contains" />
+    <fn name="about_to_wait" line="686" reads="autocomplete_active, autocomplete_scroll, editor, file_tree_notify_rx, highlighter, ide_ignore_patterns, ide_panel, is_dragging, is_focused, is_highlighted_once, is_ide_mode, last_action, lsp, lsp_actions_menu, renderer, scroll_x, scroll_y, search_anim_y, settings_ide_scroll, settings_scroll, settings_tab, show_search, show_settings, show_welcome, tab_scroll, target_sticky_lines, window, window_height, window_width" writes="autocomplete_anim_progress=, base_title=, current_sticky_lines=, file_extension=, file_path=, ide_workspaces.push(), last_blink_state=, last_frame=, last_resize_time=, open_file_rx=, open_folder_rx=, pending_fix_all_id=, run_ide_on_startup=, save_file_rx=, settings_anim_progress=, settings_y=, sticky_anim_is_adding=, sticky_anim_progress=" calls="self: add_recent_file, apply_highlight_results, apply_workspace_edit, check_external_changes, enter_ide_mode, open_file_in_tab, poll_file_tree, refresh_file_tree, save_current_file, start_file_watcher, update_autocomplete; editor: get_full_text, insert_str, is_dirty, rebuild_line_offsets, set_cursor_at_pos; highlighter: poll, reset; lsp: poll, servers_info; render_view::core_text: get_max_scroll; scroll: clamp_current, clamp_target, update; ui_system: contains" />
   </mod>
   <mod path="src/app/file_icons.rs" name="app::file_icons">
     <type name="FallbackMatcher">{ set: RegexSet, keys: Vec&lt;&amp;'static str&gt; }</type>
@@ -51,7 +51,7 @@
   <mod path="src/app.rs" name="app">
     <type name="App">{ gl_config: Option&lt;glutin::config::Config&gt;, gl_context: Option&lt;PossiblyCurrentContext&gt;, gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, window: Option&lt;Window&gt;, dialog_window: Option&lt;Window&gt;, dialog_gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, settings_scroll: crate::scroll::ScrollState, tab_scroll: crate::scroll::ScrollState, renderer: Option&lt;Renderer&gt;, editor: Editor, clipboard: Clipboard, theme: Theme, base_title: String, file_path: Option&lt;PathBuf&gt;, file_extension: String, highlighter: Highlighter, last_sent_version: u64, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, last_frame: Instant, last_action: Instant, last_blink_state: bool, modifiers: ModifiersState, is_dragging: bool, is_focused: bool, current_cursor: winit::window::CursorIcon, show_fps: bool, window_width: f64, window_height: f64, last_resize_time: Option&lt;Instant&gt;, last_click_time: Instant, click_count: u8, last_click_pos: (f32, f32), pending_action: PendingAction, open_file_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, save_file_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, show_welcome: bool, recent_files: Vec&lt;PathBuf&gt;, is_ide_mode: bool, ide_workspaces: Vec&lt;PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, settings_ignore_editor: Editor, settings_ignore_focused: bool, settings_ignore_scroll_x: f32, is_dragging_settings_ignore: bool, open_folder_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, show_search: bool, search_anim_y: f32, search_editor: Editor, search_focused: bool, search_case_sensitive: bool, search_results: Vec&lt;(usize, usize)&gt;, search_current_idx: Option&lt;usize&gt;, is_dragging_search: bool, is_dragging_lsp_log: bool, faq_editor: Editor, is_ready: bool, is_highlighted_once: bool, tried_maximize: bool, should_maximize: bool, autocomplete_active: bool, autocomplete_options: Vec&lt;(CompletionItem, Vec&lt;usize&gt;)&gt;, autocomplete_selected_idx: usize, autocomplete_anim_progress: f32, autocomplete_scroll: crate::scroll::ScrollState, autocomplete_hovered_idx: Option&lt;usize&gt;, autocomplete_rect: Option&lt;(f32, f32, f32, f32)&gt;, current_sticky_lines: Vec&lt;(usize, usize)&gt;, target_sticky_lines: Vec&lt;(usize, usize)&gt;, sticky_anim_progress: f32, sticky_anim_is_adding: bool, show_settings: bool, settings_anim_progress: f32, settings_y: f32, settings_tab: usize, settings_ide_scroll: crate::scroll::ScrollState, ide_panel: IdePanelState, file_tree_rx: Option&lt;std::sync::mpsc::Receiver&lt;Vec&lt;crate::app::file_tree::FileNode&gt;&gt;&gt;, file_tree_notify_rx: Option&lt;std::sync::mpsc::Receiver&lt;()&gt;&gt;, lsp: Option&lt;crate::lsp::LspManager&gt;, lsp_actions_menu: Option&lt;LspActionsMenu&gt;, pending_fix_all_id: Option&lt;i32&gt;, ui_registry: crate::ui_system::UiRegistry, tabs: Vec&lt;EditorTab&gt;, active_tab: usize, run_ide_on_startup: bool }</type>
     <type name="EditorTab">{ editor: crate::editor::Editor, file_path: Option&lt;PathBuf&gt;, base_title: String, file_extension: String, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, highlighter: crate::highlighter::Highlighter, last_sent_version: u64, search_results: Vec&lt;(usize, usize)&gt;, search_current_idx: Option&lt;usize&gt;, is_highlighted_once: bool, icon_key: &amp;'static str }</type>
-    <type name="IdePanelState">{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, explorer_scroll: crate::scroll::ScrollState, file_tree_hovered_idx: Option&lt;usize&gt;, lsp_servers: Vec&lt;crate::lsp::LspServerInfo&gt;, lsp_logs_expanded: FxHashSet&lt;String&gt;, lsp_scroll_y: crate::scroll::ScrollState, lsp_scroll_x: crate::scroll::ScrollState, lsp_log_editors: FxHashMap&lt;String, Editor&gt;, lsp_logs_scroll_y: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_scroll_x: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_focused: Option&lt;String&gt;, diag_copied_idx: Option&lt;usize&gt; }</type>
+    <type name="IdePanelState">{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, explorer_scroll: crate::scroll::ScrollState, file_tree_hovered_idx: Option&lt;usize&gt;, lsp_servers: Vec&lt;crate::lsp::LspServerInfo&gt;, lsp_logs_expanded: FxHashSet&lt;String&gt;, lsp_scroll_y: crate::scroll::ScrollState, lsp_scroll_x: crate::scroll::ScrollState, lsp_log_editors: FxHashMap&lt;String, Editor&gt;, lsp_logs_scroll_y: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_scroll_x: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_focused: Option&lt;String&gt;, diag_copied_idx: Option&lt;usize&gt;, problems_tab: usize, flat_diags: Vec&lt;(std::path::PathBuf, usize)&gt; }</type>
     <type name="LspActionItem">{ CodeAction(crate::lsp::CodeAction), AddNoqa { codes: Vec&lt;String&gt; }</type>
     <type name="LspActionsMenu">{ cursor_line: u32, items: Vec&lt;LspActionItem&gt;, selected: usize, menu_x: f32, menu_y: f32, pending_request_id: Option&lt;i32&gt; }</type>
     <type name="PanelDragState">{ panel_id: PanelId, start_y: f32, current_y: f32, threshold_passed: bool }</type>
@@ -61,37 +61,38 @@
     <type name="PendingAction">{ Quit, OpenFile, CloseFile }</type>
     <fn name="label" line="55" pub="true" ret="&amp;'static str" />
     <fn name="icon" line="63" pub="true" ret="crate::widgets::IconType" />
-    <fn name="default" line="147" ret="Self" />
-    <fn name="any_top_open" line="194" pub="true" ret="bool" reads="slots" />
-    <fn name="any_bottom_open" line="199" pub="true" ret="bool" reads="slots" />
-    <fn name="toggle" line="204" pub="true" reads="slots" />
-    <fn name="is_open" line="209" pub="true" ret="bool" reads="slots" />
-    <fn name="fuzzy_match" line="219" ret="Option&lt;Vec&lt;usize&gt;&gt;" />
-    <fn name="enter_ide_mode" line="358" pub="true" reads="editor, file_extension, ide_workspaces, window" writes="active_tab=, base_title=, file_path=, ide_panel=, is_ide_mode=, lsp=, show_welcome=, tabs.push()" calls="self: open_file_in_tab, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab; app::file_icons: file_icon_key; editor: get_full_text, is_dirty; lsp: notify_open" />
-    <fn name="save_tabs_state" line="440" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
-    <fn name="sync_active_tab" line="449" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
-    <fn name="switch_to_tab" line="484" pub="true" reads="base_title, editor, file_extension, file_path, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; lsp: notify_close, notify_open" />
-    <fn name="open_new_tab" line="528" pub="true" reads="is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab" />
-    <fn name="close_tab_at" line="593" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
-    <fn name="open_file_in_tab" line="627" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file, open_new_tab, switch_to_tab; editor: is_dirty" />
-    <fn name="ensure_cursor_visible" line="656" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
-    <fn name="get_current_word_prefix" line="695" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
-    <fn name="update_autocomplete" line="715" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
-    <fn name="ensure_autocomplete_visible" line="794" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
-    <fn name="apply_autocomplete" line="824" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
-    <fn name="update_search" line="858" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_search_result" line="914" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
-    <fn name="update_window_title" line="940" pub="true" />
-    <fn name="show_action_dialog" line="949" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="close_dialog" line="991" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
-    <fn name="close_current_file" line="999" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
-    <fn name="trigger_file_picker" line="1044" pub="true" writes="open_file_rx=" />
-    <fn name="trigger_folder_picker" line="1053" pub="true" writes="open_folder_rx=" />
-    <fn name="trigger_save_as_picker" line="1064" pub="true" writes="save_file_rx=" />
-    <fn name="save_current_file" line="1076" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; editor: get_full_text, mark_saved" />
-    <fn name="add_recent_file" line="1115" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
-    <fn name="apply_highlight_results" line="1124" pub="true" reads="editor, highlighter" writes="is_highlighted_once=" />
-    <fn name="load_file" line="1154" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
+    <fn name="default" line="149" ret="Self" />
+    <fn name="any_top_open" line="198" pub="true" ret="bool" reads="slots" />
+    <fn name="any_bottom_open" line="203" pub="true" ret="bool" reads="slots" />
+    <fn name="toggle" line="208" pub="true" reads="slots" />
+    <fn name="is_open" line="213" pub="true" ret="bool" reads="slots" />
+    <fn name="fuzzy_match" line="223" ret="Option&lt;Vec&lt;usize&gt;&gt;" />
+    <fn name="enter_ide_mode" line="362" pub="true" reads="editor, file_extension, ide_workspaces, window" writes="active_tab=, base_title=, file_path=, ide_panel=, is_ide_mode=, lsp=, show_welcome=, tabs.push()" calls="self: open_file_in_tab, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab; app::file_icons: file_icon_key; editor: get_full_text, is_dirty; lsp: notify_open" />
+    <fn name="save_tabs_state" line="444" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
+    <fn name="sync_active_tab" line="453" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
+    <fn name="switch_to_tab" line="488" pub="true" reads="base_title, editor, file_extension, file_path, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; lsp: notify_close, notify_open" />
+    <fn name="open_new_tab" line="532" pub="true" reads="is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab" />
+    <fn name="close_tab_at" line="597" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
+    <fn name="open_file_in_tab" line="631" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file, open_new_tab, switch_to_tab; editor: is_dirty" />
+    <fn name="ensure_cursor_visible" line="660" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
+    <fn name="get_current_word_prefix" line="699" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
+    <fn name="update_autocomplete" line="719" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
+    <fn name="ensure_autocomplete_visible" line="798" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
+    <fn name="apply_autocomplete" line="828" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
+    <fn name="update_search" line="862" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
+    <fn name="jump_to_search_result" line="918" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
+    <fn name="update_window_title" line="944" pub="true" />
+    <fn name="show_action_dialog" line="953" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
+    <fn name="close_dialog" line="995" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
+    <fn name="close_current_file" line="1003" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
+    <fn name="trigger_file_picker" line="1048" pub="true" writes="open_file_rx=" />
+    <fn name="trigger_folder_picker" line="1057" pub="true" writes="open_folder_rx=" />
+    <fn name="trigger_save_as_picker" line="1068" pub="true" writes="save_file_rx=" />
+    <fn name="save_current_file" line="1080" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; editor: get_full_text, mark_saved" />
+    <fn name="add_recent_file" line="1119" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
+    <fn name="apply_highlight_results" line="1128" pub="true" reads="editor, highlighter" writes="is_highlighted_once=" />
+    <fn name="load_file" line="1158" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
+    <fn name="check_external_changes" line="1236" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text; highlighter: reset" />
   </mod>
   <mod path="src/editor.rs" name="editor">
     <type name="EditOp">{ Insert { offset: usize, text: String }</type>
@@ -183,7 +184,7 @@
     <type name="LogEntry">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }</type>
     <type name="LspEvent">{ Log { name: &amp;'static str, message: String }</type>
     <type name="LspManager">{ python: Option&lt;LspProcess&gt;, workspace: Option&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, current_path: Option&lt;PathBuf&gt;, python_status: LspServerStatus, python_disabled: bool, server_logs: HashMap&lt;&amp;'static str, Vec&lt;LogEntry&gt;&gt;, suppress_diagnostics: bool }</type>
-    <type name="LspProcess">{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt; }</type>
+    <type name="LspProcess">{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt;, workspace_scanned: bool }</type>
     <type name="LspServerDef">{ program: &amp;'static str, args: &amp;'static [&amp;'static str], language_id: &amp;'static str, #[allow(dead_code)] extensions: &amp;'static [&amp;'static str] }</type>
     <type name="LspServerInfo">{ name: &amp;'static str, status: LspServerStatus, logs: Vec&lt;LogEntry&gt; }</type>
     <type name="LspServerStatus">{ Starting, Running, Crashed, Disabled }</type>
@@ -214,34 +215,34 @@
     <fn name="spawn_server" line="688" ret="Option&lt;SpawnedProcess&gt;" calls="self: dispatch_frame, write_frame" />
     <fn name="send_and_log" line="812" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" />
     <fn name="run_supervisor" line="828" calls="self: make_code_action, make_did_change_full, make_did_close, make_did_open, make_exit, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
-    <fn name="start" line="1021" ret="Self" calls="self: run_supervisor" />
-    <fn name="notify_open" line="1041" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=" calls="self: path_to_uri" />
-    <fn name="restart" line="1054" pub="true" reads="cmd_tx" />
-    <fn name="notify_change" line="1060" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="notify_close" line="1071" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_code_actions" line="1079" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
-    <fn name="poll" line="1109" pub="true" ret="Vec&lt;LspEvent&gt;" reads="event_rx" />
-    <fn name="shutdown" line="1121" pub="true" reads="cmd_tx" />
-    <fn name="encode_diagnostics_json" line="1128" ret="String" calls="self: json_escape" />
-    <fn name="new" line="1177" pub="true" ret="Self" />
-    <fn name="ensure_python" line="1191" reads="python_disabled, workspace" writes="python=, python_status=" />
-    <fn name="restart_python" line="1199" pub="true" reads="python_disabled, workspace" writes="python=, python_status=" calls="self: restart" />
-    <fn name="disable_python" line="1210" pub="true" reads="python" writes="diagnostics.clear(), python_disabled=, python_status=, server_logs.clear()" calls="self: shutdown" />
-    <fn name="enable_python" line="1221" pub="true" reads="current_path, workspace" writes="python=, python_disabled=, python_status=" calls="self: notify_open" />
-    <fn name="servers_info" line="1236" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status" />
-    <fn name="process_for_ext" line="1250" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
-    <fn name="notify_open" line="1261" pub="true" reads="workspace" writes="current_path=, diagnostics.remove(), suppress_diagnostics=" calls="self: process_for_ext" />
-    <fn name="notify_change" line="1278" pub="true" reads="workspace" writes="suppress_diagnostics=" calls="self: process_for_ext" />
-    <fn name="notify_close" line="1293" pub="true" reads="workspace" writes="diagnostics.remove()" calls="self: process_for_ext" />
-    <fn name="request_code_actions" line="1308" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext" />
-    <fn name="poll" line="1340" pub="true" ret="Vec&lt;LspEvent&gt;" reads="python, server_logs, suppress_diagnostics" writes="diagnostics.insert(), python_status=" calls="self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="1378" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspace" />
-    <fn name="diagnostics_for_line" line="1393" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="1401" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="request_organize_imports" line="1425" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="shutdown" line="1450" pub="true" reads="python" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="1462" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="1488" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
+    <fn name="start" line="1022" ret="Self" calls="self: run_supervisor" />
+    <fn name="notify_open" line="1043" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
+    <fn name="restart" line="1081" pub="true" reads="cmd_tx" />
+    <fn name="notify_change" line="1087" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="notify_close" line="1098" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_code_actions" line="1106" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
+    <fn name="poll" line="1136" pub="true" ret="Vec&lt;LspEvent&gt;" reads="event_rx" />
+    <fn name="shutdown" line="1148" pub="true" reads="cmd_tx" />
+    <fn name="encode_diagnostics_json" line="1155" ret="String" calls="self: json_escape" />
+    <fn name="new" line="1204" pub="true" ret="Self" />
+    <fn name="ensure_python" line="1218" reads="python_disabled, workspace" writes="python=, python_status=" />
+    <fn name="restart_python" line="1226" pub="true" reads="python_disabled, workspace" writes="python=, python_status=" calls="self: restart" />
+    <fn name="disable_python" line="1237" pub="true" reads="python" writes="diagnostics.clear(), python_disabled=, python_status=, server_logs.clear()" calls="self: shutdown" />
+    <fn name="enable_python" line="1248" pub="true" reads="current_path, workspace" writes="python=, python_disabled=, python_status=" calls="self: notify_open" />
+    <fn name="servers_info" line="1264" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status" />
+    <fn name="process_for_ext" line="1278" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
+    <fn name="notify_open" line="1289" pub="true" reads="workspace" writes="current_path=, diagnostics.remove(), suppress_diagnostics=" calls="self: process_for_ext" />
+    <fn name="notify_change" line="1307" pub="true" reads="workspace" writes="suppress_diagnostics=" calls="self: process_for_ext" />
+    <fn name="notify_close" line="1322" pub="true" reads="workspace" writes="diagnostics.remove()" calls="self: process_for_ext" />
+    <fn name="request_code_actions" line="1337" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext" />
+    <fn name="poll" line="1369" pub="true" ret="Vec&lt;LspEvent&gt;" reads="python, server_logs, suppress_diagnostics" writes="diagnostics.insert(), python_status=" calls="self: format_and_highlight_json" />
+    <fn name="get_diagnostics" line="1407" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspace" />
+    <fn name="diagnostics_for_line" line="1422" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
+    <fn name="request_fix_all" line="1430" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="request_organize_imports" line="1454" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="shutdown" line="1479" pub="true" reads="python" writes="python_disabled=" />
+    <fn name="lsp_pos_to_offset" line="1491" pub="true" ret="usize" />
+    <fn name="format_and_highlight_json" line="1517" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
   </mod>
   <mod path="src/main.rs" name="main">
     <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt; }</type>
@@ -303,14 +304,14 @@
     <fn name="draw_welcome" line="481" pub="true" ret="bool" reads="height, icon_logo, last_mouse_x, last_mouse_y, program, scale_factor, texture, vao, width" writes="gl.clear()" calls="self: draw_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect, push_vertical_gradient; ui_system: register_button, register_rect, wants_pointer; widgets: get_welcome_buttons" />
     <fn name="draw_diagnostics_ruler" line="725" pub="true" reads="minimap_width, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
     <fn name="draw_empty_ide" line="785" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
-    <fn name="draw_problems_panel" line="899" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect; ui_system: hovered, register_rect" />
+    <fn name="draw_problems_panel" line="899" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: hovered, register_rect" />
   </mod>
   <mod path="src/render_view.rs" name="render_view">
     <type name="DiagLayout">{ idx: usize, lines: Vec&lt;String&gt;, source_prefix: String, source_suffix: String, has_href: bool, source_on_new_line: bool, total_text_h: f32, severity: crate::lsp::DiagSeverity, is_copied: bool }</type>
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
-    <fn name="draw" line="22" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, last_cursor_for_popups=, last_diag_href=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_hovered_diags=, last_known_mouse=, left_padding=, max_scroll_x=, minimap_width=, phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_atlas_icon, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_welcome, flush, get_glyph, get_max_scroll, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, any_top_open, icon, is_open, label; editor: byte_at, ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, get_selection, text_parts, utf16_col_to_byte_advance; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
-    <fn name="draw_tab_bar" line="2227" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
-    <fn name="draw_minimap" line="2451" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
+    <fn name="draw" line="22" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, last_cursor_for_popups=, last_diag_href=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_hovered_diags=, last_known_mouse=, left_padding=, max_scroll_x=, minimap_width=, phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_atlas_icon, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_welcome, flush, get_glyph, get_max_scroll, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, any_top_open, icon, is_open, label; editor: byte_at, ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, get_selection, text_parts, utf16_col_to_byte_advance; lsp: get_diagnostics; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
+    <fn name="draw_tab_bar" line="2259" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
+    <fn name="draw_minimap" line="2483" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
   </mod>
   <mod path="src/renderer.rs" name="renderer">
     <type name="FontData">{ data: std::borrow::Cow&lt;'static, [u8]&gt;, index: u32 }</type>
@@ -344,25 +345,25 @@
   </mod>
   <mod path="src/ui_system.rs" name="ui_system">
     <type name="UiElement">{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }</type>
-    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), OpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize) }</type>
+    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), OpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize) }</type>
     <type name="UiRegistry">{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }</type>
-    <fn name="contains" line="116" pub="true" ret="bool" />
-    <fn name="id" line="143" pub="true" ret="UiId" />
-    <fn name="new" line="167" pub="true" ret="Self" />
-    <fn name="clear" line="178" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
-    <fn name="mark_overlay_start" line="188" pub="true" reads="elements" writes="overlay_mark=" />
-    <fn name="find_overlay_at" line="194" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
-    <fn name="register_button" line="203" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_icon_button" line="231" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_text_input" line="260" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
-    <fn name="register_blocker" line="283" pub="true" ret="bool" writes="elements.push()" />
-    <fn name="register_rect" line="300" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
-    <fn name="find_at" line="322" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
-    <fn name="hovered" line="332" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
-    <fn name="reset_cursor_state" line="339" pub="true" writes="wants_pointer=, wants_text=" />
-    <fn name="wants_pointer" line="345" pub="true" ret="bool" reads="wants_pointer" />
-    <fn name="wants_text" line="350" pub="true" ret="bool" reads="wants_text" />
-    <fn name="cursor_code" line="355" pub="true" ret="u8" reads="wants_pointer, wants_text" />
+    <fn name="contains" line="117" pub="true" ret="bool" />
+    <fn name="id" line="144" pub="true" ret="UiId" />
+    <fn name="new" line="168" pub="true" ret="Self" />
+    <fn name="clear" line="179" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
+    <fn name="mark_overlay_start" line="189" pub="true" reads="elements" writes="overlay_mark=" />
+    <fn name="find_overlay_at" line="195" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
+    <fn name="register_button" line="204" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_icon_button" line="232" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_text_input" line="261" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
+    <fn name="register_blocker" line="284" pub="true" ret="bool" writes="elements.push()" />
+    <fn name="register_rect" line="301" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
+    <fn name="find_at" line="323" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
+    <fn name="hovered" line="333" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
+    <fn name="reset_cursor_state" line="340" pub="true" writes="wants_pointer=, wants_text=" />
+    <fn name="wants_pointer" line="346" pub="true" ret="bool" reads="wants_pointer" />
+    <fn name="wants_text" line="351" pub="true" ret="bool" reads="wants_text" />
+    <fn name="cursor_code" line="356" pub="true" ret="u8" reads="wants_pointer, wants_text" />
   </mod>
   <mod path="src/widgets.rs" name="widgets">
     <type name="Button">{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }</type>

@@ -138,12 +138,14 @@ pub struct IdePanelState {
     pub lsp_scroll_x: crate::scroll::ScrollState,
     pub lsp_log_editors: FxHashMap<String, Editor>,
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
-    pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
-    pub lsp_logs_focused: Option<String>,
-    pub diag_copied_idx: Option<usize>,
-}
+            pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
+        pub lsp_logs_focused: Option<String>,
+                pub diag_copied_idx: Option<usize>,
+        pub problems_tab: usize,
+        pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+    }
 
-impl Default for IdePanelState {
+    impl Default for IdePanelState {
     fn default() -> Self {
         Self {
             slots: vec![
@@ -182,13 +184,15 @@ impl Default for IdePanelState {
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
             lsp_scroll_x: crate::scroll::ScrollState::new(15.0),
             lsp_log_editors: FxHashMap::default(),
-            lsp_logs_scroll_y: FxHashMap::default(),
-            lsp_logs_scroll_x: FxHashMap::default(),
-            lsp_logs_focused: None,
-            diag_copied_idx: None,
+                            lsp_logs_scroll_y: FxHashMap::default(),
+                lsp_logs_scroll_x: FxHashMap::default(),
+                                lsp_logs_focused: None,
+                diag_copied_idx: None,
+                problems_tab: 0,
+                flat_diags: Vec::new(),
+            }
         }
     }
-}
 
 impl IdePanelState {
     pub fn any_top_open(&self) -> bool {
@@ -1219,12 +1223,43 @@ impl App {
                 }
                 self.save_tabs_state();
             }
-            Err(_) => {
+                        Err(_) => {
                 self.recent_files.retain(|p| p != &path);
                 crate::save_recent_files(&self.recent_files);
                 if let Some(w) = self.window.as_ref() {
                     w.request_redraw();
                 }
+            }
+        }
+    }
+
+    pub fn check_external_changes(&mut self) {
+        self.sync_active_tab();
+        let mut needs_redraw = false;
+        for tab in &mut self.tabs {
+            if !tab.editor.is_dirty() {
+                if let Some(path) = &tab.file_path {
+                    if let Ok(disk_text) = std::fs::read_to_string(path) {
+                        if disk_text != tab.editor.get_full_text() {
+                            let old_version = tab.editor.version;
+                            tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
+                            tab.editor.version = old_version + 1;
+                            let _ = tab.editor.insert_str(&disk_text);
+                            tab.editor.cursor = 0;
+                            tab.editor.clear_history();
+                            tab.editor.set_original_text();
+                            tab.editor.sync_edits.clear();
+                            tab.highlighter.reset(tab.editor.version, disk_text, tab.file_extension.clone());
+                            needs_redraw = true;
+                        }
+                    }
+                }
+            }
+        }
+        self.sync_active_tab();
+        if needs_redraw {
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
             }
         }
     }

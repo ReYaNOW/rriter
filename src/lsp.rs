@@ -1014,7 +1014,8 @@ pub struct LspProcess {
     pub event_rx: Receiver<LspEvent>,
     current_uri: Option<String>,
     def: &'static LspServerDef,
-    pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
+        pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
+    workspace_scanned: bool,
 }
 
 impl LspProcess {
@@ -1028,17 +1029,43 @@ impl LspProcess {
             .spawn(move || run_supervisor(def, ws, cmd_rx, event_tx))
             .expect("failed to start LSP supervisor");
 
-        LspProcess {
+                LspProcess {
             cmd_tx,
             event_rx,
             current_uri: None,
             def,
             open_file_data: None,
+            workspace_scanned: false,
         }
     }
 
     /// textDocument/didOpen
-    pub fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32) {
+    pub fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32, workspace: Option<&PathBuf>) {
+        if !self.workspace_scanned {
+            self.workspace_scanned = true;
+            if let Some(ws) = workspace {
+                let tx = self.cmd_tx.clone();
+                let lang = self.def.language_id;
+                let ws = ws.clone();
+                std::thread::spawn(move || {
+                    for entry in ignore::Walk::new(&ws).flatten() {
+                        let p = entry.path();
+                        if p.extension().and_then(|s| s.to_str()) == Some("py") {
+                            if let Ok(content) = std::fs::read_to_string(p) {
+                                let uri = path_to_uri(&p.to_string_lossy());
+                                let _ = tx.send(Cmd::Open {
+                                    uri,
+                                    lang,
+                                    version: 1,
+                                    text: content,
+                                });
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
         self.open_file_data = Some((self.def.language_id.to_string(), text.to_string()));
@@ -1218,15 +1245,16 @@ impl LspManager {
     }
 
     /// Включить ruff обратно
-    pub fn enable_python(&mut self) {
+        pub fn enable_python(&mut self) {
         self.python_disabled = false;
         self.python_status = LspServerStatus::Starting;
         self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
         // Re-open current file if any
+        let ws = self.workspace.clone();
         if let Some(path) = &self.current_path.clone() {
             if let Some(proc) = &mut self.python {
                 if let Some((_, text)) = &proc.open_file_data.clone() {
-                    proc.notify_open(path, text, 1);
+                    proc.notify_open(path, text, 1, ws.as_ref());
                 }
             }
         }
@@ -1258,7 +1286,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -1269,8 +1297,9 @@ impl LspManager {
         };
         self.current_path = Some(abs_path.clone());
         self.diagnostics.remove(&abs_path);
+        let ws = self.workspace.clone();
         if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_open(&abs_path, text, version);
+            proc.notify_open(&abs_path, text, version, ws.as_ref());
         }
     }
 
