@@ -33,62 +33,8 @@ impl App {
                 self.is_ide_mode = false;
                 self.trigger_file_picker();
             }
-                        UiId::WelcomeIdeMode => {
-                self.show_welcome = false;
-                self.is_ide_mode = true;
-                // Удаляем пустые вкладки без файла и содержимого (появляются при старте без --ide)
-                self.sync_active_tab();
-                self.tabs.retain(|t| t.file_path.is_some() || t.editor.len() > 0);
-                self.active_tab = self.active_tab.min(self.tabs.len().saturating_sub(1));
-
-                let (saved_tabs, saved_active) = crate::load_open_tabs(true);
-                let valid_paths: Vec<std::path::PathBuf> = saved_tabs.into_iter().flatten().collect();
-                let had_tabs = !self.tabs.is_empty();
-
-                if !valid_paths.is_empty() {
-                    for p in valid_paths {
-                        if had_tabs {
-                            if !self.tabs.iter().any(|t| t.file_path.as_ref() == Some(&p)) && Some(&p) != self.file_path.as_ref() {
-                                self.open_new_tab();
-                                self.load_file(p, false);
-                            }
-                        } else {
-                            if self.tabs.is_empty() {
-                                self.open_new_tab();
-                                self.load_file(p, false);
-                            } else {
-                                self.open_new_tab();
-                                self.load_file(p, false);
-                            }
-                        }
-                    }
-                    if !had_tabs {
-                        if saved_active < self.tabs.len() {
-                            self.switch_to_tab(saved_active);
-                        } else if !self.tabs.is_empty() {
-                            self.switch_to_tab(0);
-                        }
-                    } else {
-                        // Switch back to the first tab (which was the active one before opening new tabs)
-                        self.switch_to_tab(0);
-                    }
-                }
-
-                if !self.ide_workspaces.is_empty() {
-                    self.ide_panel.toggle(crate::app::PanelId::Explorer);
-                    self.refresh_file_tree();
-                    self.start_file_watcher();
-                    if let Some(first_ws) = self.ide_workspaces.first().cloned() {
-                        if self.lsp.is_none() {
-                            self.lsp = Some(crate::lsp::LspManager::new(Some(first_ws)));
-                        }
-                    }
-                } else {
-                    self.trigger_folder_picker();
-                }
-
-                App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
-                self.window.as_ref().unwrap().request_redraw();
+            UiId::WelcomeIdeMode => {
+                self.enter_ide_mode();
             }
             UiId::WelcomeRecentFile(idx) => {
                 if idx < self.recent_files.len() {
@@ -492,13 +438,12 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
 
-                    let tab_bar_h = if self.show_welcome {
+                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
                         38.0 * r.scale_factor
                     };
-                    self.editor.set_cursor_at_pos(
-                        mx,
+                    self.editor.set_cursor_at_pos(mx,
                         my - tab_bar_h + self.scroll_y.current,
                         r,
                         true,

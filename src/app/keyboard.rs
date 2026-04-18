@@ -161,6 +161,9 @@ impl App {
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
+                    if self.is_ide_mode {
+                        crate::save_panel_state(&self.ide_panel);
+                    }
                     event_loop.exit();
                 }
                 _ => {}
@@ -746,13 +749,12 @@ impl App {
                 let old_target_y = self.scroll_y.target;
                 let old_target_x = self.scroll_x.target;
 
-                let tab_bar_h = if self.show_welcome {
+                                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                     0.0
                 } else {
                     38.0 * self.renderer.as_ref().unwrap().scale_factor
                 };
-                App::ensure_cursor_visible(
-                    &mut self.scroll_y.target,
+                App::ensure_cursor_visible(&mut self.scroll_y.target,
                     &mut self.scroll_x.target,
                     &self.editor,
                     self.renderer.as_mut().unwrap(),

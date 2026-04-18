@@ -154,9 +154,9 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-        let real_height = self.height;
-        let tab_bar_h = if show_welcome { 0.0 } else { 44.0 * s };
-        let editor_height = real_height - tab_bar_h;
+                        let real_height = self.height;
+                        let tab_bar_h = if show_welcome || !is_ide_mode { 0.0 } else { 44.0 * s };
+                        let editor_height = real_height - tab_bar_h;
 
         let target_minimap_w = 119.0 * s;
 
@@ -1616,11 +1616,10 @@ impl Renderer {
                 scale_sub,
             );
             self.flush();
-        } else if !show_welcome {
+                } else if !show_welcome && is_ide_mode {
             let tab_x = gutter_x;
             let tab_w = self.width - tab_x;
-            self.draw_tab_bar(
-                tabs,
+            self.draw_tab_bar(tabs,
                 active_tab,
                 editor,
                 editor_title,

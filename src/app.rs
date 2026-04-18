@@ -349,11 +349,98 @@ pub struct App {
 
     pub tabs: Vec<EditorTab>,
     pub active_tab: usize,
+
+    /// Флаг для отложенного входа в IDE-режим при старте с --ide
+    pub run_ide_on_startup: bool,
 }
 
 impl App {
-                pub fn save_tabs_state(&mut self) {
-        if !self.is_ide_mode { return; }
+    pub fn enter_ide_mode(&mut self) {
+        self.is_ide_mode = true;
+
+        let was_welcome = self.show_welcome;
+        self.show_welcome = false;
+        if was_welcome && self.base_title == "Добро пожаловать" {
+            self.base_title = "Безымянный".to_string();
+            self.file_path = None;
+        }
+
+        self.ide_panel = crate::load_panel_state();
+
+        if self.lsp.is_none() {
+            self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.first().cloned()));
+        }
+
+        let has_startup_file = self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
+
+        if has_startup_file && self.tabs.is_empty() {
+            self.tabs.push(EditorTab {
+                editor: crate::editor::Editor::new(128),
+                file_path: self.file_path.clone(),
+                base_title: self.base_title.clone(),
+                file_extension: self.file_extension.clone(),
+                scroll_y: crate::scroll::ScrollState::new(15.0),
+                scroll_x: crate::scroll::ScrollState::new(15.0),
+                highlighter: crate::highlighter::Highlighter::new(),
+                last_sent_version: u64::MAX,
+                search_results: Vec::new(),
+                search_current_idx: None,
+                is_highlighted_once: false,
+                icon_key: "default_file",
+            });
+            self.active_tab = 0;
+        }
+
+        let (saved_tabs, saved_active) = crate::load_open_tabs(true);
+
+        if !saved_tabs.is_empty() {
+            let mut loaded_any = false;
+            for path_opt in saved_tabs {
+                if let Some(path) = path_opt {
+                    if path.exists() {
+                        self.open_file_in_tab(path, false);
+                        loaded_any = true;
+                    }
+                } else {
+                    self.open_new_tab();
+                    loaded_any = true;
+                }
+            }
+
+            if loaded_any {
+                let target = if has_startup_file {
+                    0
+                } else {
+                    saved_active.min(self.tabs.len().saturating_sub(1))
+                };
+                self.switch_to_tab(target);
+            }
+        }
+
+        let title = self.base_title.clone();
+        if !self.tabs.is_empty() {
+            self.tabs[self.active_tab].icon_key = crate::app::file_icons::file_icon_key(&title.to_lowercase());
+        }
+
+        if let Some(path) = &self.file_path {
+            if let Some(lsp) = &mut self.lsp {
+                let text = self.editor.get_full_text();
+                lsp.notify_open(path, &self.file_extension, &text, self.editor.version as i32);
+            }
+        }
+
+        self.refresh_file_tree();
+        self.start_file_watcher();
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+            w.request_redraw();
+        }
+    }
+    pub fn save_tabs_state(&mut self) {
+        if !self.is_ide_mode {
+            return;
+        }
         self.sync_active_tab();
         crate::save_open_tabs(&self.tabs, self.active_tab, self.is_ide_mode);
         self.sync_active_tab();
@@ -380,7 +467,7 @@ impl App {
             &mut self.last_sent_version,
             &mut self.tabs[ai].last_sent_version,
         );
-                std::mem::swap(
+        std::mem::swap(
             &mut self.is_highlighted_once,
             &mut self.tabs[ai].is_highlighted_once,
         );
@@ -390,13 +477,14 @@ impl App {
         } else {
             &self.tabs[ai].base_title
         };
-        let icon_key =
-            crate::app::file_icons::file_icon_key(&title_to_use.to_lowercase());
+        let icon_key = crate::app::file_icons::file_icon_key(&title_to_use.to_lowercase());
         self.tabs[ai].icon_key = icon_key;
     }
 
-        pub fn switch_to_tab(&mut self, new_idx: usize) {
-        if !self.is_ide_mode || self.tabs.is_empty() { return; }
+    pub fn switch_to_tab(&mut self, new_idx: usize) {
+        if !self.is_ide_mode || self.tabs.is_empty() {
+            return;
+        }
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
@@ -421,21 +509,23 @@ impl App {
                         path,
                         &self.file_extension,
                         &text,
-                        self.editor.version as i32,                                        );
-                                    }
-                                }
-                            }
+                        self.editor.version as i32,
+                    );
+                }
+            }
+        }
 
-                            self.autocomplete_active = false;
-                            self.show_welcome = self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
-                                    if let Some(w) = self.window.as_ref() {
+        self.autocomplete_active = false;
+        self.show_welcome =
+            self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+        if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
         self.save_tabs_state();
     }
 
-        pub fn open_new_tab(&mut self) {
+    pub fn open_new_tab(&mut self) {
         if !self.is_ide_mode {
             self.close_current_file();
             return;
@@ -500,7 +590,7 @@ impl App {
         self.save_tabs_state();
     }
 
-        pub fn close_tab_at(&mut self, idx: usize) {
+    pub fn close_tab_at(&mut self, idx: usize) {
         if !self.is_ide_mode {
             self.close_current_file();
             return;
@@ -518,22 +608,23 @@ impl App {
             self.sync_active_tab();
         } else {
             self.tabs.remove(idx);
-                        if idx < self.active_tab {
+            if idx < self.active_tab {
                 self.active_tab -= 1;
             }
         }
 
         self.autocomplete_active = false;
-        self.show_welcome = self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+        self.show_welcome =
+            self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
 
-                if let Some(w) = self.window.as_ref() {
+        if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
         self.save_tabs_state();
     }
 
-        pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+    pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
         if !self.is_ide_mode {
             self.load_file(path, add_to_history);
             return;
@@ -552,7 +643,11 @@ impl App {
             }
         }
 
-                if self.tabs.is_empty() || self.file_path.is_some() || self.editor.is_dirty() || self.editor.len() > 0 {
+        if self.tabs.is_empty()
+            || self.file_path.is_some()
+            || self.editor.is_dirty()
+            || self.editor.len() > 0
+        {
             self.open_new_tab();
         }
 
@@ -901,7 +996,7 @@ impl App {
         }
     }
 
-        pub fn close_current_file(&mut self) {
+    pub fn close_current_file(&mut self) {
         if self.is_ide_mode && self.tabs.len() > 1 {
             self.close_tab_at(self.active_tab);
             return;
@@ -981,7 +1076,7 @@ impl App {
     pub fn save_current_file(&mut self) -> bool {
         if let Some(path) = self.file_path.clone() {
             let content = self.editor.get_full_text();
-                        match std::fs::write(&path, &content) {
+            match std::fs::write(&path, &content) {
                 Ok(_) => {
                     self.editor.mark_saved();
                     self.save_tabs_state();
@@ -1000,7 +1095,7 @@ impl App {
                         if let Some(mut stdin) = child.stdin.take() {
                             let _ = stdin.write_all(content.as_bytes());
                         }
-                                                if let Ok(status) = child.wait() {
+                        if let Ok(status) = child.wait() {
                             if status.success() {
                                 self.editor.mark_saved();
                                 self.save_tabs_state();
@@ -1118,7 +1213,7 @@ impl App {
                         );
                     }
                 }
-                                if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
                     App::update_window_title(w, &self.base_title, false);
                     w.request_redraw();
                 }

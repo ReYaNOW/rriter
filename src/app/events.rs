@@ -152,6 +152,9 @@ impl ApplicationHandler for App {
                                         ide_workspaces: self.ide_workspaces.clone(),
                                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                                     });
+                                    if self.is_ide_mode {
+                                        crate::save_panel_state(&self.ide_panel);
+                                    }
                                     event_loop.exit();
                                 } else if action == PendingAction::OpenFile {
                                     self.trigger_file_picker();
@@ -179,6 +182,9 @@ impl ApplicationHandler for App {
                                     ide_workspaces: self.ide_workspaces.clone(),
                                     ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                                 });
+                                if self.is_ide_mode {
+                                    crate::save_panel_state(&self.ide_panel);
+                                }
                                 event_loop.exit();
                             } else if action == PendingAction::OpenFile {
                                 self.trigger_file_picker();
@@ -248,6 +254,9 @@ impl ApplicationHandler for App {
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                     });
+                    if self.is_ide_mode {
+                        crate::save_panel_state(&self.ide_panel);
+                    }
                     event_loop.exit();
                 }
             }
@@ -447,7 +456,7 @@ impl ApplicationHandler for App {
 
                 // LSP actions menu — рисуем поверх всего
                 if let Some(mut menu) = self.lsp_actions_menu.clone() {
-                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                     menu.menu_y += tab_bar_h;
                     let wants = self
                         .renderer
@@ -461,7 +470,7 @@ impl ApplicationHandler for App {
 
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                     let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
                     let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
                         cx,
@@ -658,6 +667,12 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.run_ide_on_startup {
+            self.run_ide_on_startup = false;
+            self.enter_ide_mode();
+            return; // Пропускаем один кадр, чтобы избежать гонок состояний
+        }
+
         let now = Instant::now();
         let dt = (now - self.last_frame).as_secs_f32().min(0.016);
         self.last_frame = now;
@@ -787,12 +802,12 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        let s = self
+                let s = self
             .renderer
             .as_ref()
             .map(|r| r.scale_factor)
             .unwrap_or(1.0);
-        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
         let target_search_y = if self.show_search {
             tab_bar_h + 10.0 * s
         } else {
@@ -841,13 +856,12 @@ impl ApplicationHandler for App {
                         self.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                     }
 
-                    let tab_bar_h = if self.show_welcome {
+                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
                         38.0 * self.renderer.as_ref().unwrap().scale_factor
                     };
-                    self.editor.set_cursor_at_pos(
-                        mx,
+                    self.editor.set_cursor_at_pos(mx,
                         my - tab_bar_h + self.scroll_y.current,
                         self.renderer.as_mut().unwrap(),
                         false,
@@ -857,13 +871,13 @@ impl ApplicationHandler for App {
             }
         }
 
-        if let Some(w) = self.window.as_ref() {
+                if let Some(w) = self.window.as_ref() {
             let s = self
                 .renderer
                 .as_ref()
                 .map(|r| r.scale_factor)
                 .unwrap_or(1.0);
-            let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
             let max_scroll_y = self
                 .renderer
                 .as_mut()

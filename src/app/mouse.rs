@@ -225,9 +225,9 @@ impl App {
             return;
         }
 
-        let s = self.renderer.as_ref().unwrap().scale_factor;
-        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
-        
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if my >= 0.0 && my <= tab_bar_h && !self.tabs.is_empty() {
             self.tab_scroll.anim_speed = 7.0;
@@ -248,9 +248,9 @@ impl App {
             self.scroll_x.scroll_by(dx);
         }
 
-        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
         let s = self.renderer.as_ref().unwrap().scale_factor;
-        let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
         let max_scroll_y = self
             .renderer
             .as_mut()
@@ -275,9 +275,9 @@ impl App {
                 let mut clicked_inside = false;
                 if let Some(menu) = &self.lsp_actions_menu {
                     let item_h = 36.0 * s;
-                    let menu_w = 320.0 * s;
+                                        let menu_w = 320.0 * s;
                     let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                    let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                     let menu_y = menu.menu_y + tab_bar_h;
                     if mx >= menu.menu_x
                         && mx <= menu.menu_x + menu_w
@@ -1056,10 +1056,10 @@ impl App {
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
 
             if elapsed > 120 || dy > 10.0 {
-                let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
+                                let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
                     * self.renderer.as_ref().unwrap().line_height;
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let tab_bar_h = if self.show_welcome { 0.0 } else { 38.0 * s };
+                let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                 let editor_height = wh - tab_bar_h;
                 let thumb_h = (editor_height / total_content_height.max(editor_height)
                     * editor_height)
@@ -1076,16 +1076,15 @@ impl App {
 
                 self.scroll_y.anim_speed = 15.0;
             }
-        } else if self.is_dragging && !self.show_settings {
+                } else if self.is_dragging && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-            let tab_bar_h = if self.show_welcome {
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                 0.0
             } else {
                 38.0 * self.renderer.as_ref().unwrap().scale_factor
             };
-            self.editor.set_cursor_at_pos(
-                last_mouse_x,
+            self.editor.set_cursor_at_pos(last_mouse_x,
                 last_mouse_y - tab_bar_h + self.scroll_y.current,
                 self.renderer.as_mut().unwrap(),
                 false,

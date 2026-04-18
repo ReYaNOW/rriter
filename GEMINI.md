@@ -6,7 +6,7 @@ Allowed commands:
 3) change files (only in project)
 4) create only .rs, .py, .dart files (only in project)
 5) delete only .rs, .py, .dart files ( only in project)
-5) other specific commands - make test, make fast.
+5) other specific commands - make test, make fast, ls, grep.
 THATS IT. Git commands or any other ARE NOT ALLOWED FOR YOU.
 
 # HOW TO THINK AND HOW TO SPEAK

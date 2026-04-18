@@ -336,19 +336,22 @@ fn load_dracula() -> Theme {
 }
 
 fn main() {
-        let args: Vec<String> = env::args().collect();
-    let is_ide_cli = args.iter().any(|a| a == "--ide" || a == "ide");
-    let has_file_arg = args.iter().skip(1).any(|a| a != "--ide" && a != "ide");
+    let args: Vec<String> = env::args().collect();
+    let run_ide_on_startup = args.iter().any(|a| a == "--ide" || a == "ide");
+    let has_file_arg = args.iter().skip(1).any(|a| *a != "--ide" && *a != "ide");
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
     let mut file_path = None;
-        let show_welcome = !has_file_arg;
 
     let mut recent_files = load_recent_files();
 
     if has_file_arg {
-        let path = args.iter().skip(1).find(|a| *a != "--ide" && *a != "ide").unwrap();
+        let path = args
+            .iter()
+            .skip(1)
+            .find(|a| *a != "--ide" && *a != "ide")
+            .unwrap();
         if let Ok(content) = std::fs::read_to_string(path) {
             initial_text = content;
             let f_path = std::path::Path::new(path);
@@ -423,14 +426,13 @@ F8\tПоказать/скрыть счетчик FPS
     faq_editor.cursor = 0;
     faq_editor.selection_anchor = None;
 
-            let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
     let highlighter = Highlighter::new();
 
-    let ide_panel_state = crate::load_panel_state();
-    let is_ide_mode = is_ide_cli;
+    let show_welcome = !has_file_arg && !run_ide_on_startup;
 
     let mut app = App {
         gl_config: None,
@@ -474,10 +476,10 @@ F8\tПоказать/скрыть счетчик FPS
         open_file_rx: None,
         save_file_rx: None,
 
-                show_welcome,
+        show_welcome,
         recent_files,
 
-        is_ide_mode,
+        is_ide_mode: false,
         ide_workspaces: config.ide_workspaces.clone(),
         ide_ignore_patterns: config.ide_ignore_patterns.clone(),
         settings_ignore_editor: Editor::new(128),
@@ -517,98 +519,33 @@ F8\tПоказать/скрыть счетчик FPS
         sticky_anim_progress: 1.0,
         sticky_anim_is_adding: false,
 
-                show_settings: false,
+        show_settings: false,
         settings_anim_progress: 0.0,
         settings_y: 10000.0,
         settings_tab: 0,
         settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
-        ide_panel: ide_panel_state,
+        ide_panel: crate::app::IdePanelState::default(),
         file_tree_rx: None,
         file_tree_notify_rx: None,
-        lsp: if is_ide_mode {
-            Some(crate::lsp::LspManager::new(config.ide_workspaces.first().cloned(),
-            ))
-        } else {
-            None
-        },
+        lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,
         ui_registry: crate::ui_system::UiRegistry::new(),
-                tabs: if is_ide_mode {
-            vec![crate::app::EditorTab {
-                editor: Editor::new(8192),
-                file_path: None,
-                base_title: String::new(),
-                file_extension: String::new(),
-                scroll_y: crate::scroll::ScrollState::new(15.0),
-                scroll_x: crate::scroll::ScrollState::new(15.0),
-                highlighter: Highlighter::new(),
-                last_sent_version: 0,
-                search_results: Vec::new(),
-                search_current_idx: None,
-                is_highlighted_once: false,
-                icon_key: "default_file",
-            }]
-        } else {
-            Vec::new()
-        },
+        tabs: Vec::new(),
         active_tab: 0,
+        run_ide_on_startup,
     };
 
-        app.highlighter.reset(
+    app.highlighter.reset(
         app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),
     );
     app.last_sent_version = app.editor.version;
 
-                                                                let (saved_tabs, saved_active) = load_open_tabs(is_ide_mode);
-        if app.is_ide_mode {
-            let valid_paths: Vec<PathBuf> = saved_tabs.into_iter().filter_map(|p| p).collect();
-            if !valid_paths.is_empty() {
-                if has_file_arg {
-                    for p in valid_paths {
-                        if Some(&p) != app.file_path.as_ref() {
-                            app.open_new_tab();
-                            app.load_file(p, false);
-                        }
-                    }
-                    app.switch_to_tab(0);
-                } else {
-                    let mut first = true;
-                    for p in valid_paths {
-                        if first {
-                            first = false;
-                            app.load_file(p, false);
-                        } else {
-                            app.open_new_tab();
-                            app.load_file(p, false);
-                        }
-                    }
-                    if saved_active < app.tabs.len() {
-                        app.switch_to_tab(saved_active);
-                    } else {
-                        app.switch_to_tab(0);
-                    }
-                }
-            } else if !has_file_arg {
-                app.tabs.clear();
-                app.show_welcome = true;
-            }
-        } else {
-            if !has_file_arg {
-                app.show_welcome = true;
-            }
-        }
-
-        if app.show_welcome && app.file_path.is_none() && app.editor.len() == 0 {
-            app.base_title = "Добро пожаловать".to_string();
-        }
-
-                                if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Explorer) {
-        app.refresh_file_tree();
-        app.start_file_watcher();
+    if show_welcome {
+        app.base_title = "Добро пожаловать".to_string();
     }
 
     event_loop.run_app(&mut app).unwrap();
