@@ -72,6 +72,8 @@ pub enum UiId {
     LspLogScrollX(usize),
     CopyDiagnostic(usize),
     OpenDiagUrl(usize),
+    ProblemJump(usize),
+    ProblemUrl(usize),
 }
 
 /// Тип UI элемента с его геометрией
@@ -90,6 +92,8 @@ pub enum UiElement {
         y: f32,
         size: f32,
         active_square_width: Option<f32>,
+        #[allow(dead_code)]
+        custom_color: Option<[f32; 4]>,
     },
     TextInput {
         id: UiId,
@@ -119,7 +123,8 @@ impl UiElement {
                 y,
                 size,
                 active_square_width,
-                ..
+                custom_color: _,
+                id: _,
             } => {
                 if let Some(sq_w) = active_square_width {
                     let icon_center = y + size / 2.0;
@@ -241,6 +246,7 @@ impl UiRegistry {
             y: icon_button.y,
             size: icon_button.size,
             active_square_width: icon_button.active_square_width,
+            custom_color: icon_button.custom_color,
         });
 
         if hovered {

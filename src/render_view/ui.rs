@@ -895,4 +895,144 @@ impl Renderer {
 
         self.flush();
     }
+
+    pub fn draw_problems_panel(
+        &mut self,
+        content_x: f32,
+        content_y: f32,
+        content_w: f32,
+        content_h: f32,
+        s: f32,
+        lsp_diagnostics: &[crate::lsp::Diagnostic],
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (content_y + content_h)).round() as i32;
+            self.gl.scissor(
+                content_x.round() as i32,
+                sy,
+                content_w.round() as i32,
+                content_h.round() as i32,
+            );
+        }
+
+        let pad_x = 12.0 * s;
+        let text_scale = 0.92;
+
+        if lsp_diagnostics.is_empty() {
+            let hint = "Нет ляпов";
+            let tw = self.measure_ui_width(hint, text_scale);
+            self.draw_string_scaled(
+                hint,
+                (content_x + (content_w - tw) / 2.0).round(),
+                (content_y + 32.0 * s).round(),
+                [0.45, 0.45, 0.45, 1.0],
+                text_scale,
+            );
+        } else {
+            let mut current_y = content_y + 8.0 * s;
+            let item_h = 24.0 * s;
+
+            let mut sorted_diags: Vec<_> = lsp_diagnostics.iter().enumerate().collect();
+            sorted_diags.sort_by(|(_, a), (_, b)| {
+                a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col))
+            });
+
+            for (idx, diag) in sorted_diags {
+                if current_y + item_h > content_y && current_y < content_y + content_h {
+                    let icon_sz = 16.0 * s;
+                    let icon_x = content_x + pad_x;
+                    let icon_y = current_y + (item_h - icon_sz) / 2.0;
+
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::ProblemJump(idx),
+                        content_x,
+                        current_y,
+                        content_w,
+                        item_h,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                    if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx)) {
+                        self.push_rect(content_x, current_y, content_w, item_h, [1.0, 1.0, 1.0, 0.05]);
+                    }
+
+                    let (icon, color) = match diag.severity {
+                        crate::lsp::DiagSeverity::Error => (crate::widgets::IconType::Close, self.theme.diag_error),
+                        crate::lsp::DiagSeverity::Warning => (crate::widgets::IconType::Warning, self.theme.diag_warn),
+                        _ => (crate::widgets::IconType::Problems, [0.5, 0.5, 0.5, 1.0]),
+                    };
+
+                    self.draw_atlas_icon(icon, icon_x, icon_y, icon_sz, color);
+
+                    let text_x = icon_x + icon_sz + 8.0 * s;
+                    let text_y = current_y + item_h * 0.7;
+
+                    let msg = diag.message.lines().next().unwrap_or("").replace("\t", " ");
+                    let prefix = format!("Строка {}: ", diag.start_line + 1);
+
+                    let prefix_w = self.measure_ui_width(&prefix, text_scale);
+                    self.draw_string_scaled(&prefix, text_x, text_y, self.theme.fg, text_scale);
+
+                    let mut current_tx = text_x + prefix_w;
+                    let msg_w = self.measure_ui_width(&msg, text_scale);
+                    self.draw_string_scaled(&msg, current_tx, text_y, self.theme.fg, text_scale);
+                    current_tx += msg_w + self.measure_ui_width(" ", text_scale);
+
+                    let source_prefix = match (&diag.source, &diag.code) {
+                        (Some(src), Some(_)) => format!("({} ", src),
+                        (Some(src), None) => format!("({})", src),
+                        (None, Some(_)) => "(".to_string(),
+                        (None, None) => "(LSP)".to_string(),
+                    };
+                    let source_suffix = match &diag.code {
+                        Some(code) => code.clone(),
+                        None => String::new(),
+                    };
+
+                    let p_w = self.measure_ui_width(&source_prefix, text_scale);
+                    self.draw_string_scaled(&source_prefix, current_tx, text_y, [0.55, 0.55, 0.6, 1.0], text_scale);
+
+                    if !source_suffix.is_empty() {
+                        let sfx_x = current_tx + p_w;
+                        let sfx_w = self.measure_ui_width(&source_suffix, text_scale);
+                        let link_color = [0.72, 0.52, 1.0, 1.0];
+                        let sfx_color = if diag.code_href.is_some() {
+                            link_color
+                        } else {
+                            [link_color[0], link_color[1], link_color[2], 0.85]
+                        };
+
+                        self.draw_string_scaled(&source_suffix, sfx_x, text_y, sfx_color, text_scale);
+                        self.draw_string_scaled(")", sfx_x + sfx_w, text_y, [0.55, 0.55, 0.6, 1.0], text_scale);
+
+                        if diag.code_href.is_some() {
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::ProblemUrl(idx),
+                                sfx_x - 1.0,
+                                current_y,
+                                sfx_w + 2.0,
+                                item_h,
+                                self.last_mouse_x,
+                                self.last_mouse_y,
+                            );
+                            if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemUrl(idx)) {
+                                self.push_rect(sfx_x, text_y + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.9]);
+                            } else {
+                                self.push_rect(sfx_x, text_y + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.55]);
+                            }
+                        }
+                    }
+                }
+                current_y += item_h;
+            }
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
 }

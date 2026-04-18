@@ -272,6 +272,7 @@ impl Renderer {
                     is_active: slot.open,
                     icon_size: Some(36.0 * s),
                     active_square_width: Some(sb_w),
+                    custom_color: None,
                 };
                 ui_registry.register_icon_button(
                     crate::ui_system::UiId::SidebarSlot(slot.id),
@@ -298,6 +299,7 @@ impl Renderer {
                             is_active: false,
                             icon_size: Some(36.0 * s),
                             active_square_width: None,
+                            custom_color: None,
                         };
                         ghost.render(self, -1.0, -1.0, s, false);
                     }
@@ -1808,6 +1810,16 @@ impl Renderer {
                             s,
                             ide_panel,
                             !lsp_diagnostics.is_empty(),
+                            ui_registry,
+                        );
+                    } else if slot.id == crate::app::PanelId::Problems {
+                        self.draw_problems_panel(
+                            panel_x,
+                            content_y,
+                            panel_w,
+                            content_h,
+                            s,
+                            lsp_diagnostics,
                             ui_registry,
                         );
                     } else {

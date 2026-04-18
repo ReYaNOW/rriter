@@ -112,6 +112,7 @@ pub struct IconButton {
     pub is_active: bool,
     pub icon_size: Option<f32>,
     pub active_square_width: Option<f32>,
+    pub custom_color: Option<[f32; 4]>,
 }
 
 impl IconButton {
@@ -195,7 +196,9 @@ impl IconButton {
         let offset = (self.size - icon_render_size) / 2.0;
 
         if let Some(icon_type) = self.icon {
-            let icon_color = if self.is_active {
+            let icon_color = if let Some(color) = self.custom_color {
+                color
+            } else if self.is_active {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
                 renderer.theme.fg

@@ -265,6 +265,7 @@ impl Renderer {
                     is_active: false,
                     icon_size: Some(18.0 * s),
                     active_square_width: None,
+                    custom_color: None,
                 };
                 btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
                 content_y += 46.0 * s;

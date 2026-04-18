@@ -511,6 +511,68 @@ impl App {
                     let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }
+            UiId::ProblemUrl(idx) => {
+                if let Some(path) = &self.file_path {
+                    if let Some(lsp) = &self.lsp {
+                        let diags = lsp.get_diagnostics(path);
+                        if let Some(diag) = diags.get(idx) {
+                            if let Some(href) = &diag.code_href {
+                                #[cfg(target_os = "windows")]
+                                let _ = std::process::Command::new("cmd")
+                                    .args(["/c", "start", "", href])
+                                    .spawn();
+                                #[cfg(target_os = "macos")]
+                                let _ = std::process::Command::new("open").arg(href).spawn();
+                                #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+                                let _ = std::process::Command::new("xdg-open").arg(href).spawn();
+                            }
+                        }
+                    }
+                }
+            }
+            UiId::ProblemJump(idx) => {
+                if let Some(path) = &self.file_path {
+                    if let Some(lsp) = &self.lsp {
+                        let diags = lsp.get_diagnostics(path);
+                        if let Some(diag) = diags.get(idx) {
+                            let line = diag.start_line as usize;
+                            if line < self.editor.line_offsets.len() {
+                                self.editor.cursor = self.editor.line_offsets[line] + diag.start_col as usize;
+                                if self.editor.cursor > self.editor.len() {
+                                    self.editor.cursor = self.editor.len();
+                                }
+                                
+                                let tab_h = if self.is_ide_mode {
+                                    32.0 * self.renderer.as_ref().unwrap().scale_factor
+                                } else {
+                                    38.0 * self.renderer.as_ref().unwrap().scale_factor
+                                };
+                                
+                                crate::app::App::ensure_cursor_visible(
+                                    &mut self.scroll_y.target,
+                                    &mut self.scroll_x.target,
+                                    &self.editor,
+                                    self.renderer.as_mut().unwrap(),
+                                    self.window_height as f32,
+                                    self.window_width as f32,
+                                    tab_h,
+                                );
+                                
+                                // Форсируем прокрутку так, чтобы строка была сверху экрана (чтобы панель ляпов ее не закрывала)
+                                let renderer = self.renderer.as_mut().unwrap();
+                                let (_, cy) = renderer.get_cursor_xy(&self.editor);
+                                self.scroll_y.target = (cy - renderer.baseline_offset - renderer.line_height * 6.0).max(0.0);
+                                self.scroll_y.target = (self.scroll_y.target / renderer.line_height).floor() * renderer.line_height;
+                                
+                                self.scroll_y.anim_speed = 7.0;
+                                self.scroll_x.anim_speed = 7.0;
+                                
+                                self.window.as_ref().unwrap().request_redraw();
+                            }
+                        }
+                    }
+                }
+            }
             UiId::CopyDiagnostic(idx) => {
                 if let Some(diag) = self
                     .file_path

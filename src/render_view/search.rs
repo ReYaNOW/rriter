@@ -212,6 +212,7 @@ impl Renderer {
             is_active: false,
             icon_size: Some(26.0 * s),
             active_square_width: None,
+            custom_color: None,
         };
         current_x -= 10.0 * s;
 
@@ -224,6 +225,7 @@ impl Renderer {
             is_active: false,
             icon_size: Some(37.0 * s),
             active_square_width: None,
+            custom_color: None,
         };
         current_x -= 10.0 * s;
 
@@ -236,6 +238,7 @@ impl Renderer {
             is_active: false,
             icon_size: Some(37.0 * s),
             active_square_width: None,
+            custom_color: None,
         };
         current_x -= 10.0 * s;
 
@@ -248,6 +251,7 @@ impl Renderer {
             is_active: search_case_sensitive,
             icon_size: Some(30.0 * s),
             active_square_width: None,
+            custom_color: None,
         };
 
         if search_results.len() != self.last_search_len
