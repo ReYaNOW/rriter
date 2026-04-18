@@ -55,7 +55,7 @@ Example — destructive op:
 
 ## Boundaries
 
-Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
+Code/commits/PRs: write normal. Level persist until changed or session end.
 
 # HERE IS INFO ON HOW TO CODE
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
