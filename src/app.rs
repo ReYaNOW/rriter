@@ -399,29 +399,35 @@ impl App {
 
         let (saved_tabs, saved_active) = crate::load_open_tabs(true);
 
-        if !saved_tabs.is_empty() {
-            let mut loaded_any = false;
-            for path_opt in saved_tabs {
-                if let Some(path) = path_opt {
-                    if path.exists() {
-                        self.open_file_in_tab(path, false);
+                    if !saved_tabs.is_empty() {
+                let mut loaded_any = false;
+                for path_opt in saved_tabs {
+                    if let Some(path) = path_opt {
+                        if path.exists() {
+                            self.open_file_in_tab_bg(path, false);
+                            loaded_any = true;
+                        }
+                    } else {
+                        self.open_new_tab();
                         loaded_any = true;
                     }
-                } else {
-                    self.open_new_tab();
-                    loaded_any = true;
+                }
+
+                if loaded_any {
+                    let target = if has_startup_file {
+                        0
+                    } else {
+                        saved_active.min(self.tabs.len().saturating_sub(1))
+                    };
+                    self.switch_to_tab(target);
+                    if self.highlighter.wait_for_first_result(
+                        self.editor.version,
+                        std::time::Duration::from_millis(50),
+                    ) {
+                        self.apply_highlight_results();
+                    }
                 }
             }
-
-            if loaded_any {
-                let target = if has_startup_file {
-                    0
-                } else {
-                    saved_active.min(self.tabs.len().saturating_sub(1))
-                };
-                self.switch_to_tab(target);
-            }
-        }
 
         let title = self.base_title.clone();
         if !self.tabs.is_empty() {
@@ -622,9 +628,17 @@ impl App {
         self.save_tabs_state();
     }
 
-    pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+        pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+        self.open_file_in_tab_internal(path, add_to_history, true);
+    }
+
+    pub fn open_file_in_tab_bg(&mut self, path: PathBuf, add_to_history: bool) {
+        self.open_file_in_tab_internal(path, add_to_history, false);
+    }
+
+    pub fn open_file_in_tab_internal(&mut self, path: PathBuf, add_to_history: bool, wait_highlight: bool) {
         if !self.is_ide_mode {
-            self.load_file(path, add_to_history);
+            self.load_file_internal(path, add_to_history, wait_highlight);
             return;
         }
 
@@ -635,7 +649,9 @@ impl App {
                 }
             } else {
                 if tab.file_path.as_ref() == Some(&path) {
-                    self.switch_to_tab(i);
+                    if wait_highlight {
+                        self.switch_to_tab(i);
+                    }
                     return;
                 }
             }
@@ -649,7 +665,7 @@ impl App {
             self.open_new_tab();
         }
 
-        self.load_file(path, add_to_history);
+        self.load_file_internal(path, add_to_history, wait_highlight);
     }
     pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,
@@ -1149,7 +1165,7 @@ impl App {
         self.is_highlighted_once = true;
     }
 
-    pub fn load_file(&mut self, path: PathBuf, add_to_history: bool) {
+            pub fn load_file_internal(&mut self, path: PathBuf, add_to_history: bool, wait_highlight: bool) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 self.show_welcome = false;
@@ -1183,13 +1199,15 @@ impl App {
                     self.file_extension.clone(),
                 );
 
-                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
+                                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
                 // Для малых файлов Tree-sitter укладывается в < 5мс, большие файлы — просто не ждут.
-                if self.highlighter.wait_for_first_result(
-                    self.editor.version,
-                    std::time::Duration::from_millis(50),
-                ) {
-                    self.apply_highlight_results();
+                if wait_highlight {
+                    if self.highlighter.wait_for_first_result(
+                        self.editor.version,
+                        std::time::Duration::from_millis(50),
+                    ) {
+                        self.apply_highlight_results();
+                    }
                 }
 
                 self.scroll_y.current = 0.0;

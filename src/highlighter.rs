@@ -897,7 +897,12 @@ impl Highlighter {
                     is_log_or_huge,
                 );
 
-                old_spans = flat_spans.clone();
+                                old_spans = flat_spans.clone();
+
+                // Очистка памяти от гигантских буферов после парсинга больших файлов
+                if byte_colors_buf.capacity() > 1024 * 1024 && text.len() < 1024 * 512 {
+                    byte_colors_buf.shrink_to_fit();
+                }
 
                 let mut inject_builtins = |items: &[(&str, SymbolKind)]| {
                     for &(word, ref kind) in items {

@@ -1382,7 +1382,15 @@ impl LspManager {
                 LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
-                LspEvent::Log { name, message } => {
+                                                LspEvent::Log { name, message } => {
+                    if message.len() > 5000 {
+                        let mut split_at = 5000;
+                        while split_at > 0 && !message.is_char_boundary(split_at) {
+                            split_at -= 1;
+                        }
+                        message.truncate(split_at);
+                        message.push_str("\n... [TRUNCATED TO SAVE RAM]");
+                    }
                     let (final_text, spans, folds) = format_and_highlight_json(message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
@@ -1391,7 +1399,7 @@ impl LspManager {
                         spans,
                         folds,
                     });
-                    if logs.len() > 100 {
+                    if logs.len() > 30 {
                         logs.remove(0);
                     }
                 }

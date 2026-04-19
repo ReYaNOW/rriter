@@ -654,8 +654,9 @@ impl Editor {
                 self.history.push_back(step);
                 self.history_size += size;
             }
-        }
-        while self.history_size > 50 * 1024 * 1024 {
+                }
+        // Урезаем лимит памяти на историю: 5 МБ на вкладку (вместо 50 МБ)
+        while self.history_size > 5 * 1024 * 1024 {
             if let Some(old) = self.history.pop_front() {
                 let old_size = match &old.op {
                     EditOp::Insert { text, .. } => text.len(),
