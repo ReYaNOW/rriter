@@ -241,8 +241,17 @@ impl Renderer {
             let btn_x = 0.0;
             let top_start_y = 0.0;
 
-            let mut top_idx = 0usize;
+                        let mut top_idx = 0usize;
             let mut bottom_idx = 0usize;
+
+            let lsp_has_issues = lsp.map_or(false, |l| {
+                l.diagnostics.values().any(|diags| {
+                    diags.iter().any(|d| {
+                        d.severity == crate::lsp::DiagSeverity::Error
+                            || d.severity == crate::lsp::DiagSeverity::Warning
+                    })
+                })
+            });
 
             for slot in &ide_panel.slots {
                 let is_dragging_this = ide_panel
@@ -270,6 +279,16 @@ impl Renderer {
                     y
                 };
 
+                                                                let custom_color = if slot.id == crate::app::PanelId::Problems {
+                    if lsp_has_issues {
+                        Some([1.0, 0.8, 0.1, 1.0])
+                    } else {
+                        Some([0.69, 0.745, 0.773, 1.0])
+                    }
+                } else {
+                    None
+                };
+
                 let btn = IconButton {
                     x: btn_x,
                     y: btn_y,
@@ -278,7 +297,7 @@ impl Renderer {
                     is_active: slot.open,
                     icon_size: Some(36.0 * s),
                     active_square_width: Some(sb_w),
-                    custom_color: None,
+                    custom_color,
                 };
                 ui_registry.register_icon_button(
                     crate::ui_system::UiId::SidebarSlot(slot.id),
@@ -294,9 +313,18 @@ impl Renderer {
             // Призрак перетаскиваемой кнопки + разделитель
             if let Some(drag) = &ide_panel.drag {
                 if drag.threshold_passed {
-                    if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
+                                                            if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
                         let ghost_y =
                             (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
+                                                let ghost_color = if slot.id == crate::app::PanelId::Problems {
+                            if lsp_has_issues {
+                                Some([1.0, 0.8, 0.1, 1.0])
+                            } else {
+                                Some([0.69, 0.745, 0.773, 1.0])
+                            }
+                        } else {
+                            None
+                        };
                         let ghost = IconButton {
                             x: btn_x,
                             y: ghost_y,
@@ -305,7 +333,7 @@ impl Renderer {
                             is_active: false,
                             icon_size: Some(36.0 * s),
                             active_square_width: None,
-                            custom_color: None,
+                            custom_color: ghost_color,
                         };
                         ghost.render(self, -1.0, -1.0, s, false);
                     }

@@ -1016,8 +1016,8 @@ impl Renderer {
             let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
                 // Заменяем жестко прописанный белый цвет на старый розовый #da4453
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-            } else if icon_type == crate::widgets::IconType::Problems {
-                svg_data_str.replace("#D81B60", "#b0bec5")
+                        } else if icon_type == crate::widgets::IconType::Problems {
+                svg_data_str.replace("#D81B60", "#ffffff")
             } else if icon_type == crate::widgets::IconType::Plus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer

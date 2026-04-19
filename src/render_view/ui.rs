@@ -929,9 +929,30 @@ impl Renderer {
                 mx, my
             );
 
-            if is_active || is_hovered {
-                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.06] } else { bg };
-                self.push_rounded_rect(tab_x.round(), tab_y.round(), tw, tab_h, 4.0 * s, draw_bg);
+                        if is_active || is_hovered {
+                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.06]
+                } else {
+                    bg
+                };
+
+                self.flush();
+                unsafe {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    let sy = (self.height - (tab_y + tab_h)).round() as i32;
+                    self.gl.scissor(
+                        tab_x.round() as i32,
+                        sy,
+                        tw.round() as i32,
+                        tab_h.round() as i32,
+                    );
+                }
+
+                self.push_rounded_rect(tab_x.round(), tab_y.round(), tw, tab_h + 4.0 * s, 4.0 * s, draw_bg);
+
+                self.flush();
+                unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
+                }
             }
 
             if is_active {

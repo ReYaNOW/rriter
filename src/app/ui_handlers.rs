@@ -438,12 +438,13 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
 
-                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
                         38.0 * r.scale_factor
                     };
-                    self.editor.set_cursor_at_pos(mx,
+                    self.editor.set_cursor_at_pos(
+                        mx,
                         my - tab_bar_h + self.scroll_y.current,
                         r,
                         true,
@@ -499,7 +500,7 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-                        UiId::ProblemsTab(idx) => {
+            UiId::ProblemsTab(idx) => {
                 self.ide_panel.problems_tab = idx;
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -515,7 +516,7 @@ impl App {
                     let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
                 }
             }
-                        UiId::ProblemUrl(idx) => {
+            UiId::ProblemUrl(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if let Some(lsp) = &self.lsp {
                         let diags = lsp.get_diagnostics(path);
@@ -542,19 +543,28 @@ impl App {
                     if let Some(lsp) = &self.lsp {
                         let diags = lsp.get_diagnostics(&path);
                         if let Some(diag) = diags.get(diag_idx) {
-                            let line = diag.start_line as usize;
-                            if line < self.editor.line_offsets.len() {
-                                self.editor.cursor = self.editor.line_offsets[line] + diag.start_col as usize;
-                                if self.editor.cursor > self.editor.len() {
-                                    self.editor.cursor = self.editor.len();
-                                }
-                                
+                            let start_line = diag.start_line as usize;
+                            let end_line = diag.end_line as usize;
+                            if start_line < self.editor.line_offsets.len()
+                                && end_line < self.editor.line_offsets.len()
+                            {
+                                let full_text = self.editor.get_full_text();
+
+                                let end_byte = crate::lsp::lsp_pos_to_offset(
+                                    &full_text,
+                                    diag.end_line,
+                                    diag.end_col,
+                                );
+
+                                self.editor.cursor = end_byte.min(self.editor.len());
+                                self.editor.selection_anchor = None;
+
                                 let tab_h = if self.is_ide_mode {
                                     32.0 * self.renderer.as_ref().unwrap().scale_factor
                                 } else {
                                     38.0 * self.renderer.as_ref().unwrap().scale_factor
                                 };
-                                
+
                                 crate::app::App::ensure_cursor_visible(
                                     &mut self.scroll_y.target,
                                     &mut self.scroll_x.target,
@@ -564,25 +574,34 @@ impl App {
                                     self.window_width as f32,
                                     tab_h,
                                 );
-                                
+
                                 // Форсируем прокрутку так, чтобы строка была сверху экрана (чтобы панель ляпов ее не закрывала)
                                 let renderer = self.renderer.as_mut().unwrap();
                                 let (_, cy) = renderer.get_cursor_xy(&self.editor);
-                                self.scroll_y.target = (cy - renderer.baseline_offset - renderer.line_height * 6.0).max(0.0);
-                                self.scroll_y.target = (self.scroll_y.target / renderer.line_height).floor() * renderer.line_height;
-                                
+                                self.scroll_y.target =
+                                    (cy - renderer.baseline_offset - renderer.line_height * 6.0)
+                                        .max(0.0);
+                                self.scroll_y.target =
+                                    (self.scroll_y.target / renderer.line_height).floor()
+                                        * renderer.line_height;
+
                                 self.scroll_y.anim_speed = 7.0;
                                 self.scroll_x.anim_speed = 7.0;
-                                
+
                                 self.window.as_ref().unwrap().request_redraw();
                             }
                         }
                     }
                 }
             }
-                        UiId::CopyDiagnostic(idx) => {
+            UiId::CopyDiagnostic(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
-                    if let Some(diag) = self.lsp.as_ref().and_then(|l| l.diagnostics.get(path)).and_then(|diags| diags.get(*diag_idx)) {
+                    if let Some(diag) = self
+                        .lsp
+                        .as_ref()
+                        .and_then(|l| l.diagnostics.get(path))
+                        .and_then(|diags| diags.get(*diag_idx))
+                    {
                         let _ = self.clipboard.set_text(&diag.message);
                         self.ide_panel.diag_copied_idx = Some(idx);
                     }
