@@ -386,24 +386,20 @@ impl Renderer {
                 ];
                 self.push_rect(panel_x, 0.0, panel_left_w, title_h, title_bg);
 
-                let open_top: Vec<_> = ide_panel
-                    .slots
-                    .iter()
-                    .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
-                    .collect();
+                                let open_top_count = ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).count();
 
-                if open_top.len() == 1 {
-                    let label = open_top[0].id.label();
-                    self.draw_string_scaled(
-                        label,
+                if open_top_count == 1 {
+                    let slot = ide_panel.slots.iter().find(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).unwrap();
+                    let label = slot.id.label();
+                    self.draw_string_scaled(label,
                         panel_x + 12.0 * s,
                         title_h / 2.0 + 6.0 * s,
                         self.theme.fg,
                         0.9,
                     );
-                } else {
+                                } else {
                     let mut tx = panel_x + 6.0 * s;
-                    for (i, slot) in open_top.iter().enumerate() {
+                    for (i, slot) in ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).enumerate() {
                         let label = slot.id.label();
                         let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
                         if i == 0 {
@@ -711,9 +707,9 @@ impl Renderer {
             .map(|a| a.max(editor.cursor))
             .unwrap_or(editor.cursor);
 
-        // --- Одинаковые слова (Word Highlighting) ---
-        let mut identical_words = Vec::new();
-        let mut target_word = None;
+                // --- Одинаковые слова (Word Highlighting) ---
+        self.identical_words_cache.clear();
+        let mut target_word_str: Option<&str> = None;
         let is_valid_word = |s: &str| -> bool {
             s.chars().next().map_or(false, |c| !c.is_ascii_digit())
                 && s.as_bytes()
@@ -721,12 +717,16 @@ impl Renderer {
                     .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
         };
 
-        if sel_start != sel_end {
+                if sel_start != sel_end {
             let slen = sel_end - sel_start;
             if slen < 100 {
-                if let Some(text) = editor.get_selection() {
-                    if is_valid_word(&text) {
-                        target_word = Some(text);
+                if sel_end <= first_len {
+                    if let Some(s) = first.get(sel_start..sel_end) {
+                        if is_valid_word(s) { target_word_str = Some(s); }
+                    }
+                } else if sel_start >= first_len {
+                    if let Some(s) = second.get((sel_start - first_len)..(sel_end - first_len)) {
+                        if is_valid_word(s) { target_word_str = Some(s); }
                     }
                 }
             }
@@ -748,20 +748,19 @@ impl Renderer {
                 p_end += 1;
             }
             if p_end > p_start {
-                let slen = p_end - p_start;
-                let mut res = Vec::with_capacity(slen);
-                for i in p_start..p_end {
-                    res.push(editor.byte_at(i));
-                }
-                let w = String::from_utf8_lossy(&res).into_owned();
-                if is_valid_word(&w) {
-                    target_word = Some(w);
+                if p_end <= first_len {
+                    if let Some(s) = first.get(p_start..p_end) {
+                        if is_valid_word(s) { target_word_str = Some(s); }
+                    }
+                } else if p_start >= first_len {
+                    if let Some(s) = second.get((p_start - first_len)..(p_end - first_len)) {
+                        if is_valid_word(s) { target_word_str = Some(s); }
+                    }
                 }
             }
         }
 
-        if let Some(word) = target_word {
-            let (first, second) = editor.text_parts();
+        if let Some(word) = target_word_str {
             let first_bytes = first.as_bytes();
             let second_bytes = second.as_bytes();
             let w_len = word.len();
@@ -776,7 +775,7 @@ impl Renderer {
             };
 
             let mut start = 0;
-            while let Some(idx) = first[start..].find(&word) {
+            while let Some(idx) = first[start..].find(word) {
                 let abs_idx = start + idx;
                 let left_ok = if abs_idx == 0 {
                     true
@@ -791,7 +790,7 @@ impl Renderer {
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
                 if left_ok && right_ok {
-                    identical_words.push((abs_idx, abs_idx + w_len));
+                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
                 }
                 start = abs_idx + w_len;
             }
@@ -821,14 +820,14 @@ impl Renderer {
                             !(b.is_ascii_alphanumeric() || b == b'_')
                         };
                         if left_ok && right_ok {
-                            identical_words.push((i, i + w_len));
+                            self.identical_words_cache.push((i, i + w_len));
                         }
                     }
                 }
             }
 
             let mut start = 0;
-            while let Some(idx) = second[start..].find(&word) {
+            while let Some(idx) = second[start..].find(word) {
                 let abs_idx = first.len() + start + idx;
                 let left_ok = if abs_idx == 0 {
                     true
@@ -843,7 +842,7 @@ impl Renderer {
                     !(b.is_ascii_alphanumeric() || b == b'_')
                 };
                 if left_ok && right_ok {
-                    identical_words.push((abs_idx, abs_idx + w_len));
+                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
                 }
                 start = start + idx + w_len;
             }
@@ -925,7 +924,8 @@ impl Renderer {
             }
         }
 
-        let mut intervals = Vec::with_capacity(64);
+                self.mod_intervals_cache.clear();
+        self.merged_intervals_cache.clear();
         let mut last_phys_line = None;
         let mut last_bottom_y = 0.0;
 
@@ -938,7 +938,7 @@ impl Renderer {
 
             if !v_line.is_soft_wrap {
                 if let Some(st) = editor.deleted_gaps.get(phys_idx).copied().flatten() {
-                    intervals.push(ModInterval {
+                    self.mod_intervals_cache.push(ModInterval {
                         top: y_top - 3.0,
                         bottom: y_top + 3.0,
                         state: st,
@@ -947,7 +947,7 @@ impl Renderer {
             }
 
             if let Some(st) = editor.get_line_modification_state(phys_idx) {
-                intervals.push(ModInterval {
+                self.mod_intervals_cache.push(ModInterval {
                     top: y_top,
                     bottom: y_bottom,
                     state: st,
@@ -959,7 +959,7 @@ impl Renderer {
         if end_visual_line == self.visual_lines.len() {
             if let Some(phys_idx) = last_phys_line {
                 if let Some(st) = editor.deleted_gaps.get(phys_idx + 1).copied().flatten() {
-                    intervals.push(ModInterval {
+                    self.mod_intervals_cache.push(ModInterval {
                         top: last_bottom_y - 3.0,
                         bottom: last_bottom_y + 3.0,
                         state: st,
@@ -968,15 +968,17 @@ impl Renderer {
             }
         }
 
-        let mut merged: Vec<ModInterval> = Vec::with_capacity(64);
-        for int in intervals {
-            if let Some(last) = merged.last_mut() {
+        for int in &self.mod_intervals_cache {
+            let mut merged = false;
+            if let Some(last) = self.merged_intervals_cache.last_mut() {
                 if int.top <= last.bottom + 0.1 && int.state == last.state {
                     last.bottom = last.bottom.max(int.bottom);
-                    continue;
+                    merged = true;
                 }
             }
-            merged.push(int);
+            if !merged {
+                self.merged_intervals_cache.push(*int);
+            }
         }
 
         let mut cursor_pos = None;
@@ -1012,7 +1014,7 @@ impl Renderer {
             };
 
             let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
-            let mut identical_idx = identical_words.partition_point(|&(_, e)| e <= start_byte);
+                        let mut identical_idx = self.identical_words_cache.partition_point(|&(_, e)| e <= start_byte);
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -1057,8 +1059,8 @@ impl Renderer {
                     {
                         search_idx += 1;
                     }
-                    while identical_idx < identical_words.len()
-                        && identical_words[identical_idx].1 <= current_offset
+                                        while identical_idx < self.identical_words_cache.len()
+                        && self.identical_words_cache[identical_idx].1 <= current_offset
                     {
                         identical_idx += 1;
                     }
@@ -1083,8 +1085,8 @@ impl Renderer {
                         }
                     }
 
-                    let is_identical = identical_idx < identical_words.len()
-                        && current_offset >= identical_words[identical_idx].0;
+                                        let is_identical = identical_idx < self.identical_words_cache.len()
+                        && current_offset >= self.identical_words_cache[identical_idx].0;
 
                     let is_bracket = if let Some((b1, b2)) = bracket_pairs {
                         current_offset == b1 || current_offset == b2
@@ -1327,7 +1329,7 @@ impl Renderer {
 
         self.flush();
 
-        let mut hovered_diags = Vec::new();
+                self.hovered_diags_cache.clear();
         let mut mouse_in_popup = false;
         if let Some(rect) = self.last_diag_popup_rect {
             // Расширяем "зону безопасности" попапа на 40px во все стороны,
@@ -1435,10 +1437,9 @@ impl Renderer {
                     }
                 }
 
-                if in_hitbox {
-                    hovered_diags.push((
+                                if in_hitbox {
+                    self.hovered_diags_cache.push((
                         idx,
-                        diag.clone(),
                         x_start,
                         top_y,
                         top_y + self.line_height,
@@ -1532,7 +1533,8 @@ impl Renderer {
             }
         }
 
-        for m in merged {
+                        for i in 0..self.merged_intervals_cache.len() {
+            let m = self.merged_intervals_cache[i];
             if m.bottom < 0.0 || m.top > real_height {
                 continue;
             }
@@ -1825,13 +1827,8 @@ impl Renderer {
             ];
             self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
-            let open_bottom: Vec<_> = ide_panel
-                .slots
-                .iter()
-                .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
-                .collect();
-            let mut tx = panel_x + 8.0 * s;
-            for (i, slot) in open_bottom.iter().enumerate() {
+                        let mut tx = panel_x + 8.0 * s;
+            for (i, slot) in ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).enumerate() {
                 let label = slot.id.label();
                 let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
                 if i == 0 {
@@ -1859,11 +1856,11 @@ impl Renderer {
                 self.push_rect(panel_x, panel_y, panel_w, 2.0,[0.60, 0.35, 0.85, 0.4]);
             }
 
-            // Плейсхолдер контента
+                        // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
             let content_h = panel_bottom_h - 1.0 - tab_h;
             if content_h > 8.0 * s {
-                if let Some(slot) = open_bottom.first() {
+                if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open) {
                     if slot.id == crate::app::PanelId::LspServers {
                         self.draw_lsp_servers_panel(
                             panel_x,
@@ -1906,8 +1903,8 @@ impl Renderer {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
 
-        // --- LSP Diagnostic Tooltip ---
-        if hovered_diags.is_empty() {
+                // --- LSP Diagnostic Tooltip ---
+        if self.hovered_diags_cache.is_empty() {
             self.last_diag_popup_rect = None;
             self.last_hovered_diags.clear();
         }
@@ -1919,8 +1916,9 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        let current_hovered_indices: Vec<usize> = hovered_diags.iter().map(|h| h.0).collect();
-        let first_idx = current_hovered_indices.first().copied();
+        self.last_hovered_diags.clear();
+        self.last_hovered_diags.extend(self.hovered_diags_cache.iter().map(|h| h.0));
+        let first_idx = self.last_hovered_diags.first().copied();
 
         if first_idx != self.diag_hover_timer_idx {
             self.diag_hover_timer_idx = first_idx;
@@ -1930,120 +1928,69 @@ impl Renderer {
         }
         let popup_ready = self.diag_hover_timer >= 0.2;
 
-        self.last_hovered_diags = current_hovered_indices;
-
-        if popup_ready && !hovered_diags.is_empty() {
+        if popup_ready && !self.hovered_diags_cache.is_empty() {
             let s = self.scale_factor;
             let pad = 12.0 * s;
             let line_h = 22.0 * s;
             let icon_sz = 20.0 * s;
             let max_text_w = (self.width - 100.0 * s).max(300.0 * s).min(700.0 * s);
 
-            struct DiagLayout {
-                idx: usize,
-                lines: Vec<String>,
-                source_prefix: String,
-                source_suffix: String,
-                has_href: bool,
-                source_on_new_line: bool,
-                total_text_h: f32,
-                severity: crate::lsp::DiagSeverity,
-                is_copied: bool,
-            }
+                        let mut global_max_w = 180.0 * s;
+            let mut total_h = pad * 2.0;
 
-            let mut layouts = Vec::new();
-            let mut global_max_w = 180.0 * s;
+            for i in 0..self.hovered_diags_cache.len() {
+                let (idx, _, _, _) = self.hovered_diags_cache[i];
+                let diag = &lsp_diagnostics[idx];
 
-            for (idx, diag, _, _, _) in &hovered_diags {
-                let source_prefix = match (&diag.source, &diag.code) {
-                    (Some(src), Some(_)) => format!("({} ", src),
-                    (Some(src), None) => format!("({})", src),
-                    (None, Some(_)) => "(".to_string(),
-                    (None, None) => "(LSP)".to_string(),
-                };
-                let source_suffix = match &diag.code {
-                    Some(code) => code.clone(),
-                    None => String::new(),
-                };
-                let close_paren_w = if source_suffix.is_empty() {
-                    0.0
+                let source_str = diag.source.as_deref().unwrap_or("LSP");
+                let code_str = diag.code.as_deref().unwrap_or("");
+
+                let prefix_w = self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
+                let suffix_w = if !code_str.is_empty() {
+                    self.measure_ui_width(" ", 1.0) + self.measure_ui_width(code_str, 1.0) + self.measure_ui_width(")", 1.0)
                 } else {
                     self.measure_ui_width(")", 1.0)
                 };
-                let source_full_w = self.measure_ui_width(&source_prefix, 1.0)
-                    + self.measure_ui_width(&source_suffix, 1.0)
-                    + close_paren_w;
+                let source_full_w = prefix_w + suffix_w;
 
-                let mut lines = Vec::new();
-                let mut cur_line = String::new();
+                let mut cur_line_w = 0.0;
+                let mut line_count = 1;
+                let mut max_line_w = 0.0;
+
                 for word in diag.message.split_whitespace() {
-                    let w = self.measure_ui_width(&format!("{} {}", cur_line, word), 1.0);
-                    if w > max_text_w && !cur_line.is_empty() {
-                        lines.push(cur_line);
-                        cur_line = word.to_string();
+                    let w = self.measure_ui_width(word, 1.0);
+                    let space_w = if cur_line_w > 0.0 { self.measure_ui_width(" ", 1.0) } else { 0.0 };
+
+                    if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
+                        if cur_line_w > max_line_w { max_line_w = cur_line_w; }
+                        line_count += 1;
+                        cur_line_w = w;
                     } else {
-                        if !cur_line.is_empty() {
-                            cur_line.push(' ');
-                        }
-                        cur_line.push_str(word);
+                        cur_line_w += space_w + w;
                     }
                 }
-                if !cur_line.is_empty() {
-                    lines.push(cur_line.clone());
+                if cur_line_w > max_line_w { max_line_w = cur_line_w; }
+
+                let source_on_new_line = cur_line_w + source_full_w + 10.0 * s > max_text_w;
+                if source_on_new_line {
+                    line_count += 1;
+                    if source_full_w > max_line_w { max_line_w = source_full_w; }
+                } else {
+                    let combined = cur_line_w + 8.0 * s + source_full_w;
+                    if combined > max_line_w { max_line_w = combined; }
                 }
 
-                let last_line_w =
-                    self.measure_ui_width(lines.last().map(|st| st.as_str()).unwrap_or(""), 1.0);
-                let mut source_on_new_line = false;
+                let item_w = max_line_w + pad * 2.0 + icon_sz + 16.0 * s;
+                if item_w > global_max_w { global_max_w = item_w; }
 
-                if last_line_w + source_full_w + 10.0 * s > max_text_w {
-                    lines.push(String::new());
-                    source_on_new_line = true;
-                }
-
-                let mut box_text_w = 0.0f32;
-                for l in &lines {
-                    let lw = self.measure_ui_width(l, 1.0);
-                    if lw > box_text_w {
-                        box_text_w = lw;
-                    }
-                }
-                if source_on_new_line && source_full_w > box_text_w {
-                    box_text_w = source_full_w;
-                } else if !source_on_new_line {
-                    let combined_w = last_line_w + 8.0 * s + source_full_w;
-                    if combined_w > box_text_w {
-                        box_text_w = combined_w;
-                    }
-                }
-
-                let item_w = box_text_w + pad * 2.0 + icon_sz + 16.0 * s;
-                if item_w > global_max_w {
-                    global_max_w = item_w;
-                }
-
-                let total_text_h = lines.len() as f32 * line_h;
-                layouts.push(DiagLayout {
-                    idx: *idx,
-                    lines,
-                    source_prefix,
-                    source_suffix,
-                    has_href: diag.code_href.is_some(),
-                    source_on_new_line,
-                    total_text_h,
-                    severity: diag.severity,
-                    is_copied: ide_panel.diag_copied_idx == Some(*idx),
-                });
+                let text_h = line_count as f32 * line_h;
+                total_h += text_h;
             }
 
+            total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
             let box_w = global_max_w;
-            let mut total_h = pad * 2.0;
-            for l in &layouts {
-                total_h += l.total_text_h;
-            }
-            total_h += (layouts.len() as f32 - 1.0) * (line_h * 0.5);
 
-            let (_, _, first_diag_x, first_line_y_top, first_diag_y_bottom) = hovered_diags[0];
+            let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
             let mut bx = first_diag_x;
             if bx + box_w > self.width - 20.0 * s {
                 bx = self.width - box_w - 20.0 * s;
@@ -2075,16 +2022,14 @@ impl Renderer {
                 by.round() - 1.0,
                 box_w.round() + 2.0,
                 total_h.round() + 2.0,
-                6.0 * s,
-                [0.4, 0.4, 0.45, 0.6],
+                6.0 * s,[0.4, 0.4, 0.45, 0.6],
             );
             self.push_rounded_rect(
                 bx.round(),
                 by.round(),
                 box_w.round(),
                 total_h.round(),
-                6.0 * s,
-                [
+                6.0 * s,[
                     self.theme.minimap_bg[0],
                     self.theme.minimap_bg[1],
                     self.theme.minimap_bg[2],
@@ -2092,118 +2037,125 @@ impl Renderer {
                 ],
             );
 
-            let mut current_y = by + pad;
+                        let mut current_y = by + pad;
 
-            for layout in layouts {
-                let border_color = match layout.severity {
-                    crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 1.0],
-                    crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 1.0],
-                    crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 1.0],
-                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 1.0],
+            for i in 0..self.hovered_diags_cache.len() {
+                let (idx, _, _, _) = self.hovered_diags_cache[i];
+                let diag = &lsp_diagnostics[idx];
+                let border_color = match diag.severity {
+                    crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 1.0],
+                    crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 1.0],
+                    crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 1.0],
+                    crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 1.0],
                 };
 
+                let source_str = diag.source.as_deref().unwrap_or("LSP");
+                let code_str = diag.code.as_deref().unwrap_or("");
+
+                let prefix_w = self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
+                let suffix_w = if !code_str.is_empty() {
+                    self.measure_ui_width(" ", 1.0) + self.measure_ui_width(code_str, 1.0) + self.measure_ui_width(")", 1.0)
+                } else {
+                    self.measure_ui_width(")", 1.0)
+                };
+                let source_full_w = prefix_w + suffix_w;
+
+                let mut lines_count = 1;
+                let mut cur_line_w = 0.0;
+                let mut text_y = current_y + line_h * 0.75;
+                let mut draw_x = (bx + pad).round();
+
+                for word in diag.message.split_whitespace() {
+                    let w = self.measure_ui_width(word, 1.0);
+                    let space_w = if cur_line_w > 0.0 { self.measure_ui_width(" ", 1.0) } else { 0.0 };
+
+                    if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
+                        lines_count += 1;
+                        cur_line_w = w;
+                        text_y += line_h;
+                        draw_x = (bx + pad).round();
+                    } else {
+                        if cur_line_w > 0.0 {
+                            draw_x += space_w;
+                        }
+                        cur_line_w += space_w + w;
+                    }
+                    self.draw_string_scaled(word, draw_x, text_y.round(), [0.9, 0.9, 0.9, 1.0], 1.0);
+                    draw_x += w;
+                }
+
+                let source_on_new_line = cur_line_w + source_full_w + 10.0 * s > max_text_w;
+                if source_on_new_line {
+                    lines_count += 1;
+                    text_y += line_h;
+                    draw_x = (bx + pad).round();
+                } else {
+                    draw_x += 8.0 * s;
+                }
+
+                self.draw_string_scaled("(", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                draw_x += self.measure_ui_width("(", 1.0);
+                self.draw_string_scaled(source_str, draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                draw_x += self.measure_ui_width(source_str, 1.0);
+
+                if !code_str.is_empty() {
+                    self.draw_string_scaled(" ", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                    draw_x += self.measure_ui_width(" ", 1.0);
+
+                    let sfx_w = self.measure_ui_width(code_str, 1.0);
+                    let has_href = diag.code_href.is_some();
+                    let sfx_hovered = has_href
+                        && mx >= draw_x - 1.0
+                        && mx <= draw_x + sfx_w + 1.0
+                        && my >= text_y.round() - line_h
+                        && my <= text_y.round() + 2.0 * s;
+
+                    let link_color: [f32; 4] =[0.72, 0.52, 1.0, 1.0];
+                    let sfx_color = if sfx_hovered {
+                        link_color
+                    } else {[link_color[0], link_color[1], link_color[2], 0.85]
+                    };
+
+                    if has_href {
+                        let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
+                        self.push_rect(
+                            draw_x,
+                            text_y.round() + 1.0,
+                            sfx_w,
+                            1.0,
+                            [link_color[0], link_color[1], link_color[2], ul_alpha],
+                        );
+                        if sfx_hovered { wants_pointer = true; }
+                        self.last_diag_href = diag.code_href.clone();
+
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::OpenDiagUrl(idx),
+                            draw_x - 1.0,
+                            text_y.round() - line_h,
+                            sfx_w + 2.0,
+                            line_h + 2.0 * s,
+                            mx,
+                            my,
+                        );
+                    }
+                    self.draw_string_scaled(code_str, draw_x, text_y.round(), sfx_color, 1.0);
+                    draw_x += sfx_w;
+                }
+
+                self.draw_string_scaled(")", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+
+                let total_text_h = lines_count as f32 * line_h;
                 self.push_rect(
                     bx + 4.0 * s,
                     current_y,
                     3.0 * s,
-                    layout.total_text_h,
+                    total_text_h,
                     border_color,
                 );
 
-                let mut text_y = current_y + line_h * 0.75;
-                for (i, line) in layout.lines.iter().enumerate() {
-                    self.draw_string_scaled(
-                        line,
-                        (bx + pad).round(),
-                        text_y.round(),
-                        [0.9, 0.9, 0.9, 1.0],
-                        1.0,
-                    );
-
-                    if i == layout.lines.len() - 1 {
-                        let line_w = self.measure_ui_width(line, 1.0);
-                        let sx = if layout.source_on_new_line {
-                            (bx + pad).round()
-                        } else {
-                            (bx + pad + line_w + 8.0 * s).round()
-                        };
-                        let sy = text_y.round();
-
-                        let prefix_w = self.measure_ui_width(&layout.source_prefix, 1.0);
-                        self.draw_string_scaled(
-                            &layout.source_prefix,
-                            sx,
-                            sy,
-                            [0.55, 0.55, 0.6, 1.0],
-                            1.0,
-                        );
-
-                        if !layout.source_suffix.is_empty() {
-                            let sfx_x = sx + prefix_w;
-                            let sfx_w = self.measure_ui_width(&layout.source_suffix, 1.0);
-                            let sfx_hovered = layout.has_href
-                                && mx >= sfx_x - 1.0
-                                && mx <= sfx_x + sfx_w + 1.0
-                                && my >= sy - line_h
-                                && my <= sy + 2.0 * s;
-                            let link_color: [f32; 4] = [0.72, 0.52, 1.0, 1.0];
-                            let sfx_color = if sfx_hovered {
-                                link_color
-                            } else {
-                                [link_color[0], link_color[1], link_color[2], 0.85]
-                            };
-
-                            if layout.has_href {
-                                let ul_alpha = if sfx_hovered { 0.9 } else { 0.55 };
-                                self.push_rect(
-                                    sfx_x,
-                                    sy + 1.0,
-                                    sfx_w,
-                                    1.0,
-                                    [link_color[0], link_color[1], link_color[2], ul_alpha],
-                                );
-                                if sfx_hovered {
-                                    wants_pointer = true;
-                                }
-                            }
-                            self.draw_string_scaled(
-                                &layout.source_suffix,
-                                sfx_x,
-                                sy,
-                                sfx_color,
-                                1.0,
-                            );
-                            self.draw_string_scaled(
-                                ")",
-                                sfx_x + sfx_w,
-                                sy,
-                                [0.55, 0.55, 0.6, 1.0],
-                                1.0,
-                            );
-
-                            if layout.has_href {
-                                if let Some((_, diag, _, _, _)) =
-                                    hovered_diags.iter().find(|h| h.0 == layout.idx)
-                                {
-                                    self.last_diag_href = diag.code_href.clone();
-                                }
-                                ui_registry.register_rect(
-                                    crate::ui_system::UiId::OpenDiagUrl(layout.idx),
-                                    sfx_x - 1.0,
-                                    sy - line_h,
-                                    sfx_w + 2.0,
-                                    line_h + 2.0 * s,
-                                    mx,
-                                    my,
-                                );
-                            }
-                        }
-                    }
-                    text_y += line_h;
-                }
-
+                let is_copied = ide_panel.diag_copied_idx == Some(idx);
                 let btn_x = (bx + box_w - pad - icon_sz).round();
-                let btn_y = (current_y + (layout.total_text_h - icon_sz) / 2.0).round();
+                let btn_y = (current_y + (total_text_h - icon_sz) / 2.0).round();
                 let btn_hovered = mx >= btn_x - 4.0 * s
                     && mx <= btn_x + icon_sz + 4.0 * s
                     && my >= btn_y - 2.0 * s
@@ -2215,33 +2167,18 @@ impl Renderer {
                         btn_y - 2.0 * s,
                         icon_sz + 8.0 * s,
                         icon_sz + 4.0 * s,
-                        4.0 * s,
-                        [1.0, 1.0, 1.0, 0.1],
+                        4.0 * s,[1.0, 1.0, 1.0, 0.1],
                     );
                     wants_pointer = true;
                 }
-                let icon_type = if layout.is_copied {
-                    crate::widgets::IconType::Check
-                } else {
-                    crate::widgets::IconType::Copy
-                };
-                let icon_color = if layout.is_copied {
-                    [0.3, 0.9, 0.4, 1.0]
-                } else {
-                    self.theme.fg
-                };
+                let icon_type = if is_copied { crate::widgets::IconType::Check } else { crate::widgets::IconType::Copy };
+                let icon_color = if is_copied {[0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
                 let icon_render_sz = 16.0 * s;
                 let offset = (icon_sz - icon_render_sz) / 2.0;
-                self.draw_atlas_icon(
-                    icon_type,
-                    btn_x + offset,
-                    btn_y + offset,
-                    icon_render_sz,
-                    icon_color,
-                );
+                self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
 
                 ui_registry.register_rect(
-                    crate::ui_system::UiId::CopyDiagnostic(layout.idx),
+                    crate::ui_system::UiId::CopyDiagnostic(idx),
                     btn_x - 4.0 * s,
                     btn_y - 2.0 * s,
                     icon_sz + 8.0 * s,
@@ -2250,7 +2187,7 @@ impl Renderer {
                     my,
                 );
 
-                current_y += layout.total_text_h + line_h * 0.5;
+                current_y += total_text_h + line_h * 0.5;
             }
         }
 

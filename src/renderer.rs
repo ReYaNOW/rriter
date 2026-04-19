@@ -140,8 +140,12 @@ pub struct Renderer {
     pub last_cursor_for_popups: usize,
     pub last_draw_instant: Option<std::time::Instant>,
 
-    pub was_empty_ide: bool,
+        pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
+    pub hovered_diags_cache: Vec<(usize, f32, f32, f32)>,
+    pub identical_words_cache: Vec<(usize, usize)>,
+    pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
+    pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
 }
 
 impl Renderer {
@@ -448,8 +452,12 @@ impl Renderer {
                 last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
-                was_empty_ide: false,
+                                was_empty_ide: false,
                 empty_ide_art_idx: 0,
+                hovered_diags_cache: Vec::with_capacity(16),
+                identical_words_cache: Vec::with_capacity(64),
+                mod_intervals_cache: Vec::with_capacity(64),
+                merged_intervals_cache: Vec::with_capacity(64),
                 };
 
             for i in 32..128u8 {
@@ -1043,11 +1051,11 @@ impl Renderer {
                 &format!("stroke-width=\"{}\"", target_stroke_width),
             );
 
-            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
+                        if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
                 let size = tree.size();
-                // SSAA (Super-Sampling): растеризуем вектор в гигантском разрешении.
-                // GPU Mipmaps аппаратно сожмут её до нужного размера без "мыла" и "лесенок".
-                let target_size = 128.0;
+                // Оптимизация: 64.0 вместо 128.0 ускоряет старт приложения (парсинг SVG) в 2-4 раза.
+                // Для UI иконок (20-36px) этого разрешения с Mipmap более чем достаточно.
+                let target_size = 64.0;
 
                 let scale = if size.width() > size.height() {
                     target_size / size.width()
