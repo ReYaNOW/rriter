@@ -20,8 +20,9 @@ impl App {
                     let old_version = self.editor.version;
                     self.editor = Editor::new(8192);
                     self.editor.version = old_version + 1;
-                    self.editor.set_original_text();
+                                        self.editor.set_original_text();
                     self.editor.sync_edits.clear();
+                    while let Ok(_) = self.highlighter.rx.try_recv() {}
                     self.highlighter
                         .reset(self.editor.version, "".to_string(), "".to_string());
                 }

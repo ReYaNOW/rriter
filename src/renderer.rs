@@ -1,10 +1,9 @@
 use glow::HasContext;
 use std::collections::HashMap;
-use std::fs;
 use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
 
-pub const MAX_VERTICES: usize = 100_000;
+pub const MAX_VERTICES: usize = 32_768;
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
 
@@ -64,9 +63,75 @@ pub struct VisualLine {
     pub fold_suffix_len: u8,
 }
 #[derive(Clone)]
+pub enum FontSource {
+    Static(&'static [u8]),
+    LoadedMmap(std::sync::Arc<memmap2::Mmap>),
+    LoadedVec(std::sync::Arc<Vec<u8>>),
+    Lazy(
+        std::path::PathBuf,
+        std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>, ()>>>>,
+    ),
+}
+
+#[derive(Clone)]
 pub struct FontData {
-    pub data: std::borrow::Cow<'static, [u8]>,
+    pub source: FontSource,
     pub index: u32,
+}
+
+impl FontData {
+    pub fn new_lazy(path: &str) -> Self {
+        Self {
+            source: FontSource::Lazy(
+                std::path::PathBuf::from(path),
+                std::rc::Rc::new(std::cell::RefCell::new(None)),
+            ),
+            index: 0,
+        }
+    }
+
+    pub fn new_static(data: &'static [u8]) -> Self {
+        Self {
+            source: FontSource::Static(data),
+            index: 0,
+        }
+    }
+
+        pub fn ensure_loaded(&mut self) {
+        let new_source = if let FontSource::Lazy(path, refcell) = &self.source {
+            let mut cache = refcell.borrow_mut();
+            if cache.is_none() {
+                if let Ok(file) = std::fs::File::open(path) {
+                    if let Ok(mmap) = unsafe { memmap2::Mmap::map(&file) } {
+                        *cache = Some(Ok(std::sync::Arc::new(mmap)));
+                    } else {
+                        *cache = Some(Err(()));
+                    }
+                } else {
+                    *cache = Some(Err(()));
+                }
+            }
+            match cache.as_ref().unwrap() {
+                Ok(arc) => Some(FontSource::LoadedMmap(arc.clone())),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        if let Some(ns) = new_source {
+            self.source = ns;
+        }
+    }
+
+        pub fn data_slice(&self) -> &[u8] {
+        match &self.source {
+            FontSource::Static(d) => d,
+            FontSource::LoadedMmap(arc) => &**arc,
+                        FontSource::LoadedVec(arc) => arc.as_slice(),
+            FontSource::Lazy(_, _) => &[],
+        }
+    }
 }
 
 pub struct Renderer {
@@ -264,52 +329,40 @@ impl Renderer {
                 glow::ONE,
             );
 
-            let font_paths = [
+                        let font_paths =[
                 "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
                 "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
                 "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
             ];
 
-            let emoji_paths = [
+            let mut fonts = Vec::new();
+
+            for path in font_paths.iter() {
+                if std::path::Path::new(path).exists() {
+                    fonts.push(FontData::new_lazy(path));
+                    break;
+                }
+            }
+
+            let nerd_font_data = include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf");
+            let inter_font_data = include_bytes!("fonts/Inter-Regular.otf");
+
+            fonts.push(FontData::new_static(nerd_font_data));
+
+            let emoji_paths =[
                 "/usr/share/fonts/noto/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto/NotoColorEmoji.google.ttf",
             ];
 
-            let mut fonts = Vec::new();
-
-            for path in font_paths.iter() {
-                if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData {
-                        data: std::borrow::Cow::Owned(data),
-                        index: 0,
-                    });
-                    break;
-                }
-            }
-
-            let nerd_font_data: std::borrow::Cow<'static, [u8]> = std::borrow::Cow::Borrowed(
-                include_bytes!("fonts/JetBrainsMonoNerdFont-Regular.ttf"),
-            );
-            let inter_font_data: std::borrow::Cow<'static, [u8]> =
-                std::borrow::Cow::Borrowed(include_bytes!("fonts/Inter-Regular.otf"));
-
-            fonts.push(FontData {
-                data: nerd_font_data.clone(),
-                index: 0,
-            });
-
             for path in emoji_paths.iter() {
-                if let Ok(data) = fs::read(path) {
-                    fonts.push(FontData {
-                        data: std::borrow::Cow::Owned(data),
-                        index: 0,
-                    });
+                if std::path::Path::new(path).exists() {
+                    fonts.push(FontData::new_lazy(path));
                     break;
                 }
             }
 
-            let ui_font_paths = [
+            let ui_font_paths =[
                 "/usr/share/fonts/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/TTF/NotoSans-Regular.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
@@ -318,34 +371,19 @@ impl Renderer {
 
             let mut ui_fonts = Vec::new();
 
-            // Inter теперь первый в приоритете для UI
-            ui_fonts.push(FontData {
-                data: inter_font_data.clone(),
-                index: 0,
-            });
+            ui_fonts.push(FontData::new_static(inter_font_data));
 
             for path in ui_font_paths.iter() {
-                if let Ok(data) = fs::read(path) {
-                    ui_fonts.push(FontData {
-                        data: std::borrow::Cow::Owned(data),
-                        index: 0,
-                    });
+                if std::path::Path::new(path).exists() {
+                    ui_fonts.push(FontData::new_lazy(path));
                     break;
                 }
             }
 
-            ui_fonts.push(FontData {
-                data: nerd_font_data.clone(),
-                index: 0,
-            });
+            ui_fonts.push(FontData::new_static(nerd_font_data));
 
-            if ui_fonts.is_empty() {
-                for f in &fonts {
-                    ui_fonts.push(FontData {
-                        data: f.data.clone(),
-                        index: f.index,
-                    });
-                }
+            for f in &fonts {
+                ui_fonts.push(f.clone());
             }
 
             let load_icon_from_memory = |data: &[u8], _name: &str| -> Option<glow::Texture> {
@@ -558,15 +596,18 @@ impl Renderer {
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
 
-        let indices: Vec<usize> = if is_emoji_char {
+                        let indices: Vec<usize> = if is_emoji_char {
             (0..self.fonts.len()).rev().collect()
         } else {
             (0..self.fonts.len()).collect()
         };
 
-        for &idx in &indices {
+        for idx in indices {
+            self.fonts[idx].ensure_loaded();
             let font_data = &self.fonts[idx];
-            if let Some(font_ref) = FontRef::from_index(&font_data.data, font_data.index as usize) {
+            let data = font_data.data_slice();
+            if data.is_empty() { continue; }
+            if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
                 if glyph_id != 0 || (c == ' ' && idx == 0) {
                     let head = font_ref.metrics(&[]);
@@ -721,15 +762,18 @@ impl Renderer {
         let mut rendered_image = None;
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
-        let indices: Vec<usize> = if is_emoji_char {
+                        let indices: Vec<usize> = if is_emoji_char {
             (0..self.ui_fonts.len()).rev().collect()
         } else {
             (0..self.ui_fonts.len()).collect()
         };
 
-        for &idx in &indices {
+        for idx in indices {
+            self.ui_fonts[idx].ensure_loaded();
             let font_data = &self.ui_fonts[idx];
-            if let Some(font_ref) = FontRef::from_index(&font_data.data, font_data.index as usize) {
+            let data = font_data.data_slice();
+            if data.is_empty() { continue; }
+            if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
                 if glyph_id != 0 || (c == ' ' && idx == 0) {
                     let head = font_ref.metrics(&[]);

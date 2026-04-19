@@ -1761,6 +1761,7 @@ dependencies = [
  "ignore",
  "image",
  "lexical-sort",
+ "memmap2",
  "notify-debouncer-mini",
  "once_cell",
  "rayon",

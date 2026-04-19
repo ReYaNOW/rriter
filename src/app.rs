@@ -28,7 +28,9 @@ pub struct EditorTab {
     pub file_extension: String,
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
-    pub highlighter: crate::highlighter::Highlighter,
+    pub spans: Vec<crate::highlighter::ColorSpan>,
+    pub completions: Vec<crate::highlighter::CompletionItem>,
+    pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
     pub last_sent_version: u64,
     pub search_results: Vec<(usize, usize)>,
     pub search_current_idx: Option<usize>,
@@ -379,7 +381,7 @@ impl App {
 
         let has_startup_file = self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
 
-        if has_startup_file && self.tabs.is_empty() {
+                if has_startup_file && self.tabs.is_empty() {
             self.tabs.push(EditorTab {
                 editor: crate::editor::Editor::new(128),
                 file_path: self.file_path.clone(),
@@ -387,7 +389,9 @@ impl App {
                 file_extension: self.file_extension.clone(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
-                highlighter: crate::highlighter::Highlighter::new(),
+                spans: Vec::new(),
+                completions: Vec::new(),
+                foldable_ranges: Vec::new(),
                 last_sent_version: u64::MAX,
                 search_results: Vec::new(),
                 search_current_idx: None,
@@ -462,9 +466,11 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
-        let ai = self.active_tab;
+                let ai = self.active_tab;
         std::mem::swap(&mut self.editor, &mut self.tabs[ai].editor);
-        std::mem::swap(&mut self.highlighter, &mut self.tabs[ai].highlighter);
+        std::mem::swap(&mut self.highlighter.spans, &mut self.tabs[ai].spans);
+        std::mem::swap(&mut self.highlighter.completions, &mut self.tabs[ai].completions);
+        std::mem::swap(&mut self.highlighter.foldable_ranges, &mut self.tabs[ai].foldable_ranges);
         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
         std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
@@ -501,9 +507,15 @@ impl App {
             return;
         }
 
-        self.sync_active_tab();
+                self.sync_active_tab();
         self.active_tab = new_idx;
         self.sync_active_tab();
+
+        let highest = self.tabs.iter().map(|t| t.editor.version).max().unwrap_or(0).max(self.editor.version);
+        self.editor.version = highest + 1;
+
+        while let Ok(_) = self.highlighter.rx.try_recv() {}
+        self.highlighter.reset(self.editor.version, self.editor.get_full_text(), self.file_extension.clone());
 
                 if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
@@ -535,19 +547,26 @@ impl App {
             return;
         }
 
-        if self.tabs.is_empty() {
+                if self.tabs.is_empty() {
+            let old_version = self.editor.version;
             self.editor = crate::editor::Editor::new(8192);
+            self.editor.version = old_version + 1;
             self.file_path = None;
             self.base_title = "Безымянный".to_string();
             self.file_extension = String::new();
+
+            let mut tab_editor = crate::editor::Editor::new(8192);
+            tab_editor.version = old_version + 1;
             self.tabs.push(EditorTab {
-                editor: crate::editor::Editor::new(8192),
+                editor: tab_editor,
                 file_path: None,
                 base_title: String::new(),
                 file_extension: String::new(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
-                highlighter: crate::highlighter::Highlighter::new(),
+                spans: Vec::new(),
+                completions: Vec::new(),
+                foldable_ranges: Vec::new(),
                 last_sent_version: 0,
                 search_results: Vec::new(),
                 search_current_idx: None,
@@ -556,6 +575,8 @@ impl App {
             });
             self.active_tab = 0;
             self.show_welcome = false;
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.highlighter.reset(self.editor.version, String::new(), String::new());
             self.autocomplete_active = false;
             if let Some(w) = self.window.as_ref() {
                 App::update_window_title(w, &self.base_title, false);
@@ -565,15 +586,20 @@ impl App {
             return;
         }
 
-        self.sync_active_tab();
+                self.sync_active_tab();
+        let highest = self.tabs.iter().map(|t| t.editor.version).max().unwrap_or(0).max(self.editor.version);
+        let mut new_editor = crate::editor::Editor::new(8192);
+        new_editor.version = highest + 1;
         let new_tab = EditorTab {
-            editor: crate::editor::Editor::new(8192),
+            editor: new_editor,
             file_path: None,
             base_title: "Безымянный".to_string(),
             file_extension: String::new(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
-            highlighter: crate::highlighter::Highlighter::new(),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
             last_sent_version: u64::MAX,
             search_results: Vec::new(),
             search_current_idx: None,
@@ -583,6 +609,8 @@ impl App {
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
         self.sync_active_tab();
+        while let Ok(_) = self.highlighter.rx.try_recv() {}
+        self.highlighter.reset(self.editor.version, String::new(), String::new());
 
         self.autocomplete_active = false;
         self.show_welcome = false;
@@ -1021,8 +1049,9 @@ impl App {
         let old_version = self.editor.version;
         self.editor = Editor::new(8192);
         self.editor.version = old_version + 1;
-        self.editor.set_original_text();
+                self.editor.set_original_text();
         self.editor.sync_edits.clear();
+        while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter
             .reset(self.editor.version, "".to_string(), "".to_string());
         self.search_results.clear();
@@ -1191,8 +1220,9 @@ impl App {
                     .extension()
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
-                self.highlighter.spans.clear();
+                                self.highlighter.spans.clear();
                 self.is_highlighted_once = false;
+                while let Ok(_) = self.highlighter.rx.try_recv() {}
                 self.highlighter.reset(
                     self.editor.version,
                     self.editor.get_full_text(),
@@ -1258,10 +1288,13 @@ impl App {
                             tab.editor.version = old_version + 1;
                             let _ = tab.editor.insert_str(&disk_text);
                             tab.editor.cursor = 0;
-                            tab.editor.clear_history();
+                                                        tab.editor.clear_history();
                             tab.editor.set_original_text();
                             tab.editor.sync_edits.clear();
-                            tab.highlighter.reset(tab.editor.version, disk_text, tab.file_extension.clone());
+                            tab.spans.clear();
+                            tab.completions.clear();
+                            tab.foldable_ranges.clear();
+                            tab.is_highlighted_once = false;
                             needs_redraw = true;
                         }
                     }
