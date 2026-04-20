@@ -19,6 +19,9 @@ impl Default for Cell {
 pub struct TermGrid {
     pub scrollback: std::collections::VecDeque<Vec<Cell>>,
     pub lines: std::collections::VecDeque<Vec<Cell>>,
+    pub alt_lines: Option<std::collections::VecDeque<Vec<Cell>>>,
+    pub alt_saved_cursor: Option<(usize, usize)>,
+    pub is_alt: bool,
     pub cols: usize,
     pub visible_rows: usize,
     pub cur_x: usize,
@@ -27,8 +30,9 @@ pub struct TermGrid {
         pub cur_bg: u8,
     pub dirty: bool,
     pub selection: Option<(usize, usize, usize, usize)>,
-    pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+        pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
     pub saved_cursor: Option<(usize, usize)>,
+    pub scroll_region: (usize, usize),
 }
 
 impl TermGrid {
@@ -37,56 +41,119 @@ impl TermGrid {
         for _ in 0..visible_rows {
             lines.push_back(vec![Cell::default(); cols]);
         }
-        Self {
+                Self {
             scrollback: std::collections::VecDeque::new(),
             lines,
+            alt_lines: None,
+            alt_saved_cursor: None,
+            is_alt: false,
             cols,
             visible_rows,
             cur_x: 0,
             cur_y: 0,
             cur_fg: 7,
-                        cur_bg: 0,
+            cur_bg: 0,
             dirty: true,
             selection: None,
             reply_tx: None,
             saved_cursor: None,
+            scroll_region: (0, visible_rows.saturating_sub(1)),
         }
     }
 
-            pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
-                self.cols = new_cols;
-                for line in self.scrollback.iter_mut() {
-                    line.resize(new_cols, Cell::default());
-                }
-                for line in self.lines.iter_mut() {
-                    line.resize(new_cols, Cell::default());
-                }
+                        pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
+        if new_cols == self.cols && new_rows == self.visible_rows { return; }
 
-                                if new_rows < self.lines.len() {
-            let mut lines_to_remove = self.lines.len() - new_rows;
-            while lines_to_remove > 0 && self.lines.len() > self.cur_y + 1 {
-                self.lines.pop_back();
-                lines_to_remove -= 1;
+        if new_cols != self.cols {
+            for line in self.lines.iter_mut() { line.resize(new_cols, Cell::default()); }
+            for line in self.scrollback.iter_mut() { line.resize(new_cols, Cell::default()); }
+            if let Some(alt) = &mut self.alt_lines {
+                for line in alt.iter_mut() { line.resize(new_cols, Cell::default()); }
             }
-            for _ in 0..lines_to_remove {
+            self.cols = new_cols;
+        }
+
+        let current_rows = self.lines.len();
+        let was_full_region = self.scroll_region.1 >= current_rows.saturating_sub(1);
+
+        if new_rows < current_rows {
+            let diff = current_rows - new_rows;
+            let rows_below_cursor = current_rows.saturating_sub(self.cur_y + 1);
+            let drop_bottom = rows_below_cursor.min(diff);
+            let drop_top = diff - drop_bottom;
+
+            for _ in 0..drop_bottom {
+                self.lines.pop_back();
+            }
+            for _ in 0..drop_top {
                 if let Some(top) = self.lines.pop_front() {
-                    self.scrollback.push_back(top);
-                    if self.scrollback.len() > 10000 {
-                        self.scrollback.pop_front();
+                    if !self.is_alt {
+                        self.scrollback.push_back(top);
                     }
                 }
             }
-            self.cur_y = self.cur_y.saturating_sub(lines_to_remove);
-        } else if new_rows > self.lines.len() {
-            let diff = new_rows - self.lines.len();
-            for _ in 0..diff {
-                self.lines.push_back(vec![Cell::default(); new_cols]);
+
+            self.cur_y = self.cur_y.saturating_sub(drop_top);
+            if let Some((_, ref mut sy)) = self.saved_cursor {
+                *sy = sy.saturating_sub(drop_top);
+            }
+        } else if new_rows > current_rows {
+            let diff = new_rows - current_rows;
+
+            if !self.is_alt {
+                let from_scrollback = diff.min(self.scrollback.len());
+
+                for _ in 0..from_scrollback {
+                    if let Some(row) = self.scrollback.pop_back() {
+                        self.lines.push_front(row);
+                    }
+                }
+
+                let blanks = diff - from_scrollback;
+                for _ in 0..blanks {
+                    self.lines.push_back(vec![Cell::default(); self.cols]);
+                }
+
+                self.cur_y += from_scrollback;
+                if let Some((_, ref mut sy)) = self.saved_cursor {
+                    *sy += from_scrollback;
+                }
+            } else {
+                for _ in 0..diff {
+                    self.lines.push_back(vec![Cell::default(); self.cols]);
+                }
             }
         }
 
+        if let Some(alt) = &mut self.alt_lines {
+            let alt_current_rows = alt.len();
+            if new_rows < alt_current_rows {
+                let diff = alt_current_rows - new_rows;
+                for _ in 0..diff { alt.pop_back(); }
+            } else if new_rows > alt_current_rows {
+                let diff = new_rows - alt_current_rows;
+                for _ in 0..diff { alt.push_back(vec![Cell::default(); self.cols]); }
+            }
+            if let Some((_, ref mut sy)) = self.alt_saved_cursor {
+                *sy = (*sy).min(new_rows.saturating_sub(1));
+            }
+        }
+
+        while self.scrollback.len() > 10000 { self.scrollback.pop_front(); }
         self.visible_rows = new_rows;
         self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
         self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
+
+        if was_full_region {
+            self.scroll_region = (0, new_rows.saturating_sub(1));
+        } else {
+            let (sr_top, sr_bot) = self.scroll_region;
+            self.scroll_region = (
+                sr_top.min(new_rows.saturating_sub(1)),
+                sr_bot.min(new_rows.saturating_sub(1)),
+            );
+        }
+        self.dirty = true;
     }
 
         pub fn put_char(&mut self, c: char) {
@@ -109,18 +176,41 @@ impl TermGrid {
         self.cur_x += 1;
     }
 
-    pub fn newline(&mut self) {
-        if self.cur_y + 1 < self.visible_rows {
+        pub fn newline(&mut self) {
+        if self.cur_y == self.scroll_region.1 {
+            self.scroll_region_up(1);
+        } else if self.cur_y + 1 < self.visible_rows {
             self.cur_y += 1;
         } else {
-            if let Some(top) = self.lines.pop_front() {
-                self.scrollback.push_back(top);
-                if self.scrollback.len() > 1000 {
-                    self.scrollback.pop_front();
+            self.scroll_region_up(1);
+            self.cur_y = self.visible_rows.saturating_sub(1);
+        }
+    }
+
+        pub fn scroll_region_up(&mut self, rows: usize) {
+        let (top, bottom) = self.scroll_region;
+        if bottom >= self.lines.len() || top >= bottom { return; }
+        for _ in 0..rows {
+            let removed = self.lines.remove(top).unwrap_or_else(|| vec![Cell::default(); self.cols]);
+            if top == 0 && bottom == self.visible_rows.saturating_sub(1) {
+                if !self.is_alt {
+                    self.scrollback.push_back(removed);
+                    if self.scrollback.len() > 10000 { self.scrollback.pop_front(); }
                 }
             }
-            self.lines.push_back(vec![Cell::default(); self.cols]);
+            self.lines.insert(bottom, vec![Cell::default(); self.cols]);
         }
+        self.dirty = true;
+    }
+
+    pub fn scroll_region_down(&mut self, rows: usize) {
+        let (top, bottom) = self.scroll_region;
+        if bottom >= self.lines.len() || top >= bottom { return; }
+        for _ in 0..rows {
+            self.lines.remove(bottom);
+            self.lines.insert(top, vec![Cell::default(); self.cols]);
+        }
+        self.dirty = true;
     }
 
     pub fn get_selection_text(&self) -> String {
@@ -133,7 +223,7 @@ impl Perform for TermGrid {
     fn print(&mut self, c: char) {
         self.put_char(c);
     }
-    fn execute(&mut self, byte: u8) {
+            fn execute(&mut self, byte: u8) {
         match byte {
             b'\n' | b'\x0B' | b'\x0C' => self.newline(),
             b'\r' => self.cur_x = 0,
@@ -148,7 +238,7 @@ impl Perform for TermGrid {
     fn hook(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
     fn put(&mut self, _byte: u8) {}
     fn unhook(&mut self) {}
-        fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+                        fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         if params.len() >= 2 && params[1] == b"?" {
             if params[0] == b"10" || params[0] == b"11" {
                 if let Some(tx) = &self.reply_tx {
@@ -159,7 +249,7 @@ impl Perform for TermGrid {
             }
         }
     }
-        fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+                        fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
         match byte {
             b'7' => self.saved_cursor = Some((self.cur_x, self.cur_y)),
             b'8' => {
@@ -171,8 +261,42 @@ impl Perform for TermGrid {
             _ => {}
         }
     }
-    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, action: char) {
+                        fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         match action {
+            'h' | 'l' => {
+                let enable = action == 'h';
+                let is_private = intermediates.contains(&b'?');
+                if is_private {
+                    for param in params.iter() {
+                        if param[0] == 1049 || param[0] == 47 || param[0] == 1047 {
+                            if enable && !self.is_alt {
+                                self.is_alt = true;
+                                self.alt_saved_cursor = Some((self.cur_x, self.cur_y));
+                                let mut alt = std::collections::VecDeque::new();
+                                for _ in 0..self.visible_rows {
+                                    alt.push_back(vec![Cell::default(); self.cols]);
+                                }
+                                self.alt_lines = Some(std::mem::replace(&mut self.lines, alt));
+                                self.cur_x = 0;
+                                self.cur_y = 0;
+                                self.dirty = true;
+                            } else if !enable && self.is_alt {
+                                self.is_alt = false;
+                                if let Some(alt) = self.alt_lines.take() {
+                                    self.lines = alt;
+                                }
+                                if let Some((x, y)) = self.alt_saved_cursor.take() {
+                                    self.cur_x = x;
+                                    self.cur_y = y;
+                                }
+                                self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
+                                self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
             's' => self.saved_cursor = Some((self.cur_x, self.cur_y)),
             'u' => {
                 if let Some((x, y)) = self.saved_cursor {
@@ -180,12 +304,14 @@ impl Perform for TermGrid {
                     self.cur_y = y;
                 }
             }
-            'G' | '`' => {
+                        'G' | '`' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_x = p.saturating_sub(1).min(self.cols.saturating_sub(1));
             }
             'd' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_y = p.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
             }
             'c' => {
@@ -209,42 +335,122 @@ impl Perform for TermGrid {
                 let mut iter = params.iter();
                 let y = iter.next().map(|p| p[0]).unwrap_or(1) as usize;
                 let x = iter.next().map(|p| p[0]).unwrap_or(1) as usize;
+                let y = if y == 0 { 1 } else { y };
+                let x = if x == 0 { 1 } else { x };
                 self.cur_y = y.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
                 self.cur_x = x.saturating_sub(1).min(self.cols.saturating_sub(1));
             }
-                        'J' => {
+            'J' => {
                 let param = params.iter().next().map(|p| p[0]).unwrap_or(0);
-                if param == 2 || param == 3 {
-                    for line in self.lines.iter_mut() {
-                        for cell in line.iter_mut() {
-                            *cell = Cell::default();
+                match param {
+                    0 => {
+                        if let Some(line) = self.lines.get_mut(self.cur_y) {
+                            for i in self.cur_x..self.cols {
+                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                            }
+                        }
+                        for i in (self.cur_y + 1)..self.visible_rows {
+                            if let Some(line) = self.lines.get_mut(i) {
+                                for cell in line.iter_mut() { *cell = Cell::default(); }
+                            }
                         }
                     }
-                    if param == 3 {
-                        self.scrollback.clear();
-                    }
-                    self.cur_x = 0;
-                    self.cur_y = 0;
-                } else if param == 0 {
-                    if let Some(line) = self.lines.get_mut(self.cur_y) {
-                        for i in self.cur_x..self.cols {
-                            if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                    1 => {
+                        for i in 0..self.cur_y {
+                            if let Some(line) = self.lines.get_mut(i) {
+                                for cell in line.iter_mut() { *cell = Cell::default(); }
+                            }
+                        }
+                        if let Some(line) = self.lines.get_mut(self.cur_y) {
+                            for i in 0..=self.cur_x.min(self.cols - 1) {
+                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                            }
                         }
                     }
-                    for i in (self.cur_y + 1)..self.visible_rows {
-                        if let Some(line) = self.lines.get_mut(i) {
+                                        2 | 3 => {
+                        for line in self.lines.iter_mut() {
                             for cell in line.iter_mut() { *cell = Cell::default(); }
                         }
+                        if param == 3 { self.scrollback.clear(); }
                     }
+                    _ => {}
                 }
             }
             'K' => {
                 let param = params.iter().next().map(|p| p[0]).unwrap_or(0);
-                if param == 0 {
-                    if let Some(line) = self.lines.get_mut(self.cur_y) {
-                        for i in self.cur_x..self.cols {
-                            if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                if let Some(line) = self.lines.get_mut(self.cur_y) {
+                    match param {
+                        0 => {
+                            for i in self.cur_x..self.cols {
+                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                            }
                         }
+                        1 => {
+                            for i in 0..=self.cur_x.min(self.cols - 1) {
+                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
+                            }
+                        }
+                        2 => {
+                            for cell in line.iter_mut() { *cell = Cell::default(); }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+                                                'r' => {
+                let mut iter = params.iter();
+                let top = iter.next().map(|p| p[0]).unwrap_or(1) as usize;
+                let bottom = iter.next().map(|p| p[0]).unwrap_or(self.visible_rows as u16) as usize;
+                let top = if top == 0 { 1 } else { top };
+                let bottom = if bottom == 0 { self.visible_rows } else { bottom };
+                let top_idx = top.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
+                let bottom_idx = bottom.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
+                if bottom_idx >= top_idx {
+                    self.scroll_region = (top_idx, bottom_idx);
+                }
+                self.cur_x = 0;
+                self.cur_y = 0;
+            }
+            'L' => {
+                let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let count = if count == 0 { 1 } else { count };
+                let bottom = self.scroll_region.1;
+                for _ in 0..count {
+                    if self.cur_y <= bottom && bottom < self.lines.len() {
+                        self.lines.remove(bottom);
+                        self.lines.insert(self.cur_y, vec![Cell::default(); self.cols]);
+                    }
+                }
+            }
+            'M' => {
+                let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let count = if count == 0 { 1 } else { count };
+                let bottom = self.scroll_region.1;
+                for _ in 0..count {
+                    if self.cur_y <= bottom && bottom < self.lines.len() {
+                        self.lines.remove(self.cur_y);
+                        self.lines.insert(bottom, vec![Cell::default(); self.cols]);
+                    }
+                }
+            }
+            'P' => {
+                let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let count = if count == 0 { 1 } else { count };
+                if let Some(line) = self.lines.get_mut(self.cur_y) {
+                    for _ in 0..count {
+                        if self.cur_x < line.len() {
+                            line.remove(self.cur_x);
+                            line.push(Cell::default());
+                        }
+                    }
+                }
+            }
+            'X' => {
+                let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let count = if count == 0 { 1 } else { count };
+                if let Some(line) = self.lines.get_mut(self.cur_y) {
+                    for i in self.cur_x..(self.cur_x + count).min(self.cols) {
+                        if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
                     }
                 }
             }
@@ -285,21 +491,35 @@ impl Perform for TermGrid {
                     i += 1;
                 }
             }
-            'C' => {
+                        'C' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_x = (self.cur_x + p).min(self.cols.saturating_sub(1));
             }
             'D' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_x = self.cur_x.saturating_sub(p);
             }
             'A' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_y = self.cur_y.saturating_sub(p);
             }
             'B' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
                 self.cur_y = (self.cur_y + p).min(self.visible_rows.saturating_sub(1));
+            }
+                        'S' => {
+                let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
+                self.scroll_region_up(p);
+            }
+            'T' => {
+                let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
+                let p = if p == 0 { 1 } else { p };
+                self.scroll_region_down(p);
             }
             _ => {}
         }
@@ -311,7 +531,6 @@ pub struct Terminal {
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     pub child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
-    pub last_pty_size: Arc<Mutex<(u16, u16)>>,
 }
 
 impl Terminal {
@@ -367,33 +586,23 @@ impl Terminal {
             }
         });
 
-                        println!("[Terminal] Process spawned");
+                                        let master_pty = Arc::new(Mutex::new(pair.master));
+
+        println!("[Terminal] Process spawned");
         Self {
             grid,
             writer: writer_arc,
-            master_pty: Arc::new(Mutex::new(pair.master)),
+            master_pty,
             child: Arc::new(Mutex::new(child)),
-            last_pty_size: Arc::new(Mutex::new((200, 60))),
         }
     }
 
-                        pub fn resize_pty(&self, cols: u16, rows: u16) {
+                                                                                                                                                                                    pub fn resize_pty(&self, cols: u16, rows: u16) {
         if cols == 0 || rows == 0 {
             return;
         }
-
-        if let Ok(mut last) = self.last_pty_size.lock() {
-            if *last == (cols, rows) {
-                return; // Дебаунс: пресекаем шторм из SIGWINCH при ресайзе панели
-            }
-            *last = (cols, rows);
-            println!("[Terminal] Resizing PTY to {}x{}", cols, rows);
-        }
-
-        // ВНИМАНИЕ: Мы убрали grid.lock() отсюда. 
-        // Вызов resize сетки делает функция draw() в render_view.rs, 
-        // иначе мы получаем Deadlock.
-
+        // Call synchronously: shell must get SIGWINCH immediately after grid resize,
+        // otherwise cursor positions diverge (fish/zsh redraw prompt at wrong row).
         if let Ok(master) = self.master_pty.lock() {
             let _ = master.resize(PtySize {
                 rows,

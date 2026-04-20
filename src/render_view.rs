@@ -1901,7 +1901,8 @@ impl Renderer {
                         let ansi_colors = [[0.0, 0.0, 0.0, 1.0],[0.8, 0.2, 0.2, 1.0], [0.2, 0.8, 0.2, 1.0],[0.8, 0.8, 0.2, 1.0],[0.2, 0.4, 0.8, 1.0],[0.8, 0.2, 0.8, 1.0],[0.2, 0.8, 0.8, 1.0],[0.8, 0.8, 0.8, 1.0],[0.4, 0.4, 0.4, 1.0], [1.0, 0.4, 0.4, 1.0],[0.4, 1.0, 0.4, 1.0],[1.0, 1.0, 0.4, 1.0],[0.4, 0.6, 1.0, 1.0],[1.0, 0.4, 1.0, 1.0],[0.4, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
                         ];
 
-                                                                        let mut draw_y = content_y;
+                                                                        let base_draw_y = content_y + content_h - (grid.visible_rows as f32 * char_h);
+                        let mut draw_y = base_draw_y;
                         let draw_x = panel_x + 10.0 * s;
                         for (r_idx, row) in grid.lines.iter().enumerate() {
                             if r_idx >= grid.visible_rows { break; }
@@ -1922,7 +1923,7 @@ impl Renderer {
 
                                                 if ide_panel.terminal_focused {
                             let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
-                            let cursor_px_y = content_y + grid.cur_y as f32 * char_h;
+                            let cursor_px_y = base_draw_y + grid.cur_y as f32 * char_h;
                             self.push_rect(cursor_px_x, cursor_px_y + 2.0 * s, char_w, char_h,[1.0, 1.0, 1.0, 0.5]);
 
                             let border_color = self.theme.sel;
