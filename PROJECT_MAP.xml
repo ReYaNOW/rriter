@@ -48,24 +48,24 @@
   </mod>
   <mod path="src/app/terminal.rs" name="app::terminal">
     <type name="Cell">{ c: char, fg: u8, bg: u8 }</type>
-    <type name="TermGrid">{ lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, cols: usize, visible_rows: usize, cur_x: usize, cur_y: usize, cur_fg: u8, cur_bg: u8, dirty: bool, selection: Option&lt;(usize, usize, usize, usize)&gt; }</type>
-    <type name="Terminal">{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt; }</type>
+    <type name="TermGrid">{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, cols: usize, visible_rows: usize, cur_x: usize, cur_y: usize, cur_fg: u8, cur_bg: u8, dirty: bool, selection: Option&lt;(usize, usize, usize, usize)&gt;, reply_tx: Option&lt;std::sync::mpsc::Sender&lt;Vec&lt;u8&gt;&gt;&gt;, saved_cursor: Option&lt;(usize, usize)&gt; }</type>
+    <type name="Terminal">{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, last_pty_size: Arc&lt;Mutex&lt;(u16, u16)&gt;&gt; }</type>
     <fn name="default" line="14" ret="Self" />
-    <fn name="new" line="32" pub="true" ret="Self" />
-    <fn name="resize" line="50" pub="true" writes="cols=, lines.push_back(), visible_rows=" />
-    <fn name="put_char" line="61" pub="true" reads="cols, cur_bg, cur_fg, cur_x, cur_y, lines, visible_rows" calls="self: newline" />
-    <fn name="newline" line="78" pub="true" reads="cols, cur_y, visible_rows" writes="lines.push_back()" />
-    <fn name="get_selection_text" line="87" pub="true" ret="String" />
-    <fn name="print" line="94" calls="self: put_char" />
-    <fn name="execute" line="97" writes="cur_x=" calls="self: newline, put_char" />
-    <fn name="hook" line="109" />
-    <fn name="put" line="110" />
-    <fn name="unhook" line="111" />
-    <fn name="osc_dispatch" line="112" />
-    <fn name="esc_dispatch" line="113" />
-    <fn name="csi_dispatch" line="114" reads="cols, lines, visible_rows" writes="cur_bg=, cur_fg=, cur_x=, cur_y=" />
-    <fn name="spawn" line="203" pub="true" ret="Self" />
-    <fn name="resize_pty" line="249" pub="true" reads="master_pty" calls="self: resize; renderer: resize" />
+    <fn name="new" line="35" pub="true" ret="Self" />
+    <fn name="resize" line="56" pub="true" writes="cols=, cur_x=, cur_y=, lines.pop_back(), lines.push_back(), scrollback.push_back(), visible_rows=" />
+    <fn name="put_char" line="92" pub="true" reads="cols, cur_bg, cur_fg, lines, visible_rows" writes="cur_x=, cur_y=" calls="self: newline" />
+    <fn name="newline" line="112" pub="true" reads="cols, cur_y, visible_rows" writes="lines.push_back(), scrollback.push_back()" />
+    <fn name="get_selection_text" line="126" pub="true" ret="String" />
+    <fn name="print" line="133" calls="self: put_char" />
+    <fn name="execute" line="136" writes="cur_x=" calls="self: newline, put_char" />
+    <fn name="hook" line="148" />
+    <fn name="put" line="149" />
+    <fn name="unhook" line="150" />
+    <fn name="osc_dispatch" line="151" reads="reply_tx" />
+    <fn name="esc_dispatch" line="162" writes="cur_x=, cur_y=, saved_cursor=" />
+    <fn name="csi_dispatch" line="174" reads="cols, lines, reply_tx, visible_rows" writes="cur_bg=, cur_fg=, cur_x=, cur_y=, saved_cursor=, scrollback.clear()" />
+    <fn name="spawn" line="318" pub="true" ret="Self" calls="render_view::core_text: flush" />
+    <fn name="resize_pty" line="380" pub="true" reads="last_pty_size, master_pty" calls="self: resize; renderer: resize" />
   </mod>
   <mod path="src/app/ui_handlers.rs" name="app::ui_handlers">
     <fn name="handle_ui_click" line="9" pub="true" reads="clipboard, file_extension, highlighter, ide_panel, lsp, pending_action, recent_files, renderer, scroll_x, scroll_y, search_editor, window, window_height, window_width" writes="base_title=, click_count=, dialog_window=, editor=, file_path=, ide_ignore_patterns.push(), ide_ignore_patterns.remove(), ide_workspaces.remove(), is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_ide_mode=, last_click_pos=, last_click_time=, pending_fix_all_id=, search_case_sensitive=, search_current_idx=, search_focused=, search_results.clear(), settings_ignore_editor=, settings_ignore_focused=, settings_tab=, show_search=, show_welcome=" calls="self: close_tab_at, enter_ide_mode, handle_file_tree_click, jump_to_search_result, open_file_in_tab, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab, trigger_file_picker, trigger_folder_picker, trigger_save_as_picker, update_search; app: is_open, toggle; app::terminal: spawn; editor: get_full_text, is_dirty, select_line, select_word, set_cursor_at_pos, set_original_text; highlighter: reset; lsp: disable_python, enable_python, get_diagnostics, lsp_pos_to_offset, request_fix_all, restart_python, servers_info; render_view::core_text: get_cursor_xy, get_max_scroll; renderer: get_ui_glyph; scroll: stop_anim; ui_system: contains" />
@@ -337,8 +337,8 @@
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
     <fn name="draw" line="22" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, hovered_diags_cache.clear(), hovered_diags_cache.push(), identical_words_cache.clear(), identical_words_cache.push(), last_cursor_for_popups=, last_diag_href=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_hovered_diags.extend(), last_known_mouse=, left_padding=, max_scroll_x=, merged_intervals_cache.clear(), merged_intervals_cache.push(), minimap_width=, mod_intervals_cache.clear(), mod_intervals_cache.push(), phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_atlas_icon, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_welcome, flush, get_glyph, get_max_scroll, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, any_top_open, icon, is_open, label; app::terminal: resize, resize_pty; editor: byte_at, ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, text_parts, utf16_col_to_byte_advance; lsp: get_diagnostics; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
-    <fn name="draw_tab_bar" line="2289" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
-    <fn name="draw_minimap" line="2513" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
+    <fn name="draw_tab_bar" line="2290" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
+    <fn name="draw_minimap" line="2514" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
   </mod>
   <mod path="src/renderer.rs" name="renderer">
     <type name="FontData">{ source: FontSource, index: u32 }</type>

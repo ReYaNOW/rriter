@@ -1883,11 +1883,12 @@ impl Renderer {
                         ide_panel,
                         ui_registry,
                     );
-                } else if slot.id == crate::app::PanelId::Terminal {
+                                                } else if slot.id == crate::app::PanelId::Terminal {
                     if let Some(term) = &ide_panel.terminal {
                         let mut grid = term.grid.lock().unwrap();
-                        let char_w = self.char_advance('A');
-                        let char_h = self.line_height;
+                        let term_scale = 0.82; // Немного увеличили
+                        let char_w = self.char_advance('A') * term_scale;
+                        let char_h = self.line_height * term_scale;
                         let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
                         let new_rows = (content_h / char_h).floor().max(2.0) as usize;
 
@@ -1900,7 +1901,7 @@ impl Renderer {
                         let ansi_colors = [[0.0, 0.0, 0.0, 1.0],[0.8, 0.2, 0.2, 1.0], [0.2, 0.8, 0.2, 1.0],[0.8, 0.8, 0.2, 1.0],[0.2, 0.4, 0.8, 1.0],[0.8, 0.2, 0.8, 1.0],[0.2, 0.8, 0.8, 1.0],[0.8, 0.8, 0.8, 1.0],[0.4, 0.4, 0.4, 1.0], [1.0, 0.4, 0.4, 1.0],[0.4, 1.0, 0.4, 1.0],[1.0, 1.0, 0.4, 1.0],[0.4, 0.6, 1.0, 1.0],[1.0, 0.4, 1.0, 1.0],[0.4, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
                         ];
 
-                                                let mut draw_y = content_y;
+                                                                        let mut draw_y = content_y;
                         let draw_x = panel_x + 10.0 * s;
                         for (r_idx, row) in grid.lines.iter().enumerate() {
                             if r_idx >= grid.visible_rows { break; }
@@ -1912,7 +1913,7 @@ impl Renderer {
                                 }
                                 if cell.c != ' ' {
                                     let fg_color = if cell.fg < 16 { ansi_colors[cell.fg as usize] } else { self.theme.fg };
-                                    self.draw_string_mono_scaled(&cell.c.to_string(), cx, draw_y + char_h / 2.0 + 4.0 * s, fg_color, 1.0);
+                                    self.draw_string_mono_scaled(&cell.c.to_string(), cx, draw_y + char_h / 2.0 + 3.0 * s, fg_color, term_scale);
                                 }
                                 cx += char_w;
                             }
