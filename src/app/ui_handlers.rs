@@ -6,8 +6,11 @@ use crate::ui_system::UiId;
 
 impl App {
     /// Обрабатывает клик по UI элементу
-    pub fn handle_ui_click(&mut self, id: UiId) {
+        pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
+            UiId::TerminalBody => {
+                self.ide_panel.terminal_focused = true;
+            }
             // Welcome screen
             UiId::WelcomeNewFile => {
                 self.show_welcome = false;

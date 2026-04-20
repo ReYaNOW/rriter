@@ -5,6 +5,7 @@ pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
 pub mod ui_handlers;
+pub mod terminal;
 
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
@@ -145,8 +146,10 @@ pub struct IdePanelState {
                                 pub diag_copied_idx: Option<usize>,
         pub problems_tab: usize,
         pub flat_diags: Vec<(std::path::PathBuf, usize)>,
-        pub problems_collapsed: FxHashSet<std::path::PathBuf>,
+                pub problems_collapsed: FxHashSet<std::path::PathBuf>,
         pub problems_scroll: crate::scroll::ScrollState,
+        pub terminal: Option<crate::app::terminal::Terminal>,
+        pub terminal_focused: bool,
     }
 
     impl Default for IdePanelState {
@@ -194,8 +197,10 @@ pub struct IdePanelState {
                                                 diag_copied_idx: None,
                 problems_tab: 0,
                 flat_diags: Vec::new(),
-                problems_collapsed: FxHashSet::default(),
+                                problems_collapsed: FxHashSet::default(),
                 problems_scroll: crate::scroll::ScrollState::new(15.0),
+                terminal: None,
+                terminal_focused: false,
             }
         }
     }
@@ -211,7 +216,7 @@ impl IdePanelState {
             .iter()
             .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
-    pub fn toggle(&mut self, id: PanelId) {
+            pub fn toggle(&mut self, id: PanelId) {
         if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
             slot.open = !slot.open;
         }
@@ -249,9 +254,9 @@ fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
 pub struct App {
     pub gl_config: Option<glutin::config::Config>,
     pub gl_context: Option<PossiblyCurrentContext>,
-    pub gl_surface: Option<Surface<WindowSurface>>,
-    pub window: Option<Window>,
-    pub dialog_window: Option<Window>,
+        pub gl_surface: Option<Surface<WindowSurface>>,
+    pub window: Option<std::sync::Arc<Window>>,
+    pub dialog_window: Option<std::sync::Arc<Window>>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
     pub settings_scroll: crate::scroll::ScrollState,
     pub tab_scroll: crate::scroll::ScrollState,
@@ -375,7 +380,11 @@ impl App {
             self.file_path = None;
         }
 
-        self.ide_panel = crate::load_panel_state();
+                        self.ide_panel = crate::load_panel_state();
+
+        if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminal.is_none() {
+            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+        }
 
         if self.lsp.is_none() {
             self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.first().cloned()));
@@ -1025,12 +1034,12 @@ impl App {
                         std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
                         std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
                     );
-            let surface = unsafe {
+                        let surface = unsafe {
                 display
                     .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
                     .unwrap()
             };
-            self.dialog_window = Some(window);
+            self.dialog_window = Some(std::sync::Arc::new(window));
             self.dialog_gl_surface = Some(surface);
         }
     }

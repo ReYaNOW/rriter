@@ -4,133 +4,198 @@ use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
+use std::io::Write;
 
 impl App {
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
+                pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
-        let shift = self.modifiers.shift_key();
-        let mut is_edit = false;
 
-        match key_event.physical_key {
-            PhysicalKey::Code(KeyCode::Escape) => {
-                self.show_search = false;
-                self.search_focused = false;
-                self.search_results.clear();
-                self.search_current_idx = None;
+        if let Some(term) = &self.ide_panel.terminal {
+            let mut grid = term.grid.lock().unwrap();
+            if key_event.state == winit::event::ElementState::Pressed {
+                let mut w = term.writer.lock().unwrap();
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                        if grid.selection.is_some() {
+                            let text = grid.get_selection_text();
+                            let _ = self.clipboard.set_text(text);
+                            grid.selection = None;
+                        } else {
+                            let _ = w.write_all(b"\x03");
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+                        if let Ok(text) = self.clipboard.get_text() {
+                            let _ = w.write_all(text.as_bytes());
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                        let _ = w.write_all(b"\r");
+                    }
+                    PhysicalKey::Code(KeyCode::Backspace) => {
+                        let _ = w.write_all(b"\x08");
+                    }
+                    PhysicalKey::Code(KeyCode::Tab) => {
+                        let _ = w.write_all(b"\t");
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowUp) => {
+                        let _ = w.write_all(b"\x1b[A");
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowDown) => {
+                        let _ = w.write_all(b"\x1b[B");
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                        let _ = w.write_all(b"\x1b[D");
+                    }
+                    PhysicalKey::Code(KeyCode::ArrowRight) => {
+                        let _ = w.write_all(b"\x1b[C");
+                    }
+                    PhysicalKey::Code(KeyCode::Escape) => {
+                        let _ = w.write_all(b"\x1b");
+                    }
+                    _ => {
+                        if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                            if let Some(txt) = key_event.logical_key.to_text() {
+                                let _ = w.write_all(txt.as_bytes());
+                            }
+                        }
+                    }
+                }
+                w.flush().ok();
             }
-            PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
-                self.search_editor.select_all();
-            }
-            PhysicalKey::Code(KeyCode::Enter) => {
-                if !self.search_results.is_empty() {
-                    if let Some(idx) = self.search_current_idx {
-                        if shift {
+        }
+        self.last_action = std::time::Instant::now();
+        self.window.as_ref().unwrap().request_redraw();
+    }
+
+    pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
+        if key_event.state == ElementState::Pressed {
+            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let shift = self.modifiers.shift_key();
+            let mut is_edit = false;
+
+            match key_event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    self.show_search = false;
+                    self.search_focused = false;
+                    self.search_results.clear();
+                    self.search_current_idx = None;
+                }
+                PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
+                    self.search_editor.select_all();
+                }
+                PhysicalKey::Code(KeyCode::Enter) => {
+                    if !self.search_results.is_empty() {
+                        if let Some(idx) = self.search_current_idx {
+                            if shift {
+                                self.search_current_idx = Some(if idx == 0 {
+                                    self.search_results.len() - 1
+                                } else {
+                                    idx - 1
+                                });
+                            } else {
+                                self.search_current_idx =
+                                    Some((idx + 1) % self.search_results.len());
+                            }
+                        }
+                        self.jump_to_search_result();
+                    }
+                }
+                PhysicalKey::Code(KeyCode::ArrowUp) => {
+                    if !self.search_results.is_empty() {
+                        if let Some(idx) = self.search_current_idx {
                             self.search_current_idx = Some(if idx == 0 {
                                 self.search_results.len() - 1
                             } else {
                                 idx - 1
                             });
-                        } else {
-                            self.search_current_idx = Some((idx + 1) % self.search_results.len());
                         }
+                        self.jump_to_search_result();
                     }
-                    self.jump_to_search_result();
                 }
-            }
-            PhysicalKey::Code(KeyCode::ArrowUp) => {
-                if !self.search_results.is_empty() {
-                    if let Some(idx) = self.search_current_idx {
-                        self.search_current_idx = Some(if idx == 0 {
-                            self.search_results.len() - 1
-                        } else {
-                            idx - 1
-                        });
+                PhysicalKey::Code(KeyCode::ArrowDown) => {
+                    if !self.search_results.is_empty() {
+                        if let Some(idx) = self.search_current_idx {
+                            self.search_current_idx =
+                                Some((idx + 1) % self.search_results.len());
+                        }
+                        self.jump_to_search_result();
                     }
-                    self.jump_to_search_result();
                 }
-            }
-            PhysicalKey::Code(KeyCode::ArrowDown) => {
-                if !self.search_results.is_empty() {
-                    if let Some(idx) = self.search_current_idx {
-                        self.search_current_idx = Some((idx + 1) % self.search_results.len());
+                PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                    if ctrl {
+                        self.search_editor.move_word_left(shift);
+                    } else {
+                        self.search_editor.move_left(shift);
                     }
-                    self.jump_to_search_result();
                 }
-            }
-            PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                if ctrl {
-                    self.search_editor.move_word_left(shift);
-                } else {
-                    self.search_editor.move_left(shift);
+                PhysicalKey::Code(KeyCode::ArrowRight) => {
+                    if ctrl {
+                        self.search_editor.move_word_right(shift);
+                    } else {
+                        self.search_editor.move_right(shift);
+                    }
                 }
-            }
-            PhysicalKey::Code(KeyCode::ArrowRight) => {
-                if ctrl {
-                    self.search_editor.move_word_right(shift);
-                } else {
-                    self.search_editor.move_right(shift);
+                PhysicalKey::Code(KeyCode::Home) => {
+                    self.search_editor.move_home(shift);
                 }
-            }
-            PhysicalKey::Code(KeyCode::Home) => {
-                self.search_editor.move_home(shift);
-            }
-            PhysicalKey::Code(KeyCode::End) => {
-                self.search_editor.move_end(shift);
-            }
-            PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
-                self.search_editor.select_all();
-            }
-            PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                if let Some(text) = self.search_editor.get_selection() {
-                    let _ = self.clipboard.set_text(text);
+                PhysicalKey::Code(KeyCode::End) => {
+                    self.search_editor.move_end(shift);
                 }
-            }
-            PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
-                if let Some(text) = self.search_editor.get_selection() {
-                    let _ = self.clipboard.set_text(text);
-                    self.search_editor.delete_selection();
-                    is_edit = true;
+                PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                    self.search_editor.select_all();
                 }
-            }
-            PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                if let Ok(text) = self.clipboard.get_text() {
-                    self.search_editor.insert_str(&text);
-                    is_edit = true;
+                PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                    if let Some(text) = self.search_editor.get_selection() {
+                        let _ = self.clipboard.set_text(text);
+                    }
                 }
-            }
-            PhysicalKey::Code(KeyCode::Backspace) => {
-                if self.search_editor.backspace().is_some() {
-                    is_edit = true;
+                PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
+                    if let Some(text) = self.search_editor.get_selection() {
+                        let _ = self.clipboard.set_text(text);
+                        self.search_editor.delete_selection();
+                        is_edit = true;
+                    }
                 }
-            }
-            PhysicalKey::Code(KeyCode::Delete) => {
-                if self.search_editor.delete_forward().is_some() {
-                    is_edit = true;
+                PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+                    if let Ok(text) = self.clipboard.get_text() {
+                        self.search_editor.insert_str(&text);
+                        is_edit = true;
+                    }
                 }
-            }
-            _ => {
-                if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
-                    if let Some(txt) = key_event.logical_key.to_text() {
-                        let clean_txt = txt.replace('\n', "");
-                        if !clean_txt.is_empty() {
-                            self.search_editor.insert_str(&clean_txt);
-                            is_edit = true;
+                PhysicalKey::Code(KeyCode::Backspace) => {
+                    if self.search_editor.backspace().is_some() {
+                        is_edit = true;
+                    }
+                }
+                PhysicalKey::Code(KeyCode::Delete) => {
+                    if self.search_editor.delete_forward().is_some() {
+                        is_edit = true;
+                    }
+                }
+                _ => {
+                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                        if let Some(txt) = key_event.logical_key.to_text() {
+                            let clean_txt = txt.replace('\n', "");
+                            if !clean_txt.is_empty() {
+                                self.search_editor.insert_str(&clean_txt);
+                                is_edit = true;
+                            }
                         }
                     }
                 }
             }
+            if is_edit {
+                self.search_editor.sync_edits.clear();
+                self.update_search();
+                self.jump_to_search_result();
+            }
+            self.last_action = Instant::now();
+            self.window.as_ref().unwrap().request_redraw();
         }
-        if is_edit {
-            self.search_editor.sync_edits.clear();
-            self.update_search();
-            self.jump_to_search_result();
-        }
-        self.last_action = Instant::now();
-        self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_editor_keyboard_input(
-        &mut self,
+    pub fn handle_editor_keyboard_input(&mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
@@ -774,11 +839,51 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    pub fn handle_main_keyboard_input(
+        pub fn handle_main_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
+        if key_event.state == ElementState::Pressed && self.modifiers.alt_key() && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ) {
+            if self.is_ide_mode {
+                let shift = self.modifiers.shift_key();
+                let is_open = self.ide_panel.is_open(crate::app::PanelId::Terminal);
+
+                if shift {
+                    if is_open {
+                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                            slot.open = false;
+                        }
+                        self.ide_panel.terminal_focused = false;
+                    } else {
+                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                            slot.open = true;
+                        }
+                        if self.ide_panel.terminal.is_none() {
+                            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        }
+                        self.ide_panel.terminal_focused = true;
+                    }
+                } else {
+                    if !is_open {
+                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                            slot.open = true;
+                        }
+                        if self.ide_panel.terminal.is_none() {
+                            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        }
+                        self.ide_panel.terminal_focused = true;
+                    } else {
+                        self.ide_panel.terminal_focused = !self.ide_panel.terminal_focused;
+                    }
+                }
+
+                self.last_action = std::time::Instant::now();
+                if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                return;
+            }
+        }
+
         if self.dialog_window.is_some() {
             if key_event.state == ElementState::Pressed {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
@@ -985,11 +1090,13 @@ impl App {
                 }
             }
 
-            if self.search_focused {
-                self.handle_search_keyboard_input(key_event);
-            } else {
-                self.handle_editor_keyboard_input(event_loop, key_event);
-            }
+                    if self.is_ide_mode && self.ide_panel.terminal_focused && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
+            self.handle_terminal_keyboard_input(key_event);
+        } else if self.search_focused {
+            self.handle_search_keyboard_input(key_event);
+        } else {
+            self.handle_editor_keyboard_input(event_loop, key_event);
+        }
         }
     }
 }

@@ -1872,19 +1872,78 @@ impl Renderer {
                             !lsp_diagnostics.is_empty(),
                             ui_registry,
                         );
-                                        } else if slot.id == crate::app::PanelId::Problems {
-                        self.draw_problems_panel(
-                            panel_x,
-                            content_y,
-                            panel_w,
-                            content_h,
-                            s,
-                            lsp,
-                            ide_panel,
-                            ui_registry,
-                        );
-                    } else {
-                        let label = slot.id.label();
+                                                        } else if slot.id == crate::app::PanelId::Problems {
+                    self.draw_problems_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        lsp,
+                        ide_panel,
+                        ui_registry,
+                    );
+                } else if slot.id == crate::app::PanelId::Terminal {
+                    if let Some(term) = &ide_panel.terminal {
+                        let mut grid = term.grid.lock().unwrap();
+                        let char_w = self.char_advance('A');
+                        let char_h = self.line_height;
+                        let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
+                        let new_rows = (content_h / char_h).floor().max(2.0) as usize;
+
+                        if grid.cols != new_cols || grid.visible_rows != new_rows {
+                            grid.resize(new_cols, new_rows);
+                            term.resize_pty(new_cols as u16, new_rows as u16);
+                        }
+                        grid.dirty = false;
+
+                        let ansi_colors = [[0.0, 0.0, 0.0, 1.0],[0.8, 0.2, 0.2, 1.0], [0.2, 0.8, 0.2, 1.0],[0.8, 0.8, 0.2, 1.0],[0.2, 0.4, 0.8, 1.0],[0.8, 0.2, 0.8, 1.0],[0.2, 0.8, 0.8, 1.0],[0.8, 0.8, 0.8, 1.0],[0.4, 0.4, 0.4, 1.0], [1.0, 0.4, 0.4, 1.0],[0.4, 1.0, 0.4, 1.0],[1.0, 1.0, 0.4, 1.0],[0.4, 0.6, 1.0, 1.0],[1.0, 0.4, 1.0, 1.0],[0.4, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
+                        ];
+
+                                                let mut draw_y = content_y;
+                        let draw_x = panel_x + 10.0 * s;
+                        for (r_idx, row) in grid.lines.iter().enumerate() {
+                            if r_idx >= grid.visible_rows { break; }
+                            let mut cx = draw_x;
+                            for (c_idx, cell) in row.iter().enumerate() {
+                                if c_idx >= grid.cols { break; }
+                                if cell.bg != 0 && cell.bg < 16 {
+                                    self.push_rect(cx, draw_y, char_w, char_h, ansi_colors[cell.bg as usize]);
+                                }
+                                if cell.c != ' ' {
+                                    let fg_color = if cell.fg < 16 { ansi_colors[cell.fg as usize] } else { self.theme.fg };
+                                    self.draw_string_mono_scaled(&cell.c.to_string(), cx, draw_y + char_h / 2.0 + 4.0 * s, fg_color, 1.0);
+                                }
+                                cx += char_w;
+                            }
+                            draw_y += char_h;
+                        }
+
+                                                if ide_panel.terminal_focused {
+                            let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
+                            let cursor_px_y = content_y + grid.cur_y as f32 * char_h;
+                            self.push_rect(cursor_px_x, cursor_px_y + 2.0 * s, char_w, char_h,[1.0, 1.0, 1.0, 0.5]);
+
+                            let border_color = self.theme.sel;
+                            self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
+                            self.push_rect(panel_x, content_y + content_h - 2.0 * s, panel_w, 2.0 * s, border_color);
+                            self.push_rect(panel_x, content_y, 2.0 * s, content_h, border_color);
+                            self.push_rect(panel_x + panel_w - 2.0 * s, content_y, 2.0 * s, content_h, border_color);
+                        }
+                        self.flush();
+                    }
+
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::TerminalBody,
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        mx,
+                        my,
+                    );
+                } else {
+                    let label = slot.id.label();
                         let lw = self.measure_ui_width(label, 0.85);
                         let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
                         self.draw_string_scaled(

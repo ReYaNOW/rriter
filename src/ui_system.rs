@@ -74,10 +74,11 @@ pub enum UiId {
     PopupCopyDiagnostic(usize),
     OpenDiagUrl(usize),
     PopupOpenDiagUrl(usize),
-    ProblemJump(usize),
+        ProblemJump(usize),
     ProblemUrl(usize),
     ProblemsTab(usize),
     ProblemFileToggle(usize),
+    TerminalBody,
 }
 
 /// Тип UI элемента с его геометрией

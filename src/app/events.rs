@@ -87,10 +87,10 @@ impl ApplicationHandler for App {
             })
         };
 
-        let scale_factor = window.scale_factor() as f32;
+                let scale_factor = window.scale_factor() as f32;
         self.renderer = Some(Renderer::new(gl, scale_factor, self.theme.clone()));
         self.gl_config = Some(gl_config);
-        self.window = Some(window);
+        self.window = Some(std::sync::Arc::new(window));
         self.gl_context = Some(gl_context);
         self.gl_surface = Some(gl_surface);
 
@@ -299,11 +299,24 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
-            WindowEvent::MouseInput {
+                        WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
             } => {
+                if state == winit::event::ElementState::Pressed && self.is_ide_mode {
+                    let r = self.renderer.as_ref().unwrap();
+                    let id = self.ui_registry.find_at(r.last_mouse_x, r.last_mouse_y);
+                    if id == Some(crate::ui_system::UiId::TerminalBody) {
+                        self.ide_panel.terminal_focused = true;
+                    } else if let Some(i) = id {
+                        if !matches!(i, crate::ui_system::UiId::EditorScrollbarY | crate::ui_system::UiId::EditorScrollbarX) {
+                            self.ide_panel.terminal_focused = false;
+                        }
+                    } else {
+                        self.ide_panel.terminal_focused = false;
+                    }
+                }
                 self.handle_main_mouse_input(event_loop, state);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
@@ -793,9 +806,21 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             }
         }
-        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
+                        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
             if scroll.update(dt) {
                 needs_redraw = true;
+            }
+        }
+
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
+            if self.ide_panel.terminal.is_none() {
+                self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                self.ide_panel.terminal_focused = true;
+            }
+            if let Some(t) = &self.ide_panel.terminal {
+                if t.grid.lock().unwrap().dirty {
+                    needs_redraw = true;
+                }
             }
         }
 
