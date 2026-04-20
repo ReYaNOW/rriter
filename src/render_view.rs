@@ -1424,15 +1424,15 @@ impl Renderer {
                     let squiggle_hit_y_top = top_y;
                     let squiggle_hit_y_bottom = top_y + self.line_height;
 
-                    if mx >= x_start
+                                        if mouse_in_popup {
+                        if self.last_hovered_diags.contains(&idx) {
+                            in_hitbox = true;
+                        }
+                    } else if mx >= x_start
                         && mx <= x_start + squiggle_w
                         && my >= squiggle_hit_y_top
                         && my <= squiggle_hit_y_bottom
                     {
-                        in_hitbox = true;
-                    }
-
-                    if mouse_in_popup && self.last_hovered_diags.contains(&idx) {
                         in_hitbox = true;
                     }
                 }
@@ -2125,11 +2125,13 @@ impl Renderer {
                             1.0,
                             [link_color[0], link_color[1], link_color[2], ul_alpha],
                         );
-                        if sfx_hovered { wants_pointer = true; }
-                        self.last_diag_href = diag.code_href.clone();
+                                                if sfx_hovered {
+                            wants_pointer = true;
+                            self.last_diag_href = diag.code_href.clone();
+                        }
 
                         ui_registry.register_rect(
-                            crate::ui_system::UiId::OpenDiagUrl(idx),
+                            crate::ui_system::UiId::PopupOpenDiagUrl(idx),
                             draw_x - 1.0,
                             text_y.round() - line_h,
                             sfx_w + 2.0,
@@ -2177,8 +2179,8 @@ impl Renderer {
                 let offset = (icon_sz - icon_render_sz) / 2.0;
                 self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
 
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::CopyDiagnostic(idx),
+                                ui_registry.register_rect(
+                    crate::ui_system::UiId::PopupCopyDiagnostic(idx),
                     btn_x - 4.0 * s,
                     btn_y - 2.0 * s,
                     icon_sz + 8.0 * s,

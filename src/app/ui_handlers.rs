@@ -517,10 +517,9 @@ impl App {
                 self.ide_panel.problems_tab = idx;
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::OpenDiagUrl(_idx) => {
+                        UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
                 if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
-                    #[cfg(target_os = "windows")]
-                    let _ = std::process::Command::new("cmd")
+                    #[cfg(target_os = "windows")]let _ = std::process::Command::new("cmd")
                         .args(["/c", "start", "", &href])
                         .spawn();
                     #[cfg(target_os = "macos")]
@@ -610,13 +609,27 @@ impl App {
                     }
                 }
             }
-            UiId::CopyDiagnostic(idx) => {
+                        UiId::CopyDiagnostic(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if let Some(diag) = self
                         .lsp
                         .as_ref()
                         .and_then(|l| l.diagnostics.get(path))
                         .and_then(|diags| diags.get(*diag_idx))
+                    {
+                        let _ = self.clipboard.set_text(&diag.message);
+                        self.ide_panel.diag_copied_idx = Some(idx);
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+                        UiId::PopupCopyDiagnostic(idx) => {
+                if let Some(path) = &self.file_path {
+                    if let Some(diag) = self
+                        .lsp
+                        .as_ref()
+                        .and_then(|l| l.diagnostics.get(path))
+                        .and_then(|diags| diags.get(idx))
                     {
                         let _ = self.clipboard.set_text(&diag.message);
                         self.ide_panel.diag_copied_idx = Some(idx);

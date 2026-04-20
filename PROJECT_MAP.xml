@@ -312,8 +312,8 @@
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
     <fn name="draw" line="22" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, hovered_diags_cache.clear(), hovered_diags_cache.push(), identical_words_cache.clear(), identical_words_cache.push(), last_cursor_for_popups=, last_diag_href=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_hovered_diags.extend(), last_known_mouse=, left_padding=, max_scroll_x=, merged_intervals_cache.clear(), merged_intervals_cache.push(), minimap_width=, mod_intervals_cache.clear(), mod_intervals_cache.push(), phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_atlas_icon, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_welcome, flush, get_glyph, get_max_scroll, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, any_top_open, icon, is_open, label; editor: byte_at, ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, text_parts, utf16_col_to_byte_advance; lsp: get_diagnostics; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
-    <fn name="draw_tab_bar" line="2228" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
-    <fn name="draw_minimap" line="2452" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
+    <fn name="draw_tab_bar" line="2230" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
+    <fn name="draw_minimap" line="2454" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
   </mod>
   <mod path="src/renderer.rs" name="renderer">
     <type name="FontData">{ source: FontSource, index: u32 }</type>
@@ -352,25 +352,25 @@
   </mod>
   <mod path="src/ui_system.rs" name="ui_system">
     <type name="UiElement">{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }</type>
-    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), OpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize), ProblemFileToggle(usize) }</type>
+    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), PopupCopyDiagnostic(usize), OpenDiagUrl(usize), PopupOpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize), ProblemFileToggle(usize) }</type>
     <type name="UiRegistry">{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }</type>
-    <fn name="contains" line="118" pub="true" ret="bool" />
-    <fn name="id" line="145" pub="true" ret="UiId" />
-    <fn name="new" line="169" pub="true" ret="Self" />
-    <fn name="clear" line="180" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
-    <fn name="mark_overlay_start" line="190" pub="true" reads="elements" writes="overlay_mark=" />
-    <fn name="find_overlay_at" line="196" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
-    <fn name="register_button" line="205" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_icon_button" line="233" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_text_input" line="262" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
-    <fn name="register_blocker" line="285" pub="true" ret="bool" writes="elements.push()" />
-    <fn name="register_rect" line="302" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
-    <fn name="find_at" line="324" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
-    <fn name="hovered" line="334" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
-    <fn name="reset_cursor_state" line="341" pub="true" writes="wants_pointer=, wants_text=" />
-    <fn name="wants_pointer" line="347" pub="true" ret="bool" reads="wants_pointer" />
-    <fn name="wants_text" line="352" pub="true" ret="bool" reads="wants_text" />
-    <fn name="cursor_code" line="357" pub="true" ret="u8" reads="wants_pointer, wants_text" />
+    <fn name="contains" line="120" pub="true" ret="bool" />
+    <fn name="id" line="147" pub="true" ret="UiId" />
+    <fn name="new" line="171" pub="true" ret="Self" />
+    <fn name="clear" line="182" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
+    <fn name="mark_overlay_start" line="192" pub="true" reads="elements" writes="overlay_mark=" />
+    <fn name="find_overlay_at" line="198" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
+    <fn name="register_button" line="207" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_icon_button" line="235" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_text_input" line="264" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
+    <fn name="register_blocker" line="287" pub="true" ret="bool" writes="elements.push()" />
+    <fn name="register_rect" line="304" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
+    <fn name="find_at" line="326" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
+    <fn name="hovered" line="336" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
+    <fn name="reset_cursor_state" line="343" pub="true" writes="wants_pointer=, wants_text=" />
+    <fn name="wants_pointer" line="349" pub="true" ret="bool" reads="wants_pointer" />
+    <fn name="wants_text" line="354" pub="true" ret="bool" reads="wants_text" />
+    <fn name="cursor_code" line="359" pub="true" ret="u8" reads="wants_pointer, wants_text" />
   </mod>
   <mod path="src/widgets.rs" name="widgets">
     <type name="Button">{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }</type>
