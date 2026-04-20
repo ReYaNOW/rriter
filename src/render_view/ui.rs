@@ -47,13 +47,13 @@ impl Renderer {
     ) {
         if !self.file_icon_cache.contains_key(key) {
             let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
-            
+
             if let Some(state) = cache.get(key) {
                 if let Some(data) = state {
                     let data_clone = data.clone();
                     cache.remove(key); // Remove only when we are consuming it
                     drop(cache);
-                    
+
                     let target = 64i32;
                     let tex = unsafe {
                         let tex = self.gl.create_texture().unwrap();
@@ -102,7 +102,7 @@ impl Renderer {
                 // Not in cache at all. Mark as loading and spawn a thread.
                 cache.insert(key, None);
                 drop(cache);
-                
+
                 std::thread::spawn(move || {
                     // This function handles rendering the SVG and storing Some(data) back
                     crate::app::file_tree::pre_rasterize_icon(key, _is_folder);
@@ -853,10 +853,7 @@ impl Renderer {
         }
         let current_art = arts[self.empty_ide_art_idx];
 
-        let hint_lines = [
-            "Ctrl+O  — открыть файл",
-            "Кликни в дереве файлов слева",
-        ];
+        let hint_lines = ["Ctrl+O  — открыть файл", "Кликни в дереве файлов слева"];
 
         // Измеряем ширину для центрирования
         let mono_scale = 0.95_f32;
@@ -896,7 +893,7 @@ impl Renderer {
         self.flush();
     }
 
-                pub fn draw_problems_panel(
+    pub fn draw_problems_panel(
         &mut self,
         content_x: f32,
         content_y: f32,
@@ -916,21 +913,34 @@ impl Renderer {
         let tab_y = content_y + 8.0 * s;
         let tab_h = 24.0 * s;
 
-        let tabs =["Текущий файл", "Все"];
+        let tabs = ["Текущий файл", "Все"];
         for (i, t) in tabs.iter().enumerate() {
             let tw = self.measure_ui_width(t, text_scale) + 16.0 * s;
             let is_active = ide_panel.problems_tab == i;
-            let bg = if is_active {[1.0, 1.0, 1.0, 0.12] } else {[1.0, 1.0, 1.0, 0.0] };
-            let fg = if is_active { self.theme.fg } else {[0.65, 0.65, 0.65, 1.0] };
+            let bg = if is_active {
+                [1.0, 1.0, 1.0, 0.12]
+            } else {
+                [1.0, 1.0, 1.0, 0.0]
+            };
+            let fg = if is_active {
+                self.theme.fg
+            } else {
+                [0.65, 0.65, 0.65, 1.0]
+            };
 
             let is_hovered = ui_registry.register_rect(
                 crate::ui_system::UiId::ProblemsTab(i),
-                tab_x, tab_y, tw, tab_h,
-                mx, my
+                tab_x,
+                tab_y,
+                tw,
+                tab_h,
+                mx,
+                my,
             );
 
-                        if is_active || is_hovered {
-                let draw_bg = if is_hovered && !is_active {[1.0, 1.0, 1.0, 0.06]
+            if is_active || is_hovered {
+                let draw_bg = if is_hovered && !is_active {
+                    [1.0, 1.0, 1.0, 0.06]
                 } else {
                     bg
                 };
@@ -947,7 +957,14 @@ impl Renderer {
                     );
                 }
 
-                self.push_rounded_rect(tab_x.round(), tab_y.round(), tw, tab_h + 4.0 * s, 4.0 * s, draw_bg);
+                self.push_rounded_rect(
+                    tab_x.round(),
+                    tab_y.round(),
+                    tw,
+                    tab_h + 4.0 * s,
+                    4.0 * s,
+                    draw_bg,
+                );
 
                 self.flush();
                 unsafe {
@@ -956,15 +973,33 @@ impl Renderer {
             }
 
             if is_active {
-                self.push_rect(tab_x.round(), (tab_y + tab_h).round(), tw, 2.0 * s,[0.741, 0.576, 0.976, 1.0]);
+                self.push_rect(
+                    tab_x.round(),
+                    (tab_y + tab_h).round(),
+                    tw,
+                    2.0 * s,
+                    [0.741, 0.576, 0.976, 1.0],
+                );
             }
 
-            self.draw_string_scaled(t, tab_x + 8.0 * s, (tab_y + tab_h / 2.0 + 4.0 * s).round(), fg, text_scale);
+            self.draw_string_scaled(
+                t,
+                tab_x + 8.0 * s,
+                (tab_y + tab_h / 2.0 + 4.0 * s).round(),
+                fg,
+                text_scale,
+            );
             tab_x += tw + 8.0 * s;
         }
 
         let header_bottom_y = tab_y + tab_h + 2.0 * s;
-        self.push_rect(content_x, header_bottom_y.round(), content_w, 1.0,[1.0, 1.0, 1.0, 0.08]);
+        self.push_rect(
+            content_x,
+            header_bottom_y.round(),
+            content_w,
+            1.0,
+            [1.0, 1.0, 1.0, 0.08],
+        );
 
         self.flush();
 
@@ -990,7 +1025,8 @@ impl Renderer {
             self.draw_string_scaled(
                 hint,
                 content_x + (content_w - tw) / 2.0,
-                (list_y + 32.0 * s).round(),[0.45, 0.45, 0.45, 1.0],
+                (list_y + 32.0 * s).round(),
+                [0.45, 0.45, 0.45, 1.0],
                 text_scale,
             );
         } else {
@@ -1001,14 +1037,18 @@ impl Renderer {
                 let diag = if let Some(l) = lsp {
                     if let Some(d) = l.get_diagnostics(path).get(*diag_idx) {
                         d
-                    } else { continue; }
-                } else { continue; };
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                };
                 if current_y + item_h > content_y && current_y < content_y + content_h {
                     let icon_sz = 16.0 * s;
                     let icon_x = content_x + pad_x;
                     let icon_y = current_y + (item_h - icon_sz) / 2.0;
 
-                                        ui_registry.register_rect(
+                    ui_registry.register_rect(
                         crate::ui_system::UiId::ProblemJump(idx),
                         content_x,
                         current_y,
@@ -1018,12 +1058,22 @@ impl Renderer {
                         self.last_mouse_y,
                     );
                     if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx)) {
-                        self.push_rect(content_x, current_y, content_w - 14.0 * s, item_h, [1.0, 1.0, 1.0, 0.05]);
+                        self.push_rect(
+                            content_x,
+                            current_y,
+                            content_w - 14.0 * s,
+                            item_h,
+                            [1.0, 1.0, 1.0, 0.05],
+                        );
                     }
 
                     let (icon, color) = match diag.severity {
-                        crate::lsp::DiagSeverity::Error => (crate::widgets::IconType::Close, self.theme.diag_error),
-                        crate::lsp::DiagSeverity::Warning => (crate::widgets::IconType::Warning, self.theme.diag_warn),
+                        crate::lsp::DiagSeverity::Error => {
+                            (crate::widgets::IconType::Close, self.theme.diag_error)
+                        }
+                        crate::lsp::DiagSeverity::Warning => {
+                            (crate::widgets::IconType::Warning, self.theme.diag_warn)
+                        }
                         _ => (crate::widgets::IconType::Problems, [0.5, 0.5, 0.5, 1.0]),
                     };
 
@@ -1032,47 +1082,91 @@ impl Renderer {
                     let text_x = icon_x + icon_sz + 8.0 * s;
                     let text_y = current_y + item_h * 0.7;
 
-                                        let msg = diag.message.lines().next().unwrap_or("").replace("\t", " ");
-                    let prefix = if ide_panel.problems_tab == 1 {
-                        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-                        format!("{} {}: ", file_name, diag.start_line + 1)
+                    let mut scratch = std::mem::take(&mut self.scratch_buffer);
+                    scratch.clear();
+                    if ide_panel.problems_tab == 1 {
+                        if let Some(file_name) = path.file_name() {
+                            let _ = std::fmt::Write::write_fmt(
+                                &mut scratch,
+                                format_args!(
+                                    "{} {}: ",
+                                    file_name.to_string_lossy(),
+                                    diag.start_line + 1
+                                ),
+                            );
+                        }
                     } else {
-                        format!("Строка {}: ", diag.start_line + 1)
-                    };
-
-                                                                                let prefix_w = self.measure_ui_width(&prefix, text_scale).round();
-                    self.draw_string_scaled(&prefix, text_x.round(), text_y.round(), self.theme.fg, text_scale);
+                        let _ = std::fmt::Write::write_fmt(
+                            &mut scratch,
+                            format_args!("Строка {}: ", diag.start_line + 1),
+                        );
+                    }
+                    let prefix_w = self.measure_ui_width(&scratch, text_scale).round();
+                    self.draw_string_scaled(
+                        &scratch,
+                        text_x.round(),
+                        text_y.round(),
+                        self.theme.fg,
+                        text_scale,
+                    );
 
                     let mut current_tx = text_x.round() + prefix_w;
-                    let msg_w = self.measure_ui_width(&msg, text_scale).round();
-                    self.draw_string_scaled(&msg, current_tx, text_y.round(), self.theme.fg, text_scale);
+                    scratch.clear();
+                    for ch in diag.message.lines().next().unwrap_or("").chars() {
+                        scratch.push(if ch == '\t' { ' ' } else { ch });
+                    }
+                    let msg_w = self.measure_ui_width(&scratch, text_scale).round();
+                    self.draw_string_scaled(
+                        &scratch,
+                        current_tx,
+                        text_y.round(),
+                        self.theme.fg,
+                        text_scale,
+                    );
                     current_tx += msg_w + self.measure_ui_width(" ", text_scale).round();
 
-                    let source_prefix = match (&diag.source, &diag.code) {
-                        (Some(src), Some(_)) => format!("({} ", src),
-                        (Some(src), None) => format!("({})", src),
-                        (None, Some(_)) => "(".to_string(),
-                        (None, None) => "(LSP)".to_string(),
-                    };
-                    let source_suffix = match &diag.code {
-                        Some(code) => code.clone(),
-                        None => String::new(),
+                    scratch.clear();
+                    match (&diag.source, &diag.code) {
+                        (Some(src), Some(_)) => {
+                            let _ =
+                                std::fmt::Write::write_fmt(&mut scratch, format_args!("({} ", src));
+                        }
+                        (Some(src), None) => {
+                            let _ =
+                                std::fmt::Write::write_fmt(&mut scratch, format_args!("({})", src));
+                        }
+                        (None, Some(_)) => scratch.push('('),
+                        (None, None) => scratch.push_str("(LSP)"),
                     };
 
-                    let p_w = self.measure_ui_width(&source_prefix, text_scale).round();
-                    self.draw_string_scaled(&source_prefix, current_tx, text_y.round(),[0.55, 0.55, 0.6, 1.0], text_scale);
+                    let p_w = self.measure_ui_width(&scratch, text_scale).round();
+                    self.draw_string_scaled(
+                        &scratch,
+                        current_tx,
+                        text_y.round(),
+                        [0.55, 0.55, 0.6, 1.0],
+                        text_scale,
+                    );
+                    self.scratch_buffer = scratch;
 
-                    if !source_suffix.is_empty() {
+                    if let Some(code) = &diag.code {
                         let sfx_x = current_tx + p_w;
-                        let sfx_w = self.measure_ui_width(&source_suffix, text_scale).round();
-                        let link_color =[0.72, 0.52, 1.0, 1.0];
+                        let sfx_w = self.measure_ui_width(code, text_scale).round();
+                        let link_color = [0.72, 0.52, 1.0, 1.0];
                         let sfx_color = if diag.code_href.is_some() {
                             link_color
-                        } else {[link_color[0], link_color[1], link_color[2], 0.85]
+                        } else {
+                            [link_color[0], link_color[1], link_color[2], 0.85]
                         };
 
-                        self.draw_string_scaled(&source_suffix, sfx_x, text_y.round(), sfx_color, text_scale);
-                        self.draw_string_scaled(")", sfx_x + sfx_w, text_y.round(),[0.55, 0.55, 0.6, 1.0], text_scale);
+                        self.draw_string_scaled(code, sfx_x, text_y.round(), sfx_color, text_scale);
+                        self.draw_string_scaled(
+                            ")",
+                            sfx_x + sfx_w,
+                            text_y.round(),
+                            [0.55, 0.55, 0.6, 1.0],
+                            text_scale,
+                        );
 
                         if diag.code_href.is_some() {
                             ui_registry.register_rect(
@@ -1084,10 +1178,24 @@ impl Renderer {
                                 self.last_mouse_x,
                                 self.last_mouse_y,
                             );
-                            if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemUrl(idx)) {
-                                self.push_rect(sfx_x, text_y.round() + 1.0, sfx_w, 1.0, [link_color[0], link_color[1], link_color[2], 0.9]);
+                            if ui_registry.hovered()
+                                == Some(crate::ui_system::UiId::ProblemUrl(idx))
+                            {
+                                self.push_rect(
+                                    sfx_x,
+                                    text_y.round() + 1.0,
+                                    sfx_w,
+                                    1.0,
+                                    [link_color[0], link_color[1], link_color[2], 0.9],
+                                );
                             } else {
-                                self.push_rect(sfx_x, text_y.round() + 1.0, sfx_w, 1.0,[link_color[0], link_color[1], link_color[2], 0.55]);
+                                self.push_rect(
+                                    sfx_x,
+                                    text_y.round() + 1.0,
+                                    sfx_w,
+                                    1.0,
+                                    [link_color[0], link_color[1], link_color[2], 0.55],
+                                );
                             }
                         }
                     }
@@ -1108,7 +1216,8 @@ impl Renderer {
                     thumb_y.round(),
                     6.0 * s,
                     thumb_h,
-                    3.0 * s,[0.45, 0.45, 0.55, 0.5],
+                    3.0 * s,
+                    [0.45, 0.45, 0.55, 0.5],
                 );
             }
         }

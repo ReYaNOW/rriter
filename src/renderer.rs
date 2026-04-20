@@ -97,7 +97,7 @@ impl FontData {
         }
     }
 
-        pub fn ensure_loaded(&mut self) {
+    pub fn ensure_loaded(&mut self) {
         let new_source = if let FontSource::Lazy(path, refcell) = &self.source {
             let mut cache = refcell.borrow_mut();
             if cache.is_none() {
@@ -124,11 +124,11 @@ impl FontData {
         }
     }
 
-        pub fn data_slice(&self) -> &[u8] {
+    pub fn data_slice(&self) -> &[u8] {
         match &self.source {
             FontSource::Static(d) => d,
             FontSource::LoadedMmap(arc) => &**arc,
-                        FontSource::LoadedVec(arc) => arc.as_slice(),
+            FontSource::LoadedVec(arc) => arc.as_slice(),
             FontSource::Lazy(_, _) => &[],
         }
     }
@@ -183,9 +183,10 @@ pub struct Renderer {
     pub time_acc: f32,
     pub search_scroll_x: f32,
 
-    pub fps_string: String,
-    pub search_res_string: String,
-    pub last_search_idx: Option<usize>,
+            pub fps_string: String,
+        pub search_res_string: String,
+        pub scratch_buffer: String,
+        pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
@@ -205,7 +206,7 @@ pub struct Renderer {
     pub last_cursor_for_popups: usize,
     pub last_draw_instant: Option<std::time::Instant>,
 
-        pub was_empty_ide: bool,
+    pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
     pub hovered_diags_cache: Vec<(usize, f32, f32, f32)>,
     pub identical_words_cache: Vec<(usize, usize)>,
@@ -272,6 +273,9 @@ impl Renderer {
             gl.attach_shader(program, f_shader);
             gl.link_program(program);
 
+            gl.delete_shader(v_shader);
+            gl.delete_shader(f_shader);
+
             let vao = gl.create_vertex_array().unwrap();
             let vbo = gl.create_buffer().unwrap();
             gl.bind_vertex_array(Some(vao));
@@ -329,7 +333,7 @@ impl Renderer {
                 glow::ONE,
             );
 
-                        let font_paths =[
+            let font_paths = [
                 "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
                 "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
                 "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
@@ -349,7 +353,7 @@ impl Renderer {
 
             fonts.push(FontData::new_static(nerd_font_data));
 
-            let emoji_paths =[
+            let emoji_paths = [
                 "/usr/share/fonts/noto/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto/NotoColorEmoji.google.ttf",
@@ -362,7 +366,7 @@ impl Renderer {
                 }
             }
 
-            let ui_font_paths =[
+            let ui_font_paths = [
                 "/usr/share/fonts/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/TTF/NotoSans-Regular.ttf",
                 "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
@@ -471,8 +475,9 @@ impl Renderer {
                 frame_count: 0,
                 time_acc: 0.0,
                 search_scroll_x: 0.0,
-                fps_string: String::new(),
+                                fps_string: String::new(),
                 search_res_string: String::new(),
+                scratch_buffer: String::with_capacity(256),
                 last_search_idx: None,
                 last_search_len: 0,
                 icons: HashMap::new(),
@@ -490,13 +495,13 @@ impl Renderer {
                 last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
-                                was_empty_ide: false,
+                was_empty_ide: false,
                 empty_ide_art_idx: 0,
                 hovered_diags_cache: Vec::with_capacity(16),
                 identical_words_cache: Vec::with_capacity(64),
                 mod_intervals_cache: Vec::with_capacity(64),
                 merged_intervals_cache: Vec::with_capacity(64),
-                };
+            };
 
             for i in 32..128u8 {
                 let c = i as char;
@@ -506,6 +511,11 @@ impl Renderer {
             }
 
             renderer.load_builtin_icons();
+
+            // #[cfg(target_os = "linux")]
+            // extern "C" { fn malloc_trim(pad: usize) -> i32; }
+            // #[cfg(target_os = "linux")]
+            // malloc_trim(0);
 
             renderer
         }
@@ -596,7 +606,7 @@ impl Renderer {
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
 
-                        let indices: Vec<usize> = if is_emoji_char {
+        let indices: Vec<usize> = if is_emoji_char {
             (0..self.fonts.len()).rev().collect()
         } else {
             (0..self.fonts.len()).collect()
@@ -606,7 +616,9 @@ impl Renderer {
             self.fonts[idx].ensure_loaded();
             let font_data = &self.fonts[idx];
             let data = font_data.data_slice();
-            if data.is_empty() { continue; }
+            if data.is_empty() {
+                continue;
+            }
             if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
                 if glyph_id != 0 || (c == ' ' && idx == 0) {
@@ -762,7 +774,7 @@ impl Renderer {
         let mut rendered_image = None;
         let mut glyph_advance = 0.0;
         let is_emoji_char = (c as u32) > 0x2400;
-                        let indices: Vec<usize> = if is_emoji_char {
+        let indices: Vec<usize> = if is_emoji_char {
             (0..self.ui_fonts.len()).rev().collect()
         } else {
             (0..self.ui_fonts.len()).collect()
@@ -772,7 +784,9 @@ impl Renderer {
             self.ui_fonts[idx].ensure_loaded();
             let font_data = &self.ui_fonts[idx];
             let data = font_data.data_slice();
-            if data.is_empty() { continue; }
+            if data.is_empty() {
+                continue;
+            }
             if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
                 if glyph_id != 0 || (c == ' ' && idx == 0) {
@@ -1068,7 +1082,7 @@ impl Renderer {
             let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
                 // Заменяем жестко прописанный белый цвет на старый розовый #da4453
                 svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-                        } else if icon_type == crate::widgets::IconType::Problems {
+            } else if icon_type == crate::widgets::IconType::Problems {
                 svg_data_str.replace("#D81B60", "#ffffff")
             } else if icon_type == crate::widgets::IconType::Plus
                 || icon_type == crate::widgets::IconType::Terminal
@@ -1095,7 +1109,7 @@ impl Renderer {
                 &format!("stroke-width=\"{}\"", target_stroke_width),
             );
 
-                        if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
+            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
                 let size = tree.size();
                 // Оптимизация: 64.0 вместо 128.0 ускоряет старт приложения (парсинг SVG) в 2-4 раза.
                 // Для UI иконок (20-36px) этого разрешения с Mipmap более чем достаточно.

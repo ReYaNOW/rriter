@@ -507,7 +507,10 @@ impl App {
             return;
         }
 
-                self.sync_active_tab();
+                        self.sync_active_tab();
+        // Урезаем потребление RAM: освобождаем тяжелый AST автокомплита у старой вкладки.
+        // При возврате вкладка перепарсится автоматически за 10-30 мс без лагов.
+        self.tabs[self.active_tab].completions.clear();
         self.active_tab = new_idx;
         self.sync_active_tab();
 

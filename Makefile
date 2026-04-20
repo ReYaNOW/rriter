@@ -56,7 +56,8 @@ test:
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
 	cargo +nightly test \
-	$(BUILD_STD) \
+	-Z build-std=core,alloc,std,panic_abort,test \
+	-Z panic-abort-tests \
 	--target $(TARGET) \
 	--release
 	@echo "✅ Тесты завершены"

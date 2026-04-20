@@ -71,30 +71,30 @@
     <fn name="save_tabs_state" line="456" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
     <fn name="sync_active_tab" line="465" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
     <fn name="switch_to_tab" line="502" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; highlighter: reset; lsp: notify_open" />
-    <fn name="open_new_tab" line="544" pub="true" reads="highlighter, is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab; highlighter: reset" />
-    <fn name="close_tab_at" line="625" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
-    <fn name="open_file_in_tab" line="659" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_bg" line="663" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_internal" line="667" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file_internal, open_new_tab, switch_to_tab; editor: is_dirty" />
-    <fn name="ensure_cursor_visible" line="698" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
-    <fn name="get_current_word_prefix" line="737" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
-    <fn name="update_autocomplete" line="757" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
-    <fn name="ensure_autocomplete_visible" line="836" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
-    <fn name="apply_autocomplete" line="866" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
-    <fn name="update_search" line="900" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_search_result" line="956" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
-    <fn name="update_window_title" line="982" pub="true" />
-    <fn name="show_action_dialog" line="991" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="close_dialog" line="1033" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
-    <fn name="close_current_file" line="1041" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
-    <fn name="trigger_file_picker" line="1087" pub="true" writes="open_file_rx=" />
-    <fn name="trigger_folder_picker" line="1096" pub="true" writes="open_folder_rx=" />
-    <fn name="trigger_save_as_picker" line="1107" pub="true" writes="save_file_rx=" />
-    <fn name="save_current_file" line="1119" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; editor: get_full_text, mark_saved" />
-    <fn name="add_recent_file" line="1158" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
-    <fn name="apply_highlight_results" line="1167" pub="true" reads="editor, highlighter" writes="is_highlighted_once=" />
-    <fn name="load_file_internal" line="1197" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
-    <fn name="check_external_changes" line="1278" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
+    <fn name="open_new_tab" line="547" pub="true" reads="highlighter, is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab; highlighter: reset" />
+    <fn name="close_tab_at" line="628" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
+    <fn name="open_file_in_tab" line="662" pub="true" calls="self: open_file_in_tab_internal" />
+    <fn name="open_file_in_tab_bg" line="666" pub="true" calls="self: open_file_in_tab_internal" />
+    <fn name="open_file_in_tab_internal" line="670" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file_internal, open_new_tab, switch_to_tab; editor: is_dirty" />
+    <fn name="ensure_cursor_visible" line="701" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
+    <fn name="get_current_word_prefix" line="740" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
+    <fn name="update_autocomplete" line="760" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
+    <fn name="ensure_autocomplete_visible" line="839" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
+    <fn name="apply_autocomplete" line="869" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
+    <fn name="update_search" line="903" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
+    <fn name="jump_to_search_result" line="959" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
+    <fn name="update_window_title" line="985" pub="true" />
+    <fn name="show_action_dialog" line="994" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
+    <fn name="close_dialog" line="1036" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
+    <fn name="close_current_file" line="1044" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
+    <fn name="trigger_file_picker" line="1090" pub="true" writes="open_file_rx=" />
+    <fn name="trigger_folder_picker" line="1099" pub="true" writes="open_folder_rx=" />
+    <fn name="trigger_save_as_picker" line="1110" pub="true" writes="save_file_rx=" />
+    <fn name="save_current_file" line="1122" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; editor: get_full_text, mark_saved" />
+    <fn name="add_recent_file" line="1161" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
+    <fn name="apply_highlight_results" line="1170" pub="true" reads="editor, highlighter" writes="is_highlighted_once=" />
+    <fn name="load_file_internal" line="1200" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
+    <fn name="check_external_changes" line="1281" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
   </mod>
   <mod path="src/editor.rs" name="editor">
     <type name="EditOp">{ Insert { offset: usize, text: String }</type>
@@ -259,7 +259,8 @@
     <fn name="load_config" line="232" ret="Config" calls="self: save_config; ui_system: contains" />
     <fn name="get_kde_color" line="298" ret="Option&lt;[f32; 4]&gt;" />
     <fn name="load_dracula" line="320" ret="Theme" calls="self: get_kde_color" />
-    <fn name="main" line="338" calls="editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset; self: load_config, load_dracula, load_recent_files, save_recent_files" />
+    <fn name="main" line="338" calls="editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset; self: load_config, load_dracula, load_recent_files, mallopt, save_recent_files" />
+    <fn name="mallopt" line="344" ret="i32; } mallopt(-8, 2); } let args: Vec&lt;String&gt; = env::args().collect(); let run_ide_on_startup = args.iter().any(|a| a == &quot;--ide&quot; || a == &quot;ide&quot;); let has_file_arg = args.iter().skip(1).any(|a| *a != &quot;--ide&quot; &amp;&amp; *a != &quot;ide&quot;); let mut initial_text = String::new(); let mut title = &quot;Безымянный&quot;.to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg" calls="self: save_recent_files" />
   </mod>
   <mod path="src/queries.rs" name="queries">
     <fn name="get_params_query" line="3" pub="true" ret="Option&lt;&amp;'static str&gt;" />
@@ -306,7 +307,7 @@
     <fn name="draw_welcome" line="481" pub="true" ret="bool" reads="height, icon_logo, last_mouse_x, last_mouse_y, program, scale_factor, texture, vao, width" writes="gl.clear()" calls="self: draw_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect, push_vertical_gradient; ui_system: register_button, register_rect, wants_pointer; widgets: get_welcome_buttons" />
     <fn name="draw_diagnostics_ruler" line="725" pub="true" reads="minimap_width, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
     <fn name="draw_empty_ide" line="785" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
-    <fn name="draw_problems_panel" line="899" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: hovered, register_rect" />
+    <fn name="draw_problems_panel" line="896" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: hovered, register_rect" />
   </mod>
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
@@ -318,7 +319,7 @@
     <type name="FontData">{ source: FontSource, index: u32 }</type>
     <type name="FontSource">{ Static(&amp;'static [u8]), LoadedMmap(std::sync::Arc&lt;memmap2::Mmap&gt;), LoadedVec(std::sync::Arc&lt;Vec&lt;u8&gt;&gt;), Lazy( std::path::PathBuf, std::rc::Rc&lt;std::cell::RefCell&lt;Option&lt;Result&lt;std::sync::Arc&lt;memmap2::Mmap&gt;, ()&gt;&gt;&gt;&gt;, ) }</type>
     <type name="GlyphInfo">{ u: f32, v: f32, uw: f32, vh: f32, width: f32, height: f32, offset_x: f32, offset_y: f32, advance: f32, is_emoji: f32 }</type>
-    <type name="Renderer">{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, scale_context: ScaleContext, glyphs: HashMap&lt;char, GlyphInfo&gt;, ui_glyphs: HashMap&lt;char, GlyphInfo&gt;, ascii_advances: [f32; 128], atlas_x: i32, atlas_y: i32, max_row_h: i32, font_size: f32, scale_factor: f32, theme: Theme, width: f32, height: f32, minimap_width: f32, line_height: f32, baseline_offset: f32, left_padding: f32, last_mouse_x: f32, last_mouse_y: f32, visual_lines: Vec&lt;VisualLine&gt;, last_editor_version: u64, last_height: f32, last_width: f32, last_scroll_y: f32, last_scroll_x: f32, max_scroll_x: f32, max_tab_scroll_x: f32, last_editor_version_for_scroll_x: u64, last_frame_time: Option&lt;std::time::Instant&gt;, fps: f32, frame_count: u32, time_acc: f32, search_scroll_x: f32, fps_string: String, search_res_string: String, last_search_idx: Option&lt;usize&gt;, last_search_len: usize, icons: std::collections::HashMap&lt;crate::widgets::IconType, glow::Texture&gt;, icon_logo: Option&lt;glow::Texture&gt;, file_icon_cache: rustc_hash::FxHashMap&lt;&amp;'static str, glow::Texture&gt;, sticky_scroll_rects: Vec&lt;(f32, f32, f32, f32, usize)&gt;, phys_to_visual: Vec&lt;usize&gt;, last_hovered_diags: Vec&lt;usize&gt;, last_diag_popup_rect: Option&lt;(f32, f32, f32, f32)&gt;, last_diag_href: Option&lt;String&gt;, hide_popups_until_mouse_move: bool, diag_hover_timer: f32, diag_hover_timer_idx: Option&lt;usize&gt;, last_known_mouse: (f32, f32), last_editor_version_for_typing: u64, last_cursor_for_popups: usize, last_draw_instant: Option&lt;std::time::Instant&gt;, was_empty_ide: bool, empty_ide_art_idx: usize, hovered_diags_cache: Vec&lt;(usize, f32, f32, f32)&gt;, identical_words_cache: Vec&lt;(usize, usize)&gt;, mod_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt;, merged_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt; }</type>
+    <type name="Renderer">{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, scale_context: ScaleContext, glyphs: HashMap&lt;char, GlyphInfo&gt;, ui_glyphs: HashMap&lt;char, GlyphInfo&gt;, ascii_advances: [f32; 128], atlas_x: i32, atlas_y: i32, max_row_h: i32, font_size: f32, scale_factor: f32, theme: Theme, width: f32, height: f32, minimap_width: f32, line_height: f32, baseline_offset: f32, left_padding: f32, last_mouse_x: f32, last_mouse_y: f32, visual_lines: Vec&lt;VisualLine&gt;, last_editor_version: u64, last_height: f32, last_width: f32, last_scroll_y: f32, last_scroll_x: f32, max_scroll_x: f32, max_tab_scroll_x: f32, last_editor_version_for_scroll_x: u64, last_frame_time: Option&lt;std::time::Instant&gt;, fps: f32, frame_count: u32, time_acc: f32, search_scroll_x: f32, fps_string: String, search_res_string: String, scratch_buffer: String, last_search_idx: Option&lt;usize&gt;, last_search_len: usize, icons: std::collections::HashMap&lt;crate::widgets::IconType, glow::Texture&gt;, icon_logo: Option&lt;glow::Texture&gt;, file_icon_cache: rustc_hash::FxHashMap&lt;&amp;'static str, glow::Texture&gt;, sticky_scroll_rects: Vec&lt;(f32, f32, f32, f32, usize)&gt;, phys_to_visual: Vec&lt;usize&gt;, last_hovered_diags: Vec&lt;usize&gt;, last_diag_popup_rect: Option&lt;(f32, f32, f32, f32)&gt;, last_diag_href: Option&lt;String&gt;, hide_popups_until_mouse_move: bool, diag_hover_timer: f32, diag_hover_timer_idx: Option&lt;usize&gt;, last_known_mouse: (f32, f32), last_editor_version_for_typing: u64, last_cursor_for_popups: usize, last_draw_instant: Option&lt;std::time::Instant&gt;, was_empty_ide: bool, empty_ide_art_idx: usize, hovered_diags_cache: Vec&lt;(usize, f32, f32, f32)&gt;, identical_words_cache: Vec&lt;(usize, usize)&gt;, mod_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt;, merged_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt; }</type>
     <type name="Theme">{ bg: [f32; 4], fg: [f32; 4], sel: [f32; 4], minimap_bg: [f32; 4], line_num: [f32; 4], minimap_cursor: [f32; 4], modified_unsaved: [f32; 4], modified_saved: [f32; 4], diag_warn: [f32; 4], diag_error: [f32; 4] }</type>
     <type name="Vertex">{ pos: [f32; 2], uv: [f32; 2], color: [f32; 4], mode: f32, sdf_params: [f32; 3] }</type>
     <type name="VisualLine">{ byte_idx: usize, physical_line: usize, is_soft_wrap: bool, whitespace_px_width: f32, text_px_width: f32, y_offset: f32, is_folded: bool, fold_suffix: [char; 4], fold_suffix_len: u8 }</type>
@@ -326,18 +327,18 @@
     <fn name="new_static" line="93" pub="true" ret="Self" />
     <fn name="ensure_loaded" line="100" pub="true" writes="source=" />
     <fn name="data_slice" line="127" pub="true" ret="&amp;[u8]" reads="source" />
-    <fn name="new" line="217" pub="true" ret="Self" calls="self: get_glyph, load_builtin_icons" />
-    <fn name="get_custom_svg_glyph" line="514" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="atlas_y, font_size, gl, texture" writes="atlas_x=, max_row_h=" />
-    <fn name="get_glyph" line="581" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, fonts, gl, texture" writes="atlas_x=, atlas_y=, glyphs.clear(), glyphs.insert(), max_row_h=, ui_glyphs.clear()" calls="self: get_custom_svg_glyph, get_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="get_ui_glyph" line="748" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, gl, texture, ui_fonts" writes="atlas_x=, atlas_y=, glyphs.clear(), max_row_h=, ui_glyphs.clear(), ui_glyphs.insert()" calls="self: get_custom_svg_glyph, get_ui_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="resize" line="914" pub="true" reads="gl" writes="height=, width=" />
-    <fn name="measure_ui_width" line="924" pub="true" ret="f32" calls="self: get_ui_glyph" />
-    <fn name="char_advance" line="937" pub="true" ret="f32" reads="ascii_advances" calls="self: get_glyph" />
-    <fn name="push_quad" line="954" pub="true" reads="vertices" />
-    <fn name="load_builtin_icons" line="1006" pub="true" reads="gl, texture" writes="icons.insert()" />
-    <fn name="push_squiggle" line="1185" pub="true" reads="scale_factor, vertices" />
-    <fn name="push_rect" line="1238" pub="true" calls="self: push_quad" />
-    <fn name="push_rounded_rect_gradient" line="1242" pub="true" reads="vertices" />
+    <fn name="new" line="218" pub="true" ret="Self" calls="self: get_glyph, load_builtin_icons" />
+    <fn name="get_custom_svg_glyph" line="524" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="atlas_y, font_size, gl, texture" writes="atlas_x=, max_row_h=" />
+    <fn name="get_glyph" line="591" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, fonts, gl, texture" writes="atlas_x=, atlas_y=, glyphs.clear(), glyphs.insert(), max_row_h=, ui_glyphs.clear()" calls="self: get_custom_svg_glyph, get_glyph; self: data_slice, ensure_loaded; widgets: render" />
+    <fn name="get_ui_glyph" line="760" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, gl, texture, ui_fonts" writes="atlas_x=, atlas_y=, glyphs.clear(), max_row_h=, ui_glyphs.clear(), ui_glyphs.insert()" calls="self: get_custom_svg_glyph, get_ui_glyph; self: data_slice, ensure_loaded; widgets: render" />
+    <fn name="resize" line="928" pub="true" reads="gl" writes="height=, width=" />
+    <fn name="measure_ui_width" line="938" pub="true" ret="f32" calls="self: get_ui_glyph" />
+    <fn name="char_advance" line="951" pub="true" ret="f32" reads="ascii_advances" calls="self: get_glyph" />
+    <fn name="push_quad" line="968" pub="true" reads="vertices" />
+    <fn name="load_builtin_icons" line="1020" pub="true" reads="gl, texture" writes="icons.insert()" />
+    <fn name="push_squiggle" line="1199" pub="true" reads="scale_factor, vertices" />
+    <fn name="push_rect" line="1252" pub="true" calls="self: push_quad" />
+    <fn name="push_rounded_rect_gradient" line="1256" pub="true" reads="vertices" />
   </mod>
   <mod path="src/scroll.rs" name="scroll">
     <type name="ScrollState">{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }</type>
