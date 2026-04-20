@@ -1,79 +1,39 @@
 use crate::highlighter::SyncEdit;
 use crate::renderer::Renderer;
+use imara_diff::{Algorithm, Diff, InternedInput, TokenSource};
 use rustc_hash::FxHasher;
 use std::collections::VecDeque;
 use std::hash::Hasher;
 
+struct HashSource<'a>(&'a [u64]);
+
+impl<'a> TokenSource for HashSource<'a> {
+    type Token = u64;
+    type Tokenizer = std::iter::Copied<std::slice::Iter<'a, u64>>;
+
+    fn tokenize(&self) -> Self::Tokenizer {
+        self.0.iter().copied()
+    }
+
+    fn estimate_tokens(&self) -> u32 {
+        self.0.len() as u32
+    }
+}
+
 fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>) {
-    let n = old.len();
     let m = new.len();
-    let mut modified = vec![true; m];
+    let mut modified = vec![false; m];
     let mut deleted_gaps = vec![false; m + 1];
 
-    let mut prefix = 0;
-    while prefix < n && prefix < m && old[prefix] == new[prefix] {
-        modified[prefix] = false;
-        prefix += 1;
-    }
+    let input = InternedInput::new(HashSource(old), HashSource(new));
+    let diff = Diff::compute(Algorithm::Histogram, &input);
 
-    let mut suffix = 0;
-    while suffix < n - prefix && suffix < m - prefix && old[n - 1 - suffix] == new[m - 1 - suffix] {
-        modified[m - 1 - suffix] = false;
-        suffix += 1;
-    }
-
-    let n_mid = n - prefix - suffix;
-    let m_mid = m - prefix - suffix;
-
-    let mut matches = Vec::new();
-
-    if n_mid > 0 && m_mid > 0 && n_mid * m_mid <= 4_000_000 {
-        let mut dp = vec![vec![0; m_mid + 1]; n_mid + 1];
-        for i in 0..n_mid {
-            for j in 0..m_mid {
-                if old[prefix + i] == new[prefix + j] {
-                    dp[i + 1][j + 1] = dp[i][j] + 1;
-                } else {
-                    dp[i + 1][j + 1] = dp[i + 1][j].max(dp[i][j + 1]);
-                }
-            }
+    for hunk in diff.hunks() {
+        for i in hunk.after.start..hunk.after.end {
+            modified[i as usize] = true;
         }
-
-        let mut i = n_mid;
-        let mut j = m_mid;
-        while i > 0 && j > 0 {
-            if old[prefix + i - 1] == new[prefix + j - 1] {
-                matches.push((prefix + i - 1, prefix + j - 1));
-                modified[prefix + j - 1] = false;
-                i -= 1;
-                j -= 1;
-            } else if dp[i - 1][j] >= dp[i][j - 1] {
-                i -= 1;
-            } else {
-                j -= 1;
-            }
-        }
-    }
-
-    for k in 0..prefix {
-        matches.push((k, k));
-    }
-    for k in 0..suffix {
-        matches.push((n - 1 - k, m - 1 - k));
-    }
-    matches.sort_unstable_by_key(|&(o, _)| o);
-
-    let mut old_to_new = vec![None; n];
-    for (o, n_idx) in matches {
-        old_to_new[o] = Some(n_idx);
-    }
-
-    let mut last_mapped_new = 0;
-    for o in 0..n {
-        if let Some(n_idx) = old_to_new[o] {
-            last_mapped_new = n_idx + 1;
-        } else {
-            deleted_gaps[last_mapped_new] = true;
+        if !hunk.before.is_empty() {
+            deleted_gaps[hunk.after.start as usize] = true;
         }
     }
 
@@ -528,12 +488,11 @@ impl Editor {
             get_diff_info(&self.saved_hashes, &curr_hashes)
         };
 
-        let orig_was_empty =
+                let orig_was_empty =
             self.original_hashes.len() == 1 && self.original_hashes[0] == empty_hash;
         let (mod_orig, mut del_orig) = if orig_was_empty && !curr_is_empty {
-            // Оригинал тоже был пустым — зелёных (saved) маркеров нет.
             (
-                vec![false; curr_hashes.len()],
+                vec![true; curr_hashes.len()],
                 vec![false; curr_hashes.len() + 1],
             )
         } else {

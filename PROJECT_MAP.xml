@@ -99,64 +99,67 @@
   <mod path="src/editor.rs" name="editor">
     <type name="EditOp">{ Insert { offset: usize, text: String }</type>
     <type name="Editor">{ data: Vec&lt;u8&gt;, gap_start: usize, gap_end: usize, cursor: usize, selection_anchor: Option&lt;usize&gt;, version: u64, line_offsets: Vec&lt;usize&gt;, longest_line_idx: usize, history: VecDeque&lt;HistoryStep&gt;, redo_stack: VecDeque&lt;HistoryStep&gt;, history_size: usize, is_working_history: bool, original_hashes: Vec&lt;u64&gt;, saved_hashes: Vec&lt;u64&gt;, line_states: Vec&lt;Option&lt;LineModState&gt;&gt;, deleted_gaps: Vec&lt;Option&lt;LineModState&gt;&gt;, is_dirty: bool, indent_cache: Vec&lt;u8&gt;, last_indent_version: u64, sync_edits: Vec&lt;SyncEdit&gt;, foldable_lines: std::collections::HashMap&lt;usize, usize&gt;, folded_lines: std::collections::HashSet&lt;usize&gt;, folded_start_bytes: std::collections::HashSet&lt;usize&gt;, foldable_ranges_bytes: Vec&lt;(usize, usize, bool)&gt; }</type>
+    <type name="HashSource">(&amp;'a [u64])</type>
     <type name="HistoryStep">{ op: EditOp, cursor_before: usize, cursor_after: usize }</type>
     <type name="LineModState">{ ModifiedUnsaved, ModifiedSaved }</type>
     <type name="UndoRedoDelta">{ Insert(usize, usize, String), Delete(usize, usize), Replace(usize, usize, String, String) }</type>
-    <fn name="get_diff_info" line="7" ret="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" />
-    <fn name="is_delimiter" line="83" ret="bool" />
-    <fn name="char_class" line="90" ret="u8" />
-    <fn name="new" line="168" pub="true" ret="Self" />
-    <fn name="shift_folds_insert" line="197" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
-    <fn name="shift_folds_delete" line="220" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
-    <fn name="rebuild_line_offsets" line="249" pub="true" reads="foldable_ranges_bytes" writes="foldable_lines.clear(), foldable_lines.insert(), folded_lines.clear(), folded_lines.insert(), folded_start_bytes.clear(), folded_start_bytes.insert(), line_offsets=, longest_line_idx=" calls="self: text_parts" />
-    <fn name="get_line_hashes" line="319" ret="Vec&lt;u64&gt;" calls="self: text_parts" />
-    <fn name="ensure_indent_cache_updated" line="342" pub="true" reads="version" writes="indent_cache.clear(), last_indent_version=" calls="self: text_parts; renderer: resize" />
-    <fn name="get_cached_indent_levels" line="413" pub="true" ret="&amp;[u8]" reads="indent_cache" />
-    <fn name="backspace" line="417" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, gap_start, version" writes="cursor=, selection_anchor=, sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="set_original_text" line="490" pub="true" writes="original_hashes=, saved_hashes=" calls="self: get_line_hashes, update_modifications" />
-    <fn name="mark_saved" line="496" pub="true" writes="saved_hashes=" calls="self: get_line_hashes, update_modifications" />
-    <fn name="is_dirty" line="501" pub="true" ret="bool" reads="is_dirty" />
-    <fn name="get_line_modification_state" line="505" pub="true" ret="Option&lt;LineModState&gt;" reads="line_states" />
-    <fn name="update_modifications" line="509" pub="true" reads="original_hashes, saved_hashes" writes="deleted_gaps=, is_dirty=, line_states=" calls="self: get_line_hashes, rebuild_line_offsets; self: get_diff_info" />
-    <fn name="clear_history" line="581" pub="true" writes="history.clear(), history_size=, redo_stack.clear(), sync_edits.clear()" calls="self: update_modifications" />
-    <fn name="push_history" line="589" reads="history_size, is_working_history" writes="history.push_back(), redo_stack.clear()" calls="ui_system: contains" />
-    <fn name="undo" line="673" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.pop_back(), is_working_history=, redo_stack.push_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
-    <fn name="redo" line="731" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.push_back(), is_working_history=, redo_stack.pop_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
-    <fn name="text_parts" line="789" pub="true" ret="(&amp;str, &amp;str)" reads="data, gap_end, gap_start" />
-    <fn name="get_full_text" line="797" pub="true" ret="String" calls="self: text_parts" />
-    <fn name="move_gap" line="805" reads="data, gap_end, gap_start" />
-    <fn name="insert_str_internal" line="824" ret="usize" reads="cursor, gap_start" writes="data=, gap_end=, sync_edits.push()" calls="self: move_gap, shift_folds_insert" />
-    <fn name="replace_range" line="848" pub="true" ret="(usize, usize, String)" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, insert_str_internal, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="insert_str" line="895" pub="true" ret="(Option&lt;(usize, usize)&gt;, usize)" reads="cursor, version" writes="selection_anchor=" calls="self: delete_selection, insert_str_internal, push_history, update_modifications" />
-    <fn name="delete_selection" line="922" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="delete_forward" line="960" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor, gap_end, version" writes="sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="delete_word_backward" line="996" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor" writes="selection_anchor=" calls="self: byte_at, delete_selection; self: is_delimiter" />
-    <fn name="delete_word_forward" line="1029" pub="true" ret="Option&lt;(usize, usize)&gt;" writes="cursor=, selection_anchor=" calls="self: byte_at, delete_selection, len; self: is_delimiter" />
-    <fn name="get_auto_indent" line="1063" pub="true" ret="String" reads="cursor" calls="self: byte_at" />
-    <fn name="select_expand" line="1093" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; self: char_class" />
-    <fn name="select_word" line="1219" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; self: is_delimiter" />
-    <fn name="select_line" line="1236" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len" />
-    <fn name="is_char_boundary" line="1251" ret="bool" calls="self: byte_at, len" />
-    <fn name="byte_at" line="1259" pub="true" ret="u8" reads="data, gap_end, gap_start" />
-    <fn name="len" line="1267" pub="true" ret="usize" reads="data, gap_end, gap_start" />
-    <fn name="utf16_col_to_byte_advance" line="1275" pub="true" reads="line_offsets" calls="self: byte_at, len" />
-    <fn name="get_selection" line="1312" pub="true" ret="Option&lt;String&gt;" reads="cursor, selection_anchor" calls="self: byte_at" />
-    <fn name="select_all" line="1326" pub="true" writes="cursor=, selection_anchor=" calls="self: len" />
-    <fn name="handle_selection" line="1331" reads="cursor" writes="selection_anchor=" />
-    <fn name="snap_cursor_out_of_fold" line="1340" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: len, move_end; ui_system: contains" />
-    <fn name="move_left" line="1380" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, snap_cursor_out_of_fold" />
-    <fn name="move_right" line="1393" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, len, snap_cursor_out_of_fold" />
-    <fn name="move_word_left" line="1406" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, snap_cursor_out_of_fold; self: char_class" />
-    <fn name="move_word_right" line="1429" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, len, snap_cursor_out_of_fold; self: char_class" />
-    <fn name="move_home" line="1452" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
-    <fn name="move_end" line="1492" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
-    <fn name="move_start_of_file" line="1532" pub="true" writes="cursor=" calls="self: handle_selection" />
-    <fn name="move_end_of_file" line="1537" pub="true" writes="cursor=" calls="self: handle_selection, len" />
-    <fn name="move_up" line="1542" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="move_down" line="1548" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="set_cursor_at_pos" line="1554" pub="true" writes="cursor=, selection_anchor=" calls="render_view::core_text: get_byte_at_xy" />
-    <fn name="move_page_up" line="1568" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="move_page_down" line="1574" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="tokenize" line="14" ret="Self::Tokenizer" reads="0" />
+    <fn name="estimate_tokens" line="18" ret="u32" reads="0" />
+    <fn name="get_diff_info" line="23" ret="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" />
+    <fn name="is_delimiter" line="43" ret="bool" />
+    <fn name="char_class" line="50" ret="u8" />
+    <fn name="new" line="128" pub="true" ret="Self" />
+    <fn name="shift_folds_insert" line="157" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
+    <fn name="shift_folds_delete" line="180" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
+    <fn name="rebuild_line_offsets" line="209" pub="true" reads="foldable_ranges_bytes" writes="foldable_lines.clear(), foldable_lines.insert(), folded_lines.clear(), folded_lines.insert(), folded_start_bytes.clear(), folded_start_bytes.insert(), line_offsets=, longest_line_idx=" calls="self: text_parts" />
+    <fn name="get_line_hashes" line="279" ret="Vec&lt;u64&gt;" calls="self: text_parts" />
+    <fn name="ensure_indent_cache_updated" line="302" pub="true" reads="version" writes="indent_cache.clear(), last_indent_version=" calls="self: text_parts; renderer: resize" />
+    <fn name="get_cached_indent_levels" line="373" pub="true" ret="&amp;[u8]" reads="indent_cache" />
+    <fn name="backspace" line="377" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, gap_start, version" writes="cursor=, selection_anchor=, sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
+    <fn name="set_original_text" line="450" pub="true" writes="original_hashes=, saved_hashes=" calls="self: get_line_hashes, update_modifications" />
+    <fn name="mark_saved" line="456" pub="true" writes="saved_hashes=" calls="self: get_line_hashes, update_modifications" />
+    <fn name="is_dirty" line="461" pub="true" ret="bool" reads="is_dirty" />
+    <fn name="get_line_modification_state" line="465" pub="true" ret="Option&lt;LineModState&gt;" reads="line_states" />
+    <fn name="update_modifications" line="469" pub="true" reads="original_hashes, saved_hashes" writes="deleted_gaps=, is_dirty=, line_states=" calls="self: get_line_hashes, rebuild_line_offsets; self: get_diff_info" />
+    <fn name="clear_history" line="540" pub="true" writes="history.clear(), history_size=, redo_stack.clear(), sync_edits.clear()" calls="self: update_modifications" />
+    <fn name="push_history" line="548" reads="history_size, is_working_history" writes="history.push_back(), redo_stack.clear()" calls="ui_system: contains" />
+    <fn name="undo" line="632" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.pop_back(), is_working_history=, redo_stack.push_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
+    <fn name="redo" line="690" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.push_back(), is_working_history=, redo_stack.pop_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
+    <fn name="text_parts" line="748" pub="true" ret="(&amp;str, &amp;str)" reads="data, gap_end, gap_start" />
+    <fn name="get_full_text" line="756" pub="true" ret="String" calls="self: text_parts" />
+    <fn name="move_gap" line="764" reads="data, gap_end, gap_start" />
+    <fn name="insert_str_internal" line="783" ret="usize" reads="cursor, gap_start" writes="data=, gap_end=, sync_edits.push()" calls="self: move_gap, shift_folds_insert" />
+    <fn name="replace_range" line="807" pub="true" ret="(usize, usize, String)" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, insert_str_internal, move_gap, push_history, shift_folds_delete, update_modifications" />
+    <fn name="insert_str" line="854" pub="true" ret="(Option&lt;(usize, usize)&gt;, usize)" reads="cursor, version" writes="selection_anchor=" calls="self: delete_selection, insert_str_internal, push_history, update_modifications" />
+    <fn name="delete_selection" line="881" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, move_gap, push_history, shift_folds_delete, update_modifications" />
+    <fn name="delete_forward" line="919" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor, gap_end, version" writes="sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
+    <fn name="delete_word_backward" line="955" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor" writes="selection_anchor=" calls="self: byte_at, delete_selection; self: is_delimiter" />
+    <fn name="delete_word_forward" line="988" pub="true" ret="Option&lt;(usize, usize)&gt;" writes="cursor=, selection_anchor=" calls="self: byte_at, delete_selection, len; self: is_delimiter" />
+    <fn name="get_auto_indent" line="1022" pub="true" ret="String" reads="cursor" calls="self: byte_at" />
+    <fn name="select_expand" line="1052" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; self: char_class" />
+    <fn name="select_word" line="1178" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; self: is_delimiter" />
+    <fn name="select_line" line="1195" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len" />
+    <fn name="is_char_boundary" line="1210" ret="bool" calls="self: byte_at, len" />
+    <fn name="byte_at" line="1218" pub="true" ret="u8" reads="data, gap_end, gap_start" />
+    <fn name="len" line="1226" pub="true" ret="usize" reads="data, gap_end, gap_start" />
+    <fn name="utf16_col_to_byte_advance" line="1234" pub="true" reads="line_offsets" calls="self: byte_at, len" />
+    <fn name="get_selection" line="1271" pub="true" ret="Option&lt;String&gt;" reads="cursor, selection_anchor" calls="self: byte_at" />
+    <fn name="select_all" line="1285" pub="true" writes="cursor=, selection_anchor=" calls="self: len" />
+    <fn name="handle_selection" line="1290" reads="cursor" writes="selection_anchor=" />
+    <fn name="snap_cursor_out_of_fold" line="1299" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: len, move_end; ui_system: contains" />
+    <fn name="move_left" line="1339" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, snap_cursor_out_of_fold" />
+    <fn name="move_right" line="1352" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, len, snap_cursor_out_of_fold" />
+    <fn name="move_word_left" line="1365" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, snap_cursor_out_of_fold; self: char_class" />
+    <fn name="move_word_right" line="1388" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, len, snap_cursor_out_of_fold; self: char_class" />
+    <fn name="move_home" line="1411" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
+    <fn name="move_end" line="1451" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
+    <fn name="move_start_of_file" line="1491" pub="true" writes="cursor=" calls="self: handle_selection" />
+    <fn name="move_end_of_file" line="1496" pub="true" writes="cursor=" calls="self: handle_selection, len" />
+    <fn name="move_up" line="1501" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="move_down" line="1507" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="set_cursor_at_pos" line="1513" pub="true" writes="cursor=, selection_anchor=" calls="render_view::core_text: get_byte_at_xy" />
+    <fn name="move_page_up" line="1527" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="move_page_down" line="1533" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
   </mod>
   <mod path="src/highlighter.rs" name="highlighter">
     <type name="ColorSpan">{ start: usize, end: usize, color: [f32; 4] }</type>
