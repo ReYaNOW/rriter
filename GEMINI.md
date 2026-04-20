@@ -55,7 +55,7 @@ Example — destructive op:
 
 ## Boundaries
 
-Code/commits/PRs: write normal. Level persist until changed or session end.
+Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
 
 # HERE IS INFO ON HOW TO CODE
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
@@ -177,6 +177,7 @@ Project divided into several independent, tightly coupled subsystems.
     │   ├── keyboard.rs
     │   ├── lsp_actions.rs
     │   ├── mouse.rs
+    │   ├── terminal.rs
     │   └── ui_handlers.rs
     ├── app.rs
     ├── editor.rs
@@ -193,9 +194,9 @@ Project divided into several independent, tightly coupled subsystems.
     ├── render_view         <-- Folder with rendering modules
     │   ├── core_text.rs
     │   ├── lsp_ui.rs
-    │   ├── search.rs       (NEW: Search panel)
+    │   ├── search.rs       (Search panel)
     │   ├── settings_ui.rs
-    │   ├── sticky.rs       (NEW: "Sticky" headers)
+    │   ├── sticky.rs       ("Sticky" headers)
     │   └── ui.rs
     ├── render_view.rs      <-- Main render orchestrator file
     ├── scroll.rs
@@ -497,6 +498,32 @@ Panel rendering built on layers:
 * **Text engine** always renders full window height (`real_height`). Projection matrix, `gl.viewport` never shrunk when panels open.
 * **Left panel** (`panel_left_w`) drawn opaquely, shifting text rendering origin (`left_padding`) so text "makes way".
 * **Bottom panel** (`panel_bottom_h`) drawn strictly on text top, has semi-transparent gradient background (Alpha Blend). Text, scrollbars smoothly "disappear" under it, creating modern layered interface effect.
+
+---
+
+## 🖥️ Subsystem 6: Integrated Terminal (`app/terminal.rs`)
+
+RRiter includes a high-performance integrated terminal, built on `portable-pty` for robust, cross-platform pseudo-terminal management and `alacritty_terminal` for an exceptionally fast, in-memory grid and ANSI/VT escape code parser.
+
+### Core Architecture & Performance
+
+1.  **PTY Spawning**: When the terminal panel is first opened, `Terminal::spawn()` uses `portable-pty` to create a PTY and launch the user's default shell (e.g., `$SHELL` on Linux). The slave descriptor is immediately dropped in the parent process to prevent shells like `fish` from hanging on startup.
+
+2.  **Dedicated I/O Thread**: A background thread is spawned to handle all blocking reads from the PTY's master file descriptor. This ensures the main UI thread never waits for I/O and remains responsive.
+
+3.  **VTE Parsing**: The raw byte stream from the PTY is fed directly into an `alacritty_terminal::vte::Parser`. The parser processes all ANSI escape codes for colors, cursor movement, and screen clearing.
+
+4.  **In-Memory Grid**: The parser's output modifies an in-memory grid (`TermGrid`), which is a `VecDeque<Vec<Cell>>` representing the terminal's state. This grid is wrapped in an `Arc<Mutex<...>>` for thread-safe access between the I/O thread and the main render thread.
+
+5.  **Event Loop Wake-up**: After processing a batch of PTY output and marking the grid as "dirty", the background I/O thread explicitly calls `window.request_redraw()`. This crucial step wakes up the `winit` event loop, guaranteeing that terminal output is rendered instantly without relying on user input to trigger a new frame.
+
+### Input and Rendering
+
+-   **Input Routing**: `app/keyboard.rs` checks if the terminal panel is focused (`ide_panel.terminal_focused`). If so, it captures keyboard events, translates them into the appropriate byte sequences (e.g., `\x03` for `Ctrl+C`, `\x1b[A` for Arrow Up), and writes them directly to the PTY's writer.
+-   **Zero-Copy Rendering**: The `render_view.rs` module iterates directly over the visible cells of the locked `TermGrid` during the draw call. There are no intermediate buffers or per-frame allocations. Characters and their background/foreground colors are drawn using the existing GPU-accelerated text renderer.
+-   **Focus Indicator**: A colored border is rendered around the terminal panel when it is focused, providing clear visual feedback.
+
+This architecture ensures maximum throughput and minimal latency, providing a terminal experience that feels native and integrated while adhering to the editor's strict performance and resource management principles.
 
 ---
 
