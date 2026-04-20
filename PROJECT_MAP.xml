@@ -92,9 +92,9 @@
     <fn name="trigger_save_as_picker" line="1112" pub="true" writes="save_file_rx=" />
     <fn name="save_current_file" line="1124" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; editor: get_full_text, mark_saved" />
     <fn name="add_recent_file" line="1163" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
-    <fn name="apply_highlight_results" line="1172" pub="true" reads="editor, highlighter" writes="is_highlighted_once=" />
-    <fn name="load_file_internal" line="1202" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
-    <fn name="check_external_changes" line="1283" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
+    <fn name="apply_highlight_results" line="1172" pub="true" reads="editor, file_extension, highlighter" writes="is_highlighted_once=" />
+    <fn name="load_file_internal" line="1207" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
+    <fn name="check_external_changes" line="1288" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
   </mod>
   <mod path="src/editor.rs" name="editor">
     <type name="EditOp">{ Insert { offset: usize, text: String }</type>
@@ -279,14 +279,14 @@
     <fn name="push_vertical_gradient" line="530" pub="true" reads="vertices" />
     <fn name="push_horizontal_gradient" line="578" pub="true" reads="vertices" />
     <fn name="draw_string" line="626" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="draw_string_scaled" line="649" pub="true" calls="self: get_ui_glyph, push_quad" />
-    <fn name="draw_string_mono_scaled" line="679" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="measure_mono_width" line="709" pub="true" ret="f32" calls="self: char_advance" />
-    <fn name="push_rounded_rect" line="720" pub="true" reads="vertices" />
+    <fn name="draw_string_scaled" line="653" pub="true" calls="self: get_ui_glyph, push_quad" />
+    <fn name="draw_string_mono_scaled" line="687" pub="true" calls="self: get_glyph, push_quad" />
+    <fn name="measure_mono_width" line="721" pub="true" ret="f32" calls="self: char_advance" />
+    <fn name="push_rounded_rect" line="732" pub="true" reads="vertices" />
   </mod>
   <mod path="src/render_view/lsp_ui.rs" name="render_view::lsp_ui">
     <fn name="draw_lsp_servers_panel" line="6" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: char_advance, draw_string_scaled, flush, get_glyph, measure_ui_width, measure_width, push_quad, push_rounded_rect; editor: text_parts; ui_system: contains, register_blocker, register_rect" />
-    <fn name="draw_lsp_actions_menu" line="780" pub="true" ret="bool" reads="height, last_mouse_x, last_mouse_y, scale_factor, theme, width" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect" />
+    <fn name="draw_lsp_actions_menu" line="784" pub="true" ret="bool" reads="height, last_mouse_x, last_mouse_y, scale_factor, theme, width" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect" />
   </mod>
   <mod path="src/render_view/search.rs" name="render_view::search">
     <fn name="draw_search_panel" line="8" pub="true" ret="bool" reads="gl, height, last_mouse_x, last_mouse_y, minimap_width, scale_factor, theme, width" writes="last_search_idx=, last_search_len=, search_res_string.clear(), search_res_string=, search_scroll_x=" calls="self: draw_string_scaled, flush, get_ui_glyph, push_quad, push_rect, push_rounded_rect; editor: get_full_text; ui_system: register_icon_button, register_text_input, wants_pointer" />

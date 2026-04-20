@@ -1169,7 +1169,12 @@ impl App {
 
     /// Применяет последние результаты подсветки (foldable ranges) к состоянию редактора.
     /// Вызывать после `highlighter.poll()` или `highlighter.wait_for_first_result()`.
-    pub fn apply_highlight_results(&mut self) {
+        pub fn apply_highlight_results(&mut self) {
+        let ext = self.file_extension.as_str();
+        let threshold = match ext {
+            "json" | "toml" | "yaml" | "yml" | "html" | "css" | "xml" | "md" | "txt" => 20,
+            _ => 2,
+        };
         self.editor.foldable_lines.clear();
         self.editor.foldable_ranges_bytes.clear();
         for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
@@ -1186,9 +1191,9 @@ impl App {
                 .line_offsets
                 .partition_point(|&x| x <= end_b)
                 .saturating_sub(1);
-            if el > sl {
+                        if el > sl {
                 self.editor.foldable_lines.insert(sl, el);
-                if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
+                if is_autofold && el - sl >= threshold && !self.is_highlighted_once {
                     self.editor.folded_lines.insert(sl);
                     self.editor
                         .folded_start_bytes

@@ -623,17 +623,21 @@ impl Renderer {
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
-    pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
+            pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
+                let q_x = (x + g.offset_x).round();
+                let q_y = (y - g.offset_y).round();
+                let q_w = (x + g.offset_x + g.width).round() - q_x;
+                let q_h = (y - g.offset_y + g.height).round() - q_y;
                 self.push_quad(
-                    x + g.offset_x,
-                    y - g.offset_y,
-                    g.width,
-                    g.height,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,
@@ -646,7 +650,7 @@ impl Renderer {
         }
     }
 
-    pub fn draw_string_scaled(
+            pub fn draw_string_scaled(
         &mut self,
         text: &str,
         mut x: f32,
@@ -659,11 +663,15 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
+                let q_x = (x + g.offset_x * scale).round();
+                let q_y = (y - g.offset_y * scale).round();
+                let q_w = (x + g.offset_x * scale + g.width * scale).round() - q_x;
+                let q_h = (y - g.offset_y * scale + g.height * scale).round() - q_y;
                 self.push_quad(
-                    (x + g.offset_x * scale).round(),
-                    (y - g.offset_y * scale).round(),
-                    g.width * scale,
-                    g.height * scale,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,
@@ -676,7 +684,7 @@ impl Renderer {
         }
     }
 
-    pub fn draw_string_mono_scaled(
+            pub fn draw_string_mono_scaled(
         &mut self,
         text: &str,
         mut x: f32,
@@ -689,11 +697,15 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
+                let q_x = (x + g.offset_x * scale).round();
+                let q_y = (y - g.offset_y * scale).round();
+                let q_w = (x + g.offset_x * scale + g.width * scale).round() - q_x;
+                let q_h = (y - g.offset_y * scale + g.height * scale).round() - q_y;
                 self.push_quad(
-                    (x + g.offset_x * scale).round(),
-                    (y - g.offset_y * scale).round(),
-                    g.width * scale,
-                    g.height * scale,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,
