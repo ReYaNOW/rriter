@@ -501,6 +501,18 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
+                        UiId::ProblemFileToggle(idx) => {
+                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
+                    if *diag_idx == usize::MAX {
+                        if self.ide_panel.problems_collapsed.contains(path) {
+                            self.ide_panel.problems_collapsed.remove(path);
+                        } else {
+                            self.ide_panel.problems_collapsed.insert(path.clone());
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                    }
+                }
+            }
             UiId::ProblemsTab(idx) => {
                 self.ide_panel.problems_tab = idx;
                 self.window.as_ref().unwrap().request_redraw();
@@ -536,8 +548,11 @@ impl App {
                     }
                 }
             }
-            UiId::ProblemJump(idx) => {
+                        UiId::ProblemJump(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx).cloned() {
+                    if diag_idx == usize::MAX {
+                        return;
+                    }
                     if self.file_path.as_ref() != Some(&path) {
                         self.open_file_in_tab(path.clone(), true);
                     }

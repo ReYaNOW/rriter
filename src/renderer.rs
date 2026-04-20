@@ -1034,17 +1034,20 @@ impl Renderer {
             (
                 crate::widgets::IconType::Warning,
                 include_bytes!("icons/dialog-warning.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::CaseMatch,
-                include_bytes!("icons/format-text-uppercase.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Down,
-                include_bytes!("icons/go-down.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Close,
+            ),                        (
+                            crate::widgets::IconType::CaseMatch,
+                            include_bytes!("icons/format-text-uppercase.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Up,
+                            include_bytes!("icons/go-up.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Down,
+                            include_bytes!("icons/go-down.svg").as_slice(),
+                        ),
+                        (
+                            crate::widgets::IconType::Close,
                 include_bytes!("icons/window-close.svg").as_slice(),
             ),
             (

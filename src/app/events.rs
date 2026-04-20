@@ -362,14 +362,22 @@ impl ApplicationHandler for App {
                                 self.ide_panel.flat_diags.push((p.clone(), i));
                             }
                         }
-                    } else {
+                                        } else {
                         let mut paths: Vec<_> = lsp.diagnostics.keys().collect();
                         paths.sort();
                         for p in paths {
                             let mut diags = lsp.get_diagnostics(p).iter().enumerate().collect::<Vec<_>>();
+                            if diags.is_empty() {
+                                continue;
+                            }
                             diags.sort_by(|(_, a), (_, b)| a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col)));
-                            for (i, _) in diags {
-                                self.ide_panel.flat_diags.push(((*p).clone(), i));
+
+                                                        self.ide_panel.flat_diags.push(((*p).clone(), usize::MAX));
+
+                            if !self.ide_panel.problems_collapsed.contains(p) {
+                                for (i, _) in diags {
+                                    self.ide_panel.flat_diags.push(((*p).clone(), i));
+                                }
                             }
                         }
                     }

@@ -142,9 +142,10 @@ pub struct IdePanelState {
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
             pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
         pub lsp_logs_focused: Option<String>,
-                        pub diag_copied_idx: Option<usize>,
+                                pub diag_copied_idx: Option<usize>,
         pub problems_tab: usize,
         pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+        pub problems_collapsed: FxHashSet<std::path::PathBuf>,
         pub problems_scroll: crate::scroll::ScrollState,
     }
 
@@ -190,9 +191,10 @@ pub struct IdePanelState {
                             lsp_logs_scroll_y: FxHashMap::default(),
                 lsp_logs_scroll_x: FxHashMap::default(),
                                 lsp_logs_focused: None,
-                                diag_copied_idx: None,
+                                                diag_copied_idx: None,
                 problems_tab: 0,
                 flat_diags: Vec::new(),
+                problems_collapsed: FxHashSet::default(),
                 problems_scroll: crate::scroll::ScrollState::new(15.0),
             }
         }
