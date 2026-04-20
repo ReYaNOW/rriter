@@ -842,9 +842,10 @@ impl ApplicationHandler for App {
         } else {
             -120.0 * s
         };
-        let search_diff = target_search_y - self.search_anim_y;
+                        let search_diff = target_search_y - self.search_anim_y;
         if search_diff.abs() > 1.5 {
-            self.search_anim_y += search_diff * 20.0 * dt;
+            let speed = if self.show_search { 20.0 } else { 7.0 };
+            self.search_anim_y += search_diff * speed * dt;
             needs_redraw = true;
         }
 
