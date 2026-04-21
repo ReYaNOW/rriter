@@ -1464,14 +1464,21 @@ impl Renderer {
                         x_start_px + avg_adv * 8.0
                     };
                 }
-                let x_start = self.left_padding + x_start_px - render_scroll_x;
+                                let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
 
                 let top_y = v_line.y_offset - render_scroll_y;
 
                 let mut in_hitbox = false;
-                let is_under_panel = top_y > self.height - panel_bottom_h - self.line_height;
+                let mut effective_bottom_h = panel_bottom_h;
+                if is_ide_mode
+                    && ide_panel.is_open(crate::app::PanelId::Terminal)
+                    && !ide_panel.terminal_focused
+                {
+                    effective_bottom_h = 0.0;
+                }
+                let is_under_panel = top_y > self.height - effective_bottom_h - self.line_height;
 
                 if !self.hide_popups_until_mouse_move && !is_under_panel {
                     let squiggle_hit_y_top = top_y;
