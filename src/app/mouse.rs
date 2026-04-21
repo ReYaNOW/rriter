@@ -760,13 +760,21 @@ impl App {
                         self.ide_panel.terminal_focused = false;
                     }
 
-                    if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
+                                        if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
                             panel_id,
                             start_y: my,
                             current_y: my,
                             threshold_passed: false,
                         });
+                    } else if let crate::ui_system::UiId::EditorTab(idx) = clicked_id {
+                        self.ide_panel.tab_drag = Some(crate::app::TabDragState {
+                            start_idx: idx,
+                            start_x: mx,
+                            current_x: mx,
+                            threshold_passed: false,
+                        });
+                        self.handle_ui_click(clicked_id);
                     } else {
                         if clicked_id == crate::ui_system::UiId::TerminalBody {
                             self.ide_panel.is_dragging_terminal = true;
@@ -866,9 +874,79 @@ impl App {
             return;
         }
 
-        if state == ElementState::Released {
+                if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
+                if let Some(drag) = self.ide_panel.tab_drag.take() {
+                    if drag.threshold_passed && self.tabs.len() > 1 {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let tab_pad = 16.0 * s;
+                        let icon_size_tab = 20.0 * s;
+
+                                                let start_cx = if self.is_ide_mode {
+                            let panel_left_w = self.ide_panel.left_width * s;
+                            (48.0 * s + panel_left_w).round() + 1.0 - self.tab_scroll.current
+                        } else {
+                            -self.tab_scroll.current
+                        };
+
+                        let mut widths = Vec::new();
+                        for tab in &self.tabs {
+                            let title = if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title };
+                            let title_w = self.renderer.as_mut().unwrap().measure_ui_width(title, 1.0);
+                            let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
+                            widths.push(tab_w);
+                        }
+
+                        let mut initial_xs = vec![0.0; self.tabs.len()];
+                        let mut cx = start_cx;
+                        for i in 0..self.tabs.len() {
+                            initial_xs[i] = cx;
+                            cx += widths[i];
+                        }
+
+                                                let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
+                        let dragged_w = widths[drag.start_idx];
+                        let dragged_right = dragged_x + dragged_w;
+
+                        let mut new_idx = drag.start_idx;
+                        let padding = 10.0 * s;
+
+                        for i in 0..self.tabs.len() {
+                            if i == drag.start_idx { continue; }
+                            let other_x = initial_xs[i];
+                            let other_w = widths[i];
+
+                            if i < drag.start_idx {
+                                let other_right = other_x + other_w;
+                                if dragged_x < other_right - padding {
+                                    new_idx = new_idx.min(i);
+                                }
+                            } else {
+                                let other_left = other_x;
+                                if dragged_right > other_left + padding {
+                                    new_idx = new_idx.max(i);
+                                }
+                            }
+                        }
+
+                        if new_idx != drag.start_idx {
+                            self.sync_active_tab();
+                            let tab = self.tabs.remove(drag.start_idx);
+                            self.tabs.insert(new_idx, tab);
+
+                            if self.active_tab == drag.start_idx {
+                                self.active_tab = new_idx;
+                            } else if self.active_tab > drag.start_idx && self.active_tab <= new_idx {
+                                self.active_tab -= 1;
+                            } else if self.active_tab < drag.start_idx && self.active_tab >= new_idx {
+                                self.active_tab += 1;
+                            }
+                            self.sync_active_tab();
+                            self.save_tabs_state();
+                        }
+                    }
+                }
                 if let Some(drag) = self.ide_panel.drag.take() {
                     if !drag.threshold_passed {
                         // Клик без движения → переключить панель
@@ -1127,7 +1205,7 @@ impl App {
             }
         }
 
-        // DnD и ресайз IDE-панелей (обработка движения мыши)
+                // DnD и ресайз IDE-панелей (обработка движения мыши)
         if self.is_ide_mode {
             let px = position.x as f32;
             let py = position.y as f32;
@@ -1135,6 +1213,15 @@ impl App {
             if let Some(ref mut drag) = self.ide_panel.drag {
                 drag.current_y = py;
                 if (py - drag.start_y).abs() > 5.0 * s {
+                    drag.threshold_passed = true;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
+            if let Some(ref mut drag) = self.ide_panel.tab_drag {
+                drag.current_x = px;
+                if (px - drag.start_x).abs() > 5.0 * s {
                     drag.threshold_passed = true;
                 }
                 self.window.as_ref().unwrap().request_redraw();

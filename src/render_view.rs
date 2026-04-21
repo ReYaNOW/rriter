@@ -1737,7 +1737,7 @@ impl Renderer {
                 } else if !show_welcome && is_ide_mode {
             let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
-            self.draw_tab_bar(tabs,
+                            self.draw_tab_bar(tabs,
                 active_tab,
                 editor,
                 editor_title,
@@ -1751,6 +1751,7 @@ impl Renderer {
                 my,
                 ui_registry,
                 tab_scroll_x,
+                ide_panel.tab_drag.as_ref(),
             );
             self.flush();
         }

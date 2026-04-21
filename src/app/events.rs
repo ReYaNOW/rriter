@@ -797,7 +797,11 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.tab_scroll.update(dt) {
+                if self.tab_scroll.update(dt) {
+            needs_redraw = true;
+        }
+
+        if self.ide_panel.tab_drag.is_some() {
             needs_redraw = true;
         }
 

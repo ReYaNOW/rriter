@@ -94,7 +94,14 @@ pub struct PanelDragState {
     pub threshold_passed: bool,
 }
 
-/// Элемент меню быстрых действий LSP (Alt+Enter)
+#[derive(Clone, Debug)]
+pub struct TabDragState {
+    pub start_idx: usize,
+    pub start_x: f32,
+    pub current_x: f32,
+    pub threshold_passed: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum LspActionItem {
     /// Авто-правка от ruff (workspace edit)
@@ -149,9 +156,10 @@ pub struct IdePanelState {
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
     pub problems_scroll: crate::scroll::ScrollState,
     pub terminals: Vec<crate::app::terminal::Terminal>,
-    pub active_terminal: usize,
+        pub active_terminal: usize,
     pub terminal_focused: bool,
     pub is_dragging_terminal: bool,
+    pub tab_drag: Option<TabDragState>,
 }
 
 impl Default for IdePanelState {
@@ -202,9 +210,10 @@ impl Default for IdePanelState {
             problems_collapsed: FxHashSet::default(),
             problems_scroll: crate::scroll::ScrollState::new(15.0),
             terminals: Vec::new(),
-            active_terminal: 0,
+                        active_terminal: 0,
             terminal_focused: false,
             is_dragging_terminal: false,
+            tab_drag: None,
         }
     }
 }

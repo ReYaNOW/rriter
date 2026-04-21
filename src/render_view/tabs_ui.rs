@@ -3,7 +3,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-    pub fn draw_tab_bar(
+        pub fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
@@ -19,6 +19,7 @@ impl Renderer {
         my: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
+        tab_drag: Option<&crate::app::TabDragState>,
     ) {
         let tab_bar_bg = self.theme.minimap_bg;
         self.push_rect(x, y, w, h, tab_bar_bg);
@@ -31,28 +32,107 @@ impl Renderer {
                 .scissor(x.round() as i32, sy, w.round() as i32, h.round() as i32);
         }
 
-        let mut current_x = x - tab_scroll_x;
-        let tab_pad = 16.0 * s;
+                let tab_pad = 16.0 * s;
+        let icon_size_tab = 20.0 * s;
 
+        let mut tab_widths = Vec::with_capacity(tabs.len());
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = i == active_tab;
             let title = if is_active {
-                if editor_title.is_empty() {
-                    "Безымянный"
-                } else {
-                    editor_title
-                }
+                if editor_title.is_empty() { "Безымянный" } else { editor_title }
             } else {
-                if tab.base_title.is_empty() {
-                    "Безымянный"
-                } else {
-                    &tab.base_title
-                }
+                if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title }
             };
-
             let title_w = self.measure_ui_width(title, 1.0);
-            let icon_size_tab = 20.0 * s;
             let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
+            tab_widths.push((title.to_string(), tab_w));
+        }
+
+        let mut initial_xs = vec![0.0; tabs.len()];
+        let mut cx = x - tab_scroll_x;
+        for i in 0..tabs.len() {
+            initial_xs[i] = cx;
+            cx += tab_widths[i].1;
+        }
+
+        let mut order: Vec<usize> = (0..tabs.len()).collect();
+        let mut actual_xs = initial_xs.clone();
+
+        let is_dragging = tab_drag.map(|d| d.threshold_passed).unwrap_or(false);
+        let dragged_idx = tab_drag.map(|d| d.start_idx);
+
+        if let Some(drag) = tab_drag {
+                        if drag.threshold_passed {
+                                let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
+                let dragged_w = tab_widths[drag.start_idx].1;
+                let dragged_right = dragged_x + dragged_w;
+                let mut dst = drag.start_idx;
+                let padding = 10.0 * s;
+
+                for i in 0..tabs.len() {
+                    if i == drag.start_idx { continue; }
+                    let other_x = initial_xs[i];
+                    let other_w = tab_widths[i].1;
+
+                    if i < drag.start_idx {
+                        let other_right = other_x + other_w;
+                        if dragged_x < other_right - padding {
+                            dst = dst.min(i);
+                        }
+                    } else {
+                        let other_left = other_x;
+                        if dragged_right > other_left + padding {
+                            dst = dst.max(i);
+                        }
+                    }
+                }
+
+                order.retain(|&idx| idx != drag.start_idx);
+                order.insert(dst, drag.start_idx);
+
+                let mut cur_x = x - tab_scroll_x;
+                for &idx in &order {
+                    if idx != drag.start_idx {
+                        actual_xs[idx] = cur_x;
+                    }
+                    cur_x += tab_widths[idx].1;
+                }
+                                actual_xs[drag.start_idx] = dragged_x;
+            }
+        }
+
+        if self.tab_x_anim.len() != tabs.len() || !is_dragging {
+            self.tab_x_anim = actual_xs.clone();
+        } else {
+            for i in 0..tabs.len() {
+                if Some(i) == dragged_idx {
+                    self.tab_x_anim[i] = actual_xs[i];
+                                } else {
+                    let diff = actual_xs[i] - self.tab_x_anim[i];
+                    if diff.abs() > 0.5 {
+                        self.tab_x_anim[i] += diff * 0.12;
+                    } else {
+                        self.tab_x_anim[i] = actual_xs[i];
+                    }
+                }
+            }
+        }
+
+        let mut render_order = order.clone();
+        if let Some(d_idx) = dragged_idx {
+            if is_dragging {
+                render_order.retain(|&idx| idx != d_idx);
+                render_order.push(d_idx);
+            }
+        }
+
+                for &i in &render_order {
+            let tab = &tabs[i];
+            let is_active = i == active_tab;
+            let (title, tab_w) = &tab_widths[i];
+            let tab_w = *tab_w;
+            let current_x = self.tab_x_anim[i];
+            let is_last_in_order = order.last() == Some(&i);
 
             let is_hovered = mx >= current_x.max(x)
                 && mx <= (current_x + tab_w).min(x + w)
@@ -76,14 +156,20 @@ impl Renderer {
                 self.push_rect(current_x, y, tab_w, h, bg_color);
             }
 
-            if is_active {
+                        if is_active {
                 self.push_rect(
                     current_x,
                     y + h - 2.0 * s,
                     tab_w,
-                    2.0 * s,
-                    [0.60, 0.35, 0.85, 1.0],
+                    2.0 * s,[0.60, 0.35, 0.85, 1.0],
                 );
+            }
+
+            if !is_last_in_order {
+                let sep_h = h * 0.4;
+                let sep_y = y + (h - sep_h) / 2.0;
+                let sep_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
+                self.push_rect(current_x + tab_w - 1.0, sep_y, 1.0, sep_h, sep_color);
             }
 
             let is_dirty = if is_active {
@@ -175,7 +261,7 @@ impl Renderer {
                     }
                 }
 
-                if close_rect_right > x && close_rect_x < x + w {
+                                if close_rect_right > x && close_rect_x < x + w {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::EditorTabClose(i),
                         close_rect_x.max(x),
@@ -187,11 +273,10 @@ impl Renderer {
                     );
                 }
             }
-
-            current_x += tab_w;
         }
 
-        self.max_tab_scroll_x = (current_x + tab_scroll_x - x - w).max(0.0);
+        let total_tabs_w: f32 = tab_widths.iter().map(|(_, w)| w).sum();
+        self.max_tab_scroll_x = (total_tabs_w - w).max(0.0);
 
         self.flush();
         unsafe {
