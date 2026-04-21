@@ -649,7 +649,7 @@ impl App {
                 }
 
                 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
-                    if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
+                                        if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
                             panel_id,
                             start_y: my,
@@ -657,6 +657,11 @@ impl App {
                             threshold_passed: false,
                         });
                     } else {
+                        if clicked_id == crate::ui_system::UiId::TerminalBody {
+                            self.ide_panel.is_dragging_terminal = true;
+                        } else {
+                            self.ide_panel.is_dragging_terminal = false;
+                        }
                         self.handle_ui_click(clicked_id);
                     }
                     return;
@@ -856,13 +861,14 @@ impl App {
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
-                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
+                                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
                     self.ide_panel.is_resizing_left = false;
                     self.ide_panel.is_resizing_bottom = false;
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
             self.is_dragging = false;
+            self.ide_panel.is_dragging_terminal = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
@@ -1491,16 +1497,13 @@ impl App {
 
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
-                self.scroll_y.anim_speed = 15.0;
+                                self.scroll_y.anim_speed = 15.0;
             }
-        } else if self.ide_panel.terminal_focused
+        } else if self.ide_panel.is_dragging_terminal
             && self.is_dragging
             && !self.show_settings
-            && position.y as f32
-                > self.window.as_ref().unwrap().inner_size().height as f32
-                    - self.ide_panel.bottom_height * self.renderer.as_ref().unwrap().scale_factor
         {
-                        let active = self.ide_panel.active_terminal;
+            let active = self.ide_panel.active_terminal;
             if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let bottom_h = self.ide_panel.bottom_height * s;
@@ -1548,14 +1551,14 @@ impl App {
                 cell_y = cell_y.min(total_lines.saturating_sub(1));
                 cell_x = cell_x.min(grid.cols.saturating_sub(1));
 
-                if let Some((sx, sy, _, _)) = grid.selection {
+                                if let Some((sx, sy, _, _)) = grid.selection {
                     grid.selection = Some((sx, sy, cell_x, cell_y));
                 } else {
                     grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-        } else if self.is_dragging && !self.show_settings {
+        } else if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
