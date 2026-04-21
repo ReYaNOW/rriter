@@ -16,10 +16,39 @@ impl App {
             if key_event.state == winit::event::ElementState::Pressed {
                 let mut w = term.writer.lock().unwrap();
                 match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                        if grid.selection.is_some() {
-                            let text = grid.get_selection_text();
-                            let _ = self.clipboard.set_text(text);
+                                        PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                        if let Some((sx, sy, ex, ey)) = grid.selection {
+                            let mut res = String::new();
+                            let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+                            let total_lines = scrollback_len + grid.lines.len();
+                            let start_y = sy.min(ey);
+                            let end_y = sy.max(ey);
+                            let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
+                            let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+
+                            for y in start_y..=end_y {
+                                if y >= total_lines { continue; }
+                                let row = if grid.is_alt {
+                                    &grid.lines[y]
+                                } else {
+                                    if y < grid.scrollback.len() {
+                                        &grid.scrollback[y]
+                                    } else {
+                                        &grid.lines[y - grid.scrollback.len()]
+                                    }
+                                };
+                                let line_start = if y == start_y { start_x } else { 0 };
+                                let line_end = if y == end_y { end_x } else { grid.cols.saturating_sub(1) };
+
+                                for x in line_start..=line_end {
+                                    if x < row.len() {
+                                        res.push(row[x].c);
+                                    }
+                                }
+                                if y != end_y { res.push('\n'); }
+                            }
+
+                            let _ = self.clipboard.set_text(res.trim_end().to_string());
                             grid.selection = None;
                         } else {
                             let _ = w.write_all(b"\x03");

@@ -1,4 +1,5 @@
 use crate::app::App;
+use std::io::Write;
 use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
@@ -121,22 +122,51 @@ impl App {
                                     if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                 if self.ide_panel.terminal_focused {
                     let active = self.ide_panel.active_terminal;
-                    if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+                                                                                if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let grid = term.grid.lock().unwrap();
-                        if grid.is_alt {
-                            return;
-                        }
+                        let is_alt = grid.is_alt;
+                        let app_cursor = grid.app_cursor_keys;
+                        let mouse_tracking = grid.mouse_tracking;
                         let total_lines = grid.scrollback.len() + grid.lines.len();
                         drop(grid);
 
+                        if is_alt {
+                            println!("TERMINAL ALT SCROLL: dy={}, app={}, mouse={}", dy, app_cursor, mouse_tracking);
+                            if let Ok(mut w) = term.writer.lock() {
+                                if mouse_tracking {
+                                    let btn = if dy < 0.0 { 64 } else { 65 };
+                                    let seq = format!("\x1b[<{};1;1M", btn);
+                                    let steps = (dy.abs() / 20.0).max(1.0) as usize;
+                                    println!("-> mouse seq: {:?} x{}", seq, steps.min(3));
+                                    for _ in 0..steps.min(3) {
+                                        let _ = w.write_all(seq.as_bytes());
+                                    }
+                                } else {
+                                    let seq = if dy < 0.0 { 
+                                        if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
+                                    } else { 
+                                        if app_cursor { b"\x1BOB" } else { b"\x1B[B" }
+                                    };
+                                    let steps = (dy.abs() / 20.0).max(1.0) as usize;
+                                    println!("-> arrow seq: {:?} x{}", std::str::from_utf8(seq), steps.min(3));
+                                    for _ in 0..steps.min(3) {
+                                        let _ = w.write_all(seq);
+                                    }
+                                }
+                                let _ = w.flush();
+                            }
+                            return;
+                        }
+
                         term.scroll_y.anim_speed = 7.0;
-                        term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
+                                                term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
 
                         let lh = self.renderer.as_ref().unwrap().line_height;
-                        let term_scale = 0.82;
+                        let term_scale = 1.05;
                         let char_h = lh * term_scale;
 
-                        let max_scroll = ((total_lines as f32 * char_h) - ch).max(0.0);
+                                                let term_content_h = ch - 28.0 * s;
+                        let max_scroll = ((total_lines as f32 * char_h) - term_content_h).max(0.0);
 
                         term.scroll_y.clamp_target(0.0, max_scroll);
                         self.window.as_ref().unwrap().request_redraw();
@@ -1096,22 +1126,26 @@ impl App {
                 }
 
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let bottom_h = self.ide_panel.bottom_height * s;
+                                let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;
-                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h + 1.0 + tab_h;
+                                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h + 1.0 + tab_h;
                 let content_h = bottom_h - 1.0 - tab_h;
+                let term_content_y = content_y + 28.0 * s;
+                let term_content_h = content_h - 28.0 * s;
 
                 let lh = self.renderer.as_ref().unwrap().line_height;
-                let char_h = lh * 0.82;
+                let char_h = lh * 1.05;
 
-                let grid = term.grid.lock().unwrap();
-                let total_lines = grid.scrollback.len() + grid.lines.len();
+                                let grid = term.grid.lock().unwrap();
+                let is_alt = grid.is_alt;
+                let scrollback_len = if is_alt { 0 } else { grid.scrollback.len() };
+                let total_lines = scrollback_len + grid.lines.len();
                 drop(grid);
 
-                let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                let max_scroll = if is_alt { 0.0 } else { ((total_lines as f32 * char_h) - term_content_h).max(0.0) };
                 if max_scroll > 0.0 {
-                    let track_h = content_h;
-                    let ratio = ((position.y as f32 - content_y) / track_h).clamp(0.0, 1.0);
+                    let track_h = term_content_h;
+                    let ratio = ((position.y as f32 - term_content_y) / track_h).clamp(0.0, 1.0);
                     let progress = 1.0 - ratio;
                     term.scroll_y.target = progress * max_scroll;
                     term.scroll_y.current = term.scroll_y.target;
@@ -1291,24 +1325,28 @@ impl App {
             let active = self.ide_panel.active_terminal;
             if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let bottom_h = self.ide_panel.bottom_height * s;
+                                let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;
                 let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h + 1.0 + tab_h;
                 let content_h = bottom_h - 1.0 - tab_h;
+                                let term_content_y = content_y + 28.0 * s;
+                let term_content_h = content_h - 28.0 * s;
 
                                 let lh = self.renderer.as_ref().unwrap().line_height;
-                let char_h = lh * 0.82;
-                let char_w = self.renderer.as_mut().unwrap().char_advance('A') * 0.82;
+                let char_h = lh * 1.05;
+                let char_w = self.renderer.as_mut().unwrap().char_advance('A') * 1.05;
                 let panel_x = 48.0 * s + 10.0 * s;
 
                 let py = position.y as f32;
                 let px = position.x as f32;
 
                 let mut grid = term.grid.lock().unwrap();
-                                let total_lines = grid.scrollback.len() + grid.lines.len();
-                let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+                let total_lines = scrollback_len + grid.lines.len();
+                let max_scroll = if grid.is_alt { 0.0 } else { ((total_lines as f32 * char_h) - term_content_h).max(0.0) };
 
-                let offset_from_bottom = (content_y + content_h - 8.0 * s - py + term.scroll_y.current.min(max_scroll)) / char_h;
+                let scroll_offset = if grid.is_alt { 0.0 } else { term.scroll_y.current.min(max_scroll) };
+                let offset_from_bottom = (term_content_y + term_content_h - 8.0 * s - py + scroll_offset) / char_h;
                 let mut cell_y = total_lines.saturating_sub(1).saturating_sub(offset_from_bottom.floor() as usize);
                 let mut cell_x = ((px - panel_x) / char_w).floor() as usize;
 

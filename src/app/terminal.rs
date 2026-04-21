@@ -32,12 +32,14 @@ pub struct TermGrid {
             pub dirty: bool,
         pub selection: Option<(usize, usize, usize, usize)>,
         pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
-    pub saved_cursor: Option<(usize, usize)>,
-    pub scroll_region: (usize, usize),
-    pub cursor_visible: bool,
-}
+            pub saved_cursor: Option<(usize, usize)>,
+        pub scroll_region: (usize, usize),
+        pub cursor_visible: bool,
+        pub app_cursor_keys: bool,
+        pub mouse_tracking: bool,
+    }
 
-impl TermGrid {
+    impl TermGrid {
     pub fn new(cols: usize, visible_rows: usize) -> Self {
         let mut lines = std::collections::VecDeque::new();
         for _ in 0..visible_rows {
@@ -58,10 +60,12 @@ impl TermGrid {
             cur_bold: false,
             dirty: true,
                         selection: None,
-            reply_tx: None,
+                        reply_tx: None,
             saved_cursor: None,
             scroll_region: (0, visible_rows.saturating_sub(1)),
             cursor_visible: true,
+            app_cursor_keys: false,
+            mouse_tracking: false,
         }
     }
 
@@ -320,8 +324,12 @@ impl Perform for TermGrid {
                                 self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
                                 self.dirty = true;
                             }
-                        } else if param[0] == 25 {
+                                                } else if param[0] == 25 {
                             self.cursor_visible = enable;
+                        } else if param[0] == 1 {
+                            self.app_cursor_keys = enable;
+                        } else if param[0] == 1000 || param[0] == 1002 || param[0] == 1006 {
+                            self.mouse_tracking = enable;
                         }
                     }
                 }

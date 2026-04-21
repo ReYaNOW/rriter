@@ -1992,10 +1992,10 @@ impl Renderer {
                         let term_content_y = cy + term_tab_h + 4.0 * s;
                         let term_content_h = content_h - (term_content_y - content_y);
 
-                        let active = ide_panel.active_terminal;
+                                                                        let active = ide_panel.active_terminal;
                         if let Some(term) = ide_panel.terminals.get(active) {
                             let mut grid = term.grid.lock().unwrap();
-                            let term_scale = 0.82; // Немного увеличили
+                            let term_scale = 1.05; // чуть крупнее и четче как в zed
                             let char_w = self.char_advance('A') * term_scale;
                             let char_h = self.line_height * term_scale;
                             let new_cols =
@@ -2003,35 +2003,20 @@ impl Renderer {
                                                         let term_pad_bottom = 8.0 * s;
                             let new_rows = ((term_content_h - term_pad_bottom) / char_h).floor().max(2.0) as usize;
 
-                            if grid.cols != new_cols || grid.visible_rows != new_rows {
+                                                        if grid.cols != new_cols || grid.visible_rows != new_rows {
                                 grid.resize(new_cols, new_rows);
                                 term.resize_pty(new_cols as u16, new_rows as u16);
                             }
                             grid.dirty = false;
 
-                                                        let ansi_colors = [
-                                [0.0, 0.0, 0.0, 1.0],
-                                [0.8, 0.2, 0.2, 1.0],
-                                [0.2, 0.8, 0.2, 1.0],
-                                [0.8, 0.8, 0.2, 1.0],
-                                [0.2, 0.4, 0.8, 1.0],
-                                [0.8, 0.2, 0.8, 1.0],
-                                [0.2, 0.8, 0.8, 1.0],
-                                [0.8, 0.8, 0.8, 1.0],
-                                [0.4, 0.4, 0.4, 1.0],
-                                [1.0, 0.4, 0.4, 1.0],
-                                [0.4, 1.0, 0.4, 1.0],
-                                [1.0, 1.0, 0.4, 1.0],
-                                [0.4, 0.6, 1.0, 1.0],
-                                [1.0, 0.4, 1.0, 1.0],
-                                [0.4, 1.0, 1.0, 1.0],
-                                [1.0, 1.0, 1.0, 1.0],
+                                                        let ansi_colors = [[0.10, 0.10, 0.10, 1.0],[0.95, 0.30, 0.30, 1.0],[0.30, 0.85, 0.30, 1.0],[0.90, 0.85, 0.20, 1.0],[0.30, 0.60, 1.00, 1.0],[0.90, 0.35, 0.90, 1.0],[0.20, 0.85, 0.85, 1.0],[0.90, 0.90, 0.90, 1.0],[0.45, 0.45, 0.45, 1.0],[1.00, 0.40, 0.40, 1.0],[0.40, 1.00, 0.40, 1.0],[1.00, 1.00, 0.40, 1.0],[0.50, 0.70, 1.00, 1.0],[1.00, 0.50, 1.00, 1.0],[0.40, 1.00, 1.00, 1.0],[1.00, 1.00, 1.00, 1.0],
                             ];
 
-                                                        let total_lines = grid.scrollback.len() + grid.lines.len();
-                            let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                                                                                                                let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+                            let total_lines = scrollback_len + grid.lines.len();
+                            let max_scroll = if grid.is_alt { 0.0 } else { ((total_lines as f32 * char_h) - term_content_h).max(0.0) };
 
-                                                        let scroll_offset = term.scroll_y.current.min(max_scroll).round();
+                                                        let scroll_offset = if grid.is_alt { 0.0 } else { term.scroll_y.current.min(max_scroll).round() };
                             let draw_x = panel_x + 10.0 * s;
 
                             self.flush();
@@ -2062,17 +2047,19 @@ impl Renderer {
                                     self.flush();
                                 }
 
-                                let row = if i < grid.scrollback.len() {
+                                                                let row = if i < scrollback_len {
                                     &grid.scrollback[i]
                                 } else {
-                                    &grid.lines[i - grid.scrollback.len()]
+                                    &grid.lines[i - scrollback_len]
                                 };
 
-                                let mut cx = draw_x;
-                                for (c_idx, cell) in row.iter().enumerate() {
+                                                                for (c_idx, cell) in row.iter().enumerate() {
                                     if c_idx >= grid.cols {
                                         break;
                                     }
+                                    let cx = (draw_x + c_idx as f32 * char_w).round();
+                                    let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
+                                    let cell_w = next_cx - cx;
                                                                     let mut bg_color = if cell.bg != 0 && cell.bg < 16 {
                                     Some(ansi_colors[cell.bg as usize])
                                 } else {
@@ -2091,7 +2078,7 @@ impl Renderer {
                                     if in_sel { bg_color = Some(self.theme.sel); }
                                 }
                                 if let Some(bg) = bg_color {
-                                    self.push_rect(cx, draw_y, char_w, char_h, bg);
+                                    self.push_rect(cx, draw_y, cell_w, char_h, bg);
                                 }
                                                                 if cell.c != ' ' {
                                         let fg_color = if cell.fg < 16 {
@@ -2107,7 +2094,6 @@ impl Renderer {
                                             term_scale,
                                         );
                                     }
-                                    cx += char_w;
                                 }
                             }
 
@@ -2125,11 +2111,12 @@ impl Renderer {
                                 && cursor_px_y + char_h >= term_content_y
                                 && cursor_px_y <= term_content_y + term_content_h
                             {
-                                let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
+                                                                let cursor_px_x = (draw_x + grid.cur_x as f32 * char_w).round();
+                                let cursor_next_x = (draw_x + (grid.cur_x + 1) as f32 * char_w).round();
                                 self.push_rect(
                                     cursor_px_x,
                                     cursor_px_y,
-                                    char_w,
+                                    cursor_next_x - cursor_px_x,
                                     char_h,
                                     [1.0, 1.0, 1.0, 0.5],
                                 );
