@@ -3,7 +3,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-        pub fn draw_tab_bar(
+    pub fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
@@ -35,7 +35,8 @@ impl Renderer {
         let tab_pad = 16.0 * s;
         let icon_size_tab = 20.0 * s;
 
-                let mut paths: Vec<Option<&std::path::PathBuf>> = tabs.iter().map(|t| t.file_path.as_ref()).collect();
+        let mut paths: Vec<Option<&std::path::PathBuf>> =
+            tabs.iter().map(|t| t.file_path.as_ref()).collect();
         paths[active_tab] = _editor_path;
 
         let mut display_titles = vec![String::new(); tabs.len()];
@@ -44,7 +45,9 @@ impl Renderer {
                 let mut diff_level = 0;
                 let mut collision = false;
                 for j in 0..tabs.len() {
-                    if i == j { continue; }
+                    if i == j {
+                        continue;
+                    }
                     if let Some(p2) = paths[j] {
                         if p1.file_name() == p2.file_name() {
                             collision = true;
@@ -80,13 +83,25 @@ impl Renderer {
                         display_titles[i] = p1.to_string_lossy().into_owned();
                     }
                 } else {
-                    display_titles[i] = p1.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    display_titles[i] = p1
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                 }
             } else {
                 let bt = if i == active_tab {
-                    if editor_title.is_empty() { "Безымянный" } else { editor_title }
+                    if editor_title.is_empty() {
+                        "Безымянный"
+                    } else {
+                        editor_title
+                    }
                 } else {
-                    if tabs[i].base_title.is_empty() { "Безымянный" } else { &tabs[i].base_title }
+                    if tabs[i].base_title.is_empty() {
+                        "Безымянный"
+                    } else {
+                        &tabs[i].base_title
+                    }
                 };
                 display_titles[i] = bt.to_string();
             }
@@ -100,7 +115,7 @@ impl Renderer {
             tab_widths.push((title.clone(), tab_w));
         }
 
-                let mut hovered_tab_path = None;
+        let mut hovered_tab_path = None;
         let mut hovered_tab_x = 0.0;
         let mut hovered_tab_y = 0.0;
         let mut current_hovered_idx = None;
@@ -122,7 +137,7 @@ impl Renderer {
             if drag.threshold_passed {
                 let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
                 let dragged_w = tab_widths[drag.start_idx].1;
-                                let dragged_center = dragged_x + dragged_w / 2.0;
+                let dragged_center = dragged_x + dragged_w / 2.0;
                 let mut dst = drag.start_idx;
 
                 for i in 0..tabs.len() {
@@ -189,7 +204,7 @@ impl Renderer {
             let current_x = self.tab_x_anim[i];
             let is_last_in_order = order.last() == Some(&i);
 
-                                    let is_hovered = mx >= current_x.max(x)
+            let is_hovered = mx >= current_x.max(x)
                 && mx <= (current_x + tab_w).min(x + w)
                 && my >= y
                 && my <= y + h;
@@ -361,7 +376,7 @@ impl Renderer {
         if self.max_tab_scroll_x > 0.0 {
             let right_alpha = ((self.max_tab_scroll_x - tab_scroll_x) / fade_w).clamp(0.0, 1.0)
                 * base_shadow_alpha;
-                        if right_alpha > 0.001 {
+            if right_alpha > 0.001 {
                 let shadow_color = [0.0, 0.0, 0.0, right_alpha];
                 self.push_horizontal_gradient(
                     x + w - fade_w,
@@ -374,20 +389,23 @@ impl Renderer {
             }
         }
 
-                        thread_local! {
+        thread_local! {
             static TAB_HOVER_START: std::cell::RefCell<Option<std::time::Instant>> = std::cell::RefCell::new(None);
         }
 
         if self.tab_hover_idx != current_hovered_idx {
             self.tab_hover_idx = current_hovered_idx;
-            TAB_HOVER_START.with(|s| *s.borrow_mut() = current_hovered_idx.map(|_| std::time::Instant::now()));
+            TAB_HOVER_START
+                .with(|s| *s.borrow_mut() = current_hovered_idx.map(|_| std::time::Instant::now()));
         }
 
         let show_tooltip = TAB_HOVER_START.with(|s| {
-            s.borrow().map(|start| start.elapsed().as_secs_f32() > 0.4).unwrap_or(false)
+            s.borrow()
+                .map(|start| start.elapsed().as_secs_f32() > 0.4)
+                .unwrap_or(false)
         });
 
-                if let Some(path) = hovered_tab_path {
+        if let Some(path) = hovered_tab_path {
             if show_tooltip && !self.hide_popups_until_mouse_move {
                 return Some((path.clone(), hovered_tab_x, hovered_tab_y));
             }
@@ -395,9 +413,18 @@ impl Renderer {
         None
     }
 
-    pub fn draw_tab_tooltip(&mut self, path: &std::path::PathBuf, hovered_tab_x: f32, hovered_tab_y: f32, s: f32) {
+    pub fn draw_tab_tooltip(
+        &mut self,
+        path: &std::path::PathBuf,
+        hovered_tab_x: f32,
+        hovered_tab_y: f32,
+        s: f32,
+    ) {
         let mut path_str = path.to_string_lossy().into_owned();
-        if let Some(home) = std::env::var("HOME").ok().or_else(|| std::env::var("USERPROFILE").ok()) {
+        if let Some(home) = std::env::var("HOME")
+            .ok()
+            .or_else(|| std::env::var("USERPROFILE").ok())
+        {
             if path_str.starts_with(&home) {
                 path_str = path_str.replacen(&home, "~", 1);
             }
@@ -422,8 +449,28 @@ impl Renderer {
             0.98,
         ];
 
-        self.push_rounded_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, 6.0 * s, border_col);
-        self.push_rounded_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, 5.0 * s, bg_col); 
-        self.draw_string_scaled(&path_str, tooltip_x + 12.0 * s, tooltip_y + tooltip_h / 2.0 + 5.0 * s, self.theme.fg, tooltip_scale);
+        self.push_rounded_rect(
+            tooltip_x,
+            tooltip_y,
+            tooltip_w,
+            tooltip_h,
+            6.0 * s,
+            border_col,
+        );
+        self.push_rounded_rect(
+            tooltip_x + 1.0,
+            tooltip_y + 1.0,
+            tooltip_w - 2.0,
+            tooltip_h - 2.0,
+            5.0 * s,
+            bg_col,
+        );
+        self.draw_string_scaled(
+            &path_str,
+            tooltip_x + 12.0 * s,
+            tooltip_y + tooltip_h / 2.0 + 5.0 * s,
+            self.theme.fg,
+            tooltip_scale,
+        );
     }
 }

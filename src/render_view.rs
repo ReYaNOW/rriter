@@ -1685,7 +1685,7 @@ impl Renderer {
             self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
         }
 
-                let mut tab_tooltip = None;
+        let mut tab_tooltip = None;
         if show_welcome && is_ide_mode {
             let anim_w = self.width - gutter_x;
             let anim_h = self.height - panel_bottom_h;
@@ -1736,7 +1736,7 @@ impl Renderer {
                 scale_sub,
             );
             self.flush();
-                } else if !show_welcome && is_ide_mode {
+        } else if !show_welcome && is_ide_mode {
             let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
             tab_tooltip = self.draw_tab_bar(
@@ -2017,7 +2017,7 @@ impl Renderer {
         }
         let popup_ready = self.diag_hover_timer >= 0.2;
 
-                if popup_ready && !self.hovered_diags_cache.is_empty() {
+        if popup_ready && !self.hovered_diags_cache.is_empty() {
             self.draw_diagnostic_popup(
                 &lsp_diagnostics,
                 ide_panel,

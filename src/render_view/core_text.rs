@@ -623,7 +623,7 @@ impl Renderer {
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
-        pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
+    pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
@@ -639,7 +639,7 @@ impl Renderer {
         }
     }
 
-        pub fn draw_string_scaled(
+    pub fn draw_string_scaled(
         &mut self,
         text: &str,
         mut x: f32,
@@ -662,7 +662,7 @@ impl Renderer {
         }
     }
 
-        pub fn draw_string_mono_scaled(
+    pub fn draw_string_mono_scaled(
         &mut self,
         text: &str,
         mut x: f32,
