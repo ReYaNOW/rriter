@@ -24,11 +24,12 @@ pub struct TermGrid {
     pub is_alt: bool,
     pub cols: usize,
     pub visible_rows: usize,
-    pub cur_x: usize,
-    pub cur_y: usize,
-    pub cur_fg: u8,
-        pub cur_bg: u8,
-    pub dirty: bool,
+                pub cur_x: usize,
+            pub cur_y: usize,
+            pub cur_fg: u8,
+            pub cur_bg: u8,
+            pub cur_bold: bool,
+            pub dirty: bool,
     pub selection: Option<(usize, usize, usize, usize)>,
         pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
     pub saved_cursor: Option<(usize, usize)>,
@@ -49,10 +50,11 @@ impl TermGrid {
             is_alt: false,
             cols,
             visible_rows,
-            cur_x: 0,
+                        cur_x: 0,
             cur_y: 0,
             cur_fg: 7,
             cur_bg: 0,
+            cur_bold: false,
             dirty: true,
             selection: None,
             reply_tx: None,
@@ -454,9 +456,9 @@ impl Perform for TermGrid {
                     }
                 }
             }
-                        'm' => {
+                                                'm' => {
                 if params.is_empty() {
-                    self.cur_fg = 7; self.cur_bg = 0;
+                    self.cur_fg = 7; self.cur_bg = 0; self.cur_bold = false;
                     return;
                 }
                 let mut i = 0;
@@ -465,8 +467,16 @@ impl Perform for TermGrid {
                     if iter[i].is_empty() { i += 1; continue; }
                     let p = iter[i][0];
                     match p {
-                        0 => { self.cur_fg = 7; self.cur_bg = 0; }
-                        30..=37 => self.cur_fg = (p - 30) as u8,
+                        0 => { self.cur_fg = 7; self.cur_bg = 0; self.cur_bold = false; }
+                        1 => {
+                            self.cur_bold = true;
+                            if self.cur_fg < 8 { self.cur_fg += 8; }
+                        }
+                        22 => {
+                            self.cur_bold = false;
+                            if self.cur_fg >= 8 && self.cur_fg < 16 { self.cur_fg -= 8; }
+                        }
+                        30..=37 => self.cur_fg = (p - 30) as u8 + if self.cur_bold { 8 } else { 0 },
                         40..=47 => self.cur_bg = (p - 40) as u8,
                         90..=97 => self.cur_fg = (p - 90 + 8) as u8,
                         100..=107 => self.cur_bg = (p - 100 + 8) as u8,
