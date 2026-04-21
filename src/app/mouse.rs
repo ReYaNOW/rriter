@@ -31,7 +31,7 @@ impl App {
             } else {
                 0.0
             };
-                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
 
@@ -79,7 +79,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -135,7 +135,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -628,7 +628,7 @@ impl App {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                                                            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                         sl.id == crate::app::PanelId::Problems
                             && sl.group == crate::app::PanelGroup::Top
                     });
@@ -693,7 +693,7 @@ impl App {
                                     self.ide_panel.problems_scroll.target =
                                         (new_ratio * max_scroll).clamp(0.0, max_scroll);
                                     self.ide_panel.problems_scroll.is_dragging = true;
-                                                                        self.window.as_ref().unwrap().request_redraw();
+                                    self.window.as_ref().unwrap().request_redraw();
                                     return;
                                 }
                             }
@@ -722,7 +722,10 @@ impl App {
                     let mut manual_resize = false;
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - effective_bottom_h {
+                        if (mx - resize_x).abs() < 6.0 * s
+                            && my >= 0.0
+                            && my < wh - effective_bottom_h
+                        {
                             self.ide_panel.is_resizing_left = true;
                             manual_resize = true;
                         }
@@ -741,13 +744,19 @@ impl App {
                     }
                 }
 
-                                                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
-                    let is_term = matches!(clicked_id,
+                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    let is_term = matches!(
+                        clicked_id,
                         crate::ui_system::UiId::TerminalBody
                             | crate::ui_system::UiId::TerminalScrollY
                             | crate::ui_system::UiId::TerminalTab(_)
                             | crate::ui_system::UiId::TerminalTabClose(_)
                             | crate::ui_system::UiId::TerminalAdd
+                            | crate::ui_system::UiId::TerminalSearchInput
+                            | crate::ui_system::UiId::TerminalSearchClose
+                            | crate::ui_system::UiId::TerminalSearchNext
+                            | crate::ui_system::UiId::TerminalSearchPrev
+                            | crate::ui_system::UiId::TerminalSearchCaseToggle
                     );
                     let is_resize = matches!(
                         clicked_id,
@@ -760,7 +769,7 @@ impl App {
                         self.ide_panel.terminal_focused = false;
                     }
 
-                                        if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
+                    if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
                             panel_id,
                             start_y: my,
@@ -874,7 +883,7 @@ impl App {
             return;
         }
 
-                if state == ElementState::Released {
+        if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
                 if let Some(drag) = self.ide_panel.tab_drag.take() {
@@ -883,7 +892,7 @@ impl App {
                         let tab_pad = 16.0 * s;
                         let icon_size_tab = 20.0 * s;
 
-                                                let start_cx = if self.is_ide_mode {
+                        let start_cx = if self.is_ide_mode {
                             let panel_left_w = self.ide_panel.left_width * s;
                             (48.0 * s + panel_left_w).round() + 1.0 - self.tab_scroll.current
                         } else {
@@ -892,9 +901,15 @@ impl App {
 
                         let mut widths = Vec::new();
                         for tab in &self.tabs {
-                            let title = if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title };
-                            let title_w = self.renderer.as_mut().unwrap().measure_ui_width(title, 1.0);
-                            let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
+                            let title = if tab.base_title.is_empty() {
+                                "Безымянный"
+                            } else {
+                                &tab.base_title
+                            };
+                            let title_w =
+                                self.renderer.as_mut().unwrap().measure_ui_width(title, 1.0);
+                            let tab_w =
+                                tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
                             widths.push(tab_w);
                         }
 
@@ -905,7 +920,8 @@ impl App {
                             cx += widths[i];
                         }
 
-                                                let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
+                        let dragged_x =
+                            initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
                         let dragged_w = widths[drag.start_idx];
                         let dragged_right = dragged_x + dragged_w;
 
@@ -913,7 +929,9 @@ impl App {
                         let padding = 10.0 * s;
 
                         for i in 0..self.tabs.len() {
-                            if i == drag.start_idx { continue; }
+                            if i == drag.start_idx {
+                                continue;
+                            }
                             let other_x = initial_xs[i];
                             let other_w = widths[i];
 
@@ -937,9 +955,11 @@ impl App {
 
                             if self.active_tab == drag.start_idx {
                                 self.active_tab = new_idx;
-                            } else if self.active_tab > drag.start_idx && self.active_tab <= new_idx {
+                            } else if self.active_tab > drag.start_idx && self.active_tab <= new_idx
+                            {
                                 self.active_tab -= 1;
-                            } else if self.active_tab < drag.start_idx && self.active_tab >= new_idx {
+                            } else if self.active_tab < drag.start_idx && self.active_tab >= new_idx
+                            {
                                 self.active_tab += 1;
                             }
                             self.sync_active_tab();
@@ -1205,7 +1225,7 @@ impl App {
             }
         }
 
-                // DnD и ресайз IDE-панелей (обработка движения мыши)
+        // DnD и ресайз IDE-панелей (обработка движения мыши)
         if self.is_ide_mode {
             let px = position.x as f32;
             let py = position.y as f32;
@@ -1228,7 +1248,7 @@ impl App {
                 return;
             }
 
-                                                if self.ide_panel.is_resizing_left {
+            if self.ide_panel.is_resizing_left {
                 let sb_w = 48.0 * s;
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let max_w = ((ww - sb_w) / s) - 300.0;
@@ -1254,7 +1274,7 @@ impl App {
 
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
             let panel_bottom_h = if self.ide_panel.any_bottom_open() {
@@ -1640,10 +1660,19 @@ impl App {
             }
         } else if self.is_dragging_search {
             let search_w = 480.0 * s;
-            let search_x = scrollbar_x - search_w - 20.0 * s;
-            let input_x = search_x + 10.0 * s;
+            let input_x = if self.ide_panel.term_search_focused {
+                let panel_w = self.window.as_ref().unwrap().inner_size().width as f32 - 48.0 * s;
+                48.0 * s + panel_w - search_w - 20.0 * s + 10.0 * s
+            } else {
+                scrollbar_x - search_w - 20.0 * s + 10.0 * s
+            };
 
-            let text = self.search_editor.get_full_text();
+            let text = if self.ide_panel.term_search_focused {
+                self.ide_panel.term_search_editor.get_full_text()
+            } else {
+                self.search_editor.get_full_text()
+            };
+
             let x_offset = (position.x as f32 - (input_x + 5.0 * s)).max(0.0);
             let mut current_x = 0.0;
             let mut target_idx = text.len();
@@ -1664,7 +1693,11 @@ impl App {
                 current_x += adv;
                 byte_idx += c.len_utf8();
             }
-            self.search_editor.cursor = target_idx;
+            if self.ide_panel.term_search_focused {
+                self.ide_panel.term_search_editor.cursor = target_idx;
+            } else {
+                self.search_editor.cursor = target_idx;
+            }
         } else if self.scroll_x.is_dragging {
             let r = self.renderer.as_ref().unwrap();
             let track_w = scrollbar_x - padding;

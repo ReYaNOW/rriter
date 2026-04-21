@@ -83,6 +83,11 @@ pub enum UiId {
     TerminalTab(usize),
     TerminalTabClose(usize),
     TerminalAdd,
+    TerminalSearchClose,
+    TerminalSearchNext,
+    TerminalSearchPrev,
+    TerminalSearchCaseToggle,
+    TerminalSearchInput,
 }
 
 /// Тип UI элемента с его геометрией

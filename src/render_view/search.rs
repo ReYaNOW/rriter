@@ -7,6 +7,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_search_panel(
         &mut self,
+        show_search: bool,
         search_anim_y: f32,
         search_editor: &Editor,
         search_focused: bool,
@@ -273,7 +274,9 @@ impl Renderer {
 
         let temp_res_text = std::mem::take(&mut self.search_res_string);
 
-        let (res_text, text_color) = if search_results.is_empty() {
+        let (res_text, text_color) = if !show_search {
+            ("", [0.6, 0.6, 0.6, 1.0])
+        } else if search_results.is_empty() {
             if search_editor.get_full_text().is_empty() {
                 ("", [0.6, 0.6, 0.6, 1.0])
             } else {
@@ -285,7 +288,7 @@ impl Renderer {
 
         if !res_text.is_empty() {
             let counter_x = input_x + input_w + 10.0 * s;
-            self.draw_string_scaled(res_text, counter_x, text_y, text_color, 0.9);
+            self.draw_string_mono_scaled(res_text, counter_x, text_y, text_color, 0.9);
         }
 
         self.search_res_string = temp_res_text;

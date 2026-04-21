@@ -156,10 +156,16 @@ pub struct IdePanelState {
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
     pub problems_scroll: crate::scroll::ScrollState,
     pub terminals: Vec<crate::app::terminal::Terminal>,
-        pub active_terminal: usize,
+    pub active_terminal: usize,
     pub terminal_focused: bool,
     pub is_dragging_terminal: bool,
     pub tab_drag: Option<TabDragState>,
+    pub term_show_search: bool,
+    pub term_search_editor: crate::editor::Editor,
+    pub term_search_focused: bool,
+    pub term_search_case_sensitive: bool,
+    pub term_search_results: Vec<(usize, usize, usize, usize)>,
+    pub term_search_current_idx: Option<usize>,
 }
 
 impl Default for IdePanelState {
@@ -210,10 +216,16 @@ impl Default for IdePanelState {
             problems_collapsed: FxHashSet::default(),
             problems_scroll: crate::scroll::ScrollState::new(15.0),
             terminals: Vec::new(),
-                        active_terminal: 0,
+            active_terminal: 0,
             terminal_focused: false,
             is_dragging_terminal: false,
             tab_drag: None,
+            term_show_search: false,
+            term_search_editor: crate::editor::Editor::new(256),
+            term_search_focused: false,
+            term_search_case_sensitive: false,
+            term_search_results: Vec::new(),
+            term_search_current_idx: None,
         }
     }
 }
@@ -965,6 +977,87 @@ impl App {
         }
     }
 
+    pub fn update_terminal_search(&mut self) {
+        self.ide_panel.term_search_results.clear();
+        self.ide_panel.term_search_current_idx = None;
+        let query_text = self.ide_panel.term_search_editor.get_full_text();
+        if query_text.is_empty() {
+            return;
+        }
+        let escaped_query = regex::escape(&query_text);
+        if let Ok(re) = regex::RegexBuilder::new(&escaped_query)
+            .case_insensitive(!self.ide_panel.term_search_case_sensitive)
+            .build()
+        {
+            if let Some(term) = self.ide_panel.terminals.get(self.ide_panel.active_terminal) {
+                let grid = term.grid.lock().unwrap();
+                let total_lines = if grid.is_alt {
+                    grid.lines.len()
+                } else {
+                    grid.scrollback.len() + grid.lines.len()
+                };
+                for y in 0..total_lines {
+                    let row = if grid.is_alt {
+                        &grid.lines[y]
+                    } else if y < grid.scrollback.len() {
+                        &grid.scrollback[y]
+                    } else {
+                        &grid.lines[y - grid.scrollback.len()]
+                    };
+                    let line_str: String = row.iter().map(|c| c.c).collect();
+                    for mat in re.find_iter(&line_str) {
+                        self.ide_panel.term_search_results.push((
+                            mat.start(),
+                            y,
+                            mat.end().saturating_sub(1),
+                            y,
+                        ));
+                    }
+                }
+            }
+        }
+        if !self.ide_panel.term_search_results.is_empty() {
+            self.ide_panel.term_search_current_idx =
+                Some(self.ide_panel.term_search_results.len() - 1);
+        }
+    }
+
+    pub fn jump_to_terminal_search_result(&mut self) {
+        if let Some(idx) = self.ide_panel.term_search_current_idx {
+            if let Some(&(sx, sy, ex, ey)) = self.ide_panel.term_search_results.get(idx) {
+                if let Some(term) = self
+                    .ide_panel
+                    .terminals
+                    .get_mut(self.ide_panel.active_terminal)
+                {
+                    let mut grid = term.grid.lock().unwrap();
+                    grid.selection = Some((sx, sy, ex, ey));
+                    if let Some(r) = self.renderer.as_ref() {
+                        let s = r.scale_factor;
+                        let char_h = r.line_height * 1.05;
+                        let total_lines = if grid.is_alt {
+                            grid.lines.len()
+                        } else {
+                            grid.scrollback.len() + grid.lines.len()
+                        };
+                        let offset_from_bottom = total_lines.saturating_sub(1).saturating_sub(sy);
+
+                        let bottom_h = self.ide_panel.bottom_height * s;
+                        let term_content_h = bottom_h - 1.0 * s - 32.0 * s - 32.0 * s;
+                        let max_scroll = if grid.is_alt {
+                            0.0
+                        } else {
+                            ((total_lines as f32 * char_h) - term_content_h).max(0.0)
+                        };
+
+                        term.scroll_y.target =
+                            (offset_from_bottom as f32 * char_h).clamp(0.0, max_scroll);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn update_search(&mut self) {
         let previous_match_start = self
             .search_current_idx
@@ -976,8 +1069,8 @@ impl App {
             return;
         }
 
-        let full_text = self.editor.get_full_text();
         let escaped_query = regex::escape(&query_text);
+        let full_text = self.editor.get_full_text();
         if let Ok(re) = regex::RegexBuilder::new(&escaped_query)
             .case_insensitive(!self.search_case_sensitive)
             .dot_matches_new_line(true)

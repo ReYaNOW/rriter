@@ -410,6 +410,7 @@ impl ApplicationHandler for App {
                     is_resizing,
                     &self.search_results,
                     self.search_current_idx,
+                    self.show_search,
                     self.search_anim_y,
                     &self.search_editor,
                     self.search_focused,
@@ -559,11 +560,8 @@ impl ApplicationHandler for App {
                 }
 
                 // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
-                                let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
-                if self.is_ide_mode
-                    && !self.show_welcome
-                    && !self.show_settings
-                {
+                let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
+                if self.is_ide_mode && !self.show_welcome && !self.show_settings {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
@@ -797,7 +795,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                if self.tab_scroll.update(dt) {
+        if self.tab_scroll.update(dt) {
             needs_redraw = true;
         }
 

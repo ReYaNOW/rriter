@@ -39,6 +39,7 @@ impl Renderer {
         is_resizing: bool,
         search_results: &[(usize, usize)],
         search_current_idx: Option<usize>,
+        show_search: bool,
         search_anim_y: f32,
         search_editor: &Editor,
         search_focused: bool,
@@ -1526,7 +1527,7 @@ impl Renderer {
         } else {
             0.0
         };
-                // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
+        // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
         self.push_rect(
             gutter_x.round() + 1.0,
             tab_bar_h,
@@ -1534,7 +1535,7 @@ impl Renderer {
             editor_height,
             solid_minimap_bg,
         );
-                // Левая граница гаттера (отделяет IDE панель от зоны номеров строк)
+        // Левая граница гаттера (отделяет IDE панель от зоны номеров строк)
         if is_ide_mode && panel_left_w > 0.0 {
             self.push_rect(
                 gutter_x.round() + 1.0,
@@ -1734,10 +1735,11 @@ impl Renderer {
                 scale_sub,
             );
             self.flush();
-                } else if !show_welcome && is_ide_mode {
+        } else if !show_welcome && is_ide_mode {
             let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
-                            self.draw_tab_bar(tabs,
+            self.draw_tab_bar(
+                tabs,
                 active_tab,
                 editor,
                 editor_title,
@@ -1756,7 +1758,7 @@ impl Renderer {
             self.flush();
         }
 
-                let target_sticky_lines = if show_welcome {
+        let target_sticky_lines = if show_welcome {
             Vec::new()
         } else {
             self.draw_sticky_lines(
@@ -1822,6 +1824,7 @@ impl Renderer {
 
         if search_anim_y > -100.0 * self.scale_factor {
             wants_pointer |= self.draw_search_panel(
+                show_search,
                 search_anim_y,
                 search_editor,
                 search_focused,

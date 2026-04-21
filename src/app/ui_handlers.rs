@@ -10,6 +10,8 @@ impl App {
         match id {
             UiId::TerminalBody => {
                 self.is_dragging = true;
+                self.search_focused = false;
+                self.ide_panel.term_search_focused = false;
                 let active = self.ide_panel.active_terminal;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     term.grid.lock().unwrap().selection = None;
@@ -45,6 +47,82 @@ impl App {
                     .terminals
                     .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                 self.ide_panel.active_terminal = self.ide_panel.terminals.len() - 1;
+            }
+            UiId::TerminalSearchClose => {
+                self.ide_panel.term_show_search = false;
+                self.ide_panel.term_search_focused = false;
+                self.ide_panel.term_search_results.clear();
+                self.ide_panel.term_search_current_idx = None;
+                if let Some(term) = self
+                    .ide_panel
+                    .terminals
+                    .get_mut(self.ide_panel.active_terminal)
+                {
+                    term.grid.lock().unwrap().selection = None;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::TerminalSearchNext => {
+                if !self.ide_panel.term_search_results.is_empty() {
+                    if let Some(idx) = self.ide_panel.term_search_current_idx {
+                        self.ide_panel.term_search_current_idx =
+                            Some((idx + 1) % self.ide_panel.term_search_results.len());
+                    }
+                    self.jump_to_terminal_search_result();
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+            UiId::TerminalSearchPrev => {
+                if !self.ide_panel.term_search_results.is_empty() {
+                    if let Some(idx) = self.ide_panel.term_search_current_idx {
+                        self.ide_panel.term_search_current_idx = Some(if idx == 0 {
+                            self.ide_panel.term_search_results.len() - 1
+                        } else {
+                            idx - 1
+                        });
+                    }
+                    self.jump_to_terminal_search_result();
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+            UiId::TerminalSearchCaseToggle => {
+                self.ide_panel.term_search_case_sensitive =
+                    !self.ide_panel.term_search_case_sensitive;
+                self.update_terminal_search();
+                self.jump_to_terminal_search_result();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::TerminalSearchInput => {
+                self.ide_panel.term_search_focused = true;
+                self.search_focused = false;
+                self.is_dragging_search = true;
+                if let Some(r) = self.renderer.as_mut() {
+                    let mx = r.last_mouse_x;
+                    let s = r.scale_factor;
+                    let panel_w =
+                        self.window.as_ref().unwrap().inner_size().width as f32 - 48.0 * s;
+                    let search_w = 480.0 * s;
+                    let search_x = 48.0 * s + panel_w - search_w - 20.0 * s;
+                    let input_x = search_x + 10.0 * s;
+
+                    let text = self.ide_panel.term_search_editor.get_full_text();
+                    let x_offset = (mx - (input_x + 5.0 * s)).max(0.0);
+                    let mut current_x = 0.0;
+                    let mut target_idx = text.len();
+                    let mut byte_idx = 0;
+                    for c in text.chars() {
+                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                        if x_offset <= current_x + adv / 2.0 {
+                            target_idx = byte_idx;
+                            break;
+                        }
+                        current_x += adv;
+                        byte_idx += c.len_utf8();
+                    }
+                    self.ide_panel.term_search_editor.cursor = target_idx;
+                    self.ide_panel.term_search_editor.selection_anchor = Some(target_idx);
+                }
+                self.window.as_ref().unwrap().request_redraw();
             }
             // Welcome screen
             UiId::WelcomeNewFile => {
@@ -408,6 +486,7 @@ impl App {
             }
             UiId::SearchInput => {
                 self.search_focused = true;
+                self.ide_panel.term_search_focused = false;
                 self.is_dragging_search = true;
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;
@@ -457,6 +536,7 @@ impl App {
                 self.scroll_y.stop_anim();
                 self.ide_panel.lsp_logs_focused = None;
                 self.search_focused = false;
+                self.ide_panel.term_search_focused = false;
                 self.settings_ignore_focused = false;
 
                 if let Some(r) = self.renderer.as_mut() {

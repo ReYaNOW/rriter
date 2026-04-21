@@ -3,7 +3,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-        pub fn draw_tab_bar(
+    pub fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
@@ -32,16 +32,24 @@ impl Renderer {
                 .scissor(x.round() as i32, sy, w.round() as i32, h.round() as i32);
         }
 
-                let tab_pad = 16.0 * s;
+        let tab_pad = 16.0 * s;
         let icon_size_tab = 20.0 * s;
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = i == active_tab;
             let title = if is_active {
-                if editor_title.is_empty() { "Безымянный" } else { editor_title }
+                if editor_title.is_empty() {
+                    "Безымянный"
+                } else {
+                    editor_title
+                }
             } else {
-                if tab.base_title.is_empty() { "Безымянный" } else { &tab.base_title }
+                if tab.base_title.is_empty() {
+                    "Безымянный"
+                } else {
+                    &tab.base_title
+                }
             };
             let title_w = self.measure_ui_width(title, 1.0);
             let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
@@ -62,15 +70,17 @@ impl Renderer {
         let dragged_idx = tab_drag.map(|d| d.start_idx);
 
         if let Some(drag) = tab_drag {
-                        if drag.threshold_passed {
-                                let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
+            if drag.threshold_passed {
+                let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
                 let dragged_w = tab_widths[drag.start_idx].1;
                 let dragged_right = dragged_x + dragged_w;
                 let mut dst = drag.start_idx;
                 let padding = 10.0 * s;
 
                 for i in 0..tabs.len() {
-                    if i == drag.start_idx { continue; }
+                    if i == drag.start_idx {
+                        continue;
+                    }
                     let other_x = initial_xs[i];
                     let other_w = tab_widths[i].1;
 
@@ -97,7 +107,7 @@ impl Renderer {
                     }
                     cur_x += tab_widths[idx].1;
                 }
-                                actual_xs[drag.start_idx] = dragged_x;
+                actual_xs[drag.start_idx] = dragged_x;
             }
         }
 
@@ -107,7 +117,7 @@ impl Renderer {
             for i in 0..tabs.len() {
                 if Some(i) == dragged_idx {
                     self.tab_x_anim[i] = actual_xs[i];
-                                } else {
+                } else {
                     let diff = actual_xs[i] - self.tab_x_anim[i];
                     if diff.abs() > 0.5 {
                         self.tab_x_anim[i] += diff * 0.12;
@@ -126,7 +136,7 @@ impl Renderer {
             }
         }
 
-                for &i in &render_order {
+        for &i in &render_order {
             let tab = &tabs[i];
             let is_active = i == active_tab;
             let (title, tab_w) = &tab_widths[i];
@@ -156,12 +166,13 @@ impl Renderer {
                 self.push_rect(current_x, y, tab_w, h, bg_color);
             }
 
-                        if is_active {
+            if is_active {
                 self.push_rect(
                     current_x,
                     y + h - 2.0 * s,
                     tab_w,
-                    2.0 * s,[0.60, 0.35, 0.85, 1.0],
+                    2.0 * s,
+                    [0.60, 0.35, 0.85, 1.0],
                 );
             }
 
@@ -261,7 +272,7 @@ impl Renderer {
                     }
                 }
 
-                                if close_rect_right > x && close_rect_x < x + w {
+                if close_rect_right > x && close_rect_x < x + w {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::EditorTabClose(i),
                         close_rect_x.max(x),

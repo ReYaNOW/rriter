@@ -209,13 +209,13 @@ pub struct Renderer {
     pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
     pub hovered_diags_cache: Vec<(usize, f32, f32, f32)>,
-            pub identical_words_cache: Vec<(usize, usize)>,
-            pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
-            pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
-            pub tab_x_anim: Vec<f32>,
-        }
+    pub identical_words_cache: Vec<(usize, usize)>,
+    pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
+    pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
+    pub tab_x_anim: Vec<f32>,
+}
 
-        impl Renderer {
+impl Renderer {
     pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
         unsafe {
             let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
@@ -498,14 +498,14 @@ pub struct Renderer {
                 last_draw_instant: None,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,
-                            hovered_diags_cache: Vec::with_capacity(16),
-            identical_words_cache: Vec::with_capacity(64),
-            mod_intervals_cache: Vec::with_capacity(64),
-            merged_intervals_cache: Vec::with_capacity(64),
-            tab_x_anim: Vec::new(),
-        };
+                hovered_diags_cache: Vec::with_capacity(16),
+                identical_words_cache: Vec::with_capacity(64),
+                mod_intervals_cache: Vec::with_capacity(64),
+                merged_intervals_cache: Vec::with_capacity(64),
+                tab_x_anim: Vec::new(),
+            };
 
-        for i in 32..128u8 {
+            for i in 32..128u8 {
                 let c = i as char;
                 if let Some(g) = renderer.get_glyph(c) {
                     renderer.ascii_advances[i as usize] = g.advance;

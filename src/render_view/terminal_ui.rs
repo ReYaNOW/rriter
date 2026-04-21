@@ -16,7 +16,7 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-                let term_tab_h = 32.0 * s;
+        let term_tab_h = 32.0 * s;
         let mut cx = panel_x + 8.0 * s;
         let cy = content_y + 6.0 * s;
 
@@ -59,7 +59,7 @@ impl Renderer {
             } else {
                 self.theme.line_num
             };
-                                    self.draw_string_scaled(
+            self.draw_string_scaled(
                 &title,
                 cx + 12.0 * s,
                 cy + term_tab_h / 2.0 + 4.0 * s,
@@ -114,7 +114,7 @@ impl Renderer {
             cx += tab_w + 4.0 * s;
         }
 
-                        let add_sz = 20.0 * s;
+        let add_sz = 20.0 * s;
         let add_y = (cy + (term_tab_h - add_sz) / 2.0).round();
         let add_hovered = mx >= cx && mx <= cx + add_sz && my >= add_y && my <= add_y + add_sz;
         if add_hovered {
@@ -237,6 +237,21 @@ impl Renderer {
                     &grid.lines[i - scrollback_len]
                 };
 
+                let row_search_results: Vec<_> = if ide_panel.term_show_search {
+                    ide_panel
+                        .term_search_results
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, &(_sx, sy, _ex, ey))| {
+                            let start_y = sy.min(ey);
+                            let end_y = sy.max(ey);
+                            i >= start_y && i <= end_y
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
                 for (c_idx, cell) in row.iter().enumerate() {
                     if c_idx >= grid.cols {
                         break;
@@ -249,6 +264,8 @@ impl Renderer {
                     } else {
                         None
                     };
+
+                    let mut in_sel = false;
                     if let Some((sx, sy, ex, ey)) = grid.selection {
                         let start_y = sy.min(ey);
                         let end_y = sy.max(ey);
@@ -266,7 +283,7 @@ impl Renderer {
                         } else {
                             sx.max(ex)
                         };
-                        let in_sel = if i > start_y && i < end_y {
+                        in_sel = if i > start_y && i < end_y {
                             true
                         } else if i == start_y && i == end_y {
                             c_idx >= start_x && c_idx <= end_x
@@ -277,10 +294,56 @@ impl Renderer {
                         } else {
                             false
                         };
-                        if in_sel {
-                            bg_color = Some(self.theme.sel);
+                    }
+
+                    let mut is_search_res = false;
+                    let mut is_active_search = false;
+                    for &(idx, &(sx, sy, ex, ey)) in &row_search_results {
+                        let start_y = sy.min(ey);
+                        let end_y = sy.max(ey);
+                        let start_x = if sy < ey {
+                            sx
+                        } else if sy > ey {
+                            ex
+                        } else {
+                            sx.min(ex)
+                        };
+                        let end_x = if sy < ey {
+                            ex
+                        } else if sy > ey {
+                            sx
+                        } else {
+                            sx.max(ex)
+                        };
+
+                        let in_res = if i > start_y && i < end_y {
+                            true
+                        } else if i == start_y && i == end_y {
+                            c_idx >= start_x && c_idx <= end_x
+                        } else if i == start_y {
+                            c_idx >= start_x
+                        } else if i == end_y {
+                            c_idx <= end_x
+                        } else {
+                            false
+                        };
+
+                        if in_res {
+                            is_search_res = true;
+                            if Some(idx) == ide_panel.term_search_current_idx {
+                                is_active_search = true;
+                            }
                         }
                     }
+
+                    if is_active_search {
+                        bg_color = Some([1.0, 0.6, 0.0, 0.5]);
+                    } else if in_sel {
+                        bg_color = Some(self.theme.sel);
+                    } else if is_search_res {
+                        bg_color = Some([0.6, 0.6, 0.6, 0.35]);
+                    }
+
                     if let Some(bg) = bg_color {
                         self.push_rect(cx, draw_y, cell_w, char_h, bg);
                     }
@@ -387,7 +450,7 @@ impl Renderer {
             }
         }
 
-                        if ide_panel.terminal_focused {
+        if ide_panel.terminal_focused {
             ui_registry.register_blocker(
                 crate::ui_system::UiId::TerminalBody,
                 panel_x,
@@ -397,6 +460,257 @@ impl Renderer {
                 mx,
                 my,
             );
+        }
+
+        if ide_panel.term_show_search {
+            let search_w = 480.0 * s;
+            let search_h = 52.0 * s;
+            let search_x = panel_x + panel_w - search_w - 20.0 * s;
+            let search_y = term_content_y + 10.0 * s;
+
+            self.push_rounded_rect(
+                search_x,
+                search_y,
+                search_w,
+                search_h,
+                6.0 * s,
+                [0.18, 0.20, 0.22, 1.0],
+            );
+            self.push_rounded_rect(
+                search_x - 1.0,
+                search_y - 1.0,
+                search_w + 2.0,
+                search_h + 2.0,
+                6.0 * s,
+                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
+            );
+            self.push_rounded_rect(
+                search_x,
+                search_y,
+                search_w,
+                search_h,
+                6.0 * s,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            );
+
+            let input_x = search_x + 10.0 * s;
+            let input_y = search_y + 11.0 * s;
+            let input_w = 215.0 * s;
+            let input_h = 30.0 * s;
+
+            let input_bg = self.theme.bg;
+            let input_border = if ide_panel.term_search_focused {
+                self.theme.sel
+            } else {
+                [0.3, 0.3, 0.3, 1.0]
+            };
+
+            self.push_rounded_rect(
+                input_x - 1.0,
+                input_y - 1.0,
+                input_w + 2.0,
+                input_h + 2.0,
+                4.0 * s,
+                input_border,
+            );
+            self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
+
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::TerminalSearchInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                mx,
+                my,
+            );
+
+            self.flush();
+
+            let text = ide_panel.term_search_editor.get_full_text();
+            let text_y = input_y + input_h / 2.0 + 6.0 * s;
+            let text_start_x = input_x + 5.0 * s;
+            let mut current_x = text_start_x;
+
+            if let Some(anchor) = ide_panel.term_search_editor.selection_anchor {
+                let cursor = ide_panel.term_search_editor.cursor;
+                if anchor != cursor {
+                    let start = anchor.min(cursor);
+                    let end = anchor.max(cursor);
+                    let mut sel_start_x = text_start_x;
+                    let mut sel_w = 0.0;
+                    let mut byte_idx = 0;
+                    for c in text.chars() {
+                        let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                        if byte_idx < start {
+                            sel_start_x += adv;
+                        } else if byte_idx < end {
+                            sel_w += adv;
+                        }
+                        byte_idx += c.len_utf8();
+                    }
+                    self.push_rounded_rect(
+                        sel_start_x,
+                        input_y + 4.0 * s,
+                        sel_w,
+                        input_h - 8.0 * s,
+                        2.0 * s,
+                        [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.5],
+                    );
+                    self.flush();
+                }
+            }
+
+            for c in text.chars() {
+                let char_to_render = if c == '\n' { '↵' } else { c };
+                let adv = self
+                    .get_ui_glyph(char_to_render)
+                    .map(|g| g.advance)
+                    .unwrap_or(10.0);
+                if let Some(g) = self.get_ui_glyph(char_to_render) {
+                    self.push_quad(
+                        current_x + g.offset_x,
+                        text_y - g.offset_y,
+                        g.width,
+                        g.height,
+                        g.u,
+                        g.v,
+                        g.uw,
+                        g.vh,
+                        self.theme.fg,
+                        g.is_emoji,
+                    );
+                }
+                current_x += adv;
+            }
+
+            if ide_panel.term_search_focused {
+                self.push_rect(
+                    current_x,
+                    input_y + 4.0 * s,
+                    2.0 * s,
+                    input_h - 8.0 * s,
+                    self.theme.fg,
+                );
+            }
+
+            self.flush();
+
+            let btn_y = search_y + 8.0 * s;
+            let btn_size = 36.0 * s;
+            let mut btn_x = search_x + search_w - 10.0 * s - btn_size;
+
+            let btn_close = crate::widgets::IconButton {
+                x: btn_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::Close),
+                is_active: false,
+                icon_size: Some(26.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::TerminalSearchClose,
+                &btn_close,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            btn_x -= btn_size + 10.0 * s;
+
+            let btn_down = crate::widgets::IconButton {
+                x: btn_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::Down),
+                is_active: false,
+                icon_size: Some(37.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::TerminalSearchNext,
+                &btn_down,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            btn_x -= btn_size + 10.0 * s;
+
+            let btn_up = crate::widgets::IconButton {
+                x: btn_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::Up),
+                is_active: false,
+                icon_size: Some(37.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::TerminalSearchPrev,
+                &btn_up,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            btn_x -= btn_size + 10.0 * s;
+
+            let btn_case = crate::widgets::IconButton {
+                x: btn_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::CaseMatch),
+                is_active: ide_panel.term_search_case_sensitive,
+                icon_size: Some(30.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::TerminalSearchCaseToggle,
+                &btn_case,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+
+            let res_text = if ide_panel.term_search_results.is_empty() {
+                if text.is_empty() {
+                    String::new()
+                } else {
+                    "Нет".to_string()
+                }
+            } else {
+                format!(
+                    "{}/{}",
+                    ide_panel.term_search_current_idx.unwrap_or(0) + 1,
+                    ide_panel.term_search_results.len()
+                )
+            };
+
+            if !res_text.is_empty() {
+                self.draw_string_mono_scaled(
+                    &res_text,
+                    input_x + input_w + 10.0 * s,
+                    text_y,
+                    [0.6, 0.6, 0.6, 1.0],
+                    0.9,
+                );
+            }
         }
     }
 }
