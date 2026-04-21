@@ -560,18 +560,22 @@ impl ApplicationHandler for App {
 
                 // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
                 let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
-                if self.is_ide_mode && !self.show_welcome && !self.show_settings {
+                // Блокируем resize, когда терминал в фокусе
+                let terminal_focused = self.is_ide_mode && self.ide_panel.terminal_focused;
+                if self.is_ide_mode
+                    && !self.show_welcome
+                    && !self.show_settings
+                    && !terminal_focused
+                {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     let s = r.scale_factor;
                     let sb_w = 48.0 * s;
 
-                    let panel_left_w = if self.ide_panel.any_top_open() {
-                        self.ide_panel.left_width * s
-                    } else {
-                        0.0
-                    };
+                    // Используем фактическую ширину панели, а не проверку any_top_open()
+                    // Потому что панель может быть открыта через bottom группу
+                                        let panel_left_w = self.ide_panel.left_width * s;
                     let panel_bottom_h = if self.ide_panel.any_bottom_open() {
                         self.ide_panel.bottom_height * s
                     } else {
@@ -579,9 +583,16 @@ impl ApplicationHandler for App {
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
+                    let mut effective_bottom_h = panel_bottom_h;
+                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                        && !self.ide_panel.terminal_focused
+                    {
+                        effective_bottom_h = 0.0;
+                    }
+
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - panel_bottom_h
+                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - effective_bottom_h
                         {
                             ide_resize_cursor = Some(winit::window::CursorIcon::EwResize);
                         }

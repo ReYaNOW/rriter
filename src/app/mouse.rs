@@ -79,7 +79,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                        let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -89,10 +89,17 @@ impl App {
                 0.0
             };
 
+            let mut effective_bottom_h = panel_bottom_h;
+            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                && !self.ide_panel.terminal_focused
+            {
+                effective_bottom_h = 0.0;
+            }
+
             let (cx, cy, cw, ch) = if is_top {
                 let panel_left_w = self.ide_panel.left_width * s;
                 let title_h = 32.0 * s;
-                (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+                (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
@@ -123,7 +130,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                        let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -133,10 +140,17 @@ impl App {
                 0.0
             };
 
+            let mut effective_bottom_h = panel_bottom_h;
+            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                && !self.ide_panel.terminal_focused
+            {
+                effective_bottom_h = 0.0;
+            }
+
             let (cx, cy, cw, ch) = if is_top {
                 let panel_left_w = self.ide_panel.left_width * s;
                 let title_h = 32.0 * s;
-                (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+                (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
@@ -197,7 +211,7 @@ impl App {
 
                         let lh = self.renderer.as_ref().unwrap().line_height;
                         let term_scale = 1.05;
-                                                let char_h = lh * term_scale;
+                        let char_h = lh * term_scale;
 
                         let term_content_h = ch - 32.0 * s;
                         let max_scroll = ((total_lines as f32 * char_h) - term_content_h).max(0.0);
@@ -458,7 +472,7 @@ impl App {
                     let char_h = self.renderer.as_ref().unwrap().line_height * 1.05;
                     let bottom_h = self.ide_panel.bottom_height * s;
                     let tab_h = 32.0 * s;
-                                        let content_y = self.window.as_ref().unwrap().inner_size().height as f32
+                    let content_y = self.window.as_ref().unwrap().inner_size().height as f32
                         - bottom_h
                         + 1.0
                         + tab_h;
@@ -473,12 +487,29 @@ impl App {
                     let mut cell_y = 1;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let mut grid = term.grid.lock().unwrap();
-                        let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+                        let scrollback_len = if grid.is_alt {
+                            0
+                        } else {
+                            grid.scrollback.len()
+                        };
                         let total_lines = scrollback_len + grid.lines.len();
-                        let max_scroll = if grid.is_alt { 0.0 } else { ((total_lines as f32 * char_h) - term_content_h).max(0.0) };
-                        let scroll_offset = if grid.is_alt { 0.0 } else { term.scroll_y.current.min(max_scroll).round() };
-                        let offset_from_bottom = (term_content_y + term_content_h - 8.0 * s - my + scroll_offset) / char_h;
-                        let visible_row_0_based = grid.visible_rows.saturating_sub(1).saturating_sub(offset_from_bottom.max(0.0).floor() as usize);
+                        let max_scroll = if grid.is_alt {
+                            0.0
+                        } else {
+                            ((total_lines as f32 * char_h) - term_content_h).max(0.0)
+                        };
+                        let scroll_offset = if grid.is_alt {
+                            0.0
+                        } else {
+                            term.scroll_y.current.min(max_scroll).round()
+                        };
+                        let offset_from_bottom = (term_content_y + term_content_h - 8.0 * s - my
+                            + scroll_offset)
+                            / char_h;
+                        let visible_row_0_based = grid
+                            .visible_rows
+                            .saturating_sub(1)
+                            .saturating_sub(offset_from_bottom.max(0.0).floor() as usize);
                         cell_y = visible_row_0_based + 1;
 
                         if is_pressed {
@@ -587,7 +618,7 @@ impl App {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                        let is_top = self.ide_panel.slots.iter().any(|sl| {
                         sl.id == crate::app::PanelId::Problems
                             && sl.group == crate::app::PanelGroup::Top
                     });
@@ -598,10 +629,17 @@ impl App {
                         0.0
                     };
 
+                    let mut effective_bottom_h = panel_bottom_h;
+                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                        && !self.ide_panel.terminal_focused
+                    {
+                        effective_bottom_h = 0.0;
+                    }
+
                     let (cx, cy, cw, ch) = if is_top {
                         let panel_left_w = self.ide_panel.left_width * s;
                         let title_h = 32.0 * s;
-                        (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+                        (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
                     } else {
                         let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                         let tab_h = 32.0 * s;
@@ -649,7 +687,7 @@ impl App {
                 }
 
                 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
-                                        if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
+                    if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
                             panel_id,
                             start_y: my,
@@ -861,7 +899,7 @@ impl App {
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
-                                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
+                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
                     self.ide_panel.is_resizing_left = false;
                     self.ide_panel.is_resizing_bottom = false;
                     crate::save_panel_state(&self.ide_panel);
@@ -1030,7 +1068,8 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.is_resizing_left {
+            // Блокируем resize панелей, когда терминал в фокусе
+            if self.ide_panel.is_resizing_left && !self.ide_panel.terminal_focused {
                 let sb_w = 48.0 * s;
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let max_w = ((ww - sb_w) / s) - 300.0;
@@ -1040,7 +1079,7 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.is_resizing_bottom {
+            if self.ide_panel.is_resizing_bottom && !self.ide_panel.terminal_focused {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let max_h = (wh / s) - 50.0;
                 let new_h = ((wh - py) / s).max(60.0).min(max_h.max(60.0));
@@ -1056,7 +1095,7 @@ impl App {
 
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                        let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
             let panel_bottom_h = if self.ide_panel.any_bottom_open() {
@@ -1065,6 +1104,13 @@ impl App {
                 0.0
             };
 
+            let mut effective_bottom_h = panel_bottom_h;
+            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                && !self.ide_panel.terminal_focused
+            {
+                effective_bottom_h = 0.0;
+            }
+
             let (ecx, ecy, ecw, ech) = if is_top {
                 let panel_left_w = self.ide_panel.left_width * s;
                 let title_h = 32.0 * s;
@@ -1072,7 +1118,7 @@ impl App {
                     48.0 * s,
                     title_h,
                     panel_left_w,
-                    wh - title_h - panel_bottom_h,
+                    wh - title_h - effective_bottom_h,
                 )
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
@@ -1283,7 +1329,7 @@ impl App {
             .any(|t| t.scroll_y.is_dragging)
         {
             let active = self.ide_panel.active_terminal;
-                        if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let grid = term.grid.lock().unwrap();
                 let is_alt = grid.is_alt;
                 drop(grid);
@@ -1497,12 +1543,9 @@ impl App {
 
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
-                                self.scroll_y.anim_speed = 15.0;
+                self.scroll_y.anim_speed = 15.0;
             }
-        } else if self.ide_panel.is_dragging_terminal
-            && self.is_dragging
-            && !self.show_settings
-        {
+        } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
             let active = self.ide_panel.active_terminal;
             if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -1536,7 +1579,7 @@ impl App {
                     ((total_lines as f32 * char_h) - term_content_h).max(0.0)
                 };
 
-                                let scroll_offset = if grid.is_alt {
+                let scroll_offset = if grid.is_alt {
                     0.0
                 } else {
                     term.scroll_y.current.min(max_scroll)
@@ -1551,7 +1594,7 @@ impl App {
                 cell_y = cell_y.min(total_lines.saturating_sub(1));
                 cell_x = cell_x.min(grid.cols.saturating_sub(1));
 
-                                if let Some((sx, sy, _, _)) = grid.selection {
+                if let Some((sx, sy, _, _)) = grid.selection {
                     grid.selection = Some((sx, sy, cell_x, cell_y));
                 } else {
                     grid.selection = Some((cell_x, cell_y, cell_x, cell_y));

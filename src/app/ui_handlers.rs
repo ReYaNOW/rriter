@@ -504,12 +504,18 @@ impl App {
                 // Поглощаем клик — непрозрачная панель блокирует взаимодействие с редактором под ней
             }
             UiId::ResizeLeft => {
-                self.ide_panel.is_resizing_left = true;
-                self.window.as_ref().unwrap().request_redraw();
+                // Блокируем resize, когда терминал в фокусе
+                if !self.ide_panel.terminal_focused {
+                    self.ide_panel.is_resizing_left = true;
+                    self.window.as_ref().unwrap().request_redraw();
+                }
             }
             UiId::ResizeBottom => {
-                self.ide_panel.is_resizing_bottom = true;
-                self.window.as_ref().unwrap().request_redraw();
+                // Блокируем resize, когда терминал в фокусе
+                if !self.ide_panel.terminal_focused {
+                    self.ide_panel.is_resizing_bottom = true;
+                    self.window.as_ref().unwrap().request_redraw();
+                }
             }
             UiId::LspScrollY => {
                 self.ide_panel.lsp_scroll_y.is_dragging = true;

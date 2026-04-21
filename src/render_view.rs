@@ -139,7 +139,9 @@ impl Renderer {
             self.last_mouse_y
         };
 
-        let panel_left_w = if is_ide_mode && ide_panel.any_top_open() {
+        // Используем фактическую ширину панели, а не проверку any_top_open()
+        // Потому что панель может быть открыта через bottom группу
+        let panel_left_w = if is_ide_mode {
             ide_panel.left_width * s
         } else {
             0.0
@@ -667,8 +669,10 @@ impl Renderer {
                 }
 
                 // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                // Не подсвечиваем, когда терминал в фокусе
                 let resize_x = panel_x + panel_left_w;
-                if mx >= resize_x - 8.0 * s
+                if !ide_panel.terminal_focused
+                    && mx >= resize_x - 8.0 * s
                     && mx <= resize_x + 8.0 * s
                     && my >= 0.0
                     && my <= real_height
@@ -2708,7 +2712,9 @@ impl Renderer {
         self.flush();
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
-        if is_ide_mode && panel_left_w > 0.0 {
+        // Блокируем resize, когда терминал в фокусе
+        let terminal_focused = ide_panel.terminal_focused;
+        if is_ide_mode && panel_left_w > 0.0 && !terminal_focused {
             let resize_x = 48.0 * s + panel_left_w;
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeLeft,
@@ -2720,7 +2726,7 @@ impl Renderer {
                 my,
             );
         }
-        if is_ide_mode && panel_bottom_h > 0.0 {
+        if is_ide_mode && panel_bottom_h > 0.0 && !terminal_focused {
             let panel_y = self.height - panel_bottom_h;
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,
