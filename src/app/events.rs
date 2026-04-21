@@ -634,8 +634,19 @@ impl ApplicationHandler for App {
                     } else {
                         0.0
                     };
+                    
+                    let is_terminal_bottom = self.is_ide_mode && self.ide_panel.slots.iter().any(|sl| {
+                        sl.group == crate::app::PanelGroup::Bottom
+                            && sl.open
+                            && sl.id == crate::app::PanelId::Terminal
+                    });
+                    
+                    let is_transparent_terminal = is_terminal_bottom && !self.ide_panel.terminal_focused;
+
                     if panel_bottom_h > 0.0 && my >= window_height - panel_bottom_h {
-                        is_text = false;
+                        if !is_transparent_terminal {
+                            is_text = false;
+                        }
                     }
 
                     if self.show_settings
@@ -671,7 +682,7 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if is_text {
+                    if is_text || self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else {
                         winit::window::CursorIcon::Default

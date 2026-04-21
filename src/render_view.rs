@@ -517,10 +517,10 @@ impl Renderer {
                                 my,
                             );
 
-                            if ide_panel.file_tree_hovered_idx == Some(i)
-                                || ui_registry.hovered()
-                                    == Some(crate::ui_system::UiId::FileTreeNode(i))
-                            {
+                            let is_hovered = ide_panel.file_tree_hovered_idx == Some(i)
+                                || ui_registry.hovered() == Some(crate::ui_system::UiId::FileTreeNode(i));
+
+                            if is_hovered && !ide_panel.terminal_focused {
                                 self.push_rect(
                                     panel_x,
                                     row_y,
@@ -2120,7 +2120,7 @@ impl Renderer {
                         }
 
                         if ide_panel.terminal_focused {
-                            ui_registry.register_text_input(
+                            ui_registry.register_blocker(
                                 crate::ui_system::UiId::TerminalBody,
                                 panel_x,
                                 content_y,
