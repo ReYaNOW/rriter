@@ -1938,8 +1938,62 @@ impl Renderer {
                             ide_panel,
                             ui_registry,
                         );
-                    } else if slot.id == crate::app::PanelId::Terminal {
-                        if let Some(term) = &ide_panel.terminal {
+                                        } else if slot.id == crate::app::PanelId::Terminal {
+                        let term_tab_h = 24.0 * s;
+                        let mut cx = panel_x + 8.0 * s;
+                        let cy = content_y + 4.0 * s;
+
+                                                for i in 0..ide_panel.terminals.len() {
+                            let is_active = i == ide_panel.active_terminal;
+                            let title = format!("{} {}", ide_panel.terminals[i].title, i + 1);
+                            let title_w = self.measure_ui_width(&title, 0.85);
+                            let tab_w = title_w + 24.0 * s + 16.0 * s;
+
+                            let is_hovered = mx >= cx && mx <= cx + tab_w && my >= cy && my <= cy + term_tab_h;
+                            let bg_color = if is_active {
+                                [(self.theme.bg[0] + 0.15).min(1.0), (self.theme.bg[1] + 0.15).min(1.0), (self.theme.bg[2] + 0.15).min(1.0), 1.0]
+                            } else if is_hovered {
+                                [(self.theme.bg[0] + 0.05).min(1.0), (self.theme.bg[1] + 0.05).min(1.0), (self.theme.bg[2] + 0.05).min(1.0), 1.0]
+                            } else {
+                                [0.0, 0.0, 0.0, 0.0]
+                            };
+
+                            if bg_color[3] > 0.0 {
+                                self.push_rounded_rect(cx, cy, tab_w, term_tab_h, 4.0 * s, bg_color);
+                            }
+
+                            let text_color = if is_active { self.theme.fg } else { self.theme.line_num };
+                            self.draw_string_scaled(&title, cx + 8.0 * s, cy + term_tab_h / 2.0 + 4.0 * s, text_color, 0.85);
+
+                            let close_sz = 14.0 * s;
+                            let close_x = cx + tab_w - 8.0 * s - close_sz;
+                            let close_y = cy + (term_tab_h - close_sz) / 2.0;
+                            let c_hovered = mx >= close_x - 2.0*s && mx <= close_x + close_sz + 2.0*s && my >= close_y - 2.0*s && my <= close_y + close_sz + 2.0*s;
+                            if c_hovered {
+                                self.push_rounded_rect(close_x - 2.0*s, close_y - 2.0*s, close_sz + 4.0*s, close_sz + 4.0*s, 2.0*s, [1.0, 1.0, 1.0, 0.2]);
+                            }
+                            self.draw_atlas_icon(crate::widgets::IconType::Close, close_x, close_y, close_sz, text_color);
+
+                            ui_registry.register_rect(crate::ui_system::UiId::TerminalTabClose(i), close_x - 2.0*s, close_y - 2.0*s, close_sz + 4.0*s, close_sz + 4.0*s, mx, my);
+                            ui_registry.register_rect(crate::ui_system::UiId::TerminalTab(i), cx, cy, tab_w - close_sz - 4.0*s, term_tab_h, mx, my);
+
+                            cx += tab_w + 4.0 * s;
+                        }
+
+                        let add_sz = 16.0 * s;
+                        let add_y = cy + (term_tab_h - add_sz) / 2.0;
+                        let add_hovered = mx >= cx && mx <= cx + add_sz && my >= add_y && my <= add_y + add_sz;
+                        if add_hovered {
+                            self.push_rounded_rect(cx - 2.0*s, add_y - 2.0*s, add_sz + 4.0*s, add_sz + 4.0*s, 2.0*s, [1.0, 1.0, 1.0, 0.1]);
+                        }
+                        self.draw_atlas_icon(crate::widgets::IconType::Plus, cx, add_y, add_sz, self.theme.fg);
+                        ui_registry.register_rect(crate::ui_system::UiId::TerminalAdd, cx - 2.0*s, add_y - 2.0*s, add_sz + 4.0*s, add_sz + 4.0*s, mx, my);
+
+                        let term_content_y = cy + term_tab_h + 4.0 * s;
+                        let term_content_h = content_h - (term_content_y - content_y);
+
+                        let active = ide_panel.active_terminal;
+                        if let Some(term) = ide_panel.terminals.get(active) {
                             let mut grid = term.grid.lock().unwrap();
                             let term_scale = 0.82; // Немного увеличили
                             let char_w = self.char_advance('A') * term_scale;
@@ -1947,7 +2001,7 @@ impl Renderer {
                             let new_cols =
                                 ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
                                                         let term_pad_bottom = 8.0 * s;
-                            let new_rows = ((content_h - term_pad_bottom) / char_h).floor().max(2.0) as usize;
+                            let new_rows = ((term_content_h - term_pad_bottom) / char_h).floor().max(2.0) as usize;
 
                             if grid.cols != new_cols || grid.visible_rows != new_rows {
                                 grid.resize(new_cols, new_rows);
@@ -1977,30 +2031,30 @@ impl Renderer {
                                                         let total_lines = grid.scrollback.len() + grid.lines.len();
                             let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
 
-                            let scroll_offset = term.scroll_y.current.min(max_scroll).round();
+                                                        let scroll_offset = term.scroll_y.current.min(max_scroll).round();
                             let draw_x = panel_x + 10.0 * s;
 
                             self.flush();
                             unsafe {
                                 self.gl.enable(glow::SCISSOR_TEST);
-                                let sy = (self.height - (content_y + content_h)).round() as i32;
+                                let sy = (self.height - (term_content_y + term_content_h)).round() as i32;
                                 self.gl.scissor(
                                     panel_x.round() as i32,
                                     sy,
                                     panel_w.round() as i32,
-                                    content_h.round() as i32,
+                                    term_content_h.round() as i32,
                                 );
                             }
 
                             for i in 0..total_lines {
                                                             let offset_from_bottom = total_lines - 1 - i;
-                            let draw_y = content_y + content_h - 8.0 * s
+                            let draw_y = term_content_y + term_content_h - 8.0 * s
                                 - char_h
                                 - (offset_from_bottom as f32 * char_h)
                                 + scroll_offset;
 
                                                         // Строго отсекаем линии, которые полностью или частично вылезают за верх/низ (для надежности поверх glScissor)
-                            if draw_y + char_h < content_y || draw_y > content_y + content_h {
+                            if draw_y + char_h < term_content_y || draw_y > term_content_y + term_content_h {
                                     continue;
                                 }
 
@@ -2063,13 +2117,13 @@ impl Renderer {
                                     .len()
                                     .saturating_sub(1)
                                     .saturating_sub(grid.cur_y);
-                                                            let cursor_px_y = content_y + content_h - 8.0 * s
+                                                                                            let cursor_px_y = term_content_y + term_content_h - 8.0 * s
                                 - char_h
                                 - (cursor_offset_from_bottom as f32 * char_h)
                                 + scroll_offset;
                                                                                     if grid.cursor_visible 
-                                && cursor_px_y + char_h >= content_y
-                                && cursor_px_y <= content_y + content_h
+                                && cursor_px_y + char_h >= term_content_y
+                                && cursor_px_y <= term_content_y + term_content_h
                             {
                                 let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
                                 self.push_rect(
@@ -2082,37 +2136,37 @@ impl Renderer {
                             }
 
                                 let border_color = self.theme.sel;
-                                self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
+                                self.push_rect(panel_x, term_content_y, panel_w, 2.0 * s, border_color);
                                 self.push_rect(
                                     panel_x,
-                                    content_y + content_h - 2.0 * s,
+                                    term_content_y + term_content_h - 2.0 * s,
                                     panel_w,
                                     2.0 * s,
                                     border_color,
                                 );
                                 self.push_rect(
                                     panel_x,
-                                    content_y,
+                                    term_content_y,
                                     2.0 * s,
-                                    content_h,
+                                    term_content_h,
                                     border_color,
                                 );
                                                                 self.push_rect(
                                     panel_x + panel_w - 2.0 * s,
-                                    content_y,
+                                    term_content_y,
                                     2.0 * s,
-                                    content_h,
+                                    term_content_h,
                                     border_color,
                                 );
                             }
 
                             if max_scroll > 0.0 {
-                                let track_h = content_h;
+                                let track_h = term_content_h;
                                 let handle_h =
-                                    (content_h / (total_lines as f32 * char_h)) * track_h;
+                                    (term_content_h / (total_lines as f32 * char_h)) * track_h;
                                 let handle_h = handle_h.max(20.0 * s);
                                 let scroll_progress = term.scroll_y.current / max_scroll;
-                                                            let handle_y = content_y + content_h
+                                                            let handle_y = term_content_y + term_content_h
                                 - handle_h
                                 - scroll_progress * (track_h - handle_h);
                             let sb_w = 10.0 * s;
@@ -2128,9 +2182,9 @@ impl Renderer {
                             ui_registry.register_rect(
                                 crate::ui_system::UiId::TerminalScrollY,
                                 panel_x + panel_w - sb_w,
-                                content_y,
+                                term_content_y,
                                 sb_w,
-                                content_h,
+                                term_content_h,
                                 mx,
                                 my,
                             );
@@ -2146,9 +2200,9 @@ impl Renderer {
                             ui_registry.register_blocker(
                                 crate::ui_system::UiId::TerminalBody,
                                 panel_x,
-                                content_y,
+                                term_content_y,
                                 panel_w,
-                                content_h,
+                                term_content_h,
                                 mx,
                                 my,
                             );

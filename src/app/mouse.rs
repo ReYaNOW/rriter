@@ -118,9 +118,10 @@ impl App {
                 (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
             };
 
-                        if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                                    if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                 if self.ide_panel.terminal_focused {
-                    if let Some(term) = &mut self.ide_panel.terminal {
+                    let active = self.ide_panel.active_terminal;
+                    if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let grid = term.grid.lock().unwrap();
                         if grid.is_alt {
                             return;
@@ -698,9 +699,9 @@ impl App {
             self.is_dragging_search = false;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
-            self.autocomplete_scroll.is_dragging = false;
+                        self.autocomplete_scroll.is_dragging = false;
                         self.scroll_x.is_dragging = false;
-            if let Some(term) = &mut self.ide_panel.terminal { term.scroll_y.is_dragging = false; }
+            for term in &mut self.ide_panel.terminals { term.scroll_y.is_dragging = false; }
             self.ide_panel.lsp_scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_y.is_dragging = false;
             self.ide_panel.problems_scroll.is_dragging = false;
@@ -1082,9 +1083,10 @@ impl App {
                         / (track_w - thumb_w).max(0.0001);
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
-            }
-                                } else if self.ide_panel.terminal.as_ref().map_or(false, |t| t.scroll_y.is_dragging) {
-            if let Some(term) = &mut self.ide_panel.terminal {
+                        }
+                                } else if self.ide_panel.terminals.iter().any(|t| t.scroll_y.is_dragging) {
+            let active = self.ide_panel.active_terminal;
+            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let grid = term.grid.lock().unwrap();
                 let is_alt = grid.is_alt;
                 drop(grid);
@@ -1284,9 +1286,10 @@ impl App {
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
 
                 self.scroll_y.anim_speed = 15.0;
-            }
+                        }
                         } else if self.ide_panel.terminal_focused && self.is_dragging && !self.show_settings && position.y as f32 > self.window.as_ref().unwrap().inner_size().height as f32 - self.ide_panel.bottom_height * self.renderer.as_ref().unwrap().scale_factor {
-            if let Some(term) = &mut self.ide_panel.terminal {
+            let active = self.ide_panel.active_terminal;
+            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;

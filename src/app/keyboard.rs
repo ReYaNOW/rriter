@@ -7,10 +7,11 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use std::io::Write;
 
 impl App {
-                pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
+                                pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
 
-        if let Some(term) = &self.ide_panel.terminal {
+        let active = self.ide_panel.active_terminal;
+        if let Some(term) = self.ide_panel.terminals.get_mut(active) {
             let mut grid = term.grid.lock().unwrap();
             if key_event.state == winit::event::ElementState::Pressed {
                 let mut w = term.writer.lock().unwrap();
@@ -868,11 +869,12 @@ impl App {
                         }
                         self.ide_panel.terminal_focused = false;
                     } else {
-                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                                                if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
                             slot.open = true;
                         }
-                        if self.ide_panel.terminal.is_none() {
-                            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        if self.ide_panel.terminals.is_empty() {
+                            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                            self.ide_panel.active_terminal = 0;
                         }
                         self.ide_panel.terminal_focused = true;
                     }
@@ -881,8 +883,9 @@ impl App {
                         if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
                             slot.open = true;
                         }
-                        if self.ide_panel.terminal.is_none() {
-                            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        if self.ide_panel.terminals.is_empty() {
+                            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                            self.ide_panel.active_terminal = 0;
                         }
                         self.ide_panel.terminal_focused = true;
                     } else {

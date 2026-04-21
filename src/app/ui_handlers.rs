@@ -8,16 +8,38 @@ impl App {
     /// Обрабатывает клик по UI элементу
         pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
-                        UiId::TerminalBody => {
+                                                UiId::TerminalBody => {
                 self.is_dragging = true;
-                if let Some(term) = &mut self.ide_panel.terminal {
+                let active = self.ide_panel.active_terminal;
+                if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     term.grid.lock().unwrap().selection = None;
                 }
             }
             UiId::TerminalScrollY => {
-                if let Some(term) = &mut self.ide_panel.terminal {
+                let active = self.ide_panel.active_terminal;
+                if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     term.scroll_y.is_dragging = true;
                 }
+            }
+            UiId::TerminalTab(idx) => {
+                if idx < self.ide_panel.terminals.len() {
+                    self.ide_panel.active_terminal = idx;
+                }
+            }
+            UiId::TerminalTabClose(idx) => {
+                if idx < self.ide_panel.terminals.len() {
+                    self.ide_panel.terminals.remove(idx);
+                    if self.ide_panel.terminals.is_empty() {
+                        self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        self.ide_panel.active_terminal = 0;
+                    } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
+                        self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
+                    }
+                }
+            }
+            UiId::TerminalAdd => {
+                self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                self.ide_panel.active_terminal = self.ide_panel.terminals.len() - 1;
             }
             // Welcome screen
             UiId::WelcomeNewFile => {

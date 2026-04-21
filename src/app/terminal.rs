@@ -566,9 +566,10 @@ impl Perform for TermGrid {
 pub struct Terminal {
     pub grid: Arc<Mutex<TermGrid>>,
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+        pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     pub child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     pub scroll_y: crate::scroll::ScrollState,
+    pub title: String,
 }
 
 impl Terminal {
@@ -581,7 +582,11 @@ impl Terminal {
             pixel_height: 0,
         }).unwrap();
 
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "term".to_string());
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -653,7 +658,7 @@ impl Terminal {
 
                                                                                 let master_pty = Arc::new(Mutex::new(pair.master));
 
-        let scroll_y = crate::scroll::ScrollState::new(7.0);
+                let scroll_y = crate::scroll::ScrollState::new(7.0);
 
         Self {
             grid,
@@ -661,6 +666,7 @@ impl Terminal {
             master_pty,
             child: Arc::new(Mutex::new(child)),
             scroll_y,
+            title: shell_name,
         }
     }
 

@@ -147,8 +147,9 @@ pub struct IdePanelState {
         pub problems_tab: usize,
         pub flat_diags: Vec<(std::path::PathBuf, usize)>,
                 pub problems_collapsed: FxHashSet<std::path::PathBuf>,
-        pub problems_scroll: crate::scroll::ScrollState,
-        pub terminal: Option<crate::app::terminal::Terminal>,
+                pub problems_scroll: crate::scroll::ScrollState,
+        pub terminals: Vec<crate::app::terminal::Terminal>,
+        pub active_terminal: usize,
         pub terminal_focused: bool,
     }
 
@@ -197,9 +198,10 @@ pub struct IdePanelState {
                                                 diag_copied_idx: None,
                 problems_tab: 0,
                 flat_diags: Vec::new(),
-                                problems_collapsed: FxHashSet::default(),
+                                                                problems_collapsed: FxHashSet::default(),
                 problems_scroll: crate::scroll::ScrollState::new(15.0),
-                terminal: None,
+                terminals: Vec::new(),
+                active_terminal: 0,
                 terminal_focused: false,
             }
         }
@@ -380,10 +382,11 @@ impl App {
             self.file_path = None;
         }
 
-                        self.ide_panel = crate::load_panel_state();
+                                                self.ide_panel = crate::load_panel_state();
 
-        if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminal.is_none() {
-            self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+        if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
+            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+            self.ide_panel.active_terminal = 0;
         }
 
         if self.lsp.is_none() {

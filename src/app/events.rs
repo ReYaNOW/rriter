@@ -810,12 +810,34 @@ impl ApplicationHandler for App {
             }
         }
 
-        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
-            if self.ide_panel.terminal.is_none() {
-                self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
+            let mut closed_terminals = Vec::new();
+            for (i, term) in self.ide_panel.terminals.iter().enumerate() {
+                if let Ok(mut child) = term.child.lock() {
+                    if let Ok(Some(_)) = child.try_wait() {
+                        closed_terminals.push(i);
+                    }
+                }
+            }
+
+            for idx in closed_terminals.into_iter().rev() {
+                self.ide_panel.terminals.remove(idx);
+                needs_redraw = true;
+                if self.ide_panel.terminals.is_empty() {
+                    self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                    self.ide_panel.active_terminal = 0;
+                } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
+                    self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
+                }
+            }
+
+            if self.ide_panel.terminals.is_empty() {
+                self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                self.ide_panel.active_terminal = 0;
                 self.ide_panel.terminal_focused = true;
             }
-            if let Some(t) = &mut self.ide_panel.terminal {
+            let active = self.ide_panel.active_terminal;
+            if let Some(t) = self.ide_panel.terminals.get_mut(active) {
                 if t.scroll_y.update(dt) {
                     needs_redraw = true;
                 }
