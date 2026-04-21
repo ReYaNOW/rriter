@@ -35,12 +35,13 @@ pub struct TermGrid {
             pub saved_cursor: Option<(usize, usize)>,
         pub scroll_region: (usize, usize),
         pub cursor_visible: bool,
-        pub app_cursor_keys: bool,
+                pub app_cursor_keys: bool,
         pub mouse_tracking: bool,
+        pub pool: Vec<Vec<Cell>>,
     }
 
     impl TermGrid {
-    pub fn new(cols: usize, visible_rows: usize) -> Self {
+        pub fn new(cols: usize, visible_rows: usize) -> Self {
         let mut lines = std::collections::VecDeque::new();
         for _ in 0..visible_rows {
             lines.push_back(vec![Cell::default(); cols]);
@@ -63,18 +64,18 @@ pub struct TermGrid {
                         reply_tx: None,
             saved_cursor: None,
             scroll_region: (0, visible_rows.saturating_sub(1)),
-            cursor_visible: true,
+                        cursor_visible: true,
             app_cursor_keys: false,
             mouse_tracking: false,
+            pool: Vec::with_capacity(128),
         }
     }
 
                         pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
         if new_cols == self.cols && new_rows == self.visible_rows { return; }
 
-        if new_cols != self.cols {
+                if new_cols != self.cols {
             for line in self.lines.iter_mut() { line.resize(new_cols, Cell::default()); }
-            for line in self.scrollback.iter_mut() { line.resize(new_cols, Cell::default()); }
             if let Some(alt) = &mut self.alt_lines {
                 for line in alt.iter_mut() { line.resize(new_cols, Cell::default()); }
             }
@@ -91,7 +92,9 @@ pub struct TermGrid {
             let drop_top = diff - drop_bottom;
 
             for _ in 0..drop_bottom {
-                self.lines.pop_back();
+                if let Some(mut line) = self.lines.pop_back() {
+                    if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                }
             }
             for _ in 0..drop_top {
                 if let Some(top) = self.lines.pop_front() {
@@ -108,18 +111,22 @@ pub struct TermGrid {
         } else if new_rows > current_rows {
             let diff = new_rows - current_rows;
 
-            if !self.is_alt {
+                        if !self.is_alt {
                 let from_scrollback = diff.min(self.scrollback.len());
 
                 for _ in 0..from_scrollback {
-                    if let Some(row) = self.scrollback.pop_back() {
+                    if let Some(mut row) = self.scrollback.pop_back() {
+                        row.resize(self.cols, Cell::default());
                         self.lines.push_front(row);
                     }
                 }
 
                 let blanks = diff - from_scrollback;
                 for _ in 0..blanks {
-                    self.lines.push_back(vec![Cell::default(); self.cols]);
+                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                    line.resize(self.cols, Cell::default());
+                    line.fill(Cell::default());
+                    self.lines.push_back(line);
                 }
 
                 self.cur_y += from_scrollback;
@@ -133,14 +140,23 @@ pub struct TermGrid {
             }
         }
 
-        if let Some(alt) = &mut self.alt_lines {
+                if let Some(alt) = &mut self.alt_lines {
             let alt_current_rows = alt.len();
             if new_rows < alt_current_rows {
                 let diff = alt_current_rows - new_rows;
-                for _ in 0..diff { alt.pop_back(); }
+                for _ in 0..diff {
+                    if let Some(mut line) = alt.pop_back() {
+                        if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                    }
+                }
             } else if new_rows > alt_current_rows {
                 let diff = new_rows - alt_current_rows;
-                for _ in 0..diff { alt.push_back(vec![Cell::default(); self.cols]); }
+                for _ in 0..diff {
+                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                    line.resize(self.cols, Cell::default());
+                    line.fill(Cell::default());
+                    alt.push_back(line);
+                }
             }
             if let Some((_, ref mut sy)) = self.alt_saved_cursor {
                 *sy = (*sy).min(new_rows.saturating_sub(1));
@@ -195,28 +211,42 @@ pub struct TermGrid {
         }
     }
 
-        pub fn scroll_region_up(&mut self, rows: usize) {
+                pub fn scroll_region_up(&mut self, rows: usize) {
         let (top, bottom) = self.scroll_region;
         if bottom >= self.lines.len() || top >= bottom { return; }
         for _ in 0..rows {
-            let removed = self.lines.remove(top).unwrap_or_else(|| vec![Cell::default(); self.cols]);
+            let mut removed = self.lines.remove(top).unwrap_or_else(|| vec![Cell::default(); self.cols]);
             if top == 0 && bottom == self.visible_rows.saturating_sub(1) {
                 if !self.is_alt {
                     self.scrollback.push_back(removed);
-                    if self.scrollback.len() > 10000 { self.scrollback.pop_front(); }
+                    if self.scrollback.len() > 10000 {
+                        if let Some(mut old) = self.scrollback.pop_front() {
+                            if self.pool.len() < 128 { old.clear(); self.pool.push(old); }
+                        }
+                    }
+                } else {
+                    if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
                 }
+            } else {
+                if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
             }
-            self.lines.insert(bottom, vec![Cell::default(); self.cols]);
+            let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+            new_line.resize(self.cols, Cell::default());
+            self.lines.insert(bottom, new_line);
         }
         self.dirty = true;
     }
 
-    pub fn scroll_region_down(&mut self, rows: usize) {
+        pub fn scroll_region_down(&mut self, rows: usize) {
         let (top, bottom) = self.scroll_region;
         if bottom >= self.lines.len() || top >= bottom { return; }
         for _ in 0..rows {
-            self.lines.remove(bottom);
-            self.lines.insert(top, vec![Cell::default(); self.cols]);
+            if let Some(mut removed) = self.lines.remove(bottom) {
+                if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
+            }
+            let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+            new_line.resize(self.cols, Cell::default());
+            self.lines.insert(top, new_line);
         }
         self.dirty = true;
     }
@@ -300,12 +330,15 @@ impl Perform for TermGrid {
                 if is_private {
                     for param in params.iter() {
                         if param[0] == 1049 || param[0] == 47 || param[0] == 1047 {
-                            if enable && !self.is_alt {
+                                                        if enable && !self.is_alt {
                                 self.is_alt = true;
                                 self.alt_saved_cursor = Some((self.cur_x, self.cur_y));
                                 let mut alt = std::collections::VecDeque::new();
                                 for _ in 0..self.visible_rows {
-                                    alt.push_back(vec![Cell::default(); self.cols]);
+                                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                                    line.resize(self.cols, Cell::default());
+                                    line.fill(Cell::default());
+                                    alt.push_back(line);
                                 }
                                 self.alt_lines = Some(std::mem::replace(&mut self.lines, alt));
                                 self.cur_x = 0;
@@ -314,7 +347,10 @@ impl Perform for TermGrid {
                             } else if !enable && self.is_alt {
                                 self.is_alt = false;
                                 if let Some(alt) = self.alt_lines.take() {
-                                    self.lines = alt;
+                                    let old_lines = std::mem::replace(&mut self.lines, alt);
+                                    for mut line in old_lines {
+                                        if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                                    }
                                 }
                                 if let Some((x, y)) = self.alt_saved_cursor.take() {
                                     self.cur_x = x;
@@ -377,37 +413,28 @@ impl Perform for TermGrid {
                 self.cur_y = y.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
                 self.cur_x = x.saturating_sub(1).min(self.cols.saturating_sub(1));
             }
-            'J' => {
+                        'J' => {
                 let param = params.iter().next().map(|p| p[0]).unwrap_or(0);
                 match param {
                     0 => {
                         if let Some(line) = self.lines.get_mut(self.cur_y) {
-                            for i in self.cur_x..self.cols {
-                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
-                            }
+                            if self.cur_x < line.len() { line[self.cur_x..].fill(Cell::default()); }
                         }
                         for i in (self.cur_y + 1)..self.visible_rows {
-                            if let Some(line) = self.lines.get_mut(i) {
-                                for cell in line.iter_mut() { *cell = Cell::default(); }
-                            }
+                            if let Some(line) = self.lines.get_mut(i) { line.fill(Cell::default()); }
                         }
                     }
                     1 => {
                         for i in 0..self.cur_y {
-                            if let Some(line) = self.lines.get_mut(i) {
-                                for cell in line.iter_mut() { *cell = Cell::default(); }
-                            }
+                            if let Some(line) = self.lines.get_mut(i) { line.fill(Cell::default()); }
                         }
                         if let Some(line) = self.lines.get_mut(self.cur_y) {
-                            for i in 0..=self.cur_x.min(self.cols - 1) {
-                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
-                            }
+                            let end = (self.cur_x + 1).min(line.len());
+                            line[..end].fill(Cell::default());
                         }
                     }
                                         2 | 3 => {
-                        for line in self.lines.iter_mut() {
-                            for cell in line.iter_mut() { *cell = Cell::default(); }
-                        }
+                        for line in self.lines.iter_mut() { line.fill(Cell::default()); }
                         if param == 3 { self.scrollback.clear(); }
                     }
                     _ => {}
@@ -418,17 +445,14 @@ impl Perform for TermGrid {
                 if let Some(line) = self.lines.get_mut(self.cur_y) {
                     match param {
                         0 => {
-                            for i in self.cur_x..self.cols {
-                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
-                            }
+                            if self.cur_x < line.len() { line[self.cur_x..].fill(Cell::default()); }
                         }
                         1 => {
-                            for i in 0..=self.cur_x.min(self.cols - 1) {
-                                if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
-                            }
+                            let end = (self.cur_x + 1).min(line.len());
+                            line[..end].fill(Cell::default());
                         }
                         2 => {
-                            for cell in line.iter_mut() { *cell = Cell::default(); }
+                            line.fill(Cell::default());
                         }
                         _ => {}
                     }
@@ -448,14 +472,19 @@ impl Perform for TermGrid {
                 self.cur_x = 0;
                 self.cur_y = 0;
             }
-            'L' => {
+                        'L' => {
                 let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let count = if count == 0 { 1 } else { count };
                 let bottom = self.scroll_region.1;
                 for _ in 0..count {
                     if self.cur_y <= bottom && bottom < self.lines.len() {
-                        self.lines.remove(bottom);
-                        self.lines.insert(self.cur_y, vec![Cell::default(); self.cols]);
+                        if let Some(mut line) = self.lines.remove(bottom) {
+                            if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                        }
+                        let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                        new_line.resize(self.cols, Cell::default());
+                        new_line.fill(Cell::default());
+                        self.lines.insert(self.cur_y, new_line);
                     }
                 }
             }
@@ -465,8 +494,13 @@ impl Perform for TermGrid {
                 let bottom = self.scroll_region.1;
                 for _ in 0..count {
                     if self.cur_y <= bottom && bottom < self.lines.len() {
-                        self.lines.remove(self.cur_y);
-                        self.lines.insert(bottom, vec![Cell::default(); self.cols]);
+                        if let Some(mut line) = self.lines.remove(self.cur_y) {
+                            if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                        }
+                        let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                        new_line.resize(self.cols, Cell::default());
+                        new_line.fill(Cell::default());
+                        self.lines.insert(bottom, new_line);
                     }
                 }
             }
@@ -486,9 +520,9 @@ impl Perform for TermGrid {
                 let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let count = if count == 0 { 1 } else { count };
                 if let Some(line) = self.lines.get_mut(self.cur_y) {
-                    for i in self.cur_x..(self.cur_x + count).min(self.cols) {
-                        if let Some(c) = line.get_mut(i) { *c = Cell::default(); }
-                    }
+                    let start = self.cur_x.min(line.len());
+                    let end = (self.cur_x + count).min(line.len());
+                    if start < end { line[start..end].fill(Cell::default()); }
                 }
             }
                                                 'm' => {
@@ -633,17 +667,17 @@ impl Terminal {
             }
         });
 
-        std::thread::spawn(move || {
+                std::thread::spawn(move || {
             let mut parser = Parser::new();
             while let Ok(chunk) = rx.recv() {
-                let mut data = chunk;
+                let mut chunks = vec![chunk];
                 let start = std::time::Instant::now();
 
                 // Умный Nagle-буфер: собираем микро-куски, пока труба не замолчит на 8мс
                 loop {
                     match rx.recv_timeout(std::time::Duration::from_millis(8)) {
-                        Ok(mut more) => {
-                            data.append(&mut more);
+                        Ok(more) => {
+                            chunks.push(more);
                             // Предохранитель от зависания при бесконечном потоке (например, команда yes)
                             if start.elapsed().as_millis() >= 32 {
                                 break;
@@ -654,7 +688,9 @@ impl Terminal {
                 }
 
                                 let mut g = grid_clone.lock().unwrap();
-                parser.advance(&mut *g, &data);
+                for c in &chunks {
+                    parser.advance(&mut *g, c);
+                }
                 g.dirty = true;
                 drop(g);
 

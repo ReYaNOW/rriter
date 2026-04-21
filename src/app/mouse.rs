@@ -130,25 +130,22 @@ impl App {
                         let total_lines = grid.scrollback.len() + grid.lines.len();
                         drop(grid);
 
-                        if is_alt {
-                            println!("TERMINAL ALT SCROLL: dy={}, app={}, mouse={}", dy, app_cursor, mouse_tracking);
+                                                                                                if is_alt {
                             if let Ok(mut w) = term.writer.lock() {
                                 if mouse_tracking {
                                     let btn = if dy < 0.0 { 64 } else { 65 };
                                     let seq = format!("\x1b[<{};1;1M", btn);
                                     let steps = (dy.abs() / 20.0).max(1.0) as usize;
-                                    println!("-> mouse seq: {:?} x{}", seq, steps.min(3));
                                     for _ in 0..steps.min(3) {
                                         let _ = w.write_all(seq.as_bytes());
                                     }
                                 } else {
-                                    let seq = if dy < 0.0 { 
+                                    let seq = if dy < 0.0 {
                                         if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
-                                    } else { 
+                                    } else {
                                         if app_cursor { b"\x1BOB" } else { b"\x1B[B" }
                                     };
                                     let steps = (dy.abs() / 20.0).max(1.0) as usize;
-                                    println!("-> arrow seq: {:?} x{}", std::str::from_utf8(seq), steps.min(3));
                                     for _ in 0..steps.min(3) {
                                         let _ = w.write_all(seq);
                                     }
@@ -159,7 +156,7 @@ impl App {
                         }
 
                         term.scroll_y.anim_speed = 7.0;
-                                                term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
+                        term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
 
                         let lh = self.renderer.as_ref().unwrap().line_height;
                         let term_scale = 1.05;
