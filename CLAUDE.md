@@ -1,4 +1,5 @@
 # Rules for AI Assistant
+Fully read PROJECT_MAP.xml before ANYTHING. If it is NOT provided, then ASK for it.
 
 # HOW TO THINK AND HOW TO SPEAK
 ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".

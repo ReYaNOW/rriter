@@ -1,4 +1,5 @@
 # Rules for AI Assistant
+Fully read PROJECT_MAP.xml before ANYTHING. If it is NOT provided, then ASK for it.
 
 Allowed commands:
 1) read files (only in project)
