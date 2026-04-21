@@ -1955,7 +1955,7 @@ impl Renderer {
                             }
                             grid.dirty = false;
 
-                            let ansi_colors = [
+                                                        let ansi_colors = [
                                 [0.0, 0.0, 0.0, 1.0],
                                 [0.8, 0.2, 0.2, 1.0],
                                 [0.2, 0.8, 0.2, 1.0],
@@ -1974,8 +1974,10 @@ impl Renderer {
                                 [1.0, 1.0, 1.0, 1.0],
                             ];
 
-                            let total_lines = grid.scrollback.len() + grid.lines.len();
-                            let scroll_offset = term.scroll_y.current.round();
+                                                        let total_lines = grid.scrollback.len() + grid.lines.len();
+                            let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+
+                            let scroll_offset = term.scroll_y.current.min(max_scroll).round();
                             let draw_x = panel_x + 10.0 * s;
 
                             self.flush();
@@ -2037,7 +2039,7 @@ impl Renderer {
                                 if let Some(bg) = bg_color {
                                     self.push_rect(cx, draw_y, char_w, char_h, bg);
                                 }
-                                if cell.c != ' ' {
+                                                                if cell.c != ' ' {
                                         let fg_color = if cell.fg < 16 {
                                             ansi_colors[cell.fg as usize]
                                         } else {
@@ -2046,7 +2048,7 @@ impl Renderer {
                                         self.draw_string_mono_scaled(
                                             &cell.c.to_string(),
                                             cx,
-                                            draw_y + char_h / 2.0 + 3.0 * s,
+                                            draw_y + self.baseline_offset * term_scale,
                                             fg_color,
                                             term_scale,
                                         );
@@ -2065,13 +2067,14 @@ impl Renderer {
                                 - char_h
                                 - (cursor_offset_from_bottom as f32 * char_h)
                                 + scroll_offset;
-                            if cursor_px_y + char_h >= content_y
+                                                                                    if grid.cursor_visible 
+                                && cursor_px_y + char_h >= content_y
                                 && cursor_px_y <= content_y + content_h
                             {
                                 let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
                                 self.push_rect(
                                     cursor_px_x,
-                                    cursor_px_y + 0.5 * s,
+                                    cursor_px_y,
                                     char_w,
                                     char_h,
                                     [1.0, 1.0, 1.0, 0.5],
@@ -2094,7 +2097,7 @@ impl Renderer {
                                     content_h,
                                     border_color,
                                 );
-                                self.push_rect(
+                                                                self.push_rect(
                                     panel_x + panel_w - 2.0 * s,
                                     content_y,
                                     2.0 * s,
@@ -2103,7 +2106,6 @@ impl Renderer {
                                 );
                             }
 
-                            let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
                             if max_scroll > 0.0 {
                                 let track_h = content_h;
                                 let handle_h =

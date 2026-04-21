@@ -30,10 +30,11 @@ pub struct TermGrid {
             pub cur_bg: u8,
             pub cur_bold: bool,
             pub dirty: bool,
-    pub selection: Option<(usize, usize, usize, usize)>,
+        pub selection: Option<(usize, usize, usize, usize)>,
         pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
     pub saved_cursor: Option<(usize, usize)>,
     pub scroll_region: (usize, usize),
+    pub cursor_visible: bool,
 }
 
 impl TermGrid {
@@ -56,10 +57,11 @@ impl TermGrid {
             cur_bg: 0,
             cur_bold: false,
             dirty: true,
-            selection: None,
+                        selection: None,
             reply_tx: None,
             saved_cursor: None,
             scroll_region: (0, visible_rows.saturating_sub(1)),
+            cursor_visible: true,
         }
     }
 
@@ -314,10 +316,12 @@ impl Perform for TermGrid {
                                     self.cur_x = x;
                                     self.cur_y = y;
                                 }
-                                self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
+                                                                self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
                                 self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
                                 self.dirty = true;
                             }
+                        } else if param[0] == 25 {
+                            self.cursor_visible = enable;
                         }
                     }
                 }
@@ -585,7 +589,7 @@ impl Terminal {
         // КРИТИЧНО для Linux: освобождаем дескриптор slave в родительском процессе
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader().unwrap();
+                let reader = pair.master.try_clone_reader().unwrap();
         let writer = pair.master.take_writer().unwrap();
         let writer_arc = Arc::new(Mutex::new(writer));
 
@@ -605,25 +609,50 @@ impl Terminal {
         let grid = Arc::new(Mutex::new(grid_obj));
         let grid_clone = grid.clone();
 
-        std::thread::spawn(move || {
-            let mut parser = Parser::new();
-            let mut buf = [0u8; 4096];
+                                                                                let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+                        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 65536];
             while let Ok(n) = reader.read(&mut buf) {
                 if n == 0 { break; }
-                let mut g = grid_clone.lock().unwrap();
-                parser.advance(&mut *g, &buf[..n]);
+                if tx.send(buf[..n].to_vec()).is_err() { break; }
+            }
+        });
+
+        std::thread::spawn(move || {
+            let mut parser = Parser::new();
+            while let Ok(chunk) = rx.recv() {
+                let mut data = chunk;
+                let start = std::time::Instant::now();
+
+                // Умный Nagle-буфер: собираем микро-куски, пока труба не замолчит на 8мс
+                loop {
+                    match rx.recv_timeout(std::time::Duration::from_millis(8)) {
+                        Ok(mut more) => {
+                            data.append(&mut more);
+                            // Предохранитель от зависания при бесконечном потоке (например, команда yes)
+                            if start.elapsed().as_millis() >= 32 {
+                                break;
+                            }
+                        }
+                        Err(_) => break, // Вывод завершен
+                    }
+                }
+
+                                let mut g = grid_clone.lock().unwrap();
+                parser.advance(&mut *g, &data);
                 g.dirty = true;
                 drop(g);
+
                 if let Some(w) = window.as_ref() {
                     w.request_redraw();
                 }
             }
         });
 
-                                        let master_pty = Arc::new(Mutex::new(pair.master));
+                                                                                let master_pty = Arc::new(Mutex::new(pair.master));
 
-        println!("[Terminal] Process spawned");
-        
         let scroll_y = crate::scroll::ScrollState::new(7.0);
 
         Self {

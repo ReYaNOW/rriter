@@ -35,20 +35,32 @@ impl App {
                     PhysicalKey::Code(KeyCode::Backspace) => {
                         let _ = w.write_all(b"\x08");
                     }
-                    PhysicalKey::Code(KeyCode::Tab) => {
+                                        PhysicalKey::Code(KeyCode::Tab) => {
                         let _ = w.write_all(b"\t");
                     }
+                    PhysicalKey::Code(KeyCode::F1) => { let _ = w.write_all(b"\x1bOP"); }
+                    PhysicalKey::Code(KeyCode::F2) => { let _ = w.write_all(b"\x1bOQ"); }
+                    PhysicalKey::Code(KeyCode::F3) => { let _ = w.write_all(b"\x1bOR"); }
+                    PhysicalKey::Code(KeyCode::F4) => { let _ = w.write_all(b"\x1bOS"); }
+                    PhysicalKey::Code(KeyCode::F5) => { let _ = w.write_all(b"\x1b[15~"); }
+                    PhysicalKey::Code(KeyCode::F6) => { let _ = w.write_all(b"\x1b[17~"); }
+                    PhysicalKey::Code(KeyCode::F7) => { let _ = w.write_all(b"\x1b[18~"); }
+                    PhysicalKey::Code(KeyCode::F8) => { let _ = w.write_all(b"\x1b[19~"); }
+                    PhysicalKey::Code(KeyCode::F9) => { let _ = w.write_all(b"\x1b[20~"); }
+                    PhysicalKey::Code(KeyCode::F10) => { let _ = w.write_all(b"\x1b[21~"); }
+                    PhysicalKey::Code(KeyCode::F11) => { let _ = w.write_all(b"\x1b[23~"); }
+                    PhysicalKey::Code(KeyCode::F12) => { let _ = w.write_all(b"\x1b[24~"); }
                     PhysicalKey::Code(KeyCode::ArrowUp) => {
-                        let _ = w.write_all(b"\x1b[A");
+                        let _ = w.write_all(if grid.is_alt { b"\x1bOA" } else { b"\x1b[A" });
                     }
                     PhysicalKey::Code(KeyCode::ArrowDown) => {
-                        let _ = w.write_all(b"\x1b[B");
+                        let _ = w.write_all(if grid.is_alt { b"\x1bOB" } else { b"\x1b[B" });
                     }
                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                        let _ = w.write_all(b"\x1b[D");
+                        let _ = w.write_all(if grid.is_alt { b"\x1bOD" } else { b"\x1b[D" });
                     }
                     PhysicalKey::Code(KeyCode::ArrowRight) => {
-                        let _ = w.write_all(b"\x1b[C");
+                        let _ = w.write_all(if grid.is_alt { b"\x1bOC" } else { b"\x1b[C" });
                     }
                     PhysicalKey::Code(KeyCode::Escape) => {
                         let _ = w.write_all(b"\x1b");
@@ -1040,10 +1052,13 @@ impl App {
                 return;
             }
 
+                        let term_focused = self.is_ide_mode && self.ide_panel.terminal_focused && self.ide_panel.is_open(crate::app::PanelId::Terminal);
             if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
-                self.show_fps = !self.show_fps;
-                self.window.as_ref().unwrap().request_redraw();
-                return;
+                if !term_focused {
+                    self.show_fps = !self.show_fps;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
             }
 
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {

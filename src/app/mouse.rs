@@ -118,22 +118,25 @@ impl App {
                 (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
             };
 
-            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                        if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
                 if self.ide_panel.terminal_focused {
                     if let Some(term) = &mut self.ide_panel.terminal {
+                        let grid = term.grid.lock().unwrap();
+                        if grid.is_alt {
+                            return;
+                        }
+                        let total_lines = grid.scrollback.len() + grid.lines.len();
+                        drop(grid);
+
                         term.scroll_y.anim_speed = 7.0;
                         term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
-                        
+
                         let lh = self.renderer.as_ref().unwrap().line_height;
                         let term_scale = 0.82;
                         let char_h = lh * term_scale;
-                        
-                        let grid = term.grid.lock().unwrap();
-                        let total_lines = grid.scrollback.len() + grid.lines.len();
-                        
+
                         let max_scroll = ((total_lines as f32 * char_h) - ch).max(0.0);
-                        drop(grid);
-                        
+
                         term.scroll_y.clamp_target(0.0, max_scroll);
                         self.window.as_ref().unwrap().request_redraw();
                     }
@@ -1080,8 +1083,16 @@ impl App {
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
             }
-                        } else if self.ide_panel.terminal.as_ref().map_or(false, |t| t.scroll_y.is_dragging) {
+                                } else if self.ide_panel.terminal.as_ref().map_or(false, |t| t.scroll_y.is_dragging) {
             if let Some(term) = &mut self.ide_panel.terminal {
+                let grid = term.grid.lock().unwrap();
+                let is_alt = grid.is_alt;
+                drop(grid);
+                if is_alt {
+                    term.scroll_y.is_dragging = false;
+                    return;
+                }
+
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;
@@ -1291,9 +1302,10 @@ impl App {
                 let px = position.x as f32;
 
                 let mut grid = term.grid.lock().unwrap();
-                let total_lines = grid.scrollback.len() + grid.lines.len();
+                                let total_lines = grid.scrollback.len() + grid.lines.len();
+                let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
 
-                let offset_from_bottom = (content_y + content_h - 8.0 * s - py + term.scroll_y.current) / char_h;
+                let offset_from_bottom = (content_y + content_h - 8.0 * s - py + term.scroll_y.current.min(max_scroll)) / char_h;
                 let mut cell_y = total_lines.saturating_sub(1).saturating_sub(offset_from_bottom.floor() as usize);
                 let mut cell_x = ((px - panel_x) / char_w).floor() as usize;
 
