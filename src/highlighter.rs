@@ -192,10 +192,9 @@ impl Highlighter {
                 HashMap::new();
             let mut byte_colors_buf = Vec::new();
 
-            let mut replica_text = String::new();
+                        let mut replica_text = String::new();
             let mut current_tree: Option<tree_sitter::Tree> = None;
             let mut current_ext = String::new();
-            let mut old_spans = Vec::new();
 
             while let Ok(msg) = rx_in.recv() {
                 let mut msgs = vec![msg];
@@ -884,7 +883,7 @@ impl Highlighter {
                     }
                 }
 
-                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
+                                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
                 let flat_spans = flatten_spans(
                     spans,
@@ -892,12 +891,9 @@ impl Highlighter {
                     text,
                     &mut byte_colors_buf,
                     error_ranges,
-                    old_spans.clone(),
                     apply_rainbow_brackets,
                     is_log_or_huge,
                 );
-
-                old_spans = flat_spans.clone();
 
                 // Очистка памяти от гигантских буферов после парсинга больших файлов
                 if byte_colors_buf.capacity() > 1024 * 1024 && text.len() < 1024 * 512 {
@@ -1288,12 +1284,10 @@ fn flatten_spans(
     text: &str,
     byte_colors: &mut Vec<[f32; 4]>,
     error_ranges: Vec<(usize, usize)>,
-    old_spans: Vec<ColorSpan>,
     apply_rainbow_brackets: bool,
     is_log_or_huge: bool,
 ) -> Vec<ColorSpan> {
     if spans.is_empty()
-        && old_spans.is_empty()
         && error_ranges.is_empty()
         && (is_log_or_huge || !apply_rainbow_brackets)
     {

@@ -629,7 +629,7 @@ impl Renderer {
         };
 
         for idx in indices {
-            self.fonts[idx].ensure_loaded();
+                        self.fonts[idx].ensure_loaded();
             let font_data = &self.fonts[idx];
             let data = font_data.data_slice();
             if data.is_empty() {
@@ -637,7 +637,7 @@ impl Renderer {
             }
             if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
-                if glyph_id != 0 || (c == ' ' && idx == 0) {
+                if glyph_id != 0 || (c.is_whitespace() && idx == 0) {
                     let head = font_ref.metrics(&[]);
                     glyph_advance = (font_ref.glyph_metrics(&[]).advance_width(glyph_id) as f32
                         * self.font_size)
@@ -656,7 +656,7 @@ impl Renderer {
                     ])
                     .render(&mut scaler, glyph_id)
                     {
-                        if img.data.len() > 0 || c == ' ' {
+                        if img.data.len() > 0 || c.is_whitespace() {
                             rendered_image = Some(img);
                             break;
                         }
@@ -665,18 +665,22 @@ impl Renderer {
             }
         }
 
-        if rendered_image.is_none() {
+                if rendered_image.is_none() {
             if c != '□' {
-                return self.get_glyph('□');
+                let fallback = self.get_glyph('□');
+                if let Some(info) = fallback {
+                    self.glyphs.insert(c, info);
+                }
+                return fallback;
             }
             return None;
         }
 
-        let img = rendered_image.unwrap();
+                let img = rendered_image.unwrap();
         let w = img.placement.width as i32;
         let h = img.placement.height as i32;
 
-        if c == ' ' || w <= 0 || h <= 0 {
+        if c.is_whitespace() || w <= 0 || h <= 0 {
             let info = GlyphInfo {
                 u: 0.0,
                 v: 0.0,
@@ -797,7 +801,7 @@ impl Renderer {
         };
 
         for idx in indices {
-            self.ui_fonts[idx].ensure_loaded();
+                        self.ui_fonts[idx].ensure_loaded();
             let font_data = &self.ui_fonts[idx];
             let data = font_data.data_slice();
             if data.is_empty() {
@@ -805,7 +809,7 @@ impl Renderer {
             }
             if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
                 let glyph_id = font_ref.charmap().map(c);
-                if glyph_id != 0 || (c == ' ' && idx == 0) {
+                if glyph_id != 0 || (c.is_whitespace() && idx == 0) {
                     let head = font_ref.metrics(&[]);
                     glyph_advance = (font_ref.glyph_metrics(&[]).advance_width(glyph_id) as f32
                         * self.font_size)
@@ -824,7 +828,7 @@ impl Renderer {
                     ])
                     .render(&mut scaler, glyph_id)
                     {
-                        if img.data.len() > 0 || c == ' ' {
+                        if img.data.len() > 0 || c.is_whitespace() {
                             rendered_image = Some(img);
                             break;
                         }
@@ -833,18 +837,22 @@ impl Renderer {
             }
         }
 
-        if rendered_image.is_none() {
+                if rendered_image.is_none() {
             if c != '□' {
-                return self.get_ui_glyph('□');
+                let fallback = self.get_ui_glyph('□');
+                if let Some(info) = fallback {
+                    self.ui_glyphs.insert(c, info);
+                }
+                return fallback;
             }
             return None;
         }
 
-        let img = rendered_image.unwrap();
+                let img = rendered_image.unwrap();
         let w = img.placement.width as i32;
         let h = img.placement.height as i32;
 
-        if c == ' ' || w <= 0 || h <= 0 {
+        if c.is_whitespace() || w <= 0 || h <= 0 {
             let info = GlyphInfo {
                 u: 0.0,
                 v: 0.0,

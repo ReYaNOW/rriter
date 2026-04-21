@@ -201,14 +201,14 @@
     <fn name="get_point" line="86" ret="tree_sitter::Point" />
     <fn name="resolve_color" line="99" ret="[f32; 4]" calls="ui_system: contains" />
     <fn name="new" line="180" pub="true" ret="Self" calls="editor: insert_str, is_char_boundary, replace_range; self: flatten_spans, get_point, resolve_color; queries: get_folding_query, get_injection_query, get_params_query, get_ts_config; ui_system: contains" />
-    <fn name="reset" line="1114" pub="true" />
-    <fn name="apply_edits" line="1120" pub="true" reads="tx" />
-    <fn name="poll" line="1126" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=" />
-    <fn name="wait_for_first_result" line="1145" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=" calls="self: poll" />
-    <fn name="shift_insert" line="1173" pub="true" writes="spans.extend(), spans.push(), spans.retain(), spans=" />
-    <fn name="shift_delete" line="1253" pub="true" writes="spans.retain()" />
-    <fn name="get_bracket_color" line="1271" ret="[f32; 4]" />
-    <fn name="flatten_spans" line="1285" ret="Vec&lt;ColorSpan&gt;" calls="app::terminal: resize; self: get_bracket_color; renderer: resize" />
+    <fn name="reset" line="1110" pub="true" />
+    <fn name="apply_edits" line="1116" pub="true" reads="tx" />
+    <fn name="poll" line="1122" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=" />
+    <fn name="wait_for_first_result" line="1141" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=" calls="self: poll" />
+    <fn name="shift_insert" line="1169" pub="true" writes="spans.extend(), spans.push(), spans.retain(), spans=" />
+    <fn name="shift_delete" line="1249" pub="true" writes="spans.retain()" />
+    <fn name="get_bracket_color" line="1267" ret="[f32; 4]" />
+    <fn name="flatten_spans" line="1281" ret="Vec&lt;ColorSpan&gt;" calls="app::terminal: resize; self: get_bracket_color; renderer: resize" />
   </mod>
   <mod path="src/lsp.rs" name="lsp">
     <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
@@ -373,15 +373,15 @@
     <fn name="new" line="221" pub="true" ret="Self" calls="self: get_glyph, load_builtin_icons" />
     <fn name="get_custom_svg_glyph" line="540" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="atlas_y, font_size, gl, texture" writes="atlas_x=, max_row_h=" />
     <fn name="get_glyph" line="607" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, fonts, gl, texture" writes="atlas_x=, atlas_y=, glyphs.clear(), glyphs.insert(), max_row_h=, ui_glyphs.clear()" calls="self: get_custom_svg_glyph, get_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="get_ui_glyph" line="776" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, gl, texture, ui_fonts" writes="atlas_x=, atlas_y=, glyphs.clear(), max_row_h=, ui_glyphs.clear(), ui_glyphs.insert()" calls="self: get_custom_svg_glyph, get_ui_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="resize" line="944" pub="true" reads="gl" writes="height=, width=" />
-    <fn name="measure_ui_width" line="954" pub="true" ret="f32" calls="self: get_ui_glyph" />
-    <fn name="char_advance" line="967" pub="true" ret="f32" reads="ascii_advances" calls="self: get_glyph" />
-    <fn name="push_quad" line="984" pub="true" reads="vertices" />
-    <fn name="load_builtin_icons" line="1036" pub="true" reads="gl, texture" writes="icons.insert()" />
-    <fn name="push_squiggle" line="1219" pub="true" reads="scale_factor, vertices" />
-    <fn name="push_rect" line="1272" pub="true" calls="self: push_quad" />
-    <fn name="push_rounded_rect_gradient" line="1276" pub="true" reads="vertices" />
+    <fn name="get_ui_glyph" line="780" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, gl, texture, ui_fonts" writes="atlas_x=, atlas_y=, glyphs.clear(), max_row_h=, ui_glyphs.clear(), ui_glyphs.insert()" calls="self: get_custom_svg_glyph, get_ui_glyph; self: data_slice, ensure_loaded; widgets: render" />
+    <fn name="resize" line="952" pub="true" reads="gl" writes="height=, width=" />
+    <fn name="measure_ui_width" line="962" pub="true" ret="f32" calls="self: get_ui_glyph" />
+    <fn name="char_advance" line="975" pub="true" ret="f32" reads="ascii_advances" calls="self: get_glyph" />
+    <fn name="push_quad" line="992" pub="true" reads="vertices" />
+    <fn name="load_builtin_icons" line="1044" pub="true" reads="gl, texture" writes="icons.insert()" />
+    <fn name="push_squiggle" line="1227" pub="true" reads="scale_factor, vertices" />
+    <fn name="push_rect" line="1280" pub="true" calls="self: push_quad" />
+    <fn name="push_rounded_rect_gradient" line="1284" pub="true" reads="vertices" />
   </mod>
   <mod path="src/scroll.rs" name="scroll">
     <type name="ScrollState">{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }</type>
