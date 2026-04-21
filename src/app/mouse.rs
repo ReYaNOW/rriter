@@ -79,7 +79,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                        let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -99,7 +99,12 @@ impl App {
             let (cx, cy, cw, ch) = if is_top {
                 let panel_left_w = self.ide_panel.left_width * s;
                 let title_h = 32.0 * s;
-                (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
+                (
+                    sb_w,
+                    title_h,
+                    panel_left_w,
+                    wh - title_h - effective_bottom_h,
+                )
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
@@ -130,7 +135,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                        let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -150,7 +155,12 @@ impl App {
             let (cx, cy, cw, ch) = if is_top {
                 let panel_left_w = self.ide_panel.left_width * s;
                 let title_h = 32.0 * s;
-                (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
+                (
+                    sb_w,
+                    title_h,
+                    panel_left_w,
+                    wh - title_h - effective_bottom_h,
+                )
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
@@ -618,7 +628,7 @@ impl App {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                                        let is_top = self.ide_panel.slots.iter().any(|sl| {
+                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                         sl.id == crate::app::PanelId::Problems
                             && sl.group == crate::app::PanelGroup::Top
                     });
@@ -639,7 +649,12 @@ impl App {
                     let (cx, cy, cw, ch) = if is_top {
                         let panel_left_w = self.ide_panel.left_width * s;
                         let title_h = 32.0 * s;
-                        (sb_w, title_h, panel_left_w, wh - title_h - effective_bottom_h)
+                        (
+                            sb_w,
+                            title_h,
+                            panel_left_w,
+                            wh - title_h - effective_bottom_h,
+                        )
                     } else {
                         let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                         let tab_h = 32.0 * s;
@@ -1095,7 +1110,7 @@ impl App {
 
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                        let is_top = self.ide_panel.slots.iter().any(|sl| {
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
             let panel_bottom_h = if self.ide_panel.any_bottom_open() {

@@ -575,7 +575,7 @@ impl ApplicationHandler for App {
 
                     // Используем фактическую ширину панели, а не проверку any_top_open()
                     // Потому что панель может быть открыта через bottom группу
-                                        let panel_left_w = self.ide_panel.left_width * s;
+                    let panel_left_w = self.ide_panel.left_width * s;
                     let panel_bottom_h = if self.ide_panel.any_bottom_open() {
                         self.ide_panel.bottom_height * s
                     } else {
@@ -592,7 +592,9 @@ impl ApplicationHandler for App {
 
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - effective_bottom_h
+                        if (mx - resize_x).abs() < 6.0 * s
+                            && my >= 0.0
+                            && my < wh - effective_bottom_h
                         {
                             ide_resize_cursor = Some(winit::window::CursorIcon::EwResize);
                         }

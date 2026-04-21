@@ -122,7 +122,13 @@ impl Renderer {
                 [1.0, 1.0, 1.0, 0.1],
             );
         }
-        self.draw_atlas_icon(crate::widgets::IconType::Plus, cx, add_y, add_sz, self.theme.fg);
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Plus,
+            cx,
+            add_y,
+            add_sz,
+            self.theme.fg,
+        );
         ui_registry.register_rect(
             crate::ui_system::UiId::TerminalAdd,
             cx - 2.0 * s,
@@ -144,7 +150,9 @@ impl Renderer {
             let char_h = self.line_height * term_scale;
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
             let term_pad_bottom = 8.0 * s;
-            let new_rows = ((term_content_h - term_pad_bottom) / char_h).floor().max(2.0) as usize;
+            let new_rows = ((term_content_h - term_pad_bottom) / char_h)
+                .floor()
+                .max(2.0) as usize;
 
             if grid.cols != new_cols || grid.visible_rows != new_rows {
                 grid.resize(new_cols, new_rows);
@@ -171,7 +179,11 @@ impl Renderer {
                 [1.00, 1.00, 1.00, 1.0],
             ];
 
-            let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+            let scrollback_len = if grid.is_alt {
+                0
+            } else {
+                grid.scrollback.len()
+            };
             let total_lines = scrollback_len + grid.lines.len();
             let max_scroll = if grid.is_alt {
                 0.0
@@ -179,7 +191,11 @@ impl Renderer {
                 ((total_lines as f32 * char_h) - term_content_h).max(0.0)
             };
 
-            let scroll_offset = if grid.is_alt { 0.0 } else { term.scroll_y.current.min(max_scroll).round() };
+            let scroll_offset = if grid.is_alt {
+                0.0
+            } else {
+                term.scroll_y.current.min(max_scroll).round()
+            };
             let draw_x = panel_x + 10.0 * s;
 
             self.flush();
@@ -217,7 +233,9 @@ impl Renderer {
                 };
 
                 for (c_idx, cell) in row.iter().enumerate() {
-                    if c_idx >= grid.cols { break; }
+                    if c_idx >= grid.cols {
+                        break;
+                    }
                     let cx = (draw_x + c_idx as f32 * char_w).round();
                     let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
                     let cell_w = next_cx - cx;
@@ -229,8 +247,20 @@ impl Renderer {
                     if let Some((sx, sy, ex, ey)) = grid.selection {
                         let start_y = sy.min(ey);
                         let end_y = sy.max(ey);
-                        let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
-                        let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+                        let start_x = if sy < ey {
+                            sx
+                        } else if sy > ey {
+                            ex
+                        } else {
+                            sx.min(ex)
+                        };
+                        let end_x = if sy < ey {
+                            ex
+                        } else if sy > ey {
+                            sx
+                        } else {
+                            sx.max(ex)
+                        };
                         let in_sel = if i > start_y && i < end_y {
                             true
                         } else if i == start_y && i == end_y {
@@ -250,7 +280,11 @@ impl Renderer {
                         self.push_rect(cx, draw_y, cell_w, char_h, bg);
                     }
                     if cell.c != ' ' {
-                        let fg_color = if cell.fg < 16 { ansi_colors[cell.fg as usize] } else { self.theme.fg };
+                        let fg_color = if cell.fg < 16 {
+                            ansi_colors[cell.fg as usize]
+                        } else {
+                            self.theme.fg
+                        };
                         self.draw_string_mono_scaled(
                             &cell.c.to_string(),
                             cx,
@@ -263,7 +297,11 @@ impl Renderer {
             }
 
             if ide_panel.terminal_focused {
-                let cursor_offset_from_bottom = grid.lines.len().saturating_sub(1).saturating_sub(grid.cur_y);
+                let cursor_offset_from_bottom = grid
+                    .lines
+                    .len()
+                    .saturating_sub(1)
+                    .saturating_sub(grid.cur_y);
                 let cursor_px_y = term_content_y + term_content_h
                     - 8.0 * s
                     - char_h
@@ -286,9 +324,27 @@ impl Renderer {
 
                 let border_color = self.theme.sel;
                 self.push_rect(panel_x, term_content_y, panel_w, 2.0 * s, border_color);
-                self.push_rect(panel_x, term_content_y + term_content_h - 2.0 * s, panel_w, 2.0 * s, border_color);
-                self.push_rect(panel_x, term_content_y, 2.0 * s, term_content_h, border_color);
-                self.push_rect(panel_x + panel_w - 2.0 * s, term_content_y, 2.0 * s, term_content_h, border_color);
+                self.push_rect(
+                    panel_x,
+                    term_content_y + term_content_h - 2.0 * s,
+                    panel_w,
+                    2.0 * s,
+                    border_color,
+                );
+                self.push_rect(
+                    panel_x,
+                    term_content_y,
+                    2.0 * s,
+                    term_content_h,
+                    border_color,
+                );
+                self.push_rect(
+                    panel_x + panel_w - 2.0 * s,
+                    term_content_y,
+                    2.0 * s,
+                    term_content_h,
+                    border_color,
+                );
             }
 
             if max_scroll > 0.0 {
@@ -296,7 +352,9 @@ impl Renderer {
                 let handle_h = (term_content_h / (total_lines as f32 * char_h)) * track_h;
                 let handle_h = handle_h.max(20.0 * s);
                 let scroll_progress = term.scroll_y.current / max_scroll;
-                let handle_y = term_content_y + term_content_h - handle_h - scroll_progress * (track_h - handle_h);
+                let handle_y = term_content_y + term_content_h
+                    - handle_h
+                    - scroll_progress * (track_h - handle_h);
                 let sb_w = 10.0 * s;
                 let thumb_w = sb_w - 2.0 * s;
                 self.push_rounded_rect(
