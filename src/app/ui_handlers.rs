@@ -9,7 +9,7 @@ impl App {
         pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
             UiId::TerminalBody => {
-                self.ide_panel.terminal_focused = true;
+                // Фокус терминала больше не меняется по клику, только через Alt+Q
             }
             // Welcome screen
             UiId::WelcomeNewFile => {

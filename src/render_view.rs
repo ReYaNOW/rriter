@@ -1901,11 +1901,24 @@ impl Renderer {
                         let ansi_colors = [[0.0, 0.0, 0.0, 1.0],[0.8, 0.2, 0.2, 1.0], [0.2, 0.8, 0.2, 1.0],[0.8, 0.8, 0.2, 1.0],[0.2, 0.4, 0.8, 1.0],[0.8, 0.2, 0.8, 1.0],[0.2, 0.8, 0.8, 1.0],[0.8, 0.8, 0.8, 1.0],[0.4, 0.4, 0.4, 1.0], [1.0, 0.4, 0.4, 1.0],[0.4, 1.0, 0.4, 1.0],[1.0, 1.0, 0.4, 1.0],[0.4, 0.6, 1.0, 1.0],[1.0, 0.4, 1.0, 1.0],[0.4, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
                         ];
 
-                                                                        let base_draw_y = content_y + content_h - (grid.visible_rows as f32 * char_h);
-                        let mut draw_y = base_draw_y;
+                        let total_lines = grid.scrollback.len() + grid.lines.len();
+                        let scroll_offset = term.scroll_y.current.round();
                         let draw_x = panel_x + 10.0 * s;
-                        for (r_idx, row) in grid.lines.iter().enumerate() {
-                            if r_idx >= grid.visible_rows { break; }
+
+                        for i in 0..total_lines {
+                            let offset_from_bottom = total_lines - 1 - i;
+                            let draw_y = content_y + content_h - char_h - (offset_from_bottom as f32 * char_h) + scroll_offset;
+                            
+                            if draw_y + char_h < content_y || draw_y > content_y + content_h {
+                                continue;
+                            }
+
+                            let row = if i < grid.scrollback.len() {
+                                &grid.scrollback[i]
+                            } else {
+                                &grid.lines[i - grid.scrollback.len()]
+                            };
+
                             let mut cx = draw_x;
                             for (c_idx, cell) in row.iter().enumerate() {
                                 if c_idx >= grid.cols { break; }
@@ -1918,13 +1931,15 @@ impl Renderer {
                                 }
                                 cx += char_w;
                             }
-                            draw_y += char_h;
                         }
 
-                                                if ide_panel.terminal_focused {
-                            let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
-                            let cursor_px_y = base_draw_y + grid.cur_y as f32 * char_h;
-                            self.push_rect(cursor_px_x, cursor_px_y + 2.0 * s, char_w, char_h,[1.0, 1.0, 1.0, 0.5]);
+                        if ide_panel.terminal_focused {
+                            let cursor_offset_from_bottom = grid.lines.len().saturating_sub(1).saturating_sub(grid.cur_y);
+                            let cursor_px_y = content_y + content_h - char_h - (cursor_offset_from_bottom as f32 * char_h) + scroll_offset;
+                            if cursor_px_y + char_h >= content_y && cursor_px_y <= content_y + content_h {
+                                let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
+                                self.push_rect(cursor_px_x, cursor_px_y + 2.0 * s, char_w, char_h,[1.0, 1.0, 1.0, 0.5]);
+                            }
 
                             let border_color = self.theme.sel;
                             self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
@@ -1932,6 +1947,18 @@ impl Renderer {
                             self.push_rect(panel_x, content_y, 2.0 * s, content_h, border_color);
                             self.push_rect(panel_x + panel_w - 2.0 * s, content_y, 2.0 * s, content_h, border_color);
                         }
+                        
+                        let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                        if max_scroll > 0.0 {
+                            let track_h = content_h;
+                            let handle_h = (content_h / (total_lines as f32 * char_h)) * track_h;
+                            let handle_h = handle_h.max(20.0 * s);
+                            let scroll_progress = term.scroll_y.current / max_scroll;
+                            let handle_y = content_y + content_h - handle_h - scroll_progress * (track_h - handle_h);
+                            let sb_w = 6.0 * s;
+                            self.push_rect(panel_x + panel_w - sb_w, handle_y, sb_w, handle_h, [1.0, 1.0, 1.0, 0.15]);
+                        }
+                        
                         self.flush();
                     }
 

@@ -541,6 +541,7 @@ pub struct Terminal {
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     pub child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    pub scroll_y: crate::scroll::ScrollState,
 }
 
 impl Terminal {
@@ -599,11 +600,15 @@ impl Terminal {
                                         let master_pty = Arc::new(Mutex::new(pair.master));
 
         println!("[Terminal] Process spawned");
+        
+        let scroll_y = crate::scroll::ScrollState::new(7.0);
+
         Self {
             grid,
             writer: writer_arc,
             master_pty,
             child: Arc::new(Mutex::new(child)),
+            scroll_y,
         }
     }
 

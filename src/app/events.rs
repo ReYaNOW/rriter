@@ -304,19 +304,6 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                if state == winit::event::ElementState::Pressed && self.is_ide_mode {
-                    let r = self.renderer.as_ref().unwrap();
-                    let id = self.ui_registry.find_at(r.last_mouse_x, r.last_mouse_y);
-                    if id == Some(crate::ui_system::UiId::TerminalBody) {
-                        self.ide_panel.terminal_focused = true;
-                    } else if let Some(i) = id {
-                        if !matches!(i, crate::ui_system::UiId::EditorScrollbarY | crate::ui_system::UiId::EditorScrollbarX) {
-                            self.ide_panel.terminal_focused = false;
-                        }
-                    } else {
-                        self.ide_panel.terminal_focused = false;
-                    }
-                }
                 self.handle_main_mouse_input(event_loop, state);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
@@ -817,7 +804,10 @@ impl ApplicationHandler for App {
                 self.ide_panel.terminal = Some(crate::app::terminal::Terminal::spawn(self.window.clone()));
                 self.ide_panel.terminal_focused = true;
             }
-            if let Some(t) = &self.ide_panel.terminal {
+            if let Some(t) = &mut self.ide_panel.terminal {
+                if t.scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
                 if t.grid.lock().unwrap().dirty {
                     needs_redraw = true;
                 }

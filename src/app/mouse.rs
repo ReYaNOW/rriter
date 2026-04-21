@@ -93,6 +93,48 @@ impl App {
             }
         }
 
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
+            let is_top = self.ide_panel.slots.iter().any(|sl| sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top);
+            let sb_w = 48.0 * s;
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() { self.ide_panel.bottom_height * s } else { 0.0 };
+
+            let (cx, cy, cw, ch) = if is_top {
+                let panel_left_w = self.ide_panel.left_width * s;
+                let title_h = 32.0 * s;
+                (sb_w, title_h, panel_left_w, wh - title_h - panel_bottom_h)
+            } else {
+                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+                let tab_h = 32.0 * s;
+                (sb_w, wh - panel_bottom_h + 1.0 + tab_h, ww - sb_w, panel_bottom_h - 1.0 - tab_h)
+            };
+
+            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                if let Some(term) = &mut self.ide_panel.terminal {
+                    term.scroll_y.anim_speed = 7.0;
+                    term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
+                    
+                    let lh = self.renderer.as_ref().unwrap().line_height;
+                    let term_scale = 0.82;
+                    let char_h = lh * term_scale;
+                    
+                    let grid = term.grid.lock().unwrap();
+                    let total_lines = grid.scrollback.len() + grid.lines.len();
+                    
+                    let max_scroll = ((total_lines as f32 * char_h) - ch).max(0.0);
+                    drop(grid);
+                    
+                    term.scroll_y.clamp_target(0.0, max_scroll);
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+                return;
+            }
+        }
+
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::LspServers) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
