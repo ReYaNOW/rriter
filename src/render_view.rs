@@ -44,7 +44,7 @@ impl Renderer {
         current_sticky_lines: &[(usize, usize)],
         sticky_anim_progress: f32,
         sticky_anim_is_adding: bool,
-                is_ide_mode: bool,
+        is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
         lsp: Option<&crate::lsp::LspManager>,
@@ -52,7 +52,11 @@ impl Renderer {
         tab_scroll_x: f32,
     ) -> (bool, Vec<(usize, usize)>) {
         let lsp_diagnostics = if let Some(l) = lsp {
-            if let Some(p) = editor_path { l.get_diagnostics(p) } else { &[] }
+            if let Some(p) = editor_path {
+                l.get_diagnostics(p)
+            } else {
+                &[]
+            }
         } else {
             &[]
         };
@@ -160,9 +164,13 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-                        let real_height = self.height;
-                        let tab_bar_h = if show_welcome || !is_ide_mode { 0.0 } else { 44.0 * s };
-                        let editor_height = real_height - tab_bar_h;
+        let real_height = self.height;
+        let tab_bar_h = if show_welcome || !is_ide_mode {
+            0.0
+        } else {
+            44.0 * s
+        };
+        let editor_height = real_height - tab_bar_h;
 
         let target_minimap_w = 119.0 * s;
 
@@ -241,7 +249,7 @@ impl Renderer {
             let btn_x = 0.0;
             let top_start_y = 0.0;
 
-                        let mut top_idx = 0usize;
+            let mut top_idx = 0usize;
             let mut bottom_idx = 0usize;
 
             let lsp_has_issues = lsp.map_or(false, |l| {
@@ -279,7 +287,7 @@ impl Renderer {
                     y
                 };
 
-                                                                let custom_color = if slot.id == crate::app::PanelId::Problems {
+                let custom_color = if slot.id == crate::app::PanelId::Problems {
                     if lsp_has_issues {
                         Some([1.0, 0.8, 0.1, 1.0])
                     } else {
@@ -313,10 +321,10 @@ impl Renderer {
             // Призрак перетаскиваемой кнопки + разделитель
             if let Some(drag) = &ide_panel.drag {
                 if drag.threshold_passed {
-                                                            if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
+                    if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
                         let ghost_y =
                             (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
-                                                let ghost_color = if slot.id == crate::app::PanelId::Problems {
+                        let ghost_color = if slot.id == crate::app::PanelId::Problems {
                             if lsp_has_issues {
                                 Some([1.0, 0.8, 0.1, 1.0])
                             } else {
@@ -386,20 +394,34 @@ impl Renderer {
                 ];
                 self.push_rect(panel_x, 0.0, panel_left_w, title_h, title_bg);
 
-                                let open_top_count = ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).count();
+                let open_top_count = ide_panel
+                    .slots
+                    .iter()
+                    .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                    .count();
 
                 if open_top_count == 1 {
-                    let slot = ide_panel.slots.iter().find(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).unwrap();
+                    let slot = ide_panel
+                        .slots
+                        .iter()
+                        .find(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                        .unwrap();
                     let label = slot.id.label();
-                    self.draw_string_scaled(label,
+                    self.draw_string_scaled(
+                        label,
                         panel_x + 12.0 * s,
                         title_h / 2.0 + 6.0 * s,
                         self.theme.fg,
                         0.9,
                     );
-                                } else {
+                } else {
                     let mut tx = panel_x + 6.0 * s;
-                    for (i, slot) in ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open).enumerate() {
+                    for (i, slot) in ide_panel
+                        .slots
+                        .iter()
+                        .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                        .enumerate()
+                    {
                         let label = slot.id.label();
                         let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
                         if i == 0 {
@@ -509,7 +531,7 @@ impl Renderer {
                             }
 
                             let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
-                                                        let mut has_error = false;
+                            let mut has_error = false;
                             let mut has_warn = false;
                             if !node.is_ignored {
                                 if let Some(l) = lsp {
@@ -519,7 +541,9 @@ impl Renderer {
                                                 if d.severity == crate::lsp::DiagSeverity::Error {
                                                     has_error = true;
                                                     break;
-                                                } else if d.severity == crate::lsp::DiagSeverity::Warning {
+                                                } else if d.severity
+                                                    == crate::lsp::DiagSeverity::Warning
+                                                {
                                                     has_warn = true;
                                                 }
                                             }
@@ -531,10 +555,13 @@ impl Renderer {
                                 }
                             }
 
-                                                        let text_y = row_y + row_h / 2.0 + 5.5 * s;
-                            let color: [f32; 4] = if node.is_ignored {[0.973, 0.584, 0.502, 0.8]
-                            } else if node.is_dir {[0.78, 0.68, 1.0, 1.0]
-                            } else {[0.651, 0.686, 0.918, 1.0]
+                            let text_y = row_y + row_h / 2.0 + 5.5 * s;
+                            let color: [f32; 4] = if node.is_ignored {
+                                [0.973, 0.584, 0.502, 0.8]
+                            } else if node.is_dir {
+                                [0.78, 0.68, 1.0, 1.0]
+                            } else {
+                                [0.651, 0.686, 0.918, 1.0]
                             };
 
                             let icon_size = 20.0 * s;
@@ -545,8 +572,10 @@ impl Renderer {
                                 let arrow_str = if node.is_expanded { "▼" } else { "▶" };
                                 let arrow_x = indent_x - 2.0 * s;
                                 let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
-                                let arrow_color = if node.is_ignored {[0.973, 0.584, 0.502, 0.6]
-                                } else {[0.78, 0.68, 1.0, 0.7]
+                                let arrow_color = if node.is_ignored {
+                                    [0.973, 0.584, 0.502, 0.6]
+                                } else {
+                                    [0.78, 0.68, 1.0, 0.7]
                                 };
                                 self.draw_string_scaled(
                                     arrow_str,
@@ -574,7 +603,11 @@ impl Renderer {
                                 );
                                 if has_error || has_warn {
                                     let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
-                                    let sq_color = if has_error { self.theme.diag_error } else { self.theme.diag_warn };
+                                    let sq_color = if has_error {
+                                        self.theme.diag_error
+                                    } else {
+                                        self.theme.diag_warn
+                                    };
                                     self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
                                 }
                             } else {
@@ -596,7 +629,11 @@ impl Renderer {
                                 );
                                 if has_error || has_warn {
                                     let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
-                                    let sq_color = if has_error { self.theme.diag_error } else { self.theme.diag_warn };
+                                    let sq_color = if has_error {
+                                        self.theme.diag_error
+                                    } else {
+                                        self.theme.diag_warn
+                                    };
                                     self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
                                 }
                             }
@@ -628,7 +665,7 @@ impl Renderer {
                     }
                 }
 
-                                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+                // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
                 let resize_x = panel_x + panel_left_w;
                 if mx >= resize_x - 8.0 * s
                     && mx <= resize_x + 8.0 * s
@@ -639,7 +676,8 @@ impl Renderer {
                         resize_x - 2.0,
                         0.0,
                         2.0,
-                        real_height,[0.60, 0.35, 0.85, 0.4],
+                        real_height,
+                        [0.60, 0.35, 0.85, 0.4],
                     );
                 }
             }
@@ -707,7 +745,7 @@ impl Renderer {
             .map(|a| a.max(editor.cursor))
             .unwrap_or(editor.cursor);
 
-                // --- Одинаковые слова (Word Highlighting) ---
+        // --- Одинаковые слова (Word Highlighting) ---
         self.identical_words_cache.clear();
         let mut target_word_str: Option<&str> = None;
         let is_valid_word = |s: &str| -> bool {
@@ -717,16 +755,20 @@ impl Renderer {
                     .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
         };
 
-                if sel_start != sel_end {
+        if sel_start != sel_end {
             let slen = sel_end - sel_start;
             if slen < 100 {
                 if sel_end <= first_len {
                     if let Some(s) = first.get(sel_start..sel_end) {
-                        if is_valid_word(s) { target_word_str = Some(s); }
+                        if is_valid_word(s) {
+                            target_word_str = Some(s);
+                        }
                     }
                 } else if sel_start >= first_len {
                     if let Some(s) = second.get((sel_start - first_len)..(sel_end - first_len)) {
-                        if is_valid_word(s) { target_word_str = Some(s); }
+                        if is_valid_word(s) {
+                            target_word_str = Some(s);
+                        }
                     }
                 }
             }
@@ -750,11 +792,15 @@ impl Renderer {
             if p_end > p_start {
                 if p_end <= first_len {
                     if let Some(s) = first.get(p_start..p_end) {
-                        if is_valid_word(s) { target_word_str = Some(s); }
+                        if is_valid_word(s) {
+                            target_word_str = Some(s);
+                        }
                     }
                 } else if p_start >= first_len {
                     if let Some(s) = second.get((p_start - first_len)..(p_end - first_len)) {
-                        if is_valid_word(s) { target_word_str = Some(s); }
+                        if is_valid_word(s) {
+                            target_word_str = Some(s);
+                        }
                     }
                 }
             }
@@ -924,7 +970,7 @@ impl Renderer {
             }
         }
 
-                self.mod_intervals_cache.clear();
+        self.mod_intervals_cache.clear();
         self.merged_intervals_cache.clear();
         let mut last_phys_line = None;
         let mut last_bottom_y = 0.0;
@@ -1014,7 +1060,9 @@ impl Renderer {
             };
 
             let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
-                        let mut identical_idx = self.identical_words_cache.partition_point(|&(_, e)| e <= start_byte);
+            let mut identical_idx = self
+                .identical_words_cache
+                .partition_point(|&(_, e)| e <= start_byte);
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -1059,7 +1107,7 @@ impl Renderer {
                     {
                         search_idx += 1;
                     }
-                                        while identical_idx < self.identical_words_cache.len()
+                    while identical_idx < self.identical_words_cache.len()
                         && self.identical_words_cache[identical_idx].1 <= current_offset
                     {
                         identical_idx += 1;
@@ -1085,7 +1133,7 @@ impl Renderer {
                         }
                     }
 
-                                        let is_identical = identical_idx < self.identical_words_cache.len()
+                    let is_identical = identical_idx < self.identical_words_cache.len()
                         && current_offset >= self.identical_words_cache[identical_idx].0;
 
                     let is_bracket = if let Some((b1, b2)) = bracket_pairs {
@@ -1329,7 +1377,7 @@ impl Renderer {
 
         self.flush();
 
-                self.hovered_diags_cache.clear();
+        self.hovered_diags_cache.clear();
         let mut mouse_in_popup = false;
         if let Some(rect) = self.last_diag_popup_rect {
             // Расширяем "зону безопасности" попапа на 40px во все стороны,
@@ -1424,7 +1472,7 @@ impl Renderer {
                     let squiggle_hit_y_top = top_y;
                     let squiggle_hit_y_bottom = top_y + self.line_height;
 
-                                        if mouse_in_popup {
+                    if mouse_in_popup {
                         if self.last_hovered_diags.contains(&idx) {
                             in_hitbox = true;
                         }
@@ -1437,13 +1485,9 @@ impl Renderer {
                     }
                 }
 
-                                if in_hitbox {
-                    self.hovered_diags_cache.push((
-                        idx,
-                        x_start,
-                        top_y,
-                        top_y + self.line_height,
-                    ));
+                if in_hitbox {
+                    self.hovered_diags_cache
+                        .push((idx, x_start, top_y, top_y + self.line_height));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {
@@ -1533,7 +1577,7 @@ impl Renderer {
             }
         }
 
-                        for i in 0..self.merged_intervals_cache.len() {
+        for i in 0..self.merged_intervals_cache.len() {
             let m = self.merged_intervals_cache[i];
             if m.bottom < 0.0 || m.top > real_height {
                 continue;
@@ -1673,10 +1717,11 @@ impl Renderer {
                 scale_sub,
             );
             self.flush();
-                } else if !show_welcome && is_ide_mode {
+        } else if !show_welcome && is_ide_mode {
             let tab_x = gutter_x;
             let tab_w = self.width - tab_x;
-            self.draw_tab_bar(tabs,
+            self.draw_tab_bar(
+                tabs,
                 active_tab,
                 editor,
                 editor_title,
@@ -1785,7 +1830,8 @@ impl Renderer {
                     && sl.open
                     && sl.id == crate::app::PanelId::Terminal
             });
-            let panel_alpha = if is_terminal { 0.82 } else { 1.0 };
+            // Прозрачность терминала (0.0 - полностью прозрачный, 1.0 - непрозрачный)
+            let panel_alpha = if is_terminal { 0.80 } else { 1.0 };
 
             let panel_bg = [
                 0.129, // #21
@@ -1803,7 +1849,7 @@ impl Renderer {
             );
 
             // Непрозрачная панель полностью перехватывает мышь (курсор не меняется, клики не проваливаются)
-            if !is_terminal {
+            if !is_terminal || ide_panel.terminal_focused {
                 let blocked = ui_registry.register_blocker(
                     crate::ui_system::UiId::BottomPanelBody,
                     panel_x,
@@ -1827,8 +1873,13 @@ impl Renderer {
             ];
             self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
-                        let mut tx = panel_x + 8.0 * s;
-            for (i, slot) in ide_panel.slots.iter().filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open).enumerate() {
+            let mut tx = panel_x + 8.0 * s;
+            for (i, slot) in ide_panel
+                .slots
+                .iter()
+                .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                .enumerate()
+            {
                 let label = slot.id.label();
                 let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
                 if i == 0 {
@@ -1851,16 +1902,20 @@ impl Renderer {
                 tx += tw;
             }
 
-                        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+            // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
             if my >= panel_y - 8.0 * s && my <= panel_y + 8.0 * s && mx >= panel_x {
-                self.push_rect(panel_x, panel_y, panel_w, 2.0,[0.60, 0.35, 0.85, 0.4]);
+                self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
             }
 
-                        // Плейсхолдер контента
+            // Плейсхолдер контента
             let content_y = panel_y + 1.0 + tab_h;
             let content_h = panel_bottom_h - 1.0 - tab_h;
             if content_h > 8.0 * s {
-                if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open) {
+                if let Some(slot) = ide_panel
+                    .slots
+                    .iter()
+                    .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                {
                     if slot.id == crate::app::PanelId::LspServers {
                         self.draw_lsp_servers_panel(
                             panel_x,
@@ -1872,107 +1927,211 @@ impl Renderer {
                             !lsp_diagnostics.is_empty(),
                             ui_registry,
                         );
-                                                        } else if slot.id == crate::app::PanelId::Problems {
-                    self.draw_problems_panel(
-                        panel_x,
-                        content_y,
-                        panel_w,
-                        content_h,
-                        s,
-                        lsp,
-                        ide_panel,
-                        ui_registry,
-                    );
-                                                } else if slot.id == crate::app::PanelId::Terminal {
-                    if let Some(term) = &ide_panel.terminal {
-                        let mut grid = term.grid.lock().unwrap();
-                        let term_scale = 0.82; // Немного увеличили
-                        let char_w = self.char_advance('A') * term_scale;
-                        let char_h = self.line_height * term_scale;
-                        let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
-                        let new_rows = (content_h / char_h).floor().max(2.0) as usize;
+                    } else if slot.id == crate::app::PanelId::Problems {
+                        self.draw_problems_panel(
+                            panel_x,
+                            content_y,
+                            panel_w,
+                            content_h,
+                            s,
+                            lsp,
+                            ide_panel,
+                            ui_registry,
+                        );
+                    } else if slot.id == crate::app::PanelId::Terminal {
+                        if let Some(term) = &ide_panel.terminal {
+                            let mut grid = term.grid.lock().unwrap();
+                            let term_scale = 0.82; // Немного увеличили
+                            let char_w = self.char_advance('A') * term_scale;
+                            let char_h = self.line_height * term_scale;
+                            let new_cols =
+                                ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
+                            let new_rows = (content_h / char_h).floor().max(2.0) as usize;
 
-                        if grid.cols != new_cols || grid.visible_rows != new_rows {
-                            grid.resize(new_cols, new_rows);
-                            term.resize_pty(new_cols as u16, new_rows as u16);
-                        }
-                        grid.dirty = false;
+                            if grid.cols != new_cols || grid.visible_rows != new_rows {
+                                grid.resize(new_cols, new_rows);
+                                term.resize_pty(new_cols as u16, new_rows as u16);
+                            }
+                            grid.dirty = false;
 
-                        let ansi_colors = [[0.0, 0.0, 0.0, 1.0],[0.8, 0.2, 0.2, 1.0], [0.2, 0.8, 0.2, 1.0],[0.8, 0.8, 0.2, 1.0],[0.2, 0.4, 0.8, 1.0],[0.8, 0.2, 0.8, 1.0],[0.2, 0.8, 0.8, 1.0],[0.8, 0.8, 0.8, 1.0],[0.4, 0.4, 0.4, 1.0], [1.0, 0.4, 0.4, 1.0],[0.4, 1.0, 0.4, 1.0],[1.0, 1.0, 0.4, 1.0],[0.4, 0.6, 1.0, 1.0],[1.0, 0.4, 1.0, 1.0],[0.4, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
-                        ];
+                            let ansi_colors = [
+                                [0.0, 0.0, 0.0, 1.0],
+                                [0.8, 0.2, 0.2, 1.0],
+                                [0.2, 0.8, 0.2, 1.0],
+                                [0.8, 0.8, 0.2, 1.0],
+                                [0.2, 0.4, 0.8, 1.0],
+                                [0.8, 0.2, 0.8, 1.0],
+                                [0.2, 0.8, 0.8, 1.0],
+                                [0.8, 0.8, 0.8, 1.0],
+                                [0.4, 0.4, 0.4, 1.0],
+                                [1.0, 0.4, 0.4, 1.0],
+                                [0.4, 1.0, 0.4, 1.0],
+                                [1.0, 1.0, 0.4, 1.0],
+                                [0.4, 0.6, 1.0, 1.0],
+                                [1.0, 0.4, 1.0, 1.0],
+                                [0.4, 1.0, 1.0, 1.0],
+                                [1.0, 1.0, 1.0, 1.0],
+                            ];
 
-                        let total_lines = grid.scrollback.len() + grid.lines.len();
-                        let scroll_offset = term.scroll_y.current.round();
-                        let draw_x = panel_x + 10.0 * s;
+                            let total_lines = grid.scrollback.len() + grid.lines.len();
+                            let scroll_offset = term.scroll_y.current.round();
+                            let draw_x = panel_x + 10.0 * s;
 
-                        for i in 0..total_lines {
-                            let offset_from_bottom = total_lines - 1 - i;
-                            let draw_y = content_y + content_h - char_h - (offset_from_bottom as f32 * char_h) + scroll_offset;
-                            
-                            if draw_y + char_h < content_y || draw_y > content_y + content_h {
-                                continue;
+                            self.flush();
+                            unsafe {
+                                self.gl.enable(glow::SCISSOR_TEST);
+                                let sy = (self.height - (content_y + content_h)).round() as i32;
+                                self.gl.scissor(
+                                    panel_x.round() as i32,
+                                    sy,
+                                    panel_w.round() as i32,
+                                    content_h.round() as i32,
+                                );
                             }
 
-                            let row = if i < grid.scrollback.len() {
-                                &grid.scrollback[i]
-                            } else {
-                                &grid.lines[i - grid.scrollback.len()]
-                            };
+                            for i in 0..total_lines {
+                                let offset_from_bottom = total_lines - 1 - i;
+                                let draw_y = content_y + content_h
+                                    - char_h
+                                    - (offset_from_bottom as f32 * char_h)
+                                    + scroll_offset;
 
-                            let mut cx = draw_x;
-                            for (c_idx, cell) in row.iter().enumerate() {
-                                if c_idx >= grid.cols { break; }
-                                if cell.bg != 0 && cell.bg < 16 {
-                                    self.push_rect(cx, draw_y, char_w, char_h, ansi_colors[cell.bg as usize]);
+                                // Строго отсекаем линии, которые полностью или частично вылезают за верх/низ (для надежности поверх glScissor)
+                                if draw_y + char_h < content_y || draw_y > content_y + content_h {
+                                    continue;
                                 }
-                                if cell.c != ' ' {
-                                    let fg_color = if cell.fg < 16 { ansi_colors[cell.fg as usize] } else { self.theme.fg };
-                                    self.draw_string_mono_scaled(&cell.c.to_string(), cx, draw_y + char_h / 2.0 + 3.0 * s, fg_color, term_scale);
+
+                                if self.vertices.len() > 30_000 {
+                                    self.flush();
                                 }
-                                cx += char_w;
+
+                                let row = if i < grid.scrollback.len() {
+                                    &grid.scrollback[i]
+                                } else {
+                                    &grid.lines[i - grid.scrollback.len()]
+                                };
+
+                                let mut cx = draw_x;
+                                for (c_idx, cell) in row.iter().enumerate() {
+                                    if c_idx >= grid.cols {
+                                        break;
+                                    }
+                                    if cell.bg != 0 && cell.bg < 16 {
+                                        self.push_rect(
+                                            cx,
+                                            draw_y,
+                                            char_w,
+                                            char_h,
+                                            ansi_colors[cell.bg as usize],
+                                        );
+                                    }
+                                    if cell.c != ' ' {
+                                        let fg_color = if cell.fg < 16 {
+                                            ansi_colors[cell.fg as usize]
+                                        } else {
+                                            self.theme.fg
+                                        };
+                                        self.draw_string_mono_scaled(
+                                            &cell.c.to_string(),
+                                            cx,
+                                            draw_y + char_h / 2.0 + 3.0 * s,
+                                            fg_color,
+                                            term_scale,
+                                        );
+                                    }
+                                    cx += char_w;
+                                }
+                            }
+
+                            if ide_panel.terminal_focused {
+                                let cursor_offset_from_bottom = grid
+                                    .lines
+                                    .len()
+                                    .saturating_sub(1)
+                                    .saturating_sub(grid.cur_y);
+                                let cursor_px_y = content_y + content_h
+                                    - char_h
+                                    - (cursor_offset_from_bottom as f32 * char_h)
+                                    + scroll_offset;
+                                if cursor_px_y + char_h >= content_y
+                                    && cursor_px_y <= content_y + content_h
+                                {
+                                    let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
+                                    self.push_rect(
+                                        cursor_px_x,
+                                        cursor_px_y + 2.0 * s,
+                                        char_w,
+                                        char_h,
+                                        [1.0, 1.0, 1.0, 0.5],
+                                    );
+                                }
+
+                                let border_color = self.theme.sel;
+                                self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
+                                self.push_rect(
+                                    panel_x,
+                                    content_y + content_h - 2.0 * s,
+                                    panel_w,
+                                    2.0 * s,
+                                    border_color,
+                                );
+                                self.push_rect(
+                                    panel_x,
+                                    content_y,
+                                    2.0 * s,
+                                    content_h,
+                                    border_color,
+                                );
+                                self.push_rect(
+                                    panel_x + panel_w - 2.0 * s,
+                                    content_y,
+                                    2.0 * s,
+                                    content_h,
+                                    border_color,
+                                );
+                            }
+
+                            let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                            if max_scroll > 0.0 {
+                                let track_h = content_h;
+                                let handle_h =
+                                    (content_h / (total_lines as f32 * char_h)) * track_h;
+                                let handle_h = handle_h.max(20.0 * s);
+                                let scroll_progress = term.scroll_y.current / max_scroll;
+                                let handle_y = content_y + content_h
+                                    - handle_h
+                                    - scroll_progress * (track_h - handle_h);
+                                let sb_w = 14.0 * s;
+                                let thumb_w = sb_w - 2.0 * s;
+                                self.push_rounded_rect(
+                                    panel_x + panel_w - sb_w + 1.0 * s,
+                                    handle_y,
+                                    thumb_w,
+                                    handle_h,
+                                    thumb_w / 2.0,
+                                    [0.7, 0.33, 0.54, 0.8],
+                                );
+                            }
+
+                            self.flush();
+                            unsafe {
+                                self.gl.disable(glow::SCISSOR_TEST);
                             }
                         }
 
                         if ide_panel.terminal_focused {
-                            let cursor_offset_from_bottom = grid.lines.len().saturating_sub(1).saturating_sub(grid.cur_y);
-                            let cursor_px_y = content_y + content_h - char_h - (cursor_offset_from_bottom as f32 * char_h) + scroll_offset;
-                            if cursor_px_y + char_h >= content_y && cursor_px_y <= content_y + content_h {
-                                let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
-                                self.push_rect(cursor_px_x, cursor_px_y + 2.0 * s, char_w, char_h,[1.0, 1.0, 1.0, 0.5]);
-                            }
-
-                            let border_color = self.theme.sel;
-                            self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
-                            self.push_rect(panel_x, content_y + content_h - 2.0 * s, panel_w, 2.0 * s, border_color);
-                            self.push_rect(panel_x, content_y, 2.0 * s, content_h, border_color);
-                            self.push_rect(panel_x + panel_w - 2.0 * s, content_y, 2.0 * s, content_h, border_color);
+                            ui_registry.register_text_input(
+                                crate::ui_system::UiId::TerminalBody,
+                                panel_x,
+                                content_y,
+                                panel_w,
+                                content_h,
+                                mx,
+                                my,
+                            );
                         }
-                        
-                        let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
-                        if max_scroll > 0.0 {
-                            let track_h = content_h;
-                            let handle_h = (content_h / (total_lines as f32 * char_h)) * track_h;
-                            let handle_h = handle_h.max(20.0 * s);
-                            let scroll_progress = term.scroll_y.current / max_scroll;
-                            let handle_y = content_y + content_h - handle_h - scroll_progress * (track_h - handle_h);
-                            let sb_w = 6.0 * s;
-                            self.push_rect(panel_x + panel_w - sb_w, handle_y, sb_w, handle_h, [1.0, 1.0, 1.0, 0.15]);
-                        }
-                        
-                        self.flush();
-                    }
-
-                    ui_registry.register_rect(
-                        crate::ui_system::UiId::TerminalBody,
-                        panel_x,
-                        content_y,
-                        panel_w,
-                        content_h,
-                        mx,
-                        my,
-                    );
-                } else {
-                    let label = slot.id.label();
+                    } else {
+                        let label = slot.id.label();
                         let lw = self.measure_ui_width(label, 0.85);
                         let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
                         self.draw_string_scaled(
@@ -1991,7 +2150,7 @@ impl Renderer {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
 
-                // --- LSP Diagnostic Tooltip ---
+        // --- LSP Diagnostic Tooltip ---
         if self.hovered_diags_cache.is_empty() {
             self.last_diag_popup_rect = None;
             self.last_hovered_diags.clear();
@@ -2005,7 +2164,8 @@ impl Renderer {
         self.last_draw_instant = Some(now);
 
         self.last_hovered_diags.clear();
-        self.last_hovered_diags.extend(self.hovered_diags_cache.iter().map(|h| h.0));
+        self.last_hovered_diags
+            .extend(self.hovered_diags_cache.iter().map(|h| h.0));
         let first_idx = self.last_hovered_diags.first().copied();
 
         if first_idx != self.diag_hover_timer_idx {
@@ -2023,7 +2183,7 @@ impl Renderer {
             let icon_sz = 20.0 * s;
             let max_text_w = (self.width - 100.0 * s).max(300.0 * s).min(700.0 * s);
 
-                        let mut global_max_w = 180.0 * s;
+            let mut global_max_w = 180.0 * s;
             let mut total_h = pad * 2.0;
 
             for i in 0..self.hovered_diags_cache.len() {
@@ -2033,9 +2193,12 @@ impl Renderer {
                 let source_str = diag.source.as_deref().unwrap_or("LSP");
                 let code_str = diag.code.as_deref().unwrap_or("");
 
-                let prefix_w = self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
+                let prefix_w =
+                    self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
                 let suffix_w = if !code_str.is_empty() {
-                    self.measure_ui_width(" ", 1.0) + self.measure_ui_width(code_str, 1.0) + self.measure_ui_width(")", 1.0)
+                    self.measure_ui_width(" ", 1.0)
+                        + self.measure_ui_width(code_str, 1.0)
+                        + self.measure_ui_width(")", 1.0)
                 } else {
                     self.measure_ui_width(")", 1.0)
                 };
@@ -2047,29 +2210,43 @@ impl Renderer {
 
                 for word in diag.message.split_whitespace() {
                     let w = self.measure_ui_width(word, 1.0);
-                    let space_w = if cur_line_w > 0.0 { self.measure_ui_width(" ", 1.0) } else { 0.0 };
+                    let space_w = if cur_line_w > 0.0 {
+                        self.measure_ui_width(" ", 1.0)
+                    } else {
+                        0.0
+                    };
 
                     if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
-                        if cur_line_w > max_line_w { max_line_w = cur_line_w; }
+                        if cur_line_w > max_line_w {
+                            max_line_w = cur_line_w;
+                        }
                         line_count += 1;
                         cur_line_w = w;
                     } else {
                         cur_line_w += space_w + w;
                     }
                 }
-                if cur_line_w > max_line_w { max_line_w = cur_line_w; }
+                if cur_line_w > max_line_w {
+                    max_line_w = cur_line_w;
+                }
 
                 let source_on_new_line = cur_line_w + source_full_w + 10.0 * s > max_text_w;
                 if source_on_new_line {
                     line_count += 1;
-                    if source_full_w > max_line_w { max_line_w = source_full_w; }
+                    if source_full_w > max_line_w {
+                        max_line_w = source_full_w;
+                    }
                 } else {
                     let combined = cur_line_w + 8.0 * s + source_full_w;
-                    if combined > max_line_w { max_line_w = combined; }
+                    if combined > max_line_w {
+                        max_line_w = combined;
+                    }
                 }
 
                 let item_w = max_line_w + pad * 2.0 + icon_sz + 16.0 * s;
-                if item_w > global_max_w { global_max_w = item_w; }
+                if item_w > global_max_w {
+                    global_max_w = item_w;
+                }
 
                 let text_h = line_count as f32 * line_h;
                 total_h += text_h;
@@ -2078,7 +2255,8 @@ impl Renderer {
             total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
             let box_w = global_max_w;
 
-            let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
+            let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) =
+                self.hovered_diags_cache[0];
             let mut bx = first_diag_x;
             if bx + box_w > self.width - 20.0 * s {
                 bx = self.width - box_w - 20.0 * s;
@@ -2110,14 +2288,16 @@ impl Renderer {
                 by.round() - 1.0,
                 box_w.round() + 2.0,
                 total_h.round() + 2.0,
-                6.0 * s,[0.4, 0.4, 0.45, 0.6],
+                6.0 * s,
+                [0.4, 0.4, 0.45, 0.6],
             );
             self.push_rounded_rect(
                 bx.round(),
                 by.round(),
                 box_w.round(),
                 total_h.round(),
-                6.0 * s,[
+                6.0 * s,
+                [
                     self.theme.minimap_bg[0],
                     self.theme.minimap_bg[1],
                     self.theme.minimap_bg[2],
@@ -2125,24 +2305,27 @@ impl Renderer {
                 ],
             );
 
-                        let mut current_y = by + pad;
+            let mut current_y = by + pad;
 
             for i in 0..self.hovered_diags_cache.len() {
                 let (idx, _, _, _) = self.hovered_diags_cache[i];
                 let diag = &lsp_diagnostics[idx];
                 let border_color = match diag.severity {
-                    crate::lsp::DiagSeverity::Error =>[0.96, 0.26, 0.21, 1.0],
-                    crate::lsp::DiagSeverity::Warning =>[0.95, 0.9, 0.3, 1.0],
-                    crate::lsp::DiagSeverity::Info =>[0.26, 0.73, 0.90, 1.0],
-                    crate::lsp::DiagSeverity::Hint =>[0.50, 0.50, 0.50, 1.0],
+                    crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 1.0],
+                    crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 1.0],
+                    crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 1.0],
+                    crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 1.0],
                 };
 
                 let source_str = diag.source.as_deref().unwrap_or("LSP");
                 let code_str = diag.code.as_deref().unwrap_or("");
 
-                let prefix_w = self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
+                let prefix_w =
+                    self.measure_ui_width("(", 1.0) + self.measure_ui_width(source_str, 1.0);
                 let suffix_w = if !code_str.is_empty() {
-                    self.measure_ui_width(" ", 1.0) + self.measure_ui_width(code_str, 1.0) + self.measure_ui_width(")", 1.0)
+                    self.measure_ui_width(" ", 1.0)
+                        + self.measure_ui_width(code_str, 1.0)
+                        + self.measure_ui_width(")", 1.0)
                 } else {
                     self.measure_ui_width(")", 1.0)
                 };
@@ -2155,7 +2338,11 @@ impl Renderer {
 
                 for word in diag.message.split_whitespace() {
                     let w = self.measure_ui_width(word, 1.0);
-                    let space_w = if cur_line_w > 0.0 { self.measure_ui_width(" ", 1.0) } else { 0.0 };
+                    let space_w = if cur_line_w > 0.0 {
+                        self.measure_ui_width(" ", 1.0)
+                    } else {
+                        0.0
+                    };
 
                     if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
                         lines_count += 1;
@@ -2168,7 +2355,13 @@ impl Renderer {
                         }
                         cur_line_w += space_w + w;
                     }
-                    self.draw_string_scaled(word, draw_x, text_y.round(), [0.9, 0.9, 0.9, 1.0], 1.0);
+                    self.draw_string_scaled(
+                        word,
+                        draw_x,
+                        text_y.round(),
+                        [0.9, 0.9, 0.9, 1.0],
+                        1.0,
+                    );
                     draw_x += w;
                 }
 
@@ -2181,13 +2374,25 @@ impl Renderer {
                     draw_x += 8.0 * s;
                 }
 
-                self.draw_string_scaled("(", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                self.draw_string_scaled("(", draw_x, text_y.round(), [0.55, 0.55, 0.6, 1.0], 1.0);
                 draw_x += self.measure_ui_width("(", 1.0);
-                self.draw_string_scaled(source_str, draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                self.draw_string_scaled(
+                    source_str,
+                    draw_x,
+                    text_y.round(),
+                    [0.55, 0.55, 0.6, 1.0],
+                    1.0,
+                );
                 draw_x += self.measure_ui_width(source_str, 1.0);
 
                 if !code_str.is_empty() {
-                    self.draw_string_scaled(" ", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                    self.draw_string_scaled(
+                        " ",
+                        draw_x,
+                        text_y.round(),
+                        [0.55, 0.55, 0.6, 1.0],
+                        1.0,
+                    );
                     draw_x += self.measure_ui_width(" ", 1.0);
 
                     let sfx_w = self.measure_ui_width(code_str, 1.0);
@@ -2198,10 +2403,11 @@ impl Renderer {
                         && my >= text_y.round() - line_h
                         && my <= text_y.round() + 2.0 * s;
 
-                    let link_color: [f32; 4] =[0.72, 0.52, 1.0, 1.0];
+                    let link_color: [f32; 4] = [0.72, 0.52, 1.0, 1.0];
                     let sfx_color = if sfx_hovered {
                         link_color
-                    } else {[link_color[0], link_color[1], link_color[2], 0.85]
+                    } else {
+                        [link_color[0], link_color[1], link_color[2], 0.85]
                     };
 
                     if has_href {
@@ -2213,7 +2419,7 @@ impl Renderer {
                             1.0,
                             [link_color[0], link_color[1], link_color[2], ul_alpha],
                         );
-                                                if sfx_hovered {
+                        if sfx_hovered {
                             wants_pointer = true;
                             self.last_diag_href = diag.code_href.clone();
                         }
@@ -2232,16 +2438,10 @@ impl Renderer {
                     draw_x += sfx_w;
                 }
 
-                self.draw_string_scaled(")", draw_x, text_y.round(),[0.55, 0.55, 0.6, 1.0], 1.0);
+                self.draw_string_scaled(")", draw_x, text_y.round(), [0.55, 0.55, 0.6, 1.0], 1.0);
 
                 let total_text_h = lines_count as f32 * line_h;
-                self.push_rect(
-                    bx + 4.0 * s,
-                    current_y,
-                    3.0 * s,
-                    total_text_h,
-                    border_color,
-                );
+                self.push_rect(bx + 4.0 * s, current_y, 3.0 * s, total_text_h, border_color);
 
                 let is_copied = ide_panel.diag_copied_idx == Some(idx);
                 let btn_x = (bx + box_w - pad - icon_sz).round();
@@ -2257,17 +2457,32 @@ impl Renderer {
                         btn_y - 2.0 * s,
                         icon_sz + 8.0 * s,
                         icon_sz + 4.0 * s,
-                        4.0 * s,[1.0, 1.0, 1.0, 0.1],
+                        4.0 * s,
+                        [1.0, 1.0, 1.0, 0.1],
                     );
                     wants_pointer = true;
                 }
-                let icon_type = if is_copied { crate::widgets::IconType::Check } else { crate::widgets::IconType::Copy };
-                let icon_color = if is_copied {[0.3, 0.9, 0.4, 1.0] } else { self.theme.fg };
+                let icon_type = if is_copied {
+                    crate::widgets::IconType::Check
+                } else {
+                    crate::widgets::IconType::Copy
+                };
+                let icon_color = if is_copied {
+                    [0.3, 0.9, 0.4, 1.0]
+                } else {
+                    self.theme.fg
+                };
                 let icon_render_sz = 16.0 * s;
                 let offset = (icon_sz - icon_render_sz) / 2.0;
-                self.draw_atlas_icon(icon_type, btn_x + offset, btn_y + offset, icon_render_sz, icon_color);
+                self.draw_atlas_icon(
+                    icon_type,
+                    btn_x + offset,
+                    btn_y + offset,
+                    icon_render_sz,
+                    icon_color,
+                );
 
-                                ui_registry.register_rect(
+                ui_registry.register_rect(
                     crate::ui_system::UiId::PopupCopyDiagnostic(idx),
                     btn_x - 4.0 * s,
                     btn_y - 2.0 * s,
@@ -2281,7 +2496,7 @@ impl Renderer {
             }
         }
 
-                self.flush();
+        self.flush();
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
         if is_ide_mode && panel_left_w > 0.0 {
