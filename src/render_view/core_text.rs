@@ -78,7 +78,7 @@ impl Renderer {
                             }
                         }
 
-                        if self.left_padding + whitespace_px_width + text_px_width > 50000.0 {
+                                                if self.left_padding + whitespace_px_width + text_px_width > scroll_x + self.width + 2000.0 {
                             out_of_bounds = true;
                             break;
                         }
@@ -134,31 +134,34 @@ impl Renderer {
                             while p > end_line_start {
                                 p -= 1;
                                 let b = editor.byte_at(p);
-                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
                                     p += 1;
                                     break;
                                 }
                             }
-                            let mut suffix_bytes = Vec::new();
+                            let mut suffix_bytes_rev = [0u8; 4];
+                            let mut suffix_len = 0;
                             let mut p_scan = p;
-                            while p_scan > end_line_start && suffix_bytes.len() < 4 {
+                            while p_scan > end_line_start && suffix_len < 4 {
                                 p_scan -= 1;
                                 let b = editor.byte_at(p_scan);
                                 if b == b' ' || b == b'\t' {
                                     break;
                                 }
-                                suffix_bytes.push(b);
+                                suffix_bytes_rev[suffix_len] = b;
+                                suffix_len += 1;
                             }
-                            suffix_bytes.reverse();
-                            if suffix_bytes.contains(&expected_close) {
-                                if let Some(pos) =
-                                    suffix_bytes.iter().position(|&x| x == expected_close)
-                                {
-                                    for &b in &suffix_bytes[pos..] {
-                                        if fold_suffix_len < 4 {
-                                            fold_suffix[fold_suffix_len as usize] = b as char;
-                                            fold_suffix_len += 1;
-                                        }
+
+                            if let Some(pos_in_rev) =
+                                suffix_bytes_rev[..suffix_len]
+                                    .iter()
+                                    .position(|&x| x == expected_close)
+                            {
+                                for i in (0..=pos_in_rev).rev() {
+                                    let b = suffix_bytes_rev[i];
+                                    if fold_suffix_len < 4 {
+                                        fold_suffix[fold_suffix_len as usize] = b as char;
+                                        fold_suffix_len += 1;
                                     }
                                 }
                             }
@@ -290,31 +293,34 @@ impl Renderer {
                             while p > end_line_start {
                                 p -= 1;
                                 let b = editor.byte_at(p);
-                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
                                     p += 1;
                                     break;
                                 }
                             }
-                            let mut suffix_bytes = Vec::new();
+                            let mut suffix_bytes_rev = [0u8; 4];
+                            let mut suffix_len = 0;
                             let mut p_scan = p;
-                            while p_scan > end_line_start && suffix_bytes.len() < 4 {
+                            while p_scan > end_line_start && suffix_len < 4 {
                                 p_scan -= 1;
                                 let b = editor.byte_at(p_scan);
                                 if b == b' ' || b == b'\t' {
                                     break;
                                 }
-                                suffix_bytes.push(b);
+                                suffix_bytes_rev[suffix_len] = b;
+                                suffix_len += 1;
                             }
-                            suffix_bytes.reverse();
-                            if suffix_bytes.contains(&expected_close) {
-                                if let Some(pos) =
-                                    suffix_bytes.iter().position(|&x| x == expected_close)
-                                {
-                                    for &b in &suffix_bytes[pos..] {
-                                        if fold_suffix_len < 4 {
-                                            fold_suffix[fold_suffix_len as usize] = b as char;
-                                            fold_suffix_len += 1;
-                                        }
+
+                            if let Some(pos_in_rev) =
+                                suffix_bytes_rev[..suffix_len]
+                                    .iter()
+                                    .position(|&x| x == expected_close)
+                            {
+                                for i in (0..=pos_in_rev).rev() {
+                                    let b = suffix_bytes_rev[i];
+                                    if fold_suffix_len < 4 {
+                                        fold_suffix[fold_suffix_len as usize] = b as char;
+                                        fold_suffix_len += 1;
                                     }
                                 }
                             }
@@ -463,23 +469,11 @@ impl Renderer {
                 }
             }
         }
-        w
+                w
     }
 
     pub fn get_max_scroll(&mut self, editor: &Editor, window_height: f32) -> f32 {
-        let mut phys_line = 0;
-        let mut lines_count = 0;
-        while phys_line < editor.line_offsets.len() {
-            lines_count += 1;
-            if editor.folded_lines.contains(&phys_line)
-                && editor.foldable_lines.contains_key(&phys_line)
-            {
-                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
-                    phys_line = end_l;
-                }
-            }
-            phys_line += 1;
-        }
+        let lines_count = editor.get_visible_lines_count();
         let total_height = lines_count as f32 * self.line_height;
         let raw_max = (total_height - window_height + self.line_height * 2.0).max(0.0);
         (raw_max / self.line_height).ceil() * self.line_height

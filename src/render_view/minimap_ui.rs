@@ -67,13 +67,14 @@ impl Renderer {
         let view_top = current_minimap_scroll;
         let view_bottom = current_minimap_scroll + editor_height;
 
-        let (first, second) = editor.text_parts();
+                let (first, second) = editor.text_parts();
+        let first_bytes = first.as_bytes();
+        let second_bytes = second.as_bytes();
         let first_len = first.len();
 
         while phys_line < editor.line_offsets.len() {
             let start_byte = editor.line_offsets[phys_line];
-            let is_folded = editor.folded_lines.contains(&phys_line)
-                && editor.foldable_lines.contains_key(&phys_line);
+            let is_folded = editor.folded_lines.contains(&phys_line)&& editor.foldable_lines.contains_key(&phys_line);
 
             if current_y > view_bottom {
                 break;
@@ -86,54 +87,34 @@ impl Renderer {
                     editor.len()
                 };
 
-                if is_folded {
+                                if is_folded {
                     end_byte -= 1;
                 }
 
-                let mut current_x = minimap_x + 5.0;
-                let mut cur_byte = start_byte;
-
-                let mut span_idx_mini = match spans.binary_search_by_key(&cur_byte, |s| s.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
-                };
+                let minimap_char_width = 1.5;
+                let line_start_x = minimap_x + 5.0;
+                let minimap_max_x = minimap_x + self.minimap_width - 5.0;
 
                 let y1 = tab_bar_h + (current_y - current_minimap_scroll).round();
                 let y2 = y1 + rect_h;
 
-                while cur_byte < end_byte {
-                    let text_chunk = if cur_byte < first_len {
-                        &first[cur_byte..end_byte.min(first_len)]
-                    } else {
-                        &second[cur_byte - first_len..end_byte - first_len]
+                let mut cur_byte_abs = start_byte;
+                let mut cur_char_idx = 0;
+
+                let mut span_idx_mini =
+                    match spans.binary_search_by_key(&start_byte, |s| s.start) {
+                        Ok(idx) => idx,
+                        Err(idx) => idx.saturating_sub(1),
                     };
 
-                    let mut spaces_len = 0;
-                    for c in text_chunk.chars() {
-                        if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-                            spaces_len += c.len_utf8();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if spaces_len > 0 {
-                        let capped_spaces = spaces_len.min(5);
-                        current_x += 1.5 * (capped_spaces as f32);
-                        cur_byte += spaces_len;
-                        if current_x >= minimap_x + minimap_w - 5.0 {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte {
+                while cur_byte_abs < end_byte {
+                    // Find current span and color
+                    while span_idx_mini < spans.len() && spans[span_idx_mini].end <= cur_byte_abs {
                         span_idx_mini += 1;
                     }
-
                     let (span_end, raw_color) = if span_idx_mini < spans.len() {
                         let sp = &spans[span_idx_mini];
-                        if sp.start <= cur_byte {
+                        if sp.start <= cur_byte_abs {
                             (sp.end.min(end_byte), sp.color)
                         } else {
                             (sp.start.min(end_byte), self.theme.fg)
@@ -141,7 +122,6 @@ impl Renderer {
                     } else {
                         (end_byte, self.theme.fg)
                     };
-
                     let color = [
                         raw_color[0] * 0.8 + map_bg[0] * 0.2,
                         raw_color[1] * 0.8 + map_bg[1] * 0.2,
@@ -149,72 +129,85 @@ impl Renderer {
                         1.0,
                     ];
 
-                    let mut word_len = 0;
-                    for c in text_chunk.chars() {
-                        if cur_byte + word_len >= span_end
-                            || c == ' '
-                            || c == '\t'
-                            || c == '\n'
-                            || c == '\r'
-                        {
+                    let mut byte_in_span = cur_byte_abs;
+                    let span_end_abs = span_end;
+
+                    // Process this span in chunks of up to 96 chars
+                    while byte_in_span < span_end_abs {
+                        let quad_start_char_idx = cur_char_idx;
+                        let mut masks: [u32; 3] = [0; 3];
+                        let mut chars_in_mask = 0;
+                        let mut bytes_processed = 0;
+
+                        for _ in 0..96 {
+                            let current_byte_to_check = byte_in_span + bytes_processed;
+                            if current_byte_to_check >= span_end_abs {
+                                break;
+                            }
+
+                            let b = if current_byte_to_check < first_len {
+                                first_bytes[current_byte_to_check]
+                            } else {
+                                second_bytes[current_byte_to_check - first_len]
+                            };
+
+                            if !b.is_ascii_whitespace() {
+                                let mask_idx = chars_in_mask / 32;
+                                let bit_idx = chars_in_mask % 32;
+                                masks[mask_idx] |= 1 << bit_idx;
+                            }
+                            chars_in_mask += 1;
+                            bytes_processed += 1;
+                        }
+
+                        let x1 = line_start_x + quad_start_char_idx as f32 * minimap_char_width;
+                        if x1 >= minimap_max_x {
+                            cur_byte_abs = end_byte; // Fast-forward to end of line
                             break;
                         }
-                        word_len += c.len_utf8();
-                    }
 
-                    if word_len == 0 {
-                        if let Some(c) = text_chunk.chars().next() {
-                            word_len = c.len_utf8();
+                                                let quad_width =
+                            (chars_in_mask as f32 * minimap_char_width).min(minimap_max_x - x1);
+
+                        let is_empty = masks[0] == 0 && masks[1] == 0 && masks[2] == 0;
+
+                        if quad_width > 0.01 && !is_empty {
+                            let x2 = x1 + quad_width;
+                            let sdf_params = [
+                                f32::from_bits(masks[0]),
+                                f32::from_bits(masks[1]),
+                                f32::from_bits(masks[2]),
+                            ];
+
+                            let uv_x_end = (quad_width / minimap_char_width).min(chars_in_mask as f32);
+
+                            let v1 = Vertex {
+                                pos: [x1, y1], uv: [0.0, 0.0], color, mode: 7.0, sdf_params,
+                            };
+                            let v2 = Vertex {
+                                pos: [x2, y1], uv: [uv_x_end, 0.0], color, mode: 7.0, sdf_params,
+                            };
+                            let v3 = Vertex {
+                                pos: [x2, y2], uv: [uv_x_end, 0.0], color, mode: 7.0, sdf_params,
+                            };
+                            let v4 = Vertex {
+                                pos: [x1, y2], uv: [0.0, 0.0], color, mode: 7.0, sdf_params,
+                            };
+
+                            self.vertices
+                                .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                            if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
+                                self.flush();
+                            }
                         }
+
+                        byte_in_span += bytes_processed;
+                        cur_char_idx += chars_in_mask;
                     }
-
-                    let w = (word_len as f32 * 1.5).min(minimap_x + minimap_w - 5.0 - current_x);
-
-                    if w > 0.0 {
-                        let x1 = current_x.round();
-                        let x2 = (current_x + w).round();
-
-                        let sdf = [0.0, 0.0, 0.0];
-                        let v1 = Vertex {
-                            pos: [x1, y1],
-                            uv: [-1.0, -1.0],
-                            color,
-                            mode: 2.0,
-                            sdf_params: sdf,
-                        };
-                        let v2 = Vertex {
-                            pos: [x2, y1],
-                            uv: [-1.0, -1.0],
-                            color,
-                            mode: 2.0,
-                            sdf_params: sdf,
-                        };
-                        let v3 = Vertex {
-                            pos: [x2, y2],
-                            uv: [-1.0, -1.0],
-                            color,
-                            mode: 2.0,
-                            sdf_params: sdf,
-                        };
-                        let v4 = Vertex {
-                            pos: [x1, y2],
-                            uv: [-1.0, -1.0],
-                            color,
-                            mode: 2.0,
-                            sdf_params: sdf,
-                        };
-
-                        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
-                        if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
-                            self.flush();
-                        }
-                        current_x += w;
-                    }
-
-                    cur_byte += word_len;
-                    if current_x >= minimap_x + minimap_w - 5.0 {
+                    if cur_byte_abs == end_byte {
                         break;
                     }
+                    cur_byte_abs = span_end_abs;
                 }
             }
 

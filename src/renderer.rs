@@ -221,11 +221,11 @@ impl Renderer {
     pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
         unsafe {
             let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(
+                        gl.shader_source(
                 v_shader,
                 "#version 330
                 in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;
-                out vec2 v_uv; out vec4 v_col; out float v_mode; out vec3 v_sdf_params;
+                out vec2 v_uv; out vec4 v_col; out float v_mode; flat out vec3 v_sdf_params;
                 uniform mat4 proj;
                 void main() { 
                     gl_Position = proj * vec4(pos, 0.0, 1.0); 
@@ -235,15 +235,15 @@ impl Renderer {
             gl.compile_shader(v_shader);
 
             let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(f_shader, "#version 330
-                in vec2 v_uv; in vec4 v_col; in float v_mode; in vec3 v_sdf_params;
+                        gl.shader_source(f_shader, "#version 330
+                in vec2 v_uv; in vec4 v_col; in float v_mode; flat in vec3 v_sdf_params;
                 out vec4 out_color;
                 uniform sampler2D tex;
-                
+
                 float roundedBoxSDF(vec2 CenterPosition, vec2 Size, float Radius) {
                     return length(max(abs(CenterPosition) - Size + Radius, 0.0)) - Radius;
                 }
-                
+
                 void main() {
                     if(v_mode == 2.0) { 
                         float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -254,14 +254,24 @@ impl Renderer {
                         if (alpha <= 0.0) discard;
                         float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
                         out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a * alpha);
-                                        } else if (v_mode == 4.0) {
+                    } else if (v_mode == 4.0) {
                         out_color = v_col;
                     } else if (v_mode == 6.0) {
-                                                float wave = v_sdf_params.x * sin(v_uv.x * v_sdf_params.y);
+                        float wave = v_sdf_params.x * sin(v_uv.x * v_sdf_params.y);
                         float d = abs(v_uv.y - wave) - v_sdf_params.z;
                         float alpha = 1.0 - smoothstep(0.0, 1.5, d);
                         if (alpha <= 0.0) discard;
                         out_color = vec4(v_col.rgb, v_col.a * alpha);
+                    } else if (v_mode == 7.0) {
+                        int idx = int(v_uv.x);
+                        uint m0 = floatBitsToUint(v_sdf_params.x);
+                        uint m1 = floatBitsToUint(v_sdf_params.y);
+                        uint m2 = floatBitsToUint(v_sdf_params.z);
+                        uint mask = (idx < 32) ? m0 : ((idx < 64) ? m1 : m2);
+                        uint shift = uint(idx % 32);
+                        if (((mask >> shift) & 1u) == 0u) discard;
+                        float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                        out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a);
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }

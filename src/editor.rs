@@ -354,15 +354,16 @@ impl Editor {
             next_non_blank[i] = curr_next;
         }
 
-        for i in 0..num_lines {
+                for i in 0..num_lines {
             let (raw_d, is_blank) = raw_depths[i];
+            let clamped_d = raw_d.min(255) as u8;
             if !is_blank {
-                self.indent_cache[i] = raw_d as u8;
+                self.indent_cache[i] = clamped_d;
             } else {
-                if raw_d > 0 {
-                    self.indent_cache[i] = raw_d as u8;
+                if clamped_d > 0 {
+                    self.indent_cache[i] = clamped_d;
                 } else {
-                    self.indent_cache[i] = prev_non_blank[i].min(next_non_blank[i]) as u8;
+                    self.indent_cache[i] = prev_non_blank[i].min(next_non_blank[i]).min(255) as u8;
                 }
             }
         }
@@ -1279,7 +1280,27 @@ impl Editor {
         for i in start..end {
             res.push(self.byte_at(i));
         }
-        Some(String::from_utf8_lossy(&res).into_owned())
+                Some(String::from_utf8_lossy(&res).into_owned())
+    }
+
+    pub fn get_visible_lines_count(&self) -> usize {
+        let mut phys_line = 0;
+        let mut lines_count = 0;
+        if self.line_offsets.is_empty() {
+            return 1;
+        }
+        while phys_line < self.line_offsets.len() {
+            lines_count += 1;
+            if self.folded_lines.contains(&phys_line)
+                && self.foldable_lines.contains_key(&phys_line)
+            {
+                if let Some(&end_l) = self.foldable_lines.get(&phys_line) {
+                    phys_line = end_l;
+                }
+            }
+            phys_line += 1;
+        }
+        lines_count
     }
 
     pub fn select_all(&mut self) {

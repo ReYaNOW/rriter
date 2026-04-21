@@ -905,11 +905,20 @@ impl Renderer {
             }
         }
 
-        let max_scroll = self.get_max_scroll(editor, editor_height);
-        let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
-        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+                let total_render_height = total_lines as f32 * self.line_height;
+        let raw_max =
+            (total_render_height - editor_height + self.line_height * 2.0).max(0.0);
+        let max_scroll = (raw_max / self.line_height).ceil() * self.line_height;
 
-        let minimap_w = self.minimap_width;
+                let total_render_height = total_lines as f32 * self.line_height;
+                let raw_max =
+                    (total_render_height - editor_height + self.line_height * 2.0).max(0.0);
+                let max_scroll = (raw_max / self.line_height).ceil() * self.line_height;
+
+                let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
+                let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+
+                let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
         let scrollbar_x = minimap_x - scrollbar_width;
 
@@ -960,8 +969,17 @@ impl Renderer {
                     let text_start_x = self.left_padding + v_line.whitespace_px_width;
                     let text_end_x = text_start_x + v_line.text_px_width;
 
-                    for level in 1..=depth {
+                                        for level in 1..=depth {
                         let guide_x = self.left_padding + (level as f32 * 4.0 * space_adv);
+                        let screen_x = guide_x - render_scroll_x;
+
+                        if screen_x > self.width {
+                            break;
+                        }
+                        if screen_x < self.left_padding - 10.0 {
+                            continue;
+                        }
+
                         let margin = space_adv * 0.5;
                         let overlaps = v_line.text_px_width > 0.0
                             && text_start_x <= guide_x + margin
@@ -969,7 +987,7 @@ impl Renderer {
 
                         if !overlaps {
                             self.push_rect(
-                                (guide_x - render_scroll_x).round(),
+                                screen_x.round(),
                                 y_top,
                                 1.0,
                                 self.line_height,
