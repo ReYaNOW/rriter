@@ -1526,18 +1526,18 @@ impl Renderer {
         } else {
             0.0
         };
-        // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
+                // Гаттер рисуем только в зоне редактора (не заходим на нижнюю панель)
         self.push_rect(
-            gutter_x,
+            gutter_x.round() + 1.0,
             tab_bar_h,
-            self.left_padding - gutter_x,
+            (self.left_padding - (gutter_x.round() + 1.0)).max(0.0),
             editor_height,
             solid_minimap_bg,
         );
-        // Левая граница гаттера (отделяет IDE панель от зоны номеров строк)
+                // Левая граница гаттера (отделяет IDE панель от зоны номеров строк)
         if is_ide_mode && panel_left_w > 0.0 {
             self.push_rect(
-                gutter_x,
+                gutter_x.round() + 1.0,
                 tab_bar_h,
                 1.0,
                 editor_height,
@@ -1734,11 +1734,10 @@ impl Renderer {
                 scale_sub,
             );
             self.flush();
-        } else if !show_welcome && is_ide_mode {
-            let tab_x = gutter_x;
+                } else if !show_welcome && is_ide_mode {
+            let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
-            self.draw_tab_bar(
-                tabs,
+            self.draw_tab_bar(tabs,
                 active_tab,
                 editor,
                 editor_title,
@@ -1756,7 +1755,7 @@ impl Renderer {
             self.flush();
         }
 
-        let target_sticky_lines = if show_welcome {
+                let target_sticky_lines = if show_welcome {
             Vec::new()
         } else {
             self.draw_sticky_lines(
@@ -1767,7 +1766,7 @@ impl Renderer {
                 render_scroll_x,
                 sticky_anim_progress,
                 sticky_anim_is_adding,
-                gutter_x,
+                gutter_x.round() + 1.0,
                 ui_registry,
                 tab_bar_h,
             )
