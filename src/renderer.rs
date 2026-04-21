@@ -183,10 +183,10 @@ pub struct Renderer {
     pub time_acc: f32,
     pub search_scroll_x: f32,
 
-            pub fps_string: String,
-        pub search_res_string: String,
-        pub scratch_buffer: String,
-        pub last_search_idx: Option<usize>,
+    pub fps_string: String,
+    pub search_res_string: String,
+    pub scratch_buffer: String,
+    pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
@@ -475,7 +475,7 @@ impl Renderer {
                 frame_count: 0,
                 time_acc: 0.0,
                 search_scroll_x: 0.0,
-                                fps_string: String::new(),
+                fps_string: String::new(),
                 search_res_string: String::new(),
                 scratch_buffer: String::with_capacity(256),
                 last_search_idx: None,
@@ -1034,20 +1034,21 @@ impl Renderer {
             (
                 crate::widgets::IconType::Warning,
                 include_bytes!("icons/dialog-warning.svg").as_slice(),
-            ),                        (
-                            crate::widgets::IconType::CaseMatch,
-                            include_bytes!("icons/format-text-uppercase.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Up,
-                            include_bytes!("icons/go-up.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Down,
-                            include_bytes!("icons/go-down.svg").as_slice(),
-                        ),
-                        (
-                            crate::widgets::IconType::Close,
+            ),
+            (
+                crate::widgets::IconType::CaseMatch,
+                include_bytes!("icons/format-text-uppercase.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Up,
+                include_bytes!("icons/go-up.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Down,
+                include_bytes!("icons/go-down.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Close,
                 include_bytes!("icons/window-close.svg").as_slice(),
             ),
             (

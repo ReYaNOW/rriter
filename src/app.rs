@@ -4,8 +4,8 @@ pub mod file_tree;
 pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
-pub mod ui_handlers;
 pub mod terminal;
+pub mod ui_handlers;
 
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
@@ -141,19 +141,20 @@ pub struct IdePanelState {
     pub lsp_scroll_x: crate::scroll::ScrollState,
     pub lsp_log_editors: FxHashMap<String, Editor>,
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
-            pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
-        pub lsp_logs_focused: Option<String>,
-                                pub diag_copied_idx: Option<usize>,
-        pub problems_tab: usize,
-        pub flat_diags: Vec<(std::path::PathBuf, usize)>,
-                pub problems_collapsed: FxHashSet<std::path::PathBuf>,
-                pub problems_scroll: crate::scroll::ScrollState,
-        pub terminals: Vec<crate::app::terminal::Terminal>,
-        pub active_terminal: usize,
-        pub terminal_focused: bool,
-    }
+    pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
+    pub lsp_logs_focused: Option<String>,
+    pub diag_copied_idx: Option<usize>,
+    pub problems_tab: usize,
+    pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+    pub problems_collapsed: FxHashSet<std::path::PathBuf>,
+    pub problems_scroll: crate::scroll::ScrollState,
+    pub terminals: Vec<crate::app::terminal::Terminal>,
+    pub active_terminal: usize,
+    pub terminal_focused: bool,
+    pub is_dragging_terminal: bool,
+}
 
-    impl Default for IdePanelState {
+impl Default for IdePanelState {
     fn default() -> Self {
         Self {
             slots: vec![
@@ -192,20 +193,21 @@ pub struct IdePanelState {
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
             lsp_scroll_x: crate::scroll::ScrollState::new(15.0),
             lsp_log_editors: FxHashMap::default(),
-                            lsp_logs_scroll_y: FxHashMap::default(),
-                lsp_logs_scroll_x: FxHashMap::default(),
-                                lsp_logs_focused: None,
-                                                diag_copied_idx: None,
-                problems_tab: 0,
-                flat_diags: Vec::new(),
-                                                                problems_collapsed: FxHashSet::default(),
-                problems_scroll: crate::scroll::ScrollState::new(15.0),
-                terminals: Vec::new(),
-                active_terminal: 0,
-                terminal_focused: false,
-            }
+            lsp_logs_scroll_y: FxHashMap::default(),
+            lsp_logs_scroll_x: FxHashMap::default(),
+            lsp_logs_focused: None,
+            diag_copied_idx: None,
+            problems_tab: 0,
+            flat_diags: Vec::new(),
+            problems_collapsed: FxHashSet::default(),
+            problems_scroll: crate::scroll::ScrollState::new(15.0),
+            terminals: Vec::new(),
+            active_terminal: 0,
+            terminal_focused: false,
+            is_dragging_terminal: false,
         }
     }
+}
 
 impl IdePanelState {
     pub fn any_top_open(&self) -> bool {
@@ -218,7 +220,7 @@ impl IdePanelState {
             .iter()
             .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
-            pub fn toggle(&mut self, id: PanelId) {
+    pub fn toggle(&mut self, id: PanelId) {
         if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
             slot.open = !slot.open;
         }
@@ -256,7 +258,7 @@ fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
 pub struct App {
     pub gl_config: Option<glutin::config::Config>,
     pub gl_context: Option<PossiblyCurrentContext>,
-        pub gl_surface: Option<Surface<WindowSurface>>,
+    pub gl_surface: Option<Surface<WindowSurface>>,
     pub window: Option<std::sync::Arc<Window>>,
     pub dialog_window: Option<std::sync::Arc<Window>>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
@@ -382,20 +384,25 @@ impl App {
             self.file_path = None;
         }
 
-                                                self.ide_panel = crate::load_panel_state();
+        self.ide_panel = crate::load_panel_state();
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
-            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+            self.ide_panel
+                .terminals
+                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
             self.ide_panel.active_terminal = 0;
         }
 
         if self.lsp.is_none() {
-            self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.first().cloned()));
+            self.lsp = Some(crate::lsp::LspManager::new(
+                self.ide_workspaces.first().cloned(),
+            ));
         }
 
-        let has_startup_file = self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
+        let has_startup_file =
+            self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
 
-                if has_startup_file && self.tabs.is_empty() {
+        if has_startup_file && self.tabs.is_empty() {
             self.tabs.push(EditorTab {
                 editor: crate::editor::Editor::new(128),
                 file_path: self.file_path.clone(),
@@ -417,45 +424,51 @@ impl App {
 
         let (saved_tabs, saved_active) = crate::load_open_tabs(true);
 
-                    if !saved_tabs.is_empty() {
-                let mut loaded_any = false;
-                for path_opt in saved_tabs {
-                    if let Some(path) = path_opt {
-                        if path.exists() {
-                            self.open_file_in_tab_bg(path, false);
-                            loaded_any = true;
-                        }
-                    } else {
-                        self.open_new_tab();
+        if !saved_tabs.is_empty() {
+            let mut loaded_any = false;
+            for path_opt in saved_tabs {
+                if let Some(path) = path_opt {
+                    if path.exists() {
+                        self.open_file_in_tab_bg(path, false);
                         loaded_any = true;
                     }
-                }
-
-                if loaded_any {
-                    let target = if has_startup_file {
-                        0
-                    } else {
-                        saved_active.min(self.tabs.len().saturating_sub(1))
-                    };
-                    self.switch_to_tab(target);
-                    if self.highlighter.wait_for_first_result(
-                        self.editor.version,
-                        std::time::Duration::from_millis(50),
-                    ) {
-                        self.apply_highlight_results();
-                    }
+                } else {
+                    self.open_new_tab();
+                    loaded_any = true;
                 }
             }
 
+            if loaded_any {
+                let target = if has_startup_file {
+                    0
+                } else {
+                    saved_active.min(self.tabs.len().saturating_sub(1))
+                };
+                self.switch_to_tab(target);
+                if self.highlighter.wait_for_first_result(
+                    self.editor.version,
+                    std::time::Duration::from_millis(50),
+                ) {
+                    self.apply_highlight_results();
+                }
+            }
+        }
+
         let title = self.base_title.clone();
         if !self.tabs.is_empty() {
-            self.tabs[self.active_tab].icon_key = crate::app::file_icons::file_icon_key(&title.to_lowercase());
+            self.tabs[self.active_tab].icon_key =
+                crate::app::file_icons::file_icon_key(&title.to_lowercase());
         }
 
         if let Some(path) = &self.file_path {
             if let Some(lsp) = &mut self.lsp {
                 let text = self.editor.get_full_text();
-                lsp.notify_open(path, &self.file_extension, &text, self.editor.version as i32);
+                lsp.notify_open(
+                    path,
+                    &self.file_extension,
+                    &text,
+                    self.editor.version as i32,
+                );
             }
         }
 
@@ -480,11 +493,17 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
-                let ai = self.active_tab;
+        let ai = self.active_tab;
         std::mem::swap(&mut self.editor, &mut self.tabs[ai].editor);
         std::mem::swap(&mut self.highlighter.spans, &mut self.tabs[ai].spans);
-        std::mem::swap(&mut self.highlighter.completions, &mut self.tabs[ai].completions);
-        std::mem::swap(&mut self.highlighter.foldable_ranges, &mut self.tabs[ai].foldable_ranges);
+        std::mem::swap(
+            &mut self.highlighter.completions,
+            &mut self.tabs[ai].completions,
+        );
+        std::mem::swap(
+            &mut self.highlighter.foldable_ranges,
+            &mut self.tabs[ai].foldable_ranges,
+        );
         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
         std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
@@ -517,24 +536,34 @@ impl App {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
         }
-                if new_idx == self.active_tab || new_idx >= self.tabs.len() {
+        if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
 
-                        self.sync_active_tab();
+        self.sync_active_tab();
         // Урезаем потребление RAM: освобождаем тяжелый AST автокомплита у старой вкладки.
         // При возврате вкладка перепарсится автоматически за 10-30 мс без лагов.
         self.tabs[self.active_tab].completions.clear();
         self.active_tab = new_idx;
         self.sync_active_tab();
 
-        let highest = self.tabs.iter().map(|t| t.editor.version).max().unwrap_or(0).max(self.editor.version);
+        let highest = self
+            .tabs
+            .iter()
+            .map(|t| t.editor.version)
+            .max()
+            .unwrap_or(0)
+            .max(self.editor.version);
         self.editor.version = highest + 1;
 
         while let Ok(_) = self.highlighter.rx.try_recv() {}
-        self.highlighter.reset(self.editor.version, self.editor.get_full_text(), self.file_extension.clone());
+        self.highlighter.reset(
+            self.editor.version,
+            self.editor.get_full_text(),
+            self.file_extension.clone(),
+        );
 
-                if self.is_ide_mode {
+        if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();
@@ -564,7 +593,7 @@ impl App {
             return;
         }
 
-                if self.tabs.is_empty() {
+        if self.tabs.is_empty() {
             let old_version = self.editor.version;
             self.editor = crate::editor::Editor::new(8192);
             self.editor.version = old_version + 1;
@@ -593,7 +622,8 @@ impl App {
             self.active_tab = 0;
             self.show_welcome = false;
             while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.highlighter.reset(self.editor.version, String::new(), String::new());
+            self.highlighter
+                .reset(self.editor.version, String::new(), String::new());
             self.autocomplete_active = false;
             if let Some(w) = self.window.as_ref() {
                 App::update_window_title(w, &self.base_title, false);
@@ -603,8 +633,14 @@ impl App {
             return;
         }
 
-                self.sync_active_tab();
-        let highest = self.tabs.iter().map(|t| t.editor.version).max().unwrap_or(0).max(self.editor.version);
+        self.sync_active_tab();
+        let highest = self
+            .tabs
+            .iter()
+            .map(|t| t.editor.version)
+            .max()
+            .unwrap_or(0)
+            .max(self.editor.version);
         let mut new_editor = crate::editor::Editor::new(8192);
         new_editor.version = highest + 1;
         let new_tab = EditorTab {
@@ -627,7 +663,8 @@ impl App {
         self.active_tab = self.tabs.len() - 1;
         self.sync_active_tab();
         while let Ok(_) = self.highlighter.rx.try_recv() {}
-        self.highlighter.reset(self.editor.version, String::new(), String::new());
+        self.highlighter
+            .reset(self.editor.version, String::new(), String::new());
 
         self.autocomplete_active = false;
         self.show_welcome = false;
@@ -673,7 +710,7 @@ impl App {
         self.save_tabs_state();
     }
 
-        pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
+    pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
         self.open_file_in_tab_internal(path, add_to_history, true);
     }
 
@@ -681,7 +718,12 @@ impl App {
         self.open_file_in_tab_internal(path, add_to_history, false);
     }
 
-    pub fn open_file_in_tab_internal(&mut self, path: PathBuf, add_to_history: bool, wait_highlight: bool) {
+    pub fn open_file_in_tab_internal(
+        &mut self,
+        path: PathBuf,
+        add_to_history: bool,
+        wait_highlight: bool,
+    ) {
         if !self.is_ide_mode {
             self.load_file_internal(path, add_to_history, wait_highlight);
             return;
@@ -1037,7 +1079,7 @@ impl App {
                         std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
                         std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
                     );
-                        let surface = unsafe {
+            let surface = unsafe {
                 display
                     .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
                     .unwrap()
@@ -1066,7 +1108,7 @@ impl App {
         let old_version = self.editor.version;
         self.editor = Editor::new(8192);
         self.editor.version = old_version + 1;
-                self.editor.set_original_text();
+        self.editor.set_original_text();
         self.editor.sync_edits.clear();
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter
@@ -1181,7 +1223,7 @@ impl App {
 
     /// Применяет последние результаты подсветки (foldable ranges) к состоянию редактора.
     /// Вызывать после `highlighter.poll()` или `highlighter.wait_for_first_result()`.
-        pub fn apply_highlight_results(&mut self) {
+    pub fn apply_highlight_results(&mut self) {
         let ext = self.file_extension.as_str();
         let threshold = match ext {
             "json" | "toml" | "yaml" | "yml" | "html" | "css" | "xml" | "md" | "txt" => 20,
@@ -1203,7 +1245,7 @@ impl App {
                 .line_offsets
                 .partition_point(|&x| x <= end_b)
                 .saturating_sub(1);
-                        if el > sl {
+            if el > sl {
                 self.editor.foldable_lines.insert(sl, el);
                 if is_autofold && el - sl >= threshold && !self.is_highlighted_once {
                     self.editor.folded_lines.insert(sl);
@@ -1216,7 +1258,12 @@ impl App {
         self.is_highlighted_once = true;
     }
 
-            pub fn load_file_internal(&mut self, path: PathBuf, add_to_history: bool, wait_highlight: bool) {
+    pub fn load_file_internal(
+        &mut self,
+        path: PathBuf,
+        add_to_history: bool,
+        wait_highlight: bool,
+    ) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 self.show_welcome = false;
@@ -1242,7 +1289,7 @@ impl App {
                     .extension()
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
-                                self.highlighter.spans.clear();
+                self.highlighter.spans.clear();
                 self.is_highlighted_once = false;
                 while let Ok(_) = self.highlighter.rx.try_recv() {}
                 self.highlighter.reset(
@@ -1251,7 +1298,7 @@ impl App {
                     self.file_extension.clone(),
                 );
 
-                                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
+                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
                 // Для малых файлов Tree-sitter укладывается в < 5мс, большие файлы — просто не ждут.
                 if wait_highlight {
                     if self.highlighter.wait_for_first_result(
@@ -1287,7 +1334,7 @@ impl App {
                 }
                 self.save_tabs_state();
             }
-                        Err(_) => {
+            Err(_) => {
                 self.recent_files.retain(|p| p != &path);
                 crate::save_recent_files(&self.recent_files);
                 if let Some(w) = self.window.as_ref() {
@@ -1310,7 +1357,7 @@ impl App {
                             tab.editor.version = old_version + 1;
                             let _ = tab.editor.insert_str(&disk_text);
                             tab.editor.cursor = 0;
-                                                        tab.editor.clear_history();
+                            tab.editor.clear_history();
                             tab.editor.set_original_text();
                             tab.editor.sync_edits.clear();
                             tab.spans.clear();

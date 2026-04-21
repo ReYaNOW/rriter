@@ -488,7 +488,7 @@ impl Editor {
             get_diff_info(&self.saved_hashes, &curr_hashes)
         };
 
-                let orig_was_empty =
+        let orig_was_empty =
             self.original_hashes.len() == 1 && self.original_hashes[0] == empty_hash;
         let (mod_orig, mut del_orig) = if orig_was_empty && !curr_is_empty {
             (
@@ -613,7 +613,7 @@ impl Editor {
                 self.history.push_back(step);
                 self.history_size += size;
             }
-                }
+        }
         // Урезаем лимит памяти на историю: 5 МБ на вкладку (вместо 50 МБ)
         while self.history_size > 5 * 1024 * 1024 {
             if let Some(old) = self.history.pop_front() {

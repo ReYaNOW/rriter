@@ -1,7 +1,7 @@
+use alacritty_terminal::vte::{Params, Parser, Perform};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use std::sync::{Arc, Mutex};
 use std::io::{Read, Write};
-use alacritty_terminal::vte::{Parser, Perform, Params};
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Cell {
@@ -12,7 +12,11 @@ pub struct Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Cell { c: ' ', fg: 7, bg: 0 }
+        Cell {
+            c: ' ',
+            fg: 7,
+            bg: 0,
+        }
     }
 }
 
@@ -24,29 +28,29 @@ pub struct TermGrid {
     pub is_alt: bool,
     pub cols: usize,
     pub visible_rows: usize,
-                pub cur_x: usize,
-            pub cur_y: usize,
-            pub cur_fg: u8,
-            pub cur_bg: u8,
-            pub cur_bold: bool,
-            pub dirty: bool,
-        pub selection: Option<(usize, usize, usize, usize)>,
-        pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
-            pub saved_cursor: Option<(usize, usize)>,
-        pub scroll_region: (usize, usize),
-        pub cursor_visible: bool,
-                pub app_cursor_keys: bool,
-        pub mouse_tracking: bool,
-        pub pool: Vec<Vec<Cell>>,
-    }
+    pub cur_x: usize,
+    pub cur_y: usize,
+    pub cur_fg: u8,
+    pub cur_bg: u8,
+    pub cur_bold: bool,
+    pub dirty: bool,
+    pub selection: Option<(usize, usize, usize, usize)>,
+    pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    pub saved_cursor: Option<(usize, usize)>,
+    pub scroll_region: (usize, usize),
+    pub cursor_visible: bool,
+    pub app_cursor_keys: bool,
+    pub mouse_tracking: bool,
+    pub pool: Vec<Vec<Cell>>,
+}
 
-    impl TermGrid {
-        pub fn new(cols: usize, visible_rows: usize) -> Self {
+impl TermGrid {
+    pub fn new(cols: usize, visible_rows: usize) -> Self {
         let mut lines = std::collections::VecDeque::new();
         for _ in 0..visible_rows {
             lines.push_back(vec![Cell::default(); cols]);
         }
-                Self {
+        Self {
             scrollback: std::collections::VecDeque::new(),
             lines,
             alt_lines: None,
@@ -54,30 +58,36 @@ pub struct TermGrid {
             is_alt: false,
             cols,
             visible_rows,
-                        cur_x: 0,
+            cur_x: 0,
             cur_y: 0,
             cur_fg: 7,
             cur_bg: 0,
             cur_bold: false,
             dirty: true,
-                        selection: None,
-                        reply_tx: None,
+            selection: None,
+            reply_tx: None,
             saved_cursor: None,
             scroll_region: (0, visible_rows.saturating_sub(1)),
-                        cursor_visible: true,
+            cursor_visible: true,
             app_cursor_keys: false,
             mouse_tracking: false,
             pool: Vec::with_capacity(128),
         }
     }
 
-                        pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
-        if new_cols == self.cols && new_rows == self.visible_rows { return; }
+    pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
+        if new_cols == self.cols && new_rows == self.visible_rows {
+            return;
+        }
 
-                if new_cols != self.cols {
-            for line in self.lines.iter_mut() { line.resize(new_cols, Cell::default()); }
+        if new_cols != self.cols {
+            for line in self.lines.iter_mut() {
+                line.resize(new_cols, Cell::default());
+            }
             if let Some(alt) = &mut self.alt_lines {
-                for line in alt.iter_mut() { line.resize(new_cols, Cell::default()); }
+                for line in alt.iter_mut() {
+                    line.resize(new_cols, Cell::default());
+                }
             }
             self.cols = new_cols;
         }
@@ -93,7 +103,10 @@ pub struct TermGrid {
 
             for _ in 0..drop_bottom {
                 if let Some(mut line) = self.lines.pop_back() {
-                    if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                    if self.pool.len() < 128 {
+                        line.clear();
+                        self.pool.push(line);
+                    }
                 }
             }
             for _ in 0..drop_top {
@@ -111,7 +124,7 @@ pub struct TermGrid {
         } else if new_rows > current_rows {
             let diff = new_rows - current_rows;
 
-                        if !self.is_alt {
+            if !self.is_alt {
                 let from_scrollback = diff.min(self.scrollback.len());
 
                 for _ in 0..from_scrollback {
@@ -123,7 +136,10 @@ pub struct TermGrid {
 
                 let blanks = diff - from_scrollback;
                 for _ in 0..blanks {
-                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                    let mut line = self
+                        .pool
+                        .pop()
+                        .unwrap_or_else(|| Vec::with_capacity(self.cols));
                     line.resize(self.cols, Cell::default());
                     line.fill(Cell::default());
                     self.lines.push_back(line);
@@ -140,19 +156,25 @@ pub struct TermGrid {
             }
         }
 
-                if let Some(alt) = &mut self.alt_lines {
+        if let Some(alt) = &mut self.alt_lines {
             let alt_current_rows = alt.len();
             if new_rows < alt_current_rows {
                 let diff = alt_current_rows - new_rows;
                 for _ in 0..diff {
                     if let Some(mut line) = alt.pop_back() {
-                        if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                        if self.pool.len() < 128 {
+                            line.clear();
+                            self.pool.push(line);
+                        }
                     }
                 }
             } else if new_rows > alt_current_rows {
                 let diff = new_rows - alt_current_rows;
                 for _ in 0..diff {
-                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                    let mut line = self
+                        .pool
+                        .pop()
+                        .unwrap_or_else(|| Vec::with_capacity(self.cols));
                     line.resize(self.cols, Cell::default());
                     line.fill(Cell::default());
                     alt.push_back(line);
@@ -163,7 +185,9 @@ pub struct TermGrid {
             }
         }
 
-        while self.scrollback.len() > 10000 { self.scrollback.pop_front(); }
+        while self.scrollback.len() > 10000 {
+            self.scrollback.pop_front();
+        }
         self.visible_rows = new_rows;
         self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
         self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
@@ -180,7 +204,7 @@ pub struct TermGrid {
         self.dirty = true;
     }
 
-        pub fn put_char(&mut self, c: char) {
+    pub fn put_char(&mut self, c: char) {
         if self.cur_x >= self.cols {
             self.newline();
             self.cur_x = 0;
@@ -200,7 +224,7 @@ pub struct TermGrid {
         self.cur_x += 1;
     }
 
-        pub fn newline(&mut self) {
+    pub fn newline(&mut self) {
         if self.cur_y == self.scroll_region.1 {
             self.scroll_region_up(1);
         } else if self.cur_y + 1 < self.visible_rows {
@@ -211,67 +235,116 @@ pub struct TermGrid {
         }
     }
 
-                pub fn scroll_region_up(&mut self, rows: usize) {
+    pub fn scroll_region_up(&mut self, rows: usize) {
         let (top, bottom) = self.scroll_region;
-        if bottom >= self.lines.len() || top >= bottom { return; }
+        if bottom >= self.lines.len() || top >= bottom {
+            return;
+        }
         for _ in 0..rows {
-            let mut removed = self.lines.remove(top).unwrap_or_else(|| vec![Cell::default(); self.cols]);
+            let mut removed = self
+                .lines
+                .remove(top)
+                .unwrap_or_else(|| vec![Cell::default(); self.cols]);
             if top == 0 && bottom == self.visible_rows.saturating_sub(1) {
                 if !self.is_alt {
                     self.scrollback.push_back(removed);
                     if self.scrollback.len() > 10000 {
                         if let Some(mut old) = self.scrollback.pop_front() {
-                            if self.pool.len() < 128 { old.clear(); self.pool.push(old); }
+                            if self.pool.len() < 128 {
+                                old.clear();
+                                self.pool.push(old);
+                            }
                         }
                     }
                 } else {
-                    if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
+                    if self.pool.len() < 128 {
+                        removed.clear();
+                        self.pool.push(removed);
+                    }
                 }
             } else {
-                if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
+                if self.pool.len() < 128 {
+                    removed.clear();
+                    self.pool.push(removed);
+                }
             }
-            let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+            let mut new_line = self
+                .pool
+                .pop()
+                .unwrap_or_else(|| Vec::with_capacity(self.cols));
             new_line.resize(self.cols, Cell::default());
             self.lines.insert(bottom, new_line);
         }
         self.dirty = true;
     }
 
-        pub fn scroll_region_down(&mut self, rows: usize) {
+    pub fn scroll_region_down(&mut self, rows: usize) {
         let (top, bottom) = self.scroll_region;
-        if bottom >= self.lines.len() || top >= bottom { return; }
+        if bottom >= self.lines.len() || top >= bottom {
+            return;
+        }
         for _ in 0..rows {
             if let Some(mut removed) = self.lines.remove(bottom) {
-                if self.pool.len() < 128 { removed.clear(); self.pool.push(removed); }
+                if self.pool.len() < 128 {
+                    removed.clear();
+                    self.pool.push(removed);
+                }
             }
-            let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+            let mut new_line = self
+                .pool
+                .pop()
+                .unwrap_or_else(|| Vec::with_capacity(self.cols));
             new_line.resize(self.cols, Cell::default());
             self.lines.insert(top, new_line);
         }
         self.dirty = true;
     }
 
-        pub fn get_selection_text(&self) -> String {
+    pub fn get_selection_text(&self) -> String {
         if let Some((sx, sy, ex, ey)) = self.selection {
             let mut res = String::new();
             let total_lines = self.scrollback.len() + self.lines.len();
             let start_y = sy.min(ey);
             let end_y = sy.max(ey);
-            let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
-            let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+            let start_x = if sy < ey {
+                sx
+            } else if sy > ey {
+                ex
+            } else {
+                sx.min(ex)
+            };
+            let end_x = if sy < ey {
+                ex
+            } else if sy > ey {
+                sx
+            } else {
+                sx.max(ex)
+            };
 
             for y in start_y..=end_y {
-                if y >= total_lines { continue; }
-                let row = if y < self.scrollback.len() { &self.scrollback[y] } else { &self.lines[y - self.scrollback.len()] };
+                if y >= total_lines {
+                    continue;
+                }
+                let row = if y < self.scrollback.len() {
+                    &self.scrollback[y]
+                } else {
+                    &self.lines[y - self.scrollback.len()]
+                };
                 let line_start = if y == start_y { start_x } else { 0 };
-                let line_end = if y == end_y { end_x } else { self.cols.saturating_sub(1) };
+                let line_end = if y == end_y {
+                    end_x
+                } else {
+                    self.cols.saturating_sub(1)
+                };
 
                 for x in line_start..=line_end {
                     if x < row.len() {
                         res.push(row[x].c);
                     }
                 }
-                if y != end_y { res.push('\n'); }
+                if y != end_y {
+                    res.push('\n');
+                }
             }
             res.trim_end().to_string()
         } else {
@@ -284,14 +357,16 @@ impl Perform for TermGrid {
     fn print(&mut self, c: char) {
         self.put_char(c);
     }
-            fn execute(&mut self, byte: u8) {
+    fn execute(&mut self, byte: u8) {
         match byte {
             b'\n' | b'\x0B' | b'\x0C' => self.newline(),
             b'\r' => self.cur_x = 0,
             b'\x08' => self.cur_x = self.cur_x.saturating_sub(1),
             b'\t' => {
                 let spaces = 8 - (self.cur_x % 8);
-                for _ in 0..spaces { self.put_char(' '); }
+                for _ in 0..spaces {
+                    self.put_char(' ');
+                }
             }
             _ => {}
         }
@@ -299,7 +374,7 @@ impl Perform for TermGrid {
     fn hook(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
     fn put(&mut self, _byte: u8) {}
     fn unhook(&mut self) {}
-                        fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         if params.len() >= 2 && params[1] == b"?" {
             if params[0] == b"10" || params[0] == b"11" {
                 if let Some(tx) = &self.reply_tx {
@@ -310,7 +385,7 @@ impl Perform for TermGrid {
             }
         }
     }
-                        fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
         match byte {
             b'7' => self.saved_cursor = Some((self.cur_x, self.cur_y)),
             b'8' => {
@@ -322,7 +397,7 @@ impl Perform for TermGrid {
             _ => {}
         }
     }
-                        fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         match action {
             'h' | 'l' => {
                 let enable = action == 'h';
@@ -330,12 +405,15 @@ impl Perform for TermGrid {
                 if is_private {
                     for param in params.iter() {
                         if param[0] == 1049 || param[0] == 47 || param[0] == 1047 {
-                                                        if enable && !self.is_alt {
+                            if enable && !self.is_alt {
                                 self.is_alt = true;
                                 self.alt_saved_cursor = Some((self.cur_x, self.cur_y));
                                 let mut alt = std::collections::VecDeque::new();
                                 for _ in 0..self.visible_rows {
-                                    let mut line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                                    let mut line = self
+                                        .pool
+                                        .pop()
+                                        .unwrap_or_else(|| Vec::with_capacity(self.cols));
                                     line.resize(self.cols, Cell::default());
                                     line.fill(Cell::default());
                                     alt.push_back(line);
@@ -349,18 +427,21 @@ impl Perform for TermGrid {
                                 if let Some(alt) = self.alt_lines.take() {
                                     let old_lines = std::mem::replace(&mut self.lines, alt);
                                     for mut line in old_lines {
-                                        if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                                        if self.pool.len() < 128 {
+                                            line.clear();
+                                            self.pool.push(line);
+                                        }
                                     }
                                 }
                                 if let Some((x, y)) = self.alt_saved_cursor.take() {
                                     self.cur_x = x;
                                     self.cur_y = y;
                                 }
-                                                                self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
+                                self.cur_x = self.cur_x.min(self.cols.saturating_sub(1));
                                 self.cur_y = self.cur_y.min(self.visible_rows.saturating_sub(1));
                                 self.dirty = true;
                             }
-                                                } else if param[0] == 25 {
+                        } else if param[0] == 25 {
                             self.cursor_visible = enable;
                         } else if param[0] == 1 {
                             self.app_cursor_keys = enable;
@@ -377,7 +458,7 @@ impl Perform for TermGrid {
                     self.cur_y = y;
                 }
             }
-                        'G' | '`' => {
+            'G' | '`' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let p = if p == 0 { 1 } else { p };
                 self.cur_x = p.saturating_sub(1).min(self.cols.saturating_sub(1));
@@ -413,29 +494,39 @@ impl Perform for TermGrid {
                 self.cur_y = y.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
                 self.cur_x = x.saturating_sub(1).min(self.cols.saturating_sub(1));
             }
-                        'J' => {
+            'J' => {
                 let param = params.iter().next().map(|p| p[0]).unwrap_or(0);
                 match param {
                     0 => {
                         if let Some(line) = self.lines.get_mut(self.cur_y) {
-                            if self.cur_x < line.len() { line[self.cur_x..].fill(Cell::default()); }
+                            if self.cur_x < line.len() {
+                                line[self.cur_x..].fill(Cell::default());
+                            }
                         }
                         for i in (self.cur_y + 1)..self.visible_rows {
-                            if let Some(line) = self.lines.get_mut(i) { line.fill(Cell::default()); }
+                            if let Some(line) = self.lines.get_mut(i) {
+                                line.fill(Cell::default());
+                            }
                         }
                     }
                     1 => {
                         for i in 0..self.cur_y {
-                            if let Some(line) = self.lines.get_mut(i) { line.fill(Cell::default()); }
+                            if let Some(line) = self.lines.get_mut(i) {
+                                line.fill(Cell::default());
+                            }
                         }
                         if let Some(line) = self.lines.get_mut(self.cur_y) {
                             let end = (self.cur_x + 1).min(line.len());
                             line[..end].fill(Cell::default());
                         }
                     }
-                                        2 | 3 => {
-                        for line in self.lines.iter_mut() { line.fill(Cell::default()); }
-                        if param == 3 { self.scrollback.clear(); }
+                    2 | 3 => {
+                        for line in self.lines.iter_mut() {
+                            line.fill(Cell::default());
+                        }
+                        if param == 3 {
+                            self.scrollback.clear();
+                        }
                     }
                     _ => {}
                 }
@@ -445,7 +536,9 @@ impl Perform for TermGrid {
                 if let Some(line) = self.lines.get_mut(self.cur_y) {
                     match param {
                         0 => {
-                            if self.cur_x < line.len() { line[self.cur_x..].fill(Cell::default()); }
+                            if self.cur_x < line.len() {
+                                line[self.cur_x..].fill(Cell::default());
+                            }
                         }
                         1 => {
                             let end = (self.cur_x + 1).min(line.len());
@@ -458,30 +551,47 @@ impl Perform for TermGrid {
                     }
                 }
             }
-                                                'r' => {
+            'r' => {
                 let mut iter = params.iter();
                 let top = iter.next().map(|p| p[0]).unwrap_or(1) as usize;
-                let bottom = iter.next().map(|p| p[0]).unwrap_or(self.visible_rows as u16) as usize;
+                let bottom = iter
+                    .next()
+                    .map(|p| p[0])
+                    .unwrap_or(self.visible_rows as u16) as usize;
                 let top = if top == 0 { 1 } else { top };
-                let bottom = if bottom == 0 { self.visible_rows } else { bottom };
-                let top_idx = top.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
-                let bottom_idx = bottom.saturating_sub(1).min(self.visible_rows.saturating_sub(1));
+                let bottom = if bottom == 0 {
+                    self.visible_rows
+                } else {
+                    bottom
+                };
+                let top_idx = top
+                    .saturating_sub(1)
+                    .min(self.visible_rows.saturating_sub(1));
+                let bottom_idx = bottom
+                    .saturating_sub(1)
+                    .min(self.visible_rows.saturating_sub(1));
                 if bottom_idx >= top_idx {
                     self.scroll_region = (top_idx, bottom_idx);
                 }
                 self.cur_x = 0;
                 self.cur_y = 0;
             }
-                        'L' => {
+            'L' => {
                 let count = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let count = if count == 0 { 1 } else { count };
                 let bottom = self.scroll_region.1;
                 for _ in 0..count {
                     if self.cur_y <= bottom && bottom < self.lines.len() {
                         if let Some(mut line) = self.lines.remove(bottom) {
-                            if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                            if self.pool.len() < 128 {
+                                line.clear();
+                                self.pool.push(line);
+                            }
                         }
-                        let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                        let mut new_line = self
+                            .pool
+                            .pop()
+                            .unwrap_or_else(|| Vec::with_capacity(self.cols));
                         new_line.resize(self.cols, Cell::default());
                         new_line.fill(Cell::default());
                         self.lines.insert(self.cur_y, new_line);
@@ -495,9 +605,15 @@ impl Perform for TermGrid {
                 for _ in 0..count {
                     if self.cur_y <= bottom && bottom < self.lines.len() {
                         if let Some(mut line) = self.lines.remove(self.cur_y) {
-                            if self.pool.len() < 128 { line.clear(); self.pool.push(line); }
+                            if self.pool.len() < 128 {
+                                line.clear();
+                                self.pool.push(line);
+                            }
                         }
-                        let mut new_line = self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.cols));
+                        let mut new_line = self
+                            .pool
+                            .pop()
+                            .unwrap_or_else(|| Vec::with_capacity(self.cols));
                         new_line.resize(self.cols, Cell::default());
                         new_line.fill(Cell::default());
                         self.lines.insert(bottom, new_line);
@@ -522,28 +638,43 @@ impl Perform for TermGrid {
                 if let Some(line) = self.lines.get_mut(self.cur_y) {
                     let start = self.cur_x.min(line.len());
                     let end = (self.cur_x + count).min(line.len());
-                    if start < end { line[start..end].fill(Cell::default()); }
+                    if start < end {
+                        line[start..end].fill(Cell::default());
+                    }
                 }
             }
-                                                'm' => {
+            'm' => {
                 if params.is_empty() {
-                    self.cur_fg = 7; self.cur_bg = 0; self.cur_bold = false;
+                    self.cur_fg = 7;
+                    self.cur_bg = 0;
+                    self.cur_bold = false;
                     return;
                 }
                 let mut i = 0;
                 let iter: Vec<&[u16]> = params.iter().collect();
                 while i < iter.len() {
-                    if iter[i].is_empty() { i += 1; continue; }
+                    if iter[i].is_empty() {
+                        i += 1;
+                        continue;
+                    }
                     let p = iter[i][0];
                     match p {
-                        0 => { self.cur_fg = 7; self.cur_bg = 0; self.cur_bold = false; }
+                        0 => {
+                            self.cur_fg = 7;
+                            self.cur_bg = 0;
+                            self.cur_bold = false;
+                        }
                         1 => {
                             self.cur_bold = true;
-                            if self.cur_fg < 8 { self.cur_fg += 8; }
+                            if self.cur_fg < 8 {
+                                self.cur_fg += 8;
+                            }
                         }
                         22 => {
                             self.cur_bold = false;
-                            if self.cur_fg >= 8 && self.cur_fg < 16 { self.cur_fg -= 8; }
+                            if self.cur_fg >= 8 && self.cur_fg < 16 {
+                                self.cur_fg -= 8;
+                            }
                         }
                         30..=37 => self.cur_fg = (p - 30) as u8 + if self.cur_bold { 8 } else { 0 },
                         40..=47 => self.cur_bg = (p - 40) as u8,
@@ -552,11 +683,15 @@ impl Perform for TermGrid {
                         39 => self.cur_fg = 7,
                         49 => self.cur_bg = 0,
                         38 | 48 => {
-                            if i + 1 < iter.len() && !iter[i+1].is_empty() {
-                                let mode = iter[i+1][0];
-                                if mode == 5 && i + 2 < iter.len() && !iter[i+2].is_empty() {
-                                    let color = iter[i+2][0] as u8;
-                                    if p == 38 { self.cur_fg = color; } else { self.cur_bg = color; }
+                            if i + 1 < iter.len() && !iter[i + 1].is_empty() {
+                                let mode = iter[i + 1][0];
+                                if mode == 5 && i + 2 < iter.len() && !iter[i + 2].is_empty() {
+                                    let color = iter[i + 2][0] as u8;
+                                    if p == 38 {
+                                        self.cur_fg = color;
+                                    } else {
+                                        self.cur_bg = color;
+                                    }
                                     i += 2;
                                 } else if mode == 2 && i + 4 < iter.len() {
                                     i += 4;
@@ -570,7 +705,7 @@ impl Perform for TermGrid {
                     i += 1;
                 }
             }
-                        'C' => {
+            'C' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let p = if p == 0 { 1 } else { p };
                 self.cur_x = (self.cur_x + p).min(self.cols.saturating_sub(1));
@@ -590,7 +725,7 @@ impl Perform for TermGrid {
                 let p = if p == 0 { 1 } else { p };
                 self.cur_y = (self.cur_y + p).min(self.visible_rows.saturating_sub(1));
             }
-                        'S' => {
+            'S' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;
                 let p = if p == 0 { 1 } else { p };
                 self.scroll_region_up(p);
@@ -608,23 +743,25 @@ impl Perform for TermGrid {
 pub struct Terminal {
     pub grid: Arc<Mutex<TermGrid>>,
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
-        pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     pub child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     pub scroll_y: crate::scroll::ScrollState,
     pub title: String,
 }
 
 impl Terminal {
-                        pub fn spawn(window: Option<std::sync::Arc<winit::window::Window>>) -> Self {
+    pub fn spawn(window: Option<std::sync::Arc<winit::window::Window>>) -> Self {
         let pty_system = NativePtySystem::default();
-                let pair = pty_system.openpty(PtySize {
-            rows: 60,
-            cols: 200,
-            pixel_width: 0,
-            pixel_height: 0,
-        }).unwrap();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 60,
+                cols: 200,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
 
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
         let shell_name = std::path::Path::new(&shell)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -636,7 +773,7 @@ impl Terminal {
         // КРИТИЧНО для Linux: освобождаем дескриптор slave в родительском процессе
         drop(pair.slave);
 
-                let reader = pair.master.try_clone_reader().unwrap();
+        let reader = pair.master.try_clone_reader().unwrap();
         let writer = pair.master.take_writer().unwrap();
         let writer_arc = Arc::new(Mutex::new(writer));
 
@@ -651,23 +788,27 @@ impl Terminal {
             }
         });
 
-                        let mut grid_obj = TermGrid::new(200, 60);
+        let mut grid_obj = TermGrid::new(200, 60);
         grid_obj.reply_tx = Some(reply_tx);
         let grid = Arc::new(Mutex::new(grid_obj));
         let grid_clone = grid.clone();
 
-                                                                                let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
-                        std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 65536];
             while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 { break; }
-                if tx.send(buf[..n].to_vec()).is_err() { break; }
+                if n == 0 {
+                    break;
+                }
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
             }
         });
 
-                std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let mut parser = Parser::new();
             while let Ok(chunk) = rx.recv() {
                 let mut chunks = vec![chunk];
@@ -687,7 +828,7 @@ impl Terminal {
                     }
                 }
 
-                                let mut g = grid_clone.lock().unwrap();
+                let mut g = grid_clone.lock().unwrap();
                 for c in &chunks {
                     parser.advance(&mut *g, c);
                 }
@@ -700,9 +841,9 @@ impl Terminal {
             }
         });
 
-                                                                                let master_pty = Arc::new(Mutex::new(pair.master));
+        let master_pty = Arc::new(Mutex::new(pair.master));
 
-                let scroll_y = crate::scroll::ScrollState::new(7.0);
+        let scroll_y = crate::scroll::ScrollState::new(7.0);
 
         Self {
             grid,
@@ -714,7 +855,7 @@ impl Terminal {
         }
     }
 
-                                                                                                                                                                                    pub fn resize_pty(&self, cols: u16, rows: u16) {
+    pub fn resize_pty(&self, cols: u16, rows: u16) {
         if cols == 0 || rows == 0 {
             return;
         }

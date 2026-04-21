@@ -6,9 +6,9 @@ use crate::ui_system::UiId;
 
 impl App {
     /// Обрабатывает клик по UI элементу
-        pub fn handle_ui_click(&mut self, id: UiId) {
+    pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
-                                                UiId::TerminalBody => {
+            UiId::TerminalBody => {
                 self.is_dragging = true;
                 let active = self.ide_panel.active_terminal;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
@@ -30,15 +30,20 @@ impl App {
                 if idx < self.ide_panel.terminals.len() {
                     self.ide_panel.terminals.remove(idx);
                     if self.ide_panel.terminals.is_empty() {
-                        self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        self.ide_panel
+                            .terminals
+                            .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                         self.ide_panel.active_terminal = 0;
                     } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
-                        self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
+                        self.ide_panel.active_terminal =
+                            self.ide_panel.terminals.len().saturating_sub(1);
                     }
                 }
             }
             UiId::TerminalAdd => {
-                self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                self.ide_panel
+                    .terminals
+                    .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                 self.ide_panel.active_terminal = self.ide_panel.terminals.len() - 1;
             }
             // Welcome screen
@@ -53,7 +58,7 @@ impl App {
                     let old_version = self.editor.version;
                     self.editor = Editor::new(8192);
                     self.editor.version = old_version + 1;
-                                        self.editor.set_original_text();
+                    self.editor.set_original_text();
                     self.editor.sync_edits.clear();
                     while let Ok(_) = self.highlighter.rx.try_recv() {}
                     self.highlighter
@@ -534,7 +539,7 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-                        UiId::ProblemFileToggle(idx) => {
+            UiId::ProblemFileToggle(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if *diag_idx == usize::MAX {
                         if self.ide_panel.problems_collapsed.contains(path) {
@@ -550,9 +555,10 @@ impl App {
                 self.ide_panel.problems_tab = idx;
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
+            UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
                 if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
-                    #[cfg(target_os = "windows")]let _ = std::process::Command::new("cmd")
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("cmd")
                         .args(["/c", "start", "", &href])
                         .spawn();
                     #[cfg(target_os = "macos")]
@@ -580,7 +586,7 @@ impl App {
                     }
                 }
             }
-                        UiId::ProblemJump(idx) => {
+            UiId::ProblemJump(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx).cloned() {
                     if diag_idx == usize::MAX {
                         return;
@@ -642,7 +648,7 @@ impl App {
                     }
                 }
             }
-                        UiId::CopyDiagnostic(idx) => {
+            UiId::CopyDiagnostic(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if let Some(diag) = self
                         .lsp
@@ -656,7 +662,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::PopupCopyDiagnostic(idx) => {
+            UiId::PopupCopyDiagnostic(idx) => {
                 if let Some(path) = &self.file_path {
                     if let Some(diag) = self
                         .lsp

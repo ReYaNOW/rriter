@@ -1,13 +1,13 @@
 use crate::app::{App, PendingAction};
 use crate::editor::Editor;
+use std::io::Write;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
-use std::io::Write;
 
 impl App {
-                                pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
 
         let active = self.ide_panel.active_terminal;
@@ -16,18 +16,36 @@ impl App {
             if key_event.state == winit::event::ElementState::Pressed {
                 let mut w = term.writer.lock().unwrap();
                 match key_event.physical_key {
-                                        PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                         if let Some((sx, sy, ex, ey)) = grid.selection {
                             let mut res = String::new();
-                            let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+                            let scrollback_len = if grid.is_alt {
+                                0
+                            } else {
+                                grid.scrollback.len()
+                            };
                             let total_lines = scrollback_len + grid.lines.len();
                             let start_y = sy.min(ey);
                             let end_y = sy.max(ey);
-                            let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
-                            let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+                            let start_x = if sy < ey {
+                                sx
+                            } else if sy > ey {
+                                ex
+                            } else {
+                                sx.min(ex)
+                            };
+                            let end_x = if sy < ey {
+                                ex
+                            } else if sy > ey {
+                                sx
+                            } else {
+                                sx.max(ex)
+                            };
 
                             for y in start_y..=end_y {
-                                if y >= total_lines { continue; }
+                                if y >= total_lines {
+                                    continue;
+                                }
                                 let row = if grid.is_alt {
                                     &grid.lines[y]
                                 } else {
@@ -38,14 +56,20 @@ impl App {
                                     }
                                 };
                                 let line_start = if y == start_y { start_x } else { 0 };
-                                let line_end = if y == end_y { end_x } else { grid.cols.saturating_sub(1) };
+                                let line_end = if y == end_y {
+                                    end_x
+                                } else {
+                                    grid.cols.saturating_sub(1)
+                                };
 
                                 for x in line_start..=line_end {
                                     if x < row.len() {
                                         res.push(row[x].c);
                                     }
                                 }
-                                if y != end_y { res.push('\n'); }
+                                if y != end_y {
+                                    res.push('\n');
+                                }
                             }
 
                             let _ = self.clipboard.set_text(res.trim_end().to_string());
@@ -65,21 +89,45 @@ impl App {
                     PhysicalKey::Code(KeyCode::Backspace) => {
                         let _ = w.write_all(b"\x08");
                     }
-                                        PhysicalKey::Code(KeyCode::Tab) => {
+                    PhysicalKey::Code(KeyCode::Tab) => {
                         let _ = w.write_all(b"\t");
                     }
-                    PhysicalKey::Code(KeyCode::F1) => { let _ = w.write_all(b"\x1bOP"); }
-                    PhysicalKey::Code(KeyCode::F2) => { let _ = w.write_all(b"\x1bOQ"); }
-                    PhysicalKey::Code(KeyCode::F3) => { let _ = w.write_all(b"\x1bOR"); }
-                    PhysicalKey::Code(KeyCode::F4) => { let _ = w.write_all(b"\x1bOS"); }
-                    PhysicalKey::Code(KeyCode::F5) => { let _ = w.write_all(b"\x1b[15~"); }
-                    PhysicalKey::Code(KeyCode::F6) => { let _ = w.write_all(b"\x1b[17~"); }
-                    PhysicalKey::Code(KeyCode::F7) => { let _ = w.write_all(b"\x1b[18~"); }
-                    PhysicalKey::Code(KeyCode::F8) => { let _ = w.write_all(b"\x1b[19~"); }
-                    PhysicalKey::Code(KeyCode::F9) => { let _ = w.write_all(b"\x1b[20~"); }
-                    PhysicalKey::Code(KeyCode::F10) => { let _ = w.write_all(b"\x1b[21~"); }
-                    PhysicalKey::Code(KeyCode::F11) => { let _ = w.write_all(b"\x1b[23~"); }
-                    PhysicalKey::Code(KeyCode::F12) => { let _ = w.write_all(b"\x1b[24~"); }
+                    PhysicalKey::Code(KeyCode::F1) => {
+                        let _ = w.write_all(b"\x1bOP");
+                    }
+                    PhysicalKey::Code(KeyCode::F2) => {
+                        let _ = w.write_all(b"\x1bOQ");
+                    }
+                    PhysicalKey::Code(KeyCode::F3) => {
+                        let _ = w.write_all(b"\x1bOR");
+                    }
+                    PhysicalKey::Code(KeyCode::F4) => {
+                        let _ = w.write_all(b"\x1bOS");
+                    }
+                    PhysicalKey::Code(KeyCode::F5) => {
+                        let _ = w.write_all(b"\x1b[15~");
+                    }
+                    PhysicalKey::Code(KeyCode::F6) => {
+                        let _ = w.write_all(b"\x1b[17~");
+                    }
+                    PhysicalKey::Code(KeyCode::F7) => {
+                        let _ = w.write_all(b"\x1b[18~");
+                    }
+                    PhysicalKey::Code(KeyCode::F8) => {
+                        let _ = w.write_all(b"\x1b[19~");
+                    }
+                    PhysicalKey::Code(KeyCode::F9) => {
+                        let _ = w.write_all(b"\x1b[20~");
+                    }
+                    PhysicalKey::Code(KeyCode::F10) => {
+                        let _ = w.write_all(b"\x1b[21~");
+                    }
+                    PhysicalKey::Code(KeyCode::F11) => {
+                        let _ = w.write_all(b"\x1b[23~");
+                    }
+                    PhysicalKey::Code(KeyCode::F12) => {
+                        let _ = w.write_all(b"\x1b[24~");
+                    }
                     PhysicalKey::Code(KeyCode::ArrowUp) => {
                         let _ = w.write_all(if grid.is_alt { b"\x1bOA" } else { b"\x1b[A" });
                     }
@@ -158,8 +206,7 @@ impl App {
                 PhysicalKey::Code(KeyCode::ArrowDown) => {
                     if !self.search_results.is_empty() {
                         if let Some(idx) = self.search_current_idx {
-                            self.search_current_idx =
-                                Some((idx + 1) % self.search_results.len());
+                            self.search_current_idx = Some((idx + 1) % self.search_results.len());
                         }
                         self.jump_to_search_result();
                     }
@@ -237,7 +284,8 @@ impl App {
         }
     }
 
-    pub fn handle_editor_keyboard_input(&mut self,
+    pub fn handle_editor_keyboard_input(
+        &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
@@ -856,12 +904,13 @@ impl App {
                 let old_target_y = self.scroll_y.target;
                 let old_target_x = self.scroll_x.target;
 
-                                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                     0.0
                 } else {
                     38.0 * self.renderer.as_ref().unwrap().scale_factor
                 };
-                App::ensure_cursor_visible(&mut self.scroll_y.target,
+                App::ensure_cursor_visible(
+                    &mut self.scroll_y.target,
                     &mut self.scroll_x.target,
                     &self.editor,
                     self.renderer.as_mut().unwrap(),
@@ -881,39 +930,61 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-        pub fn handle_main_keyboard_input(
+    pub fn handle_main_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        if key_event.state == ElementState::Pressed && self.modifiers.alt_key() && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ) {
+        if key_event.state == ElementState::Pressed
+            && self.modifiers.alt_key()
+            && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)
+        {
             if self.is_ide_mode {
                 let shift = self.modifiers.shift_key();
                 let is_open = self.ide_panel.is_open(crate::app::PanelId::Terminal);
 
                 if shift {
                     if is_open {
-                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                        if let Some(slot) = self
+                            .ide_panel
+                            .slots
+                            .iter_mut()
+                            .find(|s| s.id == crate::app::PanelId::Terminal)
+                        {
                             slot.open = false;
                         }
                         self.ide_panel.terminal_focused = false;
                     } else {
-                                                if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                        if let Some(slot) = self
+                            .ide_panel
+                            .slots
+                            .iter_mut()
+                            .find(|s| s.id == crate::app::PanelId::Terminal)
+                        {
                             slot.open = true;
                         }
                         if self.ide_panel.terminals.is_empty() {
-                            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                            self.ide_panel
+                                .terminals
+                                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                             self.ide_panel.active_terminal = 0;
                         }
                         self.ide_panel.terminal_focused = true;
                     }
                 } else {
                     if !is_open {
-                        if let Some(slot) = self.ide_panel.slots.iter_mut().find(|s| s.id == crate::app::PanelId::Terminal) {
+                        if let Some(slot) = self
+                            .ide_panel
+                            .slots
+                            .iter_mut()
+                            .find(|s| s.id == crate::app::PanelId::Terminal)
+                        {
                             slot.open = true;
                         }
                         if self.ide_panel.terminals.is_empty() {
-                            self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                            self.ide_panel
+                                .terminals
+                                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                             self.ide_panel.active_terminal = 0;
                         }
                         self.ide_panel.terminal_focused = true;
@@ -923,7 +994,9 @@ impl App {
                 }
 
                 self.last_action = std::time::Instant::now();
-                if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
                 return;
             }
         }
@@ -1084,7 +1157,9 @@ impl App {
                 return;
             }
 
-                        let term_focused = self.is_ide_mode && self.ide_panel.terminal_focused && self.ide_panel.is_open(crate::app::PanelId::Terminal);
+            let term_focused = self.is_ide_mode
+                && self.ide_panel.terminal_focused
+                && self.ide_panel.is_open(crate::app::PanelId::Terminal);
             if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
                 if !term_focused {
                     self.show_fps = !self.show_fps;
@@ -1137,13 +1212,16 @@ impl App {
                 }
             }
 
-                    if self.is_ide_mode && self.ide_panel.terminal_focused && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
-            self.handle_terminal_keyboard_input(key_event);
-        } else if self.search_focused {
-            self.handle_search_keyboard_input(key_event);
-        } else {
-            self.handle_editor_keyboard_input(event_loop, key_event);
-        }
+            if self.is_ide_mode
+                && self.ide_panel.terminal_focused
+                && self.ide_panel.is_open(crate::app::PanelId::Terminal)
+            {
+                self.handle_terminal_keyboard_input(key_event);
+            } else if self.search_focused {
+                self.handle_search_keyboard_input(key_event);
+            } else {
+                self.handle_editor_keyboard_input(event_loop, key_event);
+            }
         }
     }
 }

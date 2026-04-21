@@ -151,7 +151,7 @@ impl IconButton {
 
                 let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
                 let offset = (self.size - icon_render_size) / 2.0;
-                                if let Some(icon_type) = self.icon {
+                if let Some(icon_type) = self.icon {
                     let icon_col = self.custom_color.unwrap_or([1.0, 1.0, 1.0, 1.0]);
                     renderer.draw_atlas_icon(
                         icon_type,

@@ -9,7 +9,7 @@ use glutin_winit::DisplayBuilder;
 use std::num::NonZeroU32;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
-use winit::event::{MouseButton, WindowEvent};
+use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::HasWindowHandle;
@@ -87,7 +87,7 @@ impl ApplicationHandler for App {
             })
         };
 
-                let scale_factor = window.scale_factor() as f32;
+        let scale_factor = window.scale_factor() as f32;
         self.renderer = Some(Renderer::new(gl, scale_factor, self.theme.clone()));
         self.gl_config = Some(gl_config);
         self.window = Some(std::sync::Arc::new(window));
@@ -299,12 +299,8 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
-                        WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } => {
-                self.handle_main_mouse_input(event_loop, state);
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.handle_main_mouse_input(event_loop, state, button);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
             WindowEvent::KeyboardInput {
@@ -349,30 +345,46 @@ impl ApplicationHandler for App {
 
                 let is_resizing = self.last_resize_time.is_some();
 
-                                // Очищаем UI registry перед новым кадром```
+                // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
 
                 self.ide_panel.flat_diags.clear();
                 if let Some(lsp) = &self.lsp {
                     if self.ide_panel.problems_tab == 0 {
                         if let Some(p) = &self.file_path {
-                            let mut diags = lsp.get_diagnostics(p).iter().enumerate().collect::<Vec<_>>();
-                            diags.sort_by(|(_, a), (_, b)| a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col)));
+                            let mut diags = lsp
+                                .get_diagnostics(p)
+                                .iter()
+                                .enumerate()
+                                .collect::<Vec<_>>();
+                            diags.sort_by(|(_, a), (_, b)| {
+                                a.start_line
+                                    .cmp(&b.start_line)
+                                    .then(a.start_col.cmp(&b.start_col))
+                            });
                             for (i, _) in diags {
                                 self.ide_panel.flat_diags.push((p.clone(), i));
                             }
                         }
-                                        } else {
+                    } else {
                         let mut paths: Vec<_> = lsp.diagnostics.keys().collect();
                         paths.sort();
                         for p in paths {
-                            let mut diags = lsp.get_diagnostics(p).iter().enumerate().collect::<Vec<_>>();
+                            let mut diags = lsp
+                                .get_diagnostics(p)
+                                .iter()
+                                .enumerate()
+                                .collect::<Vec<_>>();
                             if diags.is_empty() {
                                 continue;
                             }
-                            diags.sort_by(|(_, a), (_, b)| a.start_line.cmp(&b.start_line).then(a.start_col.cmp(&b.start_col)));
+                            diags.sort_by(|(_, a), (_, b)| {
+                                a.start_line
+                                    .cmp(&b.start_line)
+                                    .then(a.start_col.cmp(&b.start_col))
+                            });
 
-                                                        self.ide_panel.flat_diags.push(((*p).clone(), usize::MAX));
+                            self.ide_panel.flat_diags.push(((*p).clone(), usize::MAX));
 
                             if !self.ide_panel.problems_collapsed.contains(p) {
                                 for (i, _) in diags {
@@ -409,7 +421,7 @@ impl ApplicationHandler for App {
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
                     &self.ide_panel,
-                                        self.show_settings,
+                    self.show_settings,
                     self.lsp.as_ref(),
                     &mut self.ui_registry,
                     self.tab_scroll.current.round(),
@@ -481,7 +493,11 @@ impl ApplicationHandler for App {
 
                 // LSP actions menu — рисуем поверх всего
                 if let Some(mut menu) = self.lsp_actions_menu.clone() {
-                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
                     menu.menu_y += tab_bar_h;
                     let wants = self
                         .renderer
@@ -495,7 +511,11 @@ impl ApplicationHandler for App {
 
                 if self.autocomplete_active && !self.autocomplete_options.is_empty() {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
                     let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
                     let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
                         cx,
@@ -634,14 +654,16 @@ impl ApplicationHandler for App {
                     } else {
                         0.0
                     };
-                    
-                    let is_terminal_bottom = self.is_ide_mode && self.ide_panel.slots.iter().any(|sl| {
-                        sl.group == crate::app::PanelGroup::Bottom
-                            && sl.open
-                            && sl.id == crate::app::PanelId::Terminal
-                    });
-                    
-                    let is_transparent_terminal = is_terminal_bottom && !self.ide_panel.terminal_focused;
+
+                    let is_terminal_bottom = self.is_ide_mode
+                        && self.ide_panel.slots.iter().any(|sl| {
+                            sl.group == crate::app::PanelGroup::Bottom
+                                && sl.open
+                                && sl.id == crate::app::PanelId::Terminal
+                        });
+
+                    let is_transparent_terminal =
+                        is_terminal_bottom && !self.ide_panel.terminal_focused;
 
                     if panel_bottom_h > 0.0 && my >= window_height - panel_bottom_h {
                         if !is_transparent_terminal {
@@ -773,7 +795,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                // Watcher сигнализирует об изменениях на диске — обновляем дерево
+        // Watcher сигнализирует об изменениях на диске — обновляем дерево
         {
             let mut fs_changed = false;
             if let Some(rx) = &self.file_tree_notify_rx {
@@ -787,7 +809,7 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             }
         }
-                if self.ide_panel.explorer_scroll.update(dt) {
+        if self.ide_panel.explorer_scroll.update(dt) {
             needs_redraw = true;
         }
         if self.ide_panel.problems_scroll.update(dt) {
@@ -804,13 +826,13 @@ impl ApplicationHandler for App {
                 needs_redraw = true;
             }
         }
-                        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
+        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
             if scroll.update(dt) {
                 needs_redraw = true;
             }
         }
 
-                        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Terminal) {
             let mut closed_terminals = Vec::new();
             for (i, term) in self.ide_panel.terminals.iter().enumerate() {
                 if let Ok(mut child) = term.child.lock() {
@@ -824,15 +846,20 @@ impl ApplicationHandler for App {
                 self.ide_panel.terminals.remove(idx);
                 needs_redraw = true;
                 if self.ide_panel.terminals.is_empty() {
-                    self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                    self.ide_panel
+                        .terminals
+                        .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                     self.ide_panel.active_terminal = 0;
                 } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
-                    self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
+                    self.ide_panel.active_terminal =
+                        self.ide_panel.terminals.len().saturating_sub(1);
                 }
             }
 
             if self.ide_panel.terminals.is_empty() {
-                self.ide_panel.terminals.push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                self.ide_panel
+                    .terminals
+                    .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
                 self.ide_panel.active_terminal = 0;
                 self.ide_panel.terminal_focused = true;
             }
@@ -879,25 +906,29 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                let s = self
+        let s = self
             .renderer
             .as_ref()
             .map(|r| r.scale_factor)
             .unwrap_or(1.0);
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+            0.0
+        } else {
+            38.0 * s
+        };
         let target_search_y = if self.show_search {
             tab_bar_h + 10.0 * s
         } else {
             -120.0 * s
         };
-                        let search_diff = target_search_y - self.search_anim_y;
+        let search_diff = target_search_y - self.search_anim_y;
         if search_diff.abs() > 1.5 {
             let speed = if self.show_search { 20.0 } else { 7.0 };
             self.search_anim_y += search_diff * speed * dt;
             needs_redraw = true;
         }
 
-        if self.is_dragging && !self.scroll_y.is_dragging {
+        if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.scroll_y.is_dragging {
             if let Some(w) = self.window.as_ref() {
                 let wh = w.inner_size().height as f32;
                 let ww = w.inner_size().width as f32;
@@ -934,12 +965,13 @@ impl ApplicationHandler for App {
                         self.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                     }
 
-                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
                         38.0 * self.renderer.as_ref().unwrap().scale_factor
                     };
-                    self.editor.set_cursor_at_pos(mx,
+                    self.editor.set_cursor_at_pos(
+                        mx,
                         my - tab_bar_h + self.scroll_y.current,
                         self.renderer.as_mut().unwrap(),
                         false,
@@ -949,13 +981,17 @@ impl ApplicationHandler for App {
             }
         }
 
-                if let Some(w) = self.window.as_ref() {
+        if let Some(w) = self.window.as_ref() {
             let s = self
                 .renderer
                 .as_ref()
                 .map(|r| r.scale_factor)
                 .unwrap_or(1.0);
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                0.0
+            } else {
+                38.0 * s
+            };
             let max_scroll_y = self
                 .renderer
                 .as_mut()

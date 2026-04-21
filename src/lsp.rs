@@ -1014,7 +1014,7 @@ pub struct LspProcess {
     pub event_rx: Receiver<LspEvent>,
     current_uri: Option<String>,
     def: &'static LspServerDef,
-        pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
+    pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
     workspace_scanned: bool,
 }
 
@@ -1029,7 +1029,7 @@ impl LspProcess {
             .spawn(move || run_supervisor(def, ws, cmd_rx, event_tx))
             .expect("failed to start LSP supervisor");
 
-                LspProcess {
+        LspProcess {
             cmd_tx,
             event_rx,
             current_uri: None,
@@ -1040,7 +1040,13 @@ impl LspProcess {
     }
 
     /// textDocument/didOpen
-    pub fn notify_open(&mut self, path: &PathBuf, text: &str, version: i32, workspace: Option<&PathBuf>) {
+    pub fn notify_open(
+        &mut self,
+        path: &PathBuf,
+        text: &str,
+        version: i32,
+        workspace: Option<&PathBuf>,
+    ) {
         if !self.workspace_scanned {
             self.workspace_scanned = true;
             if let Some(ws) = workspace {
@@ -1245,7 +1251,7 @@ impl LspManager {
     }
 
     /// Включить ruff обратно
-        pub fn enable_python(&mut self) {
+    pub fn enable_python(&mut self) {
         self.python_disabled = false;
         self.python_status = LspServerStatus::Starting;
         self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
@@ -1286,7 +1292,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -1318,7 +1324,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP о закрытии файла
-        pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
+    pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1382,7 +1388,7 @@ impl LspManager {
                 LspEvent::StatusChanged { status, .. } => {
                     self.python_status = status.clone();
                 }
-                                                LspEvent::Log { name, message } => {
+                LspEvent::Log { name, message } => {
                     if message.len() > 5000 {
                         let mut split_at = 5000;
                         while split_at > 0 && !message.is_char_boundary(split_at) {
