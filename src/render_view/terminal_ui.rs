@@ -382,7 +382,7 @@ impl Renderer {
             }
         }
 
-        if ide_panel.terminal_focused {
+                        if ide_panel.terminal_focused {
             ui_registry.register_blocker(
                 crate::ui_system::UiId::TerminalBody,
                 panel_x,

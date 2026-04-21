@@ -31,7 +31,7 @@ impl App {
             } else {
                 0.0
             };
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
 
@@ -79,7 +79,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -135,7 +135,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top
             });
             let sb_w = 48.0 * s;
@@ -628,7 +628,7 @@ impl App {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                                            let is_top = self.ide_panel.slots.iter().any(|sl| {
                         sl.id == crate::app::PanelId::Problems
                             && sl.group == crate::app::PanelGroup::Top
                     });
@@ -693,7 +693,7 @@ impl App {
                                     self.ide_panel.problems_scroll.target =
                                         (new_ratio * max_scroll).clamp(0.0, max_scroll);
                                     self.ide_panel.problems_scroll.is_dragging = true;
-                                    self.window.as_ref().unwrap().request_redraw();
+                                                                        self.window.as_ref().unwrap().request_redraw();
                                     return;
                                 }
                             }
@@ -701,7 +701,65 @@ impl App {
                     }
                 }
 
-                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                if self.is_ide_mode {
+                    let s = self.renderer.as_ref().unwrap().scale_factor;
+                    let sb_w = 48.0 * s;
+                    let panel_left_w = self.ide_panel.left_width * s;
+                    let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                        self.ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+
+                    let mut effective_bottom_h = panel_bottom_h;
+                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                        && !self.ide_panel.terminal_focused
+                    {
+                        effective_bottom_h = 0.0;
+                    }
+
+                    let mut manual_resize = false;
+                    if panel_left_w > 0.0 {
+                        let resize_x = sb_w + panel_left_w;
+                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < wh - effective_bottom_h {
+                            self.ide_panel.is_resizing_left = true;
+                            manual_resize = true;
+                        }
+                    }
+                    if panel_bottom_h > 0.0 && !manual_resize {
+                        let resize_y = wh - panel_bottom_h;
+                        if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
+                            self.ide_panel.is_resizing_bottom = true;
+                            manual_resize = true;
+                        }
+                    }
+
+                    if manual_resize {
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                }
+
+                                                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    let is_term = matches!(clicked_id,
+                        crate::ui_system::UiId::TerminalBody
+                            | crate::ui_system::UiId::TerminalScrollY
+                            | crate::ui_system::UiId::TerminalTab(_)
+                            | crate::ui_system::UiId::TerminalTabClose(_)
+                            | crate::ui_system::UiId::TerminalAdd
+                    );
+                    let is_resize = matches!(
+                        clicked_id,
+                        crate::ui_system::UiId::ResizeLeft | crate::ui_system::UiId::ResizeBottom
+                    );
+
+                    if is_term {
+                        self.ide_panel.terminal_focused = true;
+                    } else if !is_resize {
+                        self.ide_panel.terminal_focused = false;
+                    }
+
                     if let crate::ui_system::UiId::SidebarSlot(panel_id) = clicked_id {
                         self.ide_panel.drag = Some(crate::app::PanelDragState {
                             panel_id,
@@ -1083,8 +1141,7 @@ impl App {
                 return;
             }
 
-            // Блокируем resize панелей, когда терминал в фокусе
-            if self.ide_panel.is_resizing_left && !self.ide_panel.terminal_focused {
+                                                if self.ide_panel.is_resizing_left {
                 let sb_w = 48.0 * s;
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let max_w = ((ww - sb_w) / s) - 300.0;
@@ -1094,7 +1151,7 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.is_resizing_bottom && !self.ide_panel.terminal_focused {
+            if self.ide_panel.is_resizing_bottom {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                 let max_h = (wh / s) - 50.0;
                 let new_h = ((wh - py) / s).max(60.0).min(max_h.max(60.0));
@@ -1110,7 +1167,7 @@ impl App {
 
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                                    let is_top = self.ide_panel.slots.iter().any(|sl| {
                 sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
             });
             let panel_bottom_h = if self.ide_panel.any_bottom_open() {

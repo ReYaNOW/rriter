@@ -559,13 +559,10 @@ impl ApplicationHandler for App {
                 }
 
                 // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
-                let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
-                // Блокируем resize, когда терминал в фокусе
-                let terminal_focused = self.is_ide_mode && self.ide_panel.terminal_focused;
+                                let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
                 if self.is_ide_mode
                     && !self.show_welcome
                     && !self.show_settings
-                    && !terminal_focused
                 {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
