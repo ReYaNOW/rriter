@@ -178,24 +178,36 @@ Project divided into several independent, tightly coupled subsystems.
     │   └── JetBrainsMono-Regular.ttf
     ├── highlighter.rs
     ├── icons
-    │   ├── ... (icons)
+    │   ├── atom
+    │   │   ├── folder_associations.json
+    │   │   ├── icon_associations.json
+    │   │   └── icons
+    │   │       ├── files  [1759 entries exceeds filelimit, not opening dir]
+    │   │       ├── folders  [333 entries exceeds filelimit, not opening dir]
+    │   │       ├── foldersOpen  [333 entries exceeds filelimit, not opening dir]
+    │   │       └── ui  [505 entries exceeds filelimit, not opening dir]
+
     ├── main.rs
     ├── queries.rs
     ├── renderer.rs
     ├── render_view         <-- Folder with rendering modules
-    │   ├── core_text.rs
-    │   ├── lsp_ui.rs
-    │   ├── search.rs       (Search panel)
-    │   ├── settings_ui.rs
-    │   ├── sticky.rs       ("Sticky" headers)
-    │   └── ui.rs
+    │   ├── core_text.rs        (Text, cursor, selections, brackets)
+    │   ├── diag_popup_ui.rs    (LSP diagnostic popup)
+    │   ├── lsp_ui.rs           (LSP servers panel)
+    │   ├── minimap_ui.rs       (Minimap rendering)
+    │   ├── search.rs           (Search panel Ctrl+F)
+    │   ├── settings_ui.rs      (Settings window)
+    │   ├── sticky.rs           ("Sticky" headers)
+    │   ├── tabs_ui.rs          (Tab bar rendering)
+    │   ├── terminal_ui.rs      (Terminal panel)
+    │   └── ui.rs               (Dialog boxes, icons)
     ├── render_view.rs      <-- Main render orchestrator file
     ├── scroll.rs
     ├── ui_system.rs        <-- Declarative UI system
     ├── widgets.rs
-    └── ...
 
-12 directories, 42 files
+13 directories, 58 files
+
 ```
 
 ---
@@ -410,9 +422,10 @@ Then, drawing 'A' just two triangles textured with correct atlas piece.
 - `renderer.rs`: Low-level wrapper around OpenGL. Holds vertex buffers (`Vec<Vertex>`), shaders, textures. Contains methods for "drawing primitives": `push_quad`, `push_rounded_rect`, etc. Knows nothing about editor, only geometry.
 - `render_view.rs`: High-level orchestrator. Contains main `draw()` method. Calls `update_cache()` prepare visual lines, then passes control specialized modules.
 - `render_view/core_text.rs`: Responsible for most important part—rendering text, cursor, selections, bracket highlighting, identical word highlighting.
-- `render_view/sticky.rs` (New): Implements 'sticky' headers logic. Analyzes code nesting levels, determines which lines "stick" to screen top, renders them with animation.
-- `render_view/search.rs` (New): Encapsulates all rendering logic for search panel (Ctrl+F), including text field, buttons, result display.
-- `render_view/ui.rs`, `lsp_ui.rs`, `settings_ui.rs`: Responsible for other interface parts, like dialog boxes, icons, LSP diagnostics, settings window.
+- `render_view/sticky.rs`: Implements 'sticky' headers logic. Analyzes code nesting levels, determines which lines "stick" to screen top, renders them with animation.
+- `render_view/search.rs`: Encapsulates all rendering logic for search panel (Ctrl+F), including text field, buttons, result display.
+- `render_view/ui.rs`, `render_view/lsp_ui.rs`, `render_view/settings_ui.rs`: Responsible for other interface parts, like dialog boxes, icons, LSP diagnostics, settings window.
+- `render_view/diag_popup_ui.rs`, `render_view/minimap_ui.rs`, `render_view/tabs_ui.rs`, `render_view/terminal_ui.rs`: Additional UI components.
 
 **Rendering Sequence in `draw()`:**
 1. Preparation: `update_cache()` splits bytes into visual lines (`VisualLine`), handles code folding.
