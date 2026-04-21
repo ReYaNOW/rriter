@@ -16,33 +16,38 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-        let term_tab_h = 24.0 * s;
+                let term_tab_h = 32.0 * s;
         let mut cx = panel_x + 8.0 * s;
-        let cy = content_y + 4.0 * s;
+        let cy = content_y + 6.0 * s;
 
         for i in 0..ide_panel.terminals.len() {
             let is_active = i == ide_panel.active_terminal;
             let title = format!("{} {}", ide_panel.terminals[i].title, i + 1);
-            let title_w = self.measure_ui_width(&title, 0.85);
-            let tab_w = title_w + 24.0 * s + 16.0 * s;
+            let title_w = self.measure_ui_width(&title, 0.9);
+            let tab_w = title_w + 32.0 * s + 24.0 * s;
 
             let is_hovered = mx >= cx && mx <= cx + tab_w && my >= cy && my <= cy + term_tab_h;
             let bg_color = if is_active {
                 [
-                    (self.theme.bg[0] + 0.15).min(1.0),
-                    (self.theme.bg[1] + 0.15).min(1.0),
-                    (self.theme.bg[2] + 0.15).min(1.0),
+                    (self.theme.bg[0] + 0.20).min(1.0),
+                    (self.theme.bg[1] + 0.20).min(1.0),
+                    (self.theme.bg[2] + 0.20).min(1.0),
                     1.0,
                 ]
             } else if is_hovered {
                 [
-                    (self.theme.bg[0] + 0.05).min(1.0),
-                    (self.theme.bg[1] + 0.05).min(1.0),
-                    (self.theme.bg[2] + 0.05).min(1.0),
+                    (self.theme.bg[0] + 0.12).min(1.0),
+                    (self.theme.bg[1] + 0.12).min(1.0),
+                    (self.theme.bg[2] + 0.12).min(1.0),
                     1.0,
                 ]
             } else {
-                [0.0, 0.0, 0.0, 0.0]
+                [
+                    (self.theme.bg[0] + 0.04).min(1.0),
+                    (self.theme.bg[1] + 0.04).min(1.0),
+                    (self.theme.bg[2] + 0.04).min(1.0),
+                    1.0,
+                ]
             };
 
             if bg_color[3] > 0.0 {
@@ -54,17 +59,17 @@ impl Renderer {
             } else {
                 self.theme.line_num
             };
-            self.draw_string_scaled(
+                                    self.draw_string_scaled(
                 &title,
-                cx + 8.0 * s,
+                cx + 12.0 * s,
                 cy + term_tab_h / 2.0 + 4.0 * s,
                 text_color,
-                0.85,
+                0.9,
             );
 
-            let close_sz = 14.0 * s;
-            let close_x = cx + tab_w - 8.0 * s - close_sz;
-            let close_y = cy + (term_tab_h - close_sz) / 2.0;
+            let close_sz = 18.0 * s;
+            let close_x = cx + tab_w - 12.0 * s - close_sz;
+            let close_y = (cy + (term_tab_h - close_sz) / 2.0).round();
             let c_hovered = mx >= close_x - 2.0 * s
                 && mx <= close_x + close_sz + 2.0 * s
                 && my >= close_y - 2.0 * s
@@ -109,8 +114,8 @@ impl Renderer {
             cx += tab_w + 4.0 * s;
         }
 
-        let add_sz = 16.0 * s;
-        let add_y = cy + (term_tab_h - add_sz) / 2.0;
+                        let add_sz = 20.0 * s;
+        let add_y = (cy + (term_tab_h - add_sz) / 2.0).round();
         let add_hovered = mx >= cx && mx <= cx + add_sz && my >= add_y && my <= add_y + add_sz;
         if add_hovered {
             self.push_rounded_rect(
