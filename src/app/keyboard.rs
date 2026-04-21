@@ -140,9 +140,33 @@ impl App {
                     PhysicalKey::Code(KeyCode::ArrowRight) => {
                         let _ = w.write_all(if grid.is_alt { b"\x1bOC" } else { b"\x1b[C" });
                     }
-                    PhysicalKey::Code(KeyCode::Escape) => {
+                                        PhysicalKey::Code(KeyCode::Escape) => {
                         let _ = w.write_all(b"\x1b");
                     }
+                    PhysicalKey::Code(KeyCode::KeyA) if ctrl => { let _ = w.write_all(b"\x01"); }
+                    PhysicalKey::Code(KeyCode::KeyB) if ctrl => { let _ = w.write_all(b"\x02"); }
+                    PhysicalKey::Code(KeyCode::KeyD) if ctrl => { let _ = w.write_all(b"\x04"); }
+                    PhysicalKey::Code(KeyCode::KeyE) if ctrl => { let _ = w.write_all(b"\x05"); }
+                    PhysicalKey::Code(KeyCode::KeyF) if ctrl => { let _ = w.write_all(b"\x06"); }
+                    PhysicalKey::Code(KeyCode::KeyG) if ctrl => { let _ = w.write_all(b"\x07"); }
+                    PhysicalKey::Code(KeyCode::KeyH) if ctrl => { let _ = w.write_all(b"\x08"); }
+                    PhysicalKey::Code(KeyCode::KeyI) if ctrl => { let _ = w.write_all(b"\x09"); }
+                    PhysicalKey::Code(KeyCode::KeyJ) if ctrl => { let _ = w.write_all(b"\x0a"); }
+                    PhysicalKey::Code(KeyCode::KeyK) if ctrl => { let _ = w.write_all(b"\x0b"); }
+                    PhysicalKey::Code(KeyCode::KeyL) if ctrl => { let _ = w.write_all(b"\x0c"); }
+                    PhysicalKey::Code(KeyCode::KeyM) if ctrl => { let _ = w.write_all(b"\x0d"); }
+                    PhysicalKey::Code(KeyCode::KeyN) if ctrl => { let _ = w.write_all(b"\x0e"); }
+                    PhysicalKey::Code(KeyCode::KeyO) if ctrl => { let _ = w.write_all(b"\x0f"); }
+                    PhysicalKey::Code(KeyCode::KeyP) if ctrl => { let _ = w.write_all(b"\x10"); }
+                    PhysicalKey::Code(KeyCode::KeyQ) if ctrl => { let _ = w.write_all(b"\x11"); }
+                    PhysicalKey::Code(KeyCode::KeyR) if ctrl => { let _ = w.write_all(b"\x12"); }
+                    PhysicalKey::Code(KeyCode::KeyS) if ctrl => { let _ = w.write_all(b"\x13"); }
+                    PhysicalKey::Code(KeyCode::KeyT) if ctrl => { let _ = w.write_all(b"\x14"); }
+                    PhysicalKey::Code(KeyCode::KeyU) if ctrl => { let _ = w.write_all(b"\x15"); }
+                    PhysicalKey::Code(KeyCode::KeyW) if ctrl => { let _ = w.write_all(b"\x17"); }
+                    PhysicalKey::Code(KeyCode::KeyX) if ctrl => { let _ = w.write_all(b"\x18"); }
+                    PhysicalKey::Code(KeyCode::KeyY) if ctrl => { let _ = w.write_all(b"\x19"); }
+                    PhysicalKey::Code(KeyCode::KeyZ) if ctrl => { let _ = w.write_all(b"\x1a"); }
                     _ => {
                         if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
                             if let Some(txt) = key_event.logical_key.to_text() {
