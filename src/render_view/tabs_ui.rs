@@ -3,7 +3,7 @@ use crate::renderer::Renderer;
 use glow::HasContext;
 
 impl Renderer {
-    pub fn draw_tab_bar(
+        pub fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
@@ -20,7 +20,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         tab_drag: Option<&crate::app::TabDragState>,
-    ) {
+    ) -> Option<(std::path::PathBuf, f32, f32)> {
         let tab_bar_bg = self.theme.minimap_bg;
         self.push_rect(x, y, w, h, tab_bar_bg);
 
@@ -35,26 +35,75 @@ impl Renderer {
         let tab_pad = 16.0 * s;
         let icon_size_tab = 20.0 * s;
 
-        let mut tab_widths = Vec::with_capacity(tabs.len());
-        for (i, tab) in tabs.iter().enumerate() {
-            let is_active = i == active_tab;
-            let title = if is_active {
-                if editor_title.is_empty() {
-                    "Безымянный"
+                let mut paths: Vec<Option<&std::path::PathBuf>> = tabs.iter().map(|t| t.file_path.as_ref()).collect();
+        paths[active_tab] = _editor_path;
+
+        let mut display_titles = vec![String::new(); tabs.len()];
+        for i in 0..tabs.len() {
+            if let Some(p1) = paths[i] {
+                let mut diff_level = 0;
+                let mut collision = false;
+                for j in 0..tabs.len() {
+                    if i == j { continue; }
+                    if let Some(p2) = paths[j] {
+                        if p1.file_name() == p2.file_name() {
+                            collision = true;
+                            let mut it1 = p1.components().rev();
+                            let mut it2 = p2.components().rev();
+                            let mut level = 0;
+                            loop {
+                                let c1 = it1.next();
+                                let c2 = it2.next();
+                                if c1 != c2 {
+                                    diff_level = diff_level.max(level);
+                                    break;
+                                }
+                                if c1.is_none() && c2.is_none() {
+                                    break;
+                                }
+                                level += 1;
+                            }
+                        }
+                    }
+                }
+                if collision && diff_level > 0 {
+                    let comps: Vec<_> = p1.components().rev().collect();
+                    if diff_level < comps.len() {
+                        let diff_dir = comps[diff_level].as_os_str().to_string_lossy();
+                        let file_name = comps[0].as_os_str().to_string_lossy();
+                        if diff_level == 1 {
+                            display_titles[i] = format!("{}/{}", diff_dir, file_name);
+                        } else {
+                            display_titles[i] = format!("{}/.../{}", diff_dir, file_name);
+                        }
+                    } else {
+                        display_titles[i] = p1.to_string_lossy().into_owned();
+                    }
                 } else {
-                    editor_title
+                    display_titles[i] = p1.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 }
             } else {
-                if tab.base_title.is_empty() {
-                    "Безымянный"
+                let bt = if i == active_tab {
+                    if editor_title.is_empty() { "Безымянный" } else { editor_title }
                 } else {
-                    &tab.base_title
-                }
-            };
+                    if tabs[i].base_title.is_empty() { "Безымянный" } else { &tabs[i].base_title }
+                };
+                display_titles[i] = bt.to_string();
+            }
+        }
+
+        let mut tab_widths = Vec::with_capacity(tabs.len());
+        for i in 0..tabs.len() {
+            let title = &display_titles[i];
             let title_w = self.measure_ui_width(title, 1.0);
             let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
-            tab_widths.push((title.to_string(), tab_w));
+            tab_widths.push((title.clone(), tab_w));
         }
+
+                let mut hovered_tab_path = None;
+        let mut hovered_tab_x = 0.0;
+        let mut hovered_tab_y = 0.0;
+        let mut current_hovered_idx = None;
 
         let mut initial_xs = vec![0.0; tabs.len()];
         let mut cx = x - tab_scroll_x;
@@ -73,25 +122,21 @@ impl Renderer {
             if drag.threshold_passed {
                 let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
                 let dragged_w = tab_widths[drag.start_idx].1;
-                let dragged_right = dragged_x + dragged_w;
+                                let dragged_center = dragged_x + dragged_w / 2.0;
                 let mut dst = drag.start_idx;
-                let padding = 10.0 * s;
 
                 for i in 0..tabs.len() {
                     if i == drag.start_idx {
                         continue;
                     }
-                    let other_x = initial_xs[i];
-                    let other_w = tab_widths[i].1;
+                    let other_center = initial_xs[i] + tab_widths[i].1 / 2.0;
 
                     if i < drag.start_idx {
-                        let other_right = other_x + other_w;
-                        if dragged_x < other_right - padding {
+                        if dragged_center < other_center {
                             dst = dst.min(i);
                         }
                     } else {
-                        let other_left = other_x;
-                        if dragged_right > other_left + padding {
+                        if dragged_center > other_center {
                             dst = dst.max(i);
                         }
                     }
@@ -144,10 +189,19 @@ impl Renderer {
             let current_x = self.tab_x_anim[i];
             let is_last_in_order = order.last() == Some(&i);
 
-            let is_hovered = mx >= current_x.max(x)
+                                    let is_hovered = mx >= current_x.max(x)
                 && mx <= (current_x + tab_w).min(x + w)
                 && my >= y
                 && my <= y + h;
+
+            if is_hovered {
+                if let Some(p) = paths[i] {
+                    hovered_tab_path = Some(p.clone());
+                    hovered_tab_x = current_x.max(x);
+                    hovered_tab_y = y + h;
+                    current_hovered_idx = Some(i);
+                }
+            }
 
             let bg_color = if is_active {
                 [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0]
@@ -307,7 +361,7 @@ impl Renderer {
         if self.max_tab_scroll_x > 0.0 {
             let right_alpha = ((self.max_tab_scroll_x - tab_scroll_x) / fade_w).clamp(0.0, 1.0)
                 * base_shadow_alpha;
-            if right_alpha > 0.001 {
+                        if right_alpha > 0.001 {
                 let shadow_color = [0.0, 0.0, 0.0, right_alpha];
                 self.push_horizontal_gradient(
                     x + w - fade_w,
@@ -319,5 +373,57 @@ impl Renderer {
                 );
             }
         }
+
+                        thread_local! {
+            static TAB_HOVER_START: std::cell::RefCell<Option<std::time::Instant>> = std::cell::RefCell::new(None);
+        }
+
+        if self.tab_hover_idx != current_hovered_idx {
+            self.tab_hover_idx = current_hovered_idx;
+            TAB_HOVER_START.with(|s| *s.borrow_mut() = current_hovered_idx.map(|_| std::time::Instant::now()));
+        }
+
+        let show_tooltip = TAB_HOVER_START.with(|s| {
+            s.borrow().map(|start| start.elapsed().as_secs_f32() > 0.4).unwrap_or(false)
+        });
+
+                if let Some(path) = hovered_tab_path {
+            if show_tooltip && !self.hide_popups_until_mouse_move {
+                return Some((path.clone(), hovered_tab_x, hovered_tab_y));
+            }
+        }
+        None
+    }
+
+    pub fn draw_tab_tooltip(&mut self, path: &std::path::PathBuf, hovered_tab_x: f32, hovered_tab_y: f32, s: f32) {
+        let mut path_str = path.to_string_lossy().into_owned();
+        if let Some(home) = std::env::var("HOME").ok().or_else(|| std::env::var("USERPROFILE").ok()) {
+            if path_str.starts_with(&home) {
+                path_str = path_str.replacen(&home, "~", 1);
+            }
+        }
+
+        let tooltip_scale = 0.95;
+        let tooltip_w = self.measure_ui_width(&path_str, tooltip_scale) + 24.0 * s;
+        let tooltip_h = 32.0 * s;
+
+        let mut tooltip_x = hovered_tab_x + 10.0 * s;
+        if tooltip_x + tooltip_w > self.width {
+            tooltip_x = (self.width - tooltip_w - 4.0 * s).max(0.0);
+        }
+
+        let tooltip_y = hovered_tab_y + 8.0 * s;
+
+        let border_col = self.theme.sel;
+        let bg_col = [
+            self.theme.minimap_bg[0],
+            self.theme.minimap_bg[1],
+            self.theme.minimap_bg[2],
+            0.98,
+        ];
+
+        self.push_rounded_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, 6.0 * s, border_col);
+        self.push_rounded_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, 5.0 * s, bg_col); 
+        self.draw_string_scaled(&path_str, tooltip_x + 12.0 * s, tooltip_y + tooltip_h / 2.0 + 5.0 * s, self.theme.fg, tooltip_scale);
     }
 }
