@@ -696,9 +696,10 @@ impl App {
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
             self.autocomplete_scroll.is_dragging = false;
-            self.scroll_x.is_dragging = false;
+                        self.scroll_x.is_dragging = false;
+            if let Some(term) = &mut self.ide_panel.terminal { term.scroll_y.is_dragging = false; }
             self.ide_panel.lsp_scroll_x.is_dragging = false;
-                        self.ide_panel.lsp_scroll_y.is_dragging = false;
+            self.ide_panel.lsp_scroll_y.is_dragging = false;
             self.ide_panel.problems_scroll.is_dragging = false;
             for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
                 scroll.is_dragging = false;
@@ -1079,7 +1080,32 @@ impl App {
                 self.ide_panel.lsp_scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
                 self.ide_panel.lsp_scroll_x.current = self.ide_panel.lsp_scroll_x.target;
             }
-                } else if self.ide_panel.problems_scroll.is_dragging {
+                        } else if self.ide_panel.terminal.as_ref().map_or(false, |t| t.scroll_y.is_dragging) {
+            if let Some(term) = &mut self.ide_panel.terminal {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let bottom_h = self.ide_panel.bottom_height * s;
+                let tab_h = 32.0 * s;
+                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h + 1.0 + tab_h;
+                let content_h = bottom_h - 1.0 - tab_h;
+
+                let lh = self.renderer.as_ref().unwrap().line_height;
+                let char_h = lh * 0.82;
+
+                let grid = term.grid.lock().unwrap();
+                let total_lines = grid.scrollback.len() + grid.lines.len();
+                drop(grid);
+
+                let max_scroll = ((total_lines as f32 * char_h) - content_h).max(0.0);
+                if max_scroll > 0.0 {
+                    let track_h = content_h;
+                    let ratio = ((position.y as f32 - content_y) / track_h).clamp(0.0, 1.0);
+                    let progress = 1.0 - ratio;
+                    term.scroll_y.target = progress * max_scroll;
+                    term.scroll_y.current = term.scroll_y.target;
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
+        } else if self.ide_panel.problems_scroll.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let bottom_h = self.ide_panel.bottom_height * s;
@@ -1248,7 +1274,40 @@ impl App {
 
                 self.scroll_y.anim_speed = 15.0;
             }
-                } else if self.is_dragging && !self.show_settings {
+                        } else if self.ide_panel.terminal_focused && self.is_dragging && !self.show_settings && position.y as f32 > self.window.as_ref().unwrap().inner_size().height as f32 - self.ide_panel.bottom_height * self.renderer.as_ref().unwrap().scale_factor {
+            if let Some(term) = &mut self.ide_panel.terminal {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let bottom_h = self.ide_panel.bottom_height * s;
+                let tab_h = 32.0 * s;
+                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h + 1.0 + tab_h;
+                let content_h = bottom_h - 1.0 - tab_h;
+
+                                let lh = self.renderer.as_ref().unwrap().line_height;
+                let char_h = lh * 0.82;
+                let char_w = self.renderer.as_mut().unwrap().char_advance('A') * 0.82;
+                let panel_x = 48.0 * s + 10.0 * s;
+
+                let py = position.y as f32;
+                let px = position.x as f32;
+
+                let mut grid = term.grid.lock().unwrap();
+                let total_lines = grid.scrollback.len() + grid.lines.len();
+
+                let offset_from_bottom = (content_y + content_h - 8.0 * s - py + term.scroll_y.current) / char_h;
+                let mut cell_y = total_lines.saturating_sub(1).saturating_sub(offset_from_bottom.floor() as usize);
+                let mut cell_x = ((px - panel_x) / char_w).floor() as usize;
+
+                cell_y = cell_y.min(total_lines.saturating_sub(1));
+                cell_x = cell_x.min(grid.cols.saturating_sub(1));
+
+                if let Some((sx, sy, _, _)) = grid.selection {
+                    grid.selection = Some((sx, sy, cell_x, cell_y));
+                } else {
+                    grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+        } else if self.is_dragging && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {

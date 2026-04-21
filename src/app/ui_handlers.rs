@@ -8,8 +8,16 @@ impl App {
     /// Обрабатывает клик по UI элементу
         pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
-            UiId::TerminalBody => {
-                // Фокус терминала больше не меняется по клику, только через Alt+Q
+                        UiId::TerminalBody => {
+                self.is_dragging = true;
+                if let Some(term) = &mut self.ide_panel.terminal {
+                    term.grid.lock().unwrap().selection = None;
+                }
+            }
+            UiId::TerminalScrollY => {
+                if let Some(term) = &mut self.ide_panel.terminal {
+                    term.scroll_y.is_dragging = true;
+                }
             }
             // Welcome screen
             UiId::WelcomeNewFile => {

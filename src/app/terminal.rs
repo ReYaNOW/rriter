@@ -215,9 +215,32 @@ impl TermGrid {
         self.dirty = true;
     }
 
-    pub fn get_selection_text(&self) -> String {
-        // Selection dragging will populate selection bounds. Flat mock for now.
-        String::new()
+        pub fn get_selection_text(&self) -> String {
+        if let Some((sx, sy, ex, ey)) = self.selection {
+            let mut res = String::new();
+            let total_lines = self.scrollback.len() + self.lines.len();
+            let start_y = sy.min(ey);
+            let end_y = sy.max(ey);
+            let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
+            let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+
+            for y in start_y..=end_y {
+                if y >= total_lines { continue; }
+                let row = if y < self.scrollback.len() { &self.scrollback[y] } else { &self.lines[y - self.scrollback.len()] };
+                let line_start = if y == start_y { start_x } else { 0 };
+                let line_end = if y == end_y { end_x } else { self.cols.saturating_sub(1) };
+
+                for x in line_start..=line_end {
+                    if x < row.len() {
+                        res.push(row[x].c);
+                    }
+                }
+                if y != end_y { res.push('\n'); }
+            }
+            res.trim_end().to_string()
+        } else {
+            String::new()
+        }
     }
 }
 

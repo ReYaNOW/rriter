@@ -1946,7 +1946,8 @@ impl Renderer {
                             let char_h = self.line_height * term_scale;
                             let new_cols =
                                 ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
-                            let new_rows = (content_h / char_h).floor().max(2.0) as usize;
+                                                        let term_pad_bottom = 8.0 * s;
+                            let new_rows = ((content_h - term_pad_bottom) / char_h).floor().max(2.0) as usize;
 
                             if grid.cols != new_cols || grid.visible_rows != new_rows {
                                 grid.resize(new_cols, new_rows);
@@ -1990,14 +1991,14 @@ impl Renderer {
                             }
 
                             for i in 0..total_lines {
-                                let offset_from_bottom = total_lines - 1 - i;
-                                let draw_y = content_y + content_h
-                                    - char_h
-                                    - (offset_from_bottom as f32 * char_h)
-                                    + scroll_offset;
+                                                            let offset_from_bottom = total_lines - 1 - i;
+                            let draw_y = content_y + content_h - 8.0 * s
+                                - char_h
+                                - (offset_from_bottom as f32 * char_h)
+                                + scroll_offset;
 
-                                // Строго отсекаем линии, которые полностью или частично вылезают за верх/низ (для надежности поверх glScissor)
-                                if draw_y + char_h < content_y || draw_y > content_y + content_h {
+                                                        // Строго отсекаем линии, которые полностью или частично вылезают за верх/низ (для надежности поверх glScissor)
+                            if draw_y + char_h < content_y || draw_y > content_y + content_h {
                                     continue;
                                 }
 
@@ -2016,16 +2017,27 @@ impl Renderer {
                                     if c_idx >= grid.cols {
                                         break;
                                     }
-                                    if cell.bg != 0 && cell.bg < 16 {
-                                        self.push_rect(
-                                            cx,
-                                            draw_y,
-                                            char_w,
-                                            char_h,
-                                            ansi_colors[cell.bg as usize],
-                                        );
-                                    }
-                                    if cell.c != ' ' {
+                                                                    let mut bg_color = if cell.bg != 0 && cell.bg < 16 {
+                                    Some(ansi_colors[cell.bg as usize])
+                                } else {
+                                    None
+                                };
+                                if let Some((sx, sy, ex, ey)) = grid.selection {
+                                    let start_y = sy.min(ey);
+                                    let end_y = sy.max(ey);
+                                    let start_x = if sy < ey { sx } else if sy > ey { ex } else { sx.min(ex) };
+                                    let end_x = if sy < ey { ex } else if sy > ey { sx } else { sx.max(ex) };
+                                    let in_sel = if i > start_y && i < end_y { true }
+                                    else if i == start_y && i == end_y { c_idx >= start_x && c_idx <= end_x }
+                                    else if i == start_y { c_idx >= start_x }
+                                    else if i == end_y { c_idx <= end_x }
+                                    else { false };
+                                    if in_sel { bg_color = Some(self.theme.sel); }
+                                }
+                                if let Some(bg) = bg_color {
+                                    self.push_rect(cx, draw_y, char_w, char_h, bg);
+                                }
+                                if cell.c != ' ' {
                                         let fg_color = if cell.fg < 16 {
                                             ansi_colors[cell.fg as usize]
                                         } else {
@@ -2049,22 +2061,22 @@ impl Renderer {
                                     .len()
                                     .saturating_sub(1)
                                     .saturating_sub(grid.cur_y);
-                                let cursor_px_y = content_y + content_h
-                                    - char_h
-                                    - (cursor_offset_from_bottom as f32 * char_h)
-                                    + scroll_offset;
-                                if cursor_px_y + char_h >= content_y
-                                    && cursor_px_y <= content_y + content_h
-                                {
-                                    let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
-                                    self.push_rect(
-                                        cursor_px_x,
-                                        cursor_px_y + 2.0 * s,
-                                        char_w,
-                                        char_h,
-                                        [1.0, 1.0, 1.0, 0.5],
-                                    );
-                                }
+                                                            let cursor_px_y = content_y + content_h - 8.0 * s
+                                - char_h
+                                - (cursor_offset_from_bottom as f32 * char_h)
+                                + scroll_offset;
+                            if cursor_px_y + char_h >= content_y
+                                && cursor_px_y <= content_y + content_h
+                            {
+                                let cursor_px_x = draw_x + grid.cur_x as f32 * char_w;
+                                self.push_rect(
+                                    cursor_px_x,
+                                    cursor_px_y + 0.5 * s,
+                                    char_w,
+                                    char_h,
+                                    [1.0, 1.0, 1.0, 0.5],
+                                );
+                            }
 
                                 let border_color = self.theme.sel;
                                 self.push_rect(panel_x, content_y, panel_w, 2.0 * s, border_color);
@@ -2098,22 +2110,31 @@ impl Renderer {
                                     (content_h / (total_lines as f32 * char_h)) * track_h;
                                 let handle_h = handle_h.max(20.0 * s);
                                 let scroll_progress = term.scroll_y.current / max_scroll;
-                                let handle_y = content_y + content_h
-                                    - handle_h
-                                    - scroll_progress * (track_h - handle_h);
-                                let sb_w = 14.0 * s;
-                                let thumb_w = sb_w - 2.0 * s;
-                                self.push_rounded_rect(
-                                    panel_x + panel_w - sb_w + 1.0 * s,
-                                    handle_y,
-                                    thumb_w,
-                                    handle_h,
-                                    thumb_w / 2.0,
-                                    [0.7, 0.33, 0.54, 0.8],
-                                );
-                            }
+                                                            let handle_y = content_y + content_h
+                                - handle_h
+                                - scroll_progress * (track_h - handle_h);
+                            let sb_w = 10.0 * s;
+                            let thumb_w = sb_w - 2.0 * s;
+                            self.push_rounded_rect(
+                                panel_x + panel_w - sb_w + 1.0 * s,
+                                handle_y,
+                                thumb_w,
+                                handle_h,
+                                thumb_w / 2.0,
+                                [0.7, 0.33, 0.54, 0.8],
+                            );
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::TerminalScrollY,
+                                panel_x + panel_w - sb_w,
+                                content_y,
+                                sb_w,
+                                content_h,
+                                mx,
+                                my,
+                            );
+                        }
 
-                            self.flush();
+                        self.flush();
                             unsafe {
                                 self.gl.disable(glow::SCISSOR_TEST);
                             }
@@ -2499,9 +2520,9 @@ impl Renderer {
         self.flush();
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
-        if is_ide_mode && panel_left_w > 0.0 {
+                if is_ide_mode && panel_left_w > 0.0 {
             let resize_x = 48.0 * s + panel_left_w;
-            ui_registry.register_rect(
+            ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeLeft,
                 resize_x - 8.0 * s,
                 0.0,
@@ -2513,7 +2534,7 @@ impl Renderer {
         }
         if is_ide_mode && panel_bottom_h > 0.0 {
             let panel_y = self.height - panel_bottom_h;
-            ui_registry.register_rect(
+            ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,
                 48.0 * s,
                 panel_y - 8.0 * s,

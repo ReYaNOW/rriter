@@ -44,7 +44,7 @@
   <mod path="src/app/mouse.rs" name="app::mouse">
     <fn name="handle_main_mouse_wheel" line="7" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; render_view::core_text: get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
     <fn name="handle_main_mouse_input" line="350" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, ui_registry, window" writes="autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree; app: any_bottom_open, is_open, toggle; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: get_max_scroll; renderer: get_ui_glyph; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
-    <fn name="handle_main_cursor_moved" line="782" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_max_scroll; renderer: char_advance, get_ui_glyph; ui_system: contains" />
+    <fn name="handle_main_cursor_moved" line="783" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_max_scroll; renderer: char_advance, get_ui_glyph; ui_system: contains" />
   </mod>
   <mod path="src/app/terminal.rs" name="app::terminal">
     <type name="Cell">{ c: char, fg: u8, bg: u8 }</type>
@@ -57,17 +57,17 @@
     <fn name="newline" line="181" pub="true" reads="scroll_region, visible_rows" writes="cur_y=" calls="self: scroll_region_up" />
     <fn name="scroll_region_up" line="192" pub="true" reads="cols, is_alt, scroll_region, visible_rows" writes="dirty=, lines.insert(), lines.remove(), scrollback.push_back()" />
     <fn name="scroll_region_down" line="208" pub="true" reads="cols, scroll_region" writes="dirty=, lines.insert(), lines.remove()" />
-    <fn name="get_selection_text" line="218" pub="true" ret="String" />
-    <fn name="print" line="225" calls="self: put_char" />
-    <fn name="execute" line="228" writes="cur_x=" calls="self: newline, put_char" />
-    <fn name="hook" line="240" />
-    <fn name="put" line="241" />
-    <fn name="unhook" line="242" />
-    <fn name="osc_dispatch" line="243" reads="reply_tx" />
-    <fn name="esc_dispatch" line="254" writes="cur_x=, cur_y=, saved_cursor=" />
-    <fn name="csi_dispatch" line="266" reads="cols, reply_tx, visible_rows" writes="alt_lines=, alt_saved_cursor=, cur_bg=, cur_bold=, cur_fg=, cur_x=, cur_y=, dirty=, is_alt=, lines.insert(), lines.remove(), lines=, saved_cursor=, scroll_region=, scrollback.clear()" calls="self: scroll_region_down, scroll_region_up; ui_system: contains" />
-    <fn name="spawn" line="548" pub="true" ret="Self" calls="render_view::core_text: flush" />
-    <fn name="resize_pty" line="615" pub="true" reads="master_pty" calls="self: resize; renderer: resize" />
+    <fn name="get_selection_text" line="218" pub="true" ret="String" reads="cols, lines, scrollback, selection" />
+    <fn name="print" line="248" calls="self: put_char" />
+    <fn name="execute" line="251" writes="cur_x=" calls="self: newline, put_char" />
+    <fn name="hook" line="263" />
+    <fn name="put" line="264" />
+    <fn name="unhook" line="265" />
+    <fn name="osc_dispatch" line="266" reads="reply_tx" />
+    <fn name="esc_dispatch" line="277" writes="cur_x=, cur_y=, saved_cursor=" />
+    <fn name="csi_dispatch" line="289" reads="cols, reply_tx, visible_rows" writes="alt_lines=, alt_saved_cursor=, cur_bg=, cur_bold=, cur_fg=, cur_x=, cur_y=, dirty=, is_alt=, lines.insert(), lines.remove(), lines=, saved_cursor=, scroll_region=, scrollback.clear()" calls="self: scroll_region_down, scroll_region_up; ui_system: contains" />
+    <fn name="spawn" line="571" pub="true" ret="Self" calls="render_view::core_text: flush" />
+    <fn name="resize_pty" line="638" pub="true" reads="master_pty" calls="self: resize; renderer: resize" />
   </mod>
   <mod path="src/app/ui_handlers.rs" name="app::ui_handlers">
     <fn name="handle_ui_click" line="9" pub="true" reads="clipboard, file_extension, highlighter, ide_panel, lsp, pending_action, recent_files, renderer, scroll_x, scroll_y, search_editor, window, window_height, window_width" writes="base_title=, click_count=, dialog_window=, editor=, file_path=, ide_ignore_patterns.push(), ide_ignore_patterns.remove(), ide_workspaces.remove(), is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_ide_mode=, last_click_pos=, last_click_time=, pending_fix_all_id=, search_case_sensitive=, search_current_idx=, search_focused=, search_results.clear(), settings_ignore_editor=, settings_ignore_focused=, settings_tab=, show_search=, show_welcome=" calls="self: close_tab_at, enter_ide_mode, handle_file_tree_click, jump_to_search_result, open_file_in_tab, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab, trigger_file_picker, trigger_folder_picker, trigger_save_as_picker, update_search; app: is_open, toggle; app::terminal: spawn; editor: get_full_text, is_dirty, select_line, select_word, set_cursor_at_pos, set_original_text; highlighter: reset; lsp: disable_python, enable_python, get_diagnostics, lsp_pos_to_offset, request_fix_all, restart_python, servers_info; render_view::core_text: get_cursor_xy, get_max_scroll; renderer: get_ui_glyph; scroll: stop_anim; ui_system: contains" />
@@ -339,8 +339,8 @@
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
     <fn name="draw" line="22" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, hovered_diags_cache.clear(), identical_words_cache.clear(), identical_words_cache.push(), last_cursor_for_popups=, last_diag_href=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_known_mouse=, left_padding=, max_scroll_x=, merged_intervals_cache.clear(), merged_intervals_cache.push(), minimap_width=, mod_intervals_cache.clear(), mod_intervals_cache.push(), phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_atlas_icon, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_welcome, flush, get_glyph, get_max_scroll, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, any_top_open, icon, is_open, label; app::terminal: resize, resize_pty; editor: byte_at, ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, text_parts, utf16_col_to_byte_advance; lsp: get_diagnostics; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
-    <fn name="draw_tab_bar" line="2533" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
-    <fn name="draw_minimap" line="2757" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
+    <fn name="draw_tab_bar" line="2554" reads="gl, height, theme" writes="max_tab_scroll_x=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
+    <fn name="draw_minimap" line="2778" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
   </mod>
   <mod path="src/renderer.rs" name="renderer">
     <type name="FontData">{ source: FontSource, index: u32 }</type>
@@ -379,25 +379,25 @@
   </mod>
   <mod path="src/ui_system.rs" name="ui_system">
     <type name="UiElement">{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }</type>
-    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), PopupCopyDiagnostic(usize), OpenDiagUrl(usize), PopupOpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize), ProblemFileToggle(usize), TerminalBody }</type>
+    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), PopupCopyDiagnostic(usize), OpenDiagUrl(usize), PopupOpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize), ProblemFileToggle(usize), TerminalBody, TerminalScrollY }</type>
     <type name="UiRegistry">{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }</type>
-    <fn name="contains" line="121" pub="true" ret="bool" />
-    <fn name="id" line="148" pub="true" ret="UiId" />
-    <fn name="new" line="172" pub="true" ret="Self" />
-    <fn name="clear" line="183" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
-    <fn name="mark_overlay_start" line="193" pub="true" reads="elements" writes="overlay_mark=" />
-    <fn name="find_overlay_at" line="199" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
-    <fn name="register_button" line="208" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_icon_button" line="236" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_text_input" line="265" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
-    <fn name="register_blocker" line="288" pub="true" ret="bool" writes="elements.push()" />
-    <fn name="register_rect" line="305" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
-    <fn name="find_at" line="327" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
-    <fn name="hovered" line="337" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
-    <fn name="reset_cursor_state" line="344" pub="true" writes="wants_pointer=, wants_text=" />
-    <fn name="wants_pointer" line="350" pub="true" ret="bool" reads="wants_pointer" />
-    <fn name="wants_text" line="355" pub="true" ret="bool" reads="wants_text" />
-    <fn name="cursor_code" line="360" pub="true" ret="u8" reads="wants_pointer, wants_text" />
+    <fn name="contains" line="122" pub="true" ret="bool" />
+    <fn name="id" line="149" pub="true" ret="UiId" />
+    <fn name="new" line="173" pub="true" ret="Self" />
+    <fn name="clear" line="184" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
+    <fn name="mark_overlay_start" line="194" pub="true" reads="elements" writes="overlay_mark=" />
+    <fn name="find_overlay_at" line="200" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
+    <fn name="register_button" line="209" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_icon_button" line="237" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
+    <fn name="register_text_input" line="266" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
+    <fn name="register_blocker" line="289" pub="true" ret="bool" writes="elements.push()" />
+    <fn name="register_rect" line="306" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
+    <fn name="find_at" line="328" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
+    <fn name="hovered" line="338" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
+    <fn name="reset_cursor_state" line="345" pub="true" writes="wants_pointer=, wants_text=" />
+    <fn name="wants_pointer" line="351" pub="true" ret="bool" reads="wants_pointer" />
+    <fn name="wants_text" line="356" pub="true" ret="bool" reads="wants_text" />
+    <fn name="cursor_code" line="361" pub="true" ret="u8" reads="wants_pointer, wants_text" />
   </mod>
   <mod path="src/widgets.rs" name="widgets">
     <type name="Button">{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }</type>
