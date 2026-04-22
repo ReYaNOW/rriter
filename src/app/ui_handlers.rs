@@ -518,7 +518,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::EditorScrollbarY | UiId::EditorMinimap => {
+                        UiId::EditorScrollbarY => {
                 if let Some(r) = self.renderer.as_ref() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
@@ -526,6 +526,39 @@ impl App {
                     self.last_click_pos = (mx, my);
                     self.last_click_time = std::time::Instant::now();
                 }
+            }
+            UiId::EditorMinimap => {
+                self.scroll_y.is_dragging = true;
+                if let Some(r) = self.renderer.as_mut() {
+                    let mx = r.last_mouse_x;
+                    let my = r.last_mouse_y;
+                    self.last_click_pos = (mx, my);
+                    // Set time to the past so mouse.rs drag logic bypasses the 120ms delay instantly
+                    self.last_click_time = std::time::Instant::now() - std::time::Duration::from_millis(200);
+
+                    let s = r.scale_factor;
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let editor_height = wh - tab_bar_h;
+                    let max_scroll = r.get_max_scroll(&self.editor, editor_height);
+
+                    if max_scroll > 0.0 {
+                        let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
+                        let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+
+                        // Center viewport on click
+                        self.scroll_y.drag_offset = thumb_h / 2.0;
+                        let scroll_ratio = (my - tab_bar_h - self.scroll_y.drag_offset) / (editor_height - thumb_h).max(0.0001);
+
+                        self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
+                        self.scroll_y.anim_speed = 15.0;
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorScrollbarX => {
                 self.scroll_x.is_dragging = true;
