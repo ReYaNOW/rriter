@@ -272,14 +272,14 @@
     <fn name="notify_close" line="1336" pub="true" reads="workspace" calls="self: process_for_ext" />
     <fn name="request_code_actions" line="1350" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext" />
     <fn name="poll" line="1382" pub="true" ret="Vec&lt;LspEvent&gt;" reads="python, server_logs, suppress_diagnostics" writes="diagnostics.insert(), dirty_diagnostics=, instant_diagnostics.insert(), last_change=, python_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="1449" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspace" />
-    <fn name="get_instant_diagnostics_with_version" line="1463" pub="true" ret="(i32, &amp;[Diagnostic])" reads="instant_diagnostics, workspace" />
-    <fn name="diagnostics_for_line" line="1478" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="1486" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="request_organize_imports" line="1510" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="shutdown" line="1535" pub="true" reads="python" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="1547" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="1573" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
+    <fn name="get_diagnostics" line="1456" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspace" />
+    <fn name="get_instant_diagnostics_with_version" line="1470" pub="true" ret="(i32, &amp;[Diagnostic])" reads="instant_diagnostics, workspace" />
+    <fn name="diagnostics_for_line" line="1485" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
+    <fn name="request_fix_all" line="1493" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="request_organize_imports" line="1517" pub="true" ret="Option&lt;i32&gt;" reads="workspace" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="shutdown" line="1542" pub="true" reads="python" writes="python_disabled=" />
+    <fn name="lsp_pos_to_offset" line="1554" pub="true" ret="usize" />
+    <fn name="format_and_highlight_json" line="1580" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
   </mod>
   <mod path="src/main.rs" name="main">
     <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }</type>

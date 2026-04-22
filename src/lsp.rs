@@ -1389,11 +1389,18 @@ impl LspManager {
                 // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                                                LspEvent::Diagnostics { path, version, items, .. } => {
+                                                                LspEvent::Diagnostics { path, version, items, .. } => {
                     if !self.suppress_diagnostics {
                         let v = version.unwrap_or(0);
+                        let old_len = self.diagnostics.get(path).map(|d| d.len()).unwrap_or(0);
+                        let is_fewer = items.len() < old_len;
+
                         self.instant_diagnostics.insert(path.clone(), (v, items.clone()));
                         self.dirty_diagnostics = true;
+
+                        if is_fewer {
+                            self.last_change = None;
+                        }
                     }
                 }
                 LspEvent::StatusChanged { status, .. } => {
