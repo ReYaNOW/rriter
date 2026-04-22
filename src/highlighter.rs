@@ -949,8 +949,18 @@ impl Highlighter {
 
                                 let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
-                let mut flat_spans = flatten_spans(
-                    spans,
+                                let mut merged_spans = last_full_spans.clone();
+                if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                    let exp_sb = sb.saturating_sub(1000);
+                    let exp_eb = (eb + 1000).min(text.len());
+                    merged_spans.retain(|s| s.end <= exp_sb || s.start >= exp_eb);
+                } else {
+                    merged_spans.clear();
+                }
+                merged_spans.extend(spans);
+
+                let flat_spans = flatten_spans(
+                    merged_spans,
                     text.len(),
                     text,
                     &mut byte_colors_buf,
@@ -959,20 +969,7 @@ impl Highlighter {
                     is_log_or_huge,
                 );
 
-                if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
-                    let exp_sb = sb.saturating_sub(1000);
-                    let exp_eb = (eb + 1000).min(text.len());
-                    
-                    let mut new_spans = last_full_spans.clone();
-                    new_spans.retain(|s| s.end <= exp_sb || s.start >= exp_eb);
-                    new_spans.extend(flat_spans);
-                    new_spans.sort_by_key(|s| s.start);
-                    
-                    flat_spans = new_spans;
-                    last_full_spans = flat_spans.clone();
-                } else {
-                    last_full_spans = flat_spans.clone();
-                }
+                last_full_spans = flat_spans.clone();
 
                 // Очистка памяти от гигантских буферов после парсинга больших файлов
                 if byte_colors_buf.capacity() > 1024 * 1024 && text.len() < 1024 * 512 {
@@ -1267,17 +1264,21 @@ impl Highlighter {
             }
         }
 
-        if let Some(t) = text_opt {
-            match t.trim() {
-                "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
-                | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
-                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                    predicted_color = DRACULA_PURPLE
+                    if let Some(t) = text_opt {
+                match t.trim() {
+                    "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
+                    | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
+                    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                        predicted_color = DRACULA_PURPLE
+                    }
+                    "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
+                    "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def" | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl" | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield" => predicted_color = DRACULA_PINK,
+                    "True" | "False" | "None" | "true" | "false" | "null" => predicted_color = DRACULA_PINK,
+                    "int" | "float" | "str" | "bool" | "String" => predicted_color = DRACULA_CYAN,
+                    "self" | "cls" => predicted_color = DRACULA_PURPLE,
+                    _ => {}
                 }
-                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
-                _ => {}
             }
-        }
 
         let mut new_spans = Vec::new();
         for span in &mut self.spans {
@@ -1312,18 +1313,26 @@ impl Highlighter {
             self.spans.extend(new_spans);
             self.spans.sort_by_key(|s| s.start);
             let mut merged = Vec::new();
-            if !self.spans.is_empty() {
+                        if !self.spans.is_empty() {
                 let mut current = self.spans[0].clone();
                 for i in 1..self.spans.len() {
                     let next = &self.spans[i];
-                    if next.start <= current.end && next.color == current.color {
-                        current.end = current.end.max(next.end);
-                    } else if next.start >= current.end {
+                    if next.start <= current.end {
+                        if next.color == current.color {
+                            current.end = current.end.max(next.end);
+                        } else if next.end > current.end {
+                            merged.push(current.clone());
+                            current = next.clone();
+                            current.start = current.start.max(merged.last().unwrap().end);
+                        }
+                    } else {
                         merged.push(current);
                         current = next.clone();
                     }
                 }
-                merged.push(current);
+                if current.start < current.end {
+                    merged.push(current);
+                }
             }
             self.spans = merged;
             self.spans.retain(|s| s.start < s.end);

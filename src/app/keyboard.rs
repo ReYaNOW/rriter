@@ -572,8 +572,21 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+                                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
                     self.apply_autocomplete();
+                    let edits = std::mem::take(&mut self.editor.sync_edits);
+                    if !edits.is_empty() {
+                        if self.is_ide_mode {
+                            if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                                let text = self.editor.get_full_text();
+                                let ext = self.file_extension.clone();
+                                let path = path.clone();
+                                lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                            }
+                        }
+                        self.highlighter.apply_edits(self.editor.version, edits, None, None);
+                    }
+                    self.last_sent_version = self.editor.version;
                     return;
                 }
                 _ => {}
@@ -1009,24 +1022,13 @@ impl App {
             if should_sync {
                 if !self.editor.sync_edits.is_empty() {
                     let edits = std::mem::take(&mut self.editor.sync_edits);
-                    let is_backspace_or_delete = matches!(
-                        physical_key,
-                        PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete)
-                    );
-                    // LSP didChange — отправляем полный текст только если файл Python и IDE режим
+                                        // LSP didChange — отправляем полный текст только если файл Python и IDE режим
                     if self.is_ide_mode {
-                        if !is_backspace_or_delete && !is_dot {
-                            if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-                                let text = self.editor.get_full_text();
-                                let ext = self.file_extension.clone();
-                                let path = path.clone();
-                                lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
-                            }
-                        } else {
-                            if let Some(lsp) = &mut self.lsp {
-                                lsp.diagnostics.clear();
-                                lsp.suppress_diagnostics = true;
-                            }
+                        if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                            let text = self.editor.get_full_text();
+                            let ext = self.file_extension.clone();
+                            let path = path.clone();
+                            lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                         }
                     }
                     let edit_start_byte = if let Some(edit) = edits.first() {
