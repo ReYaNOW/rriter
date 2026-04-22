@@ -276,7 +276,16 @@ fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct KeyLog {
+    pub key: String,
+    pub t0: std::time::Instant,
+    pub t_highlight: Option<std::time::Instant>,
+    pub t_render: Option<std::time::Instant>,
+}
+
 pub struct App {
+    pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,

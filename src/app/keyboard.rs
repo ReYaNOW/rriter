@@ -937,12 +937,23 @@ impl App {
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
                     if let Some(txt) = key_event.logical_key.to_text() {
+                        let t0 = std::time::Instant::now();
                         let insert_txt = match txt {
                             "(" => "()",
                             "[" => "[]",
                             "{" => "{}",
                             _ => txt,
                         };
+                        
+                        // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе". 
+                        // Let's log any printable text that is typed.
+                        self.pending_key_log = Some(crate::app::KeyLog {
+                            key: txt.to_string(),
+                            t0,
+                            t_highlight: None,
+                            t_render: None,
+                        });
+
                         let (del_info, ins_len) = self.editor.insert_str(insert_txt);
                         if let Some((offset, len)) = del_info {
                             self.highlighter.shift_delete(offset, len);
@@ -1018,49 +1029,82 @@ impl App {
                             }
                         }
                     }
-                    self.highlighter.apply_edits(self.editor.version, edits);
+                    let edit_start_byte = if let Some(edit) = edits.first() {
+                        match edit {
+                            crate::highlighter::SyncEdit::Insert { offset, .. } => Some(*offset),
+                            crate::highlighter::SyncEdit::Delete { offset, .. } => Some(*offset),
+                        }
+                    } else {
+                        None
+                    };
+
+                    let edit_end_byte = if let Some(edit) = edits.last() {
+                        match edit {
+                            crate::highlighter::SyncEdit::Insert { offset, text } => Some(offset + text.len()),
+                            crate::highlighter::SyncEdit::Delete { offset, .. } => Some(*offset),
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    let mut line_start_byte = None;
+                    let mut line_end_byte = None;
+                    
+                    if let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) {
+                        let sl = self.editor.line_offsets.partition_point(|&x| x <= sb).saturating_sub(1);
+                        let el = self.editor.line_offsets.partition_point(|&x| x <= eb).saturating_sub(1);
+                        
+                        line_start_byte = Some(self.editor.line_offsets[sl]);
+                        line_end_byte = if el + 1 < self.editor.line_offsets.len() {
+                            Some(self.editor.line_offsets[el + 1])
+                        } else {
+                            Some(self.editor.len())
+                        };
+                    }
+
+                    self.highlighter.apply_edits(self.editor.version, edits, line_start_byte, line_end_byte);
                 }
                 self.last_sent_version = self.editor.version;
 
-                let start_wait = std::time::Instant::now();
-                while start_wait.elapsed().as_millis() < 3 {
-                    if self.highlighter.poll(self.editor.version) {
-                        self.editor.foldable_lines.clear();
-                        self.editor.foldable_ranges_bytes.clear();
-                        for &(start_b, end_b, is_autofold, is_sticky) in
-                            &self.highlighter.foldable_ranges
-                        {
-                            self.editor
-                                .foldable_ranges_bytes
-                                .push((start_b, end_b, is_sticky));
-                            let sl = self
-                                .editor
-                                .line_offsets
-                                .partition_point(|&x| x <= start_b)
-                                .saturating_sub(1);
-                            let el = self
-                                .editor
-                                .line_offsets
-                                .partition_point(|&x| x <= end_b)
-                                .saturating_sub(1);
-                            if el > sl {
-                                self.editor.foldable_lines.insert(sl, el);
-                                if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
-                                    self.editor.folded_lines.insert(sl);
-                                    self.editor
-                                        .folded_start_bytes
-                                        .insert(self.editor.line_offsets[sl]);
-                                }
+                // Check poll once but don't sleep
+                if self.highlighter.poll(self.editor.version) {
+                    self.editor.foldable_lines.clear();
+                    self.editor.foldable_ranges_bytes.clear();
+                    for &(start_b, end_b, is_autofold, is_sticky) in
+                        &self.highlighter.foldable_ranges
+                    {
+                        self.editor
+                            .foldable_ranges_bytes
+                            .push((start_b, end_b, is_sticky));
+                        let sl = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= start_b)
+                            .saturating_sub(1);
+                        let el = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= end_b)
+                            .saturating_sub(1);
+                        if el > sl {
+                            self.editor.foldable_lines.insert(sl, el);
+                            if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
+                                self.editor.folded_lines.insert(sl);
+                                self.editor
+                                    .folded_start_bytes
+                                    .insert(self.editor.line_offsets[sl]);
                             }
                         }
-
-                        self.is_highlighted_once = true;
-                        if self.autocomplete_active {
-                            self.update_autocomplete();
-                        }
-                        break;
                     }
-                    std::thread::sleep(std::time::Duration::from_micros(500));
+
+                    self.is_highlighted_once = true;
+                    if self.autocomplete_active {
+                        self.update_autocomplete();
+                    }
+                }
+                
+                if let Some(log) = &mut self.pending_key_log {
+                    log.t_highlight = Some(std::time::Instant::now());
                 }
             }
         }

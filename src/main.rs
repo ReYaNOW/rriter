@@ -461,6 +461,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     let show_welcome = !has_file_arg && !run_ide_on_startup;
 
     let mut app = App {
+        pending_key_log: None,
         gl_config: None,
         gl_context: None,
         gl_surface: None,

@@ -362,6 +362,12 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                if let Some(log) = &mut self.pending_key_log {
+                    if log.t_render.is_none() {
+                        log.t_render = Some(std::time::Instant::now());
+                    }
+                }
+
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -694,6 +700,24 @@ impl ApplicationHandler for App {
                 }
 
                 gl_surface.swap_buffers(gl_context).unwrap();
+
+                if let Some(log) = self.pending_key_log.take() {
+                    let now = std::time::Instant::now();
+                    let t_total = now.duration_since(log.t0).as_secs_f64() * 1000.0;
+                    
+                    let t_highlight = log.t_highlight.unwrap_or(log.t0);
+                    let input_to_hl = t_highlight.duration_since(log.t0).as_secs_f64() * 1000.0;
+                    
+                    let t_render = log.t_render.unwrap_or(t_highlight);
+                    let hl_to_render = t_render.duration_since(t_highlight).as_secs_f64() * 1000.0;
+                    
+                    let render_to_swap = now.duration_since(t_render).as_secs_f64() * 1000.0;
+
+                    println!(
+                        "Key: {:?} | Total: {:.2}ms (Input->HL: {:.2}ms, HL->RenderPrep: {:.2}ms, Render+Swap: {:.2}ms)",
+                        log.key, t_total, input_to_hl, hl_to_render, render_to_swap
+                    );
+                }
             }
             _ => (),
         }

@@ -47,6 +47,8 @@ pub enum HighlighterMessage {
     Edits {
         version: u64,
         edits: Vec<SyncEdit>,
+        edit_start_byte: Option<usize>,
+        edit_end_byte: Option<usize>,
     },
 }
 
@@ -191,9 +193,9 @@ impl Highlighter {
             let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
                 HashMap::new();
             let mut byte_colors_buf = Vec::new();
+            let mut last_full_spans: Vec<ColorSpan> = Vec::new();
 
-                        let mut replica_text = String::new();
-            let mut current_tree: Option<tree_sitter::Tree> = None;
+            let mut replica_text = String::new();            let mut current_tree: Option<tree_sitter::Tree> = None;
             let mut current_ext = String::new();
 
             while let Ok(msg) = rx_in.recv() {
@@ -204,6 +206,8 @@ impl Highlighter {
 
                 let mut final_version = 0;
                 let mut do_highlight = false;
+                let mut final_edit_start_byte: Option<usize> = None;
+                let mut final_edit_end_byte: Option<usize> = None;
 
                 for m in msgs {
                     match m {
@@ -213,12 +217,30 @@ impl Highlighter {
                             current_ext = ext;
                             current_tree = None;
                             do_highlight = true;
+                            last_full_spans.clear();
                         }
-                        HighlighterMessage::Edits { version, edits } => {
+                        HighlighterMessage::Edits {
+                            version,
+                            edits,
+                            edit_start_byte,
+                            edit_end_byte,
+                        } => {
                             final_version = version;
+                            final_edit_start_byte = edit_start_byte;
+                            final_edit_end_byte = edit_end_byte;
                             for edit in edits {
                                 match edit {
                                     SyncEdit::Insert { offset, text } => {
+                                        let len = text.len();
+                                        for span in &mut last_full_spans {
+                                            if span.start >= offset {
+                                                span.start += len;
+                                                span.end += len;
+                                            } else if span.end > offset {
+                                                span.end += len;
+                                            }
+                                        }
+                                        
                                         let start_byte = offset;
                                         let old_end_byte = offset;
                                         let new_end_byte = offset + text.len();
@@ -251,6 +273,19 @@ impl Highlighter {
                                         }
                                     }
                                     SyncEdit::Delete { offset, len } => {
+                                        for span in &mut last_full_spans {
+                                            if span.start >= offset + len {
+                                                span.start -= len;
+                                                span.end -= len;
+                                            } else if span.start >= offset {
+                                                span.start = offset;
+                                                span.end = span.end.saturating_sub(len).max(offset);
+                                            } else if span.end > offset {
+                                                span.end = span.end.saturating_sub(len).max(offset);
+                                            }
+                                        }
+                                        last_full_spans.retain(|s| s.start < s.end);
+
                                         let start_byte = offset;
                                         let old_end_byte = offset + len;
                                         let new_end_byte = offset;
@@ -380,6 +415,12 @@ impl Highlighter {
                                         tree_sitter::Query::new(&lang, fold_query_str)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
+                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                            // Expand bounds to ensure we capture whole nodes/statements
+                                            let exp_sb = sb.saturating_sub(1000);
+                                            let exp_eb = (eb + 1000).min(text.len());
+                                            cursor.set_byte_range(exp_sb..exp_eb);
+                                        }
                                         let mut matches = cursor.matches(
                                             &fold_query,
                                             tree.root_node(),
@@ -618,6 +659,12 @@ impl Highlighter {
                                 if let Some(q_str) = get_params_query(lang_name) {
                                     if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
+                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                            // Expand bounds to ensure we capture whole nodes/statements
+                                            let exp_sb = sb.saturating_sub(1000);
+                                            let exp_eb = (eb + 1000).min(text.len());
+                                            cursor.set_byte_range(exp_sb..exp_eb);
+                                        }
                                         let mut matches = cursor.matches(
                                             &func_query,
                                             tree.root_node(),
@@ -699,6 +746,12 @@ impl Highlighter {
 
                                     if let Some(query) = query_cache.get(&cache_key) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
+                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                            // Expand bounds to ensure we capture whole nodes/statements
+                                            let exp_sb = sb.saturating_sub(1000);
+                                            let exp_eb = (eb + 1000).min(text.len());
+                                            cursor.set_byte_range(exp_sb..exp_eb);
+                                        }
                                         let mut matches = cursor.matches(
                                             query,
                                             tree.root_node(),
@@ -744,6 +797,12 @@ impl Highlighter {
                                         tree_sitter::Query::new(&lang, inj_query_str)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
+                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                            // Expand bounds to ensure we capture whole nodes/statements
+                                            let exp_sb = sb.saturating_sub(1000);
+                                            let exp_eb = (eb + 1000).min(text.len());
+                                            cursor.set_byte_range(exp_sb..exp_eb);
+                                        }
                                         let mut matches = cursor.matches(
                                             &inj_query,
                                             tree.root_node(),
@@ -829,6 +888,11 @@ impl Highlighter {
                                                         ) {
                                                             let mut cursor =
                                                                 tree_sitter::QueryCursor::new();
+                                                            if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                                                let exp_sb = sb.saturating_sub(1000);
+                                                                let exp_eb = (eb + 1000).min(text.len());
+                                                                cursor.set_byte_range(exp_sb..exp_eb);
+                                                            }
                                                             let mut matches = cursor.matches(
                                                                 &query,
                                                                 inj_tree.root_node(),
@@ -885,7 +949,7 @@ impl Highlighter {
 
                                 let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
-                let flat_spans = flatten_spans(
+                let mut flat_spans = flatten_spans(
                     spans,
                     text.len(),
                     text,
@@ -894,6 +958,21 @@ impl Highlighter {
                     apply_rainbow_brackets,
                     is_log_or_huge,
                 );
+
+                if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                    let exp_sb = sb.saturating_sub(1000);
+                    let exp_eb = (eb + 1000).min(text.len());
+                    
+                    let mut new_spans = last_full_spans.clone();
+                    new_spans.retain(|s| s.end <= exp_sb || s.start >= exp_eb);
+                    new_spans.extend(flat_spans);
+                    new_spans.sort_by_key(|s| s.start);
+                    
+                    flat_spans = new_spans;
+                    last_full_spans = flat_spans.clone();
+                } else {
+                    last_full_spans = flat_spans.clone();
+                }
 
                 // Очистка памяти от гигантских буферов после парсинга больших файлов
                 if byte_colors_buf.capacity() > 1024 * 1024 && text.len() < 1024 * 512 {
@@ -1113,9 +1192,20 @@ impl Highlighter {
             .send(HighlighterMessage::Reset { version, text, ext });
     }
 
-    pub fn apply_edits(&self, version: u64, edits: Vec<SyncEdit>) {
+    pub fn apply_edits(
+        &self,
+        version: u64,
+        edits: Vec<SyncEdit>,
+        edit_start_byte: Option<usize>,
+        edit_end_byte: Option<usize>,
+    ) {
         if !edits.is_empty() {
-            let _ = self.tx.send(HighlighterMessage::Edits { version, edits });
+            let _ = self.tx.send(HighlighterMessage::Edits {
+                version,
+                edits,
+                edit_start_byte,
+                edit_end_byte,
+            });
         }
     }
 

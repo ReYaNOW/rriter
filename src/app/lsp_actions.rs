@@ -308,7 +308,7 @@ impl App {
                     lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                 }
             }
-            self.highlighter.apply_edits(self.editor.version, edits);
+            self.highlighter.apply_edits(self.editor.version, edits, None, None);
         }
 
         App::update_window_title(
@@ -397,7 +397,7 @@ impl App {
                             lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                         }
                     }
-                    self.highlighter.apply_edits(self.editor.version, edits);
+                    self.highlighter.apply_edits(self.editor.version, edits, None, None);
                 }
 
                 App::update_window_title(
