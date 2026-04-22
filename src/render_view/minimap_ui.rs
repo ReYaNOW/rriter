@@ -24,20 +24,21 @@ impl Renderer {
         let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
 
-        let minimap_line_h = (editor_height / (total_lines_f32 + 2.0).max(200.0))
-            .max(editor_height / 1250.0)
-            .max(1.5);
+                let minimap_line_h = (editor_height / (total_lines_f32 + 2.0).max(1.0)).max(1.5);
 
         let max_minimap_scroll =
             ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
-        let current_visible_top_line = render_scroll_y / self.line_height;
+                let current_visible_top_line = render_scroll_y / self.line_height;
         let viewport_y = tab_bar_h
             + (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
         let visible_lines = editor_height / self.line_height;
-        let max_viewport_lines = visible_lines.min(total_lines_f32 + 2.0);
-        let viewport_h = (max_viewport_lines * minimap_line_h).max(4.0);
+        let viewport_h = if max_scroll <= 0.0 {
+            editor_height
+        } else {
+            (visible_lines * minimap_line_h).max(4.0)
+        };
 
         let view_bg = [
             self.theme.sel[0],

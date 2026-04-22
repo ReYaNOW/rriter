@@ -521,14 +521,42 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::EditorScrollbarY => {
-                if let Some(r) = self.renderer.as_ref() {
+                                    UiId::EditorScrollbarY => {
+                if let Some(r) = self.renderer.as_mut() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     self.last_click_pos = (mx, my);
-                    self.last_click_time = std::time::Instant::now();
+
+                    let s = r.scale_factor;
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let editor_height = wh - tab_bar_h;
+                    let max_scroll = r.get_max_scroll(&self.editor, editor_height);
+
+                    if max_scroll > 0.0 {
+                        let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
+                        let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+                        let track_h = editor_height;
+
+                        let scroll_ratio = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
+                        let thumb_y = tab_bar_h + scroll_ratio * (track_h - thumb_h);
+
+                        if my >= thumb_y && my <= thumb_y + thumb_h {
+                            self.scroll_y.drag_offset = my - thumb_y;
+                            self.last_click_time = std::time::Instant::now();
+                        } else {
+                            self.scroll_y.drag_offset = thumb_h / 2.0;
+                            let new_ratio = (my - tab_bar_h - self.scroll_y.drag_offset) / (track_h - thumb_h).max(0.0001);
+                            self.scroll_y.target = (new_ratio * max_scroll).clamp(0.0, max_scroll).round();
+                            self.scroll_y.anim_speed = 15.0;
+                            self.last_click_time = std::time::Instant::now() - std::time::Duration::from_millis(200);
+                        }
+                    } else {
+                        self.last_click_time = std::time::Instant::now();
+                    }
                 }
+                self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorMinimap => {
                 self.scroll_y.is_dragging = true;
