@@ -15,6 +15,30 @@ use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
+fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
+    let w = app.window.as_ref().unwrap();
+    let maximized = w.is_maximized();
+    let (width, height) = if maximized {
+        (app.window_width, app.window_height)
+    } else {
+        let scale = w.scale_factor();
+        let size = w.inner_size().to_logical::<f64>(scale);
+        (size.width, size.height)
+    };
+    crate::save_config(&crate::Config {
+        window_width: width,
+        window_height: height,
+        maximized,
+        ide_workspaces: app.ide_workspaces.clone(),
+        ide_ignore_patterns: app.ide_ignore_patterns.clone(),
+        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+    });
+    if app.is_ide_mode {
+        crate::save_panel_state(&app.ide_panel);
+    }
+    event_loop.exit();
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -126,7 +150,7 @@ impl ApplicationHandler for App {
 
                         if btn_save.is_hovered(mx, my) {
                             if self.save_current_file() {
-                                if let Some(w) = self.window.as_ref() {
+                                                                if let Some(w) = self.window.as_ref() {
                                     App::update_window_title(
                                         w,
                                         &self.base_title,
@@ -136,56 +160,18 @@ impl ApplicationHandler for App {
                                 let action = self.pending_action;
                                 self.close_dialog();
                                 if action == PendingAction::Quit {
-                                    let w = self.window.as_ref().unwrap();
-                                    let maximized = w.is_maximized();
-                                    let (width, height) = if maximized {
-                                        (self.window_width, self.window_height)
-                                    } else {
-                                        let scale = w.scale_factor();
-                                        let size = w.inner_size().to_logical::<f64>(scale);
-                                        (size.width, size.height)
-                                    };
-                                    crate::save_config(&crate::Config {
-                                        window_width: width,
-                                        window_height: height,
-                                        maximized,
-                                        ide_workspaces: self.ide_workspaces.clone(),
-                                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                    });
-                                    if self.is_ide_mode {
-                                        crate::save_panel_state(&self.ide_panel);
-                                    }
-                                    event_loop.exit();
+                                    save_state_and_exit(self, event_loop);
                                 } else if action == PendingAction::OpenFile {
                                     self.trigger_file_picker();
                                 } else if action == PendingAction::CloseFile {
                                     self.close_current_file();
                                 }
-                            }
+                                                        }
                         } else if btn_discard.is_hovered(mx, my) {
                             let action = self.pending_action;
                             self.close_dialog();
                             if action == PendingAction::Quit {
-                                let w = self.window.as_ref().unwrap();
-                                let maximized = w.is_maximized();
-                                let (width, height) = if maximized {
-                                    (self.window_width, self.window_height)
-                                } else {
-                                    let scale = w.scale_factor();
-                                    let size = w.inner_size().to_logical::<f64>(scale);
-                                    (size.width, size.height)
-                                };
-                                crate::save_config(&crate::Config {
-                                    window_width: width,
-                                    window_height: height,
-                                    maximized,
-                                    ide_workspaces: self.ide_workspaces.clone(),
-                                    ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                });
-                                if self.is_ide_mode {
-                                    crate::save_panel_state(&self.ide_panel);
-                                }
-                                event_loop.exit();
+                                save_state_and_exit(self, event_loop);
                             } else if action == PendingAction::OpenFile {
                                 self.trigger_file_picker();
                             } else if action == PendingAction::CloseFile {
@@ -234,30 +220,11 @@ impl ApplicationHandler for App {
         }
 
         match event {
-            WindowEvent::CloseRequested => {
+                        WindowEvent::CloseRequested => {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
-                    let w = self.window.as_ref().unwrap();
-                    let maximized = w.is_maximized();
-                    let (width, height) = if maximized {
-                        (self.window_width, self.window_height)
-                    } else {
-                        let scale = w.scale_factor();
-                        let size = w.inner_size().to_logical::<f64>(scale);
-                        (size.width, size.height)
-                    };
-                    crate::save_config(&crate::Config {
-                        window_width: width,
-                        window_height: height,
-                        maximized,
-                        ide_workspaces: self.ide_workspaces.clone(),
-                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                    });
-                    if self.is_ide_mode {
-                        crate::save_panel_state(&self.ide_panel);
-                    }
-                    event_loop.exit();
+                    save_state_and_exit(self, event_loop);
                 }
             }
             WindowEvent::Focused(focused) => {
@@ -1024,7 +991,7 @@ impl ApplicationHandler for App {
                     self.ide_workspaces.push(path.clone());
                     self.ide_panel.file_tree_expanded.insert(path.clone());
                     self.refresh_file_tree();
-                    self.start_file_watcher();
+                                        self.start_file_watcher();
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {
@@ -1040,6 +1007,7 @@ impl ApplicationHandler for App {
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                     });
                 }
             }

@@ -62,6 +62,44 @@ test:
 	--release
 	@echo "✅ Тесты завершены"
 
+PROF_DIR = $(CURDIR)/target/pgo-profiles
+
+pgo-gen:
+	@echo "🧬 Сборка для ручного PGO..."
+	rm -rf $(PROF_DIR)
+	$(FAST_PROFILE_OPTS) \
+	RUSTFLAGS="$(COMMON_RUSTFLAGS) -Cprofile-generate=$(PROF_DIR)" \
+	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release
+
+pgo-run:
+	@echo "🏃 Открываю редактор для профилирования."
+	@echo "💾 Создаю бекап ~/.config/RRiter..."
+	@cp -r ~/.config/RRiter ~/.config/RRiter_pgo_backup || true
+	@echo "🔧 Включаю телеметрию для PGO..."
+	@sed -i 's/"enable_telemetry": false/"enable_telemetry": true/' ~/.config/RRiter/config.json || true
+	@echo "ВАЖНО: Поскролльте, попечатайте, откройте терминал и ЗАКРОЙТЕ редактор."
+	LLVM_PROFILE_FILE="$(PROF_DIR)/default_%p.profraw" target/$(TARGET)/release/$(BINARY_NAME) src/render_view.rs
+	@echo "♻️ Восстанавливаю бекап ~/.config/RRiter..."
+	@rm -rf ~/.config/RRiter
+	@mv ~/.config/RRiter_pgo_backup ~/.config/RRiter || true
+
+pgo-merge:
+	@echo "🔗 Слияние профилей..."
+	rustup run nightly llvm-profdata merge -o $(PROF_DIR)/merged.profdata $(PROF_DIR)/*.profraw
+
+pgo-max:
+	@echo "🔥 Сборка MAX с профилем PGO..."
+	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
+	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-use=$(PROF_DIR)/merged.profdata" \
+	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release
+
+pgo-clean:
+	@echo "🧹 Удаление временных файлов PGO..."
+	rm -rf $(PROF_DIR)
+
+pgo: pgo-gen pgo-run pgo-merge pgo-max pgo-clean
+
 clean:
 	@echo "🧹 Очистка..."
 	cargo clean

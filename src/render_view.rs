@@ -12,6 +12,39 @@ pub mod ui;
 use crate::editor::Editor;
 use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
+use std::cell::RefCell;
+use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    static TELEMETRY: RefCell<Telemetry> = RefCell::new(Telemetry::default());
+}
+
+struct Telemetry {
+    render_time: f32,
+    render_count: u32,
+    scroll_time: f32,
+    scroll_count: u32,
+    type_time: f32,
+    type_count: u32,
+    last_print: Instant,
+}
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self {
+            render_time: 0.0,
+            render_count: 0,
+            scroll_time: 0.0,
+            scroll_count: 0,
+            type_time: 0.0,
+            type_count: 0,
+            last_print: Instant::now(),
+        }
+    }
+}
 use crate::widgets::IconButton;
 use glow::HasContext;
 
@@ -54,12 +87,14 @@ impl Renderer {
         show_settings: bool,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
-        tab_scroll_x: f32,
-    ) -> (bool, Vec<(usize, usize)>) {
-        let lsp_diagnostics = if let Some(l) = lsp {
-            if let Some(p) = editor_path {
-                l.get_diagnostics(p)
-            } else {
+        tab_scroll_x: f32,        ) -> (bool, Vec<(usize, usize)>) {
+            let frame_start_time = Instant::now();
+            let was_typing = self.last_editor_version_for_typing != editor.version;
+            let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1 || (self.last_scroll_x - scroll_x).abs() > 0.1;
+
+            let lsp_diagnostics = if let Some(l) = lsp {
+                if let Some(p) = editor_path {
+                    l.get_diagnostics(p)} else {
                 &[]
             }
         } else {
@@ -2060,9 +2095,9 @@ impl Renderer {
                 my,
             );
         }
-        if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
+                if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
             let panel_y = self.height - panel_bottom_h;
-            ui_registry.register_blocker(
+                        ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,
                 48.0 * s,
                 panel_y - 8.0 * s,
@@ -2071,6 +2106,35 @@ impl Renderer {
                 mx,
                 my,
             );
+        }
+
+        if TELEMETRY_ENABLED.load(Ordering::Relaxed) {
+            let elapsed = frame_start_time.elapsed().as_secs_f32();
+            TELEMETRY.with(|t| {
+                let mut t = t.borrow_mut();
+                if was_typing {
+                    t.type_time += elapsed;
+                    t.type_count += 1;
+                } else if was_scrolling {
+                    t.scroll_time += elapsed;
+                    t.scroll_count += 1;
+                } else {
+                    t.render_time += elapsed;
+                    t.render_count += 1;
+                }
+
+                if t.last_print.elapsed().as_secs() >= 10 {
+                    let r_avg = if t.render_count > 0 { (t.render_time / t.render_count as f32) * 1000.0 } else { 0.0 };
+                    let s_avg = if t.scroll_count > 0 { (t.scroll_time / t.scroll_count as f32) * 1000.0 } else { 0.0 };
+                    let ty_avg = if t.type_count > 0 { (t.type_time / t.type_count as f32) * 1000.0 } else { 0.0 };
+                    println!("📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms", r_avg, s_avg, ty_avg);
+
+                    t.render_time = 0.0; t.render_count = 0;
+                    t.scroll_time = 0.0; t.scroll_count = 0;
+                    t.type_time = 0.0; t.type_count = 0;
+                    t.last_print = Instant::now();
+                }
+            });
         }
 
         (

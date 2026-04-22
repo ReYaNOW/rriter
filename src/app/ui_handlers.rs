@@ -212,7 +212,7 @@ impl App {
             UiId::SettingsIdeAddWorkspace => {
                 self.trigger_folder_picker();
             }
-            UiId::SettingsIdeRemoveWorkspace(idx) => {
+                        UiId::SettingsIdeRemoveWorkspace(idx) => {
                 if idx < self.ide_workspaces.len() {
                     self.ide_workspaces.remove(idx);
                     let config = crate::Config {
@@ -225,6 +225,7 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();
@@ -239,7 +240,7 @@ impl App {
                     .to_string();
                 if !pattern.is_empty() && !self.ide_ignore_patterns.contains(&pattern) {
                     self.ide_ignore_patterns.push(pattern);
-                    // Очищаем редактор
+                                        // Очищаем редактор
                     let old_version = self.settings_ignore_editor.version;
                     self.settings_ignore_editor = Editor::new(128);
                     self.settings_ignore_editor.version = old_version + 1;
@@ -255,13 +256,14 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-            UiId::SettingsIdeRemoveIgnore(idx) => {
+                        UiId::SettingsIdeRemoveIgnore(idx) => {
                 if idx < self.ide_ignore_patterns.len() {
                     self.ide_ignore_patterns.remove(idx);
                     let config = crate::Config {
@@ -274,6 +276,7 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();

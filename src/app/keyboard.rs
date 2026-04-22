@@ -515,7 +515,7 @@ impl App {
                 PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
                     self.trigger_file_picker();
                 }
-                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {
@@ -531,6 +531,7 @@ impl App {
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                     });
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);
@@ -1243,7 +1244,7 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                                        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
                         let trimmed = self
                             .settings_ignore_editor
                             .get_full_text()
@@ -1261,6 +1262,7 @@ impl App {
                                 maximized,
                                 ide_workspaces: self.ide_workspaces.clone(),
                                 ide_ignore_patterns: self.ide_ignore_patterns.clone(),
+                                enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
                             });
                             self.refresh_file_tree();
                         }
