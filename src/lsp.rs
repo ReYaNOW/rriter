@@ -82,9 +82,10 @@ pub struct Diagnostic {
     pub code: Option<String>,
     /// Ссылка на документацию (из codeDescription.href)
     pub code_href: Option<String>,
-    pub message: String,
+        pub message: String,
     pub source: Option<String>,
     pub quickfixes: Vec<QuickFix>,
+    pub tags: Vec<u32>,
 }
 
 /// Одна замена текста (из workspace/applyEdit или codeAction)
@@ -110,8 +111,9 @@ pub enum LspEvent {
         name: &'static str,
         message: String,
     },
-    /// Диагностика для файла (ошибки/предупреждения от ruff)
+        /// Диагностика для файла (ошибки/предупреждения от ruff)
     Diagnostics {
+        server_name: &'static str,
         path: PathBuf,
         #[allow(dead_code)]
         version: Option<i32>,
@@ -152,6 +154,13 @@ struct LspServerDef {
 
 const RUFF_SERVER: LspServerDef = LspServerDef {
     program: "ruff",
+    args: &["server"],
+    language_id: "python",
+    extensions: &["py"],
+};
+
+const TY_SERVER: LspServerDef = LspServerDef {
+    program: "ty",
     args: &["server"],
     language_id: "python",
     extensions: &["py"],
@@ -266,23 +275,30 @@ fn uri_to_path(uri: &str) -> PathBuf {
 
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
 
-fn make_initialize(id: i32, workspace: Option<&Path>) -> Vec<u8> {
-    let (root_uri_json, workspace_json) = if let Some(ws) = workspace {
-        let uri = path_to_uri(&ws.to_string_lossy());
-        let escaped_uri = json_escape(&uri);
+fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
+    let (root_uri_json, workspace_json) = if let Some(first_ws) = workspaces.first() {
+        let root_uri = path_to_uri(&first_ws.to_string_lossy());
+        let escaped_root = json_escape(&root_uri);
+
+        let mut folders = Vec::new();
+        for (i, ws) in workspaces.iter().enumerate() {
+            let uri = path_to_uri(&ws.to_string_lossy());
+            folders.push(format!(
+                r#"{{"uri":"{}","name":"workspace_{}"}}"#,
+                json_escape(&uri), i
+            ));
+        }
+
         (
-            format!(r#""{}""#, escaped_uri),
-            format!(
-                r#","workspaceFolders":[{{"uri":"{}","name":"workspace"}}]"#,
-                escaped_uri
-            ),
+            format!(r#""{}""#, escaped_root),
+            format!(r#","workspaceFolders":[{}]"#, folders.join(","))
         )
     } else {
         (String::from("null"), String::new())
     };
 
     let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
         std::process::id(),
         root_uri_json
     );
@@ -388,11 +404,24 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         _ => DiagSeverity::Hint,
     };
 
-    let message = v
+        let mut message = v
         .get("message")
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
+
+    if message.contains("info: ") {
+        let mut clean_msg = String::with_capacity(message.len());
+        for line in message.lines() {
+            let mut l = line;
+            if l.starts_with("info: ") {
+                l = &l[6..];
+            }
+            clean_msg.push_str(l);
+            clean_msg.push('\n');
+        }
+        message = clean_msg.trim_end().to_string();
+    }
 
     let code = v.get("code").and_then(|c| {
         if let Some(s) = c.as_str() {
@@ -409,11 +438,20 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
 
-    let code_href = v
+        let code_href = v
         .get("codeDescription")
         .and_then(|cd| cd.get("href"))
         .and_then(|h| h.as_str())
         .map(|s| s.to_string());
+
+    let mut tags = Vec::new();
+    if let Some(tags_arr) = v.get("tags").and_then(|t| t.as_array()) {
+        for t in tags_arr {
+            if let Some(tag_id) = t.as_u64() {
+                tags.push(tag_id as u32);
+            }
+        }
+    }
 
     let mut quickfixes = Vec::new();
     if let Some(data) = v.get("data") {
@@ -443,9 +481,10 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         severity,
         code,
         code_href,
-        message,
+                message,
         source,
         quickfixes,
+        tags,
     })
 }
 
@@ -593,7 +632,8 @@ fn dispatch_frame(
                             }
                         }
                     }
-                    let _ = event_tx.send(LspEvent::Diagnostics {
+                                        let _ = event_tx.send(LspEvent::Diagnostics {
+                        server_name,
                         path,
                         version,
                         items,
@@ -618,8 +658,8 @@ fn dispatch_frame(
                 }
             }
         }
-        Some("initialize") => {}
-        Some("window/logMessage") => {
+                Some("initialize") => {}
+        Some("window/logMessage") | Some("window/showMessage") => {
             if let Some(params) = msg.get("params") {
                 if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
                     let _ = event_tx.send(LspEvent::Log {
@@ -635,26 +675,26 @@ fn dispatch_frame(
                 let _ = out_tx.send(reply.into_bytes());
             }
         }
-        Some("workspace/configuration") => {
+                Some("workspace/configuration") => {
             if let Some(req_id) = id {
                 let mut count = 1;
                 if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
                     count = items.len().max(1);
                 }
-                let config_obj = r#"{"configurationPreference":"fileSystemFirst"}"#;
+                let config_obj = r#"{}"#;
                 let objs = vec![config_obj; count].join(",");
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());
             }
         }
-        Some(m) => {
+                Some(m) => {
             if let Some(req_id) = id {
                 if m != "window/logMessage"
+                    && m != "window/showMessage"
                     && m != "textDocument/publishDiagnostics"
                     && m != "workspace/applyEdit"
                 {
-                    let reply = format!(
-                        r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#,
+                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#,
                         req_id
                     );
                     let _ = out_tx.send(reply.into_bytes());
@@ -816,7 +856,24 @@ fn send_and_log(
     msg: Vec<u8>,
 ) -> Result<(), mpsc::SendError<Vec<u8>>> {
     if let Ok(s) = std::str::from_utf8(&msg) {
-        let log_msg = format!("[LSP SEND] {}", s);
+        let log_msg = if s.contains("\"textDocument/didOpen\"") || s.contains("\"textDocument/didChange\"") {
+            if let Some(idx) = s.find("\"text\":\"") {
+                let mut temp = String::with_capacity(s.len().min(512));
+                temp.push_str(&s[..idx + 8]);
+                temp.push_str("<TRUNCATED>\"");
+                if s.contains("didOpen") {
+                    temp.push_str("}}}}");
+                } else {
+                    temp.push_str("}]}}");
+                }
+                format!("[LSP SEND] {}", temp)
+            } else {
+                format!("[LSP SEND] {}", s)
+            }
+        } else {
+            format!("[LSP SEND] {}", s)
+        };
+
         let _ = event_tx.send(LspEvent::Log {
             name: server_name,
             message: log_msg,
@@ -827,7 +884,7 @@ fn send_and_log(
 
 fn run_supervisor(
     def: &'static LspServerDef,
-    workspace: Option<PathBuf>,
+    workspaces: Vec<PathBuf>,
     cmd_rx: Receiver<Cmd>,
     event_tx: Sender<LspEvent>,
 ) {
@@ -842,7 +899,7 @@ fn run_supervisor(
             status: LspServerStatus::Starting,
         });
         // ── Запускаем процесс ─────────────────────────────────────────
-        let mut proc = match spawn_server(def, workspace.as_deref(), event_tx.clone()) {
+        let mut proc = match spawn_server(def, workspaces.first().map(|p| p.as_path()), event_tx.clone()) {
             Some(p) => p,
             None => {
                 let _ = event_tx.send(LspEvent::StatusChanged {
@@ -858,7 +915,7 @@ fn run_supervisor(
 
         // ── Handshake: initialize ─────────────────────────────────────────
         init_id = next_id();
-        let init_msg = make_initialize(init_id, workspace.as_deref());
+        let init_msg = make_initialize(init_id, &workspaces);
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
         }
@@ -1019,10 +1076,10 @@ pub struct LspProcess {
 }
 
 impl LspProcess {
-    fn start(def: &'static LspServerDef, workspace: Option<PathBuf>) -> Self {
+        fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
-        let ws = workspace.clone();
+        let ws = workspaces.clone();
 
         thread::Builder::new()
             .name(format!("lsp-supervisor-{}", def.program))
@@ -1139,16 +1196,13 @@ impl LspProcess {
     }
 
     /// Опрашивает входящие события (non-blocking). Вызывать раз в кадр.
-    pub fn poll(&self) -> Vec<LspEvent> {
-        let mut events = Vec::new();
+        pub fn poll(&self, events: &mut Vec<LspEvent>) {
         loop {
             match self.event_rx.try_recv() {
                 Ok(e) => events.push(e),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
             }
         }
-        events
     }
 
     pub fn shutdown(self) {
@@ -1194,15 +1248,19 @@ fn encode_diagnostics_json(diags: &[Diagnostic]) -> String {
 
 pub struct LspManager {
     python: Option<LspProcess>,
-    workspace: Option<PathBuf>,
+    ty_process: Option<LspProcess>,
+    workspaces: Vec<PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
             pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    pub merged_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
     pub dirty_diagnostics: bool,
     pub last_change: Option<std::time::Instant>,
     current_path: Option<PathBuf>,
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
+    pub ty_status: LspServerStatus,
     /// Отключён ли ruff вручную
     pub python_disabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
@@ -1210,16 +1268,20 @@ pub struct LspManager {
 }
 
 impl LspManager {
-        pub fn new(workspace: Option<PathBuf>) -> Self {
+            pub fn new(workspaces: Vec<PathBuf>) -> Self {
         LspManager {
             python: None,
-            workspace,
+            ty_process: None,
+            workspaces,
                         diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
+            ty_instant_diagnostics: HashMap::new(),
+            merged_instant_diagnostics: HashMap::new(),
             dirty_diagnostics: false,
             last_change: None,
             current_path: None,
             python_status: LspServerStatus::Disabled,
+            ty_status: LspServerStatus::Disabled,
             python_disabled: false,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
@@ -1227,10 +1289,14 @@ impl LspManager {
     }
 
     /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
-    fn ensure_python(&mut self) {
+            fn ensure_python(&mut self) {
         if self.python.is_none() && !self.python_disabled {
             self.python_status = LspServerStatus::Starting;
-            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
+            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
+        }
+        if self.ty_process.is_none() && !self.python_disabled {
+            self.ty_status = LspServerStatus::Starting;
+            self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
         }
     }
 
@@ -1241,19 +1307,32 @@ impl LspManager {
             self.python_status = LspServerStatus::Starting;
         } else if !self.python_disabled {
             self.python_status = LspServerStatus::Starting;
-            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
+            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
+        }
+        if let Some(proc) = &mut self.ty_process {
+            proc.restart();
+            self.ty_status = LspServerStatus::Starting;
+        } else if !self.python_disabled {
+            self.ty_status = LspServerStatus::Starting;
+            self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
         }
     }
 
     /// Отключить ruff (остановить и не перезапускать)
-        pub fn disable_python(&mut self) {
+                        pub fn disable_python(&mut self) {
         self.python_disabled = true;
         self.python_status = LspServerStatus::Disabled;
+        self.ty_status = LspServerStatus::Disabled;
         if let Some(p) = self.python.take() {
+            p.shutdown();
+        }
+        if let Some(p) = self.ty_process.take() {
             p.shutdown();
         }
         self.diagnostics.clear();
         self.instant_diagnostics.clear();
+        self.ty_instant_diagnostics.clear();
+        self.merged_instant_diagnostics.clear();
         self.dirty_diagnostics = false;
         self.server_logs.clear();
     }
@@ -1262,11 +1341,18 @@ impl LspManager {
     pub fn enable_python(&mut self) {
         self.python_disabled = false;
         self.python_status = LspServerStatus::Starting;
-        self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspace.clone()));
+        self.ty_status = LspServerStatus::Starting;
+        self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
+        self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
         // Re-open current file if any
-        let ws = self.workspace.clone();
+        let ws = self.workspaces.first().cloned();
         if let Some(path) = &self.current_path.clone() {
             if let Some(proc) = &mut self.python {
+                if let Some((_, text)) = &proc.open_file_data.clone() {
+                    proc.notify_open(path, text, 1, ws.as_ref());
+                }
+            }
+            if let Some(proc) = &mut self.ty_process {
                 if let Some((_, text)) = &proc.open_file_data.clone() {
                     proc.notify_open(path, text, 1, ws.as_ref());
                 }
@@ -1275,17 +1361,29 @@ impl LspManager {
     }
 
     /// Информация о серверах для UI
-    pub fn servers_info(&self) -> Vec<LspServerInfo> {
+        pub fn servers_info(&self) -> Vec<LspServerInfo> {
         let logs = self
             .server_logs
             .get(RUFF_SERVER.program)
             .cloned()
             .unwrap_or_default();
-        vec![LspServerInfo {
-            name: RUFF_SERVER.program,
-            status: self.python_status.clone(),
-            logs,
-        }]
+        let ty_logs = self
+            .server_logs
+            .get(TY_SERVER.program)
+            .cloned()
+            .unwrap_or_default();
+        vec![
+            LspServerInfo {
+                name: RUFF_SERVER.program,
+                status: self.python_status.clone(),
+                logs,
+            },
+            LspServerInfo {
+                name: TY_SERVER.program,
+                status: self.ty_status.clone(),
+                logs: ty_logs,
+            }
+        ]
     }
 
     /// Возвращает процесс для нужного расширения, запустив при необходимости
@@ -1300,53 +1398,70 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         self.current_path = Some(abs_path.clone());
-        let ws = self.workspace.clone();
-        if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_open(&abs_path, text, version, ws.as_ref());
+        let ws = self.workspaces.first().cloned();
+        if ext == "py" {
+            self.ensure_python();
+            if let Some(proc) = &mut self.python {
+                proc.notify_open(&abs_path, text, version, ws.as_ref());
+            }
+            if let Some(proc) = &mut self.ty_process {
+                proc.notify_open(&abs_path, text, version, ws.as_ref());
+            }
         }
     }
 
-    /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
+        /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
         pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         self.last_change = Some(std::time::Instant::now());
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_change(&abs_path, text, version);
+        if ext == "py" {
+            self.ensure_python();
+            if let Some(proc) = &mut self.python {
+                proc.notify_change(&abs_path, text, version);
+            }
+            if let Some(proc) = &mut self.ty_process {
+                proc.notify_change(&abs_path, text, version);
+            }
         }
     }
 
     /// Уведомляет LSP о закрытии файла
-    pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
+            pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if let Some(proc) = self.process_for_ext(ext) {
-            proc.notify_close(&abs_path);
+        if ext == "py" {
+            if let Some(proc) = &mut self.python {
+                proc.notify_close(&abs_path);
+            }
+            if let Some(proc) = &mut self.ty_process {
+                proc.notify_close(&abs_path);
+            }
         }
     }
 
-    /// Запрашивает code actions для позиции/диагностики
+        /// Запрашивает code actions для позиции/диагностики
     pub fn request_code_actions(
         &mut self,
         path: &PathBuf,
@@ -1360,7 +1475,7 @@ impl LspManager {
     ) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
@@ -1379,32 +1494,51 @@ impl LspManager {
 
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
-    pub fn poll(&mut self) -> Vec<LspEvent> {
-        let mut all = Vec::new();
+        pub fn poll(&mut self) -> Vec<LspEvent> {
+                let mut all = Vec::new();
 
         if let Some(proc) = &self.python {
-            all.extend(proc.poll());
+            proc.poll(&mut all);
+        }
+        if let Some(proc) = &mut self.ty_process {
+            proc.poll(&mut all);
         }
 
                 // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                                                                LspEvent::Diagnostics { path, version, items, .. } => {
+                                                                LspEvent::Diagnostics { server_name, path, version, items, .. } => {
                     if !self.suppress_diagnostics {
                         let v = version.unwrap_or(0);
-                        let old_len = self.diagnostics.get(path).map(|d| d.len()).unwrap_or(0);
-                        let is_fewer = items.len() < old_len;
 
-                        self.instant_diagnostics.insert(path.clone(), (v, items.clone()));
-                        self.dirty_diagnostics = true;
-
-                        if is_fewer {
-                            self.last_change = None;
+                                                if *server_name == TY_SERVER.program {
+                            self.ty_instant_diagnostics.insert(path.clone(), (v, items.clone()));
+                        } else {
+                            self.instant_diagnostics.insert(path.clone(), (v, items.clone()));
                         }
+
+                                                let mut merged = Vec::new();
+                        let mut max_v = v;
+                        if let Some((v1, d)) = self.instant_diagnostics.get(path.as_path()) {
+                            merged.extend(d.clone());
+                            max_v = max_v.max(*v1);
+                        }
+                        if let Some((v2, d)) = self.ty_instant_diagnostics.get(path.as_path()) {
+                            merged.extend(d.clone());
+                            max_v = max_v.max(*v2);
+                        }
+                        self.merged_instant_diagnostics.insert(path.clone(), (max_v, merged));
+
+                        self.dirty_diagnostics = true;
+                        self.last_change = None;
                     }
                 }
-                LspEvent::StatusChanged { status, .. } => {
-                    self.python_status = status.clone();
+                LspEvent::StatusChanged { name, status } => {
+                    if *name == TY_SERVER.program {
+                        self.ty_status = status.clone();
+                    } else {
+                        self.python_status = status.clone();
+                    }
                 }
                 LspEvent::Log { name, message } => {
                     if message.len() > 5000 {
@@ -1431,11 +1565,18 @@ impl LspManager {
             }
         }
 
-                        if let Some(t) = self.last_change {
+                                                                                                if let Some(t) = self.last_change {
             if t.elapsed().as_secs_f32() >= 3.0 {
                 if self.dirty_diagnostics {
-                    for (k, v) in &self.instant_diagnostics {
-                        self.diagnostics.insert(k.clone(), v.1.clone());
+                    let mut paths = std::collections::HashSet::new();
+                    for k in self.instant_diagnostics.keys() { paths.insert(k.as_path()); }
+                    for k in self.ty_instant_diagnostics.keys() { paths.insert(k.as_path()); }
+
+                    for path in paths {
+                        let mut merged = Vec::new();
+                        if let Some((_, d)) = self.instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                        if let Some((_, d)) = self.ty_instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                        self.diagnostics.insert(path.to_path_buf(), merged);
                     }
                     self.dirty_diagnostics = false;
                 }
@@ -1443,8 +1584,15 @@ impl LspManager {
             }
         } else {
             if self.dirty_diagnostics {
-                for (k, v) in &self.instant_diagnostics {
-                    self.diagnostics.insert(k.clone(), v.1.clone());
+                let mut paths = std::collections::HashSet::new();
+                for k in self.instant_diagnostics.keys() { paths.insert(k.as_path()); }
+                for k in self.ty_instant_diagnostics.keys() { paths.insert(k.as_path()); }
+
+                for path in paths {
+                    let mut merged = Vec::new();
+                    if let Some((_, d)) = self.instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                    if let Some((_, d)) = self.ty_instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                    self.diagnostics.insert(path.to_path_buf(), merged);
                 }
                 self.dirty_diagnostics = false;
             }
@@ -1453,10 +1601,10 @@ impl LspManager {
         all
     }
 
-        pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
+                pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
@@ -1470,14 +1618,14 @@ impl LspManager {
         pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        self.instant_diagnostics
+        self.merged_instant_diagnostics
             .get(&abs_path)
-            .map(|(v, d)| (*v, d.as_slice()))
+                        .map(|(v, d)| (*v, d.as_slice()))
             .unwrap_or((0, &[]))
     }
 
@@ -1490,10 +1638,10 @@ impl LspManager {
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-    pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+        pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
@@ -1514,10 +1662,10 @@ impl LspManager {
         Some(id)
     }
 
-    pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+        pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = &self.workspace {
+        } else if let Some(ws) = self.workspaces.first() {
             ws.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
@@ -1538,10 +1686,13 @@ impl LspManager {
         Some(id)
     }
 
-    #[allow(dead_code)]
+        #[allow(dead_code)]
     pub fn shutdown(mut self) {
         self.python_disabled = true;
         if let Some(p) = self.python.take() {
+            p.shutdown();
+        }
+        if let Some(p) = self.ty_process.take() {
             p.shutdown();
         }
     }

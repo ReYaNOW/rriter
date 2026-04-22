@@ -17,8 +17,9 @@ pub struct Theme {
     pub minimap_cursor: [f32; 4],
     pub modified_unsaved: [f32; 4],
     pub modified_saved: [f32; 4],
-    pub diag_warn: [f32; 4],
+        pub diag_warn: [f32; 4],
     pub diag_error: [f32; 4],
+    pub unused:[f32; 4],
 }
 
 #[repr(C)]

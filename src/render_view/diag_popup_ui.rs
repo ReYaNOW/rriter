@@ -19,12 +19,96 @@ impl Renderer {
         let icon_sz = 20.0 * s;
         let max_text_w = (self.width - 100.0 * s).max(300.0 * s).min(700.0 * s);
 
-        let mut global_max_w = 180.0 * s;
+                let mut global_max_w = 180.0 * s;
         let mut total_h = pad * 2.0;
+
+        let mut parsed_diags = Vec::new();
 
         for i in 0..self.hovered_diags_cache.len() {
             let (idx, _, _, _) = self.hovered_diags_cache[i];
             let diag = &lsp_diagnostics[idx];
+                                    let clean_msg = diag.message.replace('\r', "");
+
+            let mut words_meta: Vec<(usize, usize, bool, bool)> = Vec::new();
+            let mut current_offset = 0;
+
+            for (line_idx, line_str) in clean_msg.split('\n').enumerate() {
+                if line_idx > 0 {
+                    if let Some(last) = words_meta.last_mut() {
+                        last.3 = true;
+                    } else {
+                        words_meta.push((current_offset, 0, false, true));
+                    }
+                    current_offset += 1;
+                }
+
+                let mut start = 0;
+                let mut in_space = None;
+                for (i, c) in line_str.char_indices() {
+                    let is_space = c == ' ';
+                    if in_space.is_none() {
+                        in_space = Some(is_space);
+                    } else if in_space != Some(is_space) {
+                        words_meta.push((current_offset + start, i - start, in_space.unwrap(), false));
+                        start = i;
+                        in_space = Some(is_space);
+                    }
+                }
+                if start < line_str.len() {
+                    words_meta.push((current_offset + start, line_str.len() - start, in_space.unwrap(), false));
+                }
+            }
+
+            let mut spans = Vec::new();
+            let mut in_backticks = false;
+            let chars: Vec<(usize, char)> = clean_msg.char_indices().collect();
+            let mut char_idx = 0;
+
+            while char_idx < chars.len() {
+                let (offset, c) = chars[char_idx];
+                if c == '`' || c == '\'' {
+                    in_backticks = !in_backticks;
+                    spans.push(crate::highlighter::ColorSpan { start: offset, end: offset + c.len_utf8(), color: [0.45, 0.85, 0.95, 1.0] });
+                } else if c == '├' || c == '─' || c == '│' || c == '└' {
+                    spans.push(crate::highlighter::ColorSpan { start: offset, end: offset + c.len_utf8(), color: [0.45, 0.45, 0.50, 1.0] });
+                } else if c.is_alphanumeric() || c == '_' {
+                    let w_start = offset;
+                    let mut w_end = offset + c.len_utf8();
+                    let mut j = char_idx + 1;
+                    while j < chars.len() {
+                        let (o2, c2) = chars[j];
+                        if c2.is_alphanumeric() || c2 == '_' {
+                            w_end = o2 + c2.len_utf8();
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    let word = &clean_msg[w_start..w_end];
+                    let color = match word {
+                        "type" | "protocol" | "union" | "Expected" | "found" | "Argument" | "incorrect" | "assignable" | "member" | "defined" | "element" | "not" | "is" | "to" | "of" | "the" | "on" => Some([1.0, 0.47, 0.77, 1.0]),
+                        "list" | "dict" | "set" | "tuple" | "str" | "int" | "bool" | "float" | "None" | "Any" | "Unknown" | "Sequence" | "Callable" | "Generator" | "AsyncGenerator" | "Coroutine" => Some([0.54, 0.91, 0.99, 1.0]),
+                        _ if in_backticks => Some([0.72, 0.52, 1.0, 1.0]),
+                        _ => None,
+                    };
+                    if let Some(c_color) = color {
+                        spans.push(crate::highlighter::ColorSpan { start: w_start, end: w_end, color: c_color });
+                    }
+                    char_idx = j - 1;
+                } else if in_backticks {
+                    let color = match c {
+                        '[' | ']' | '(' | ')' | '{' | '}' => Some([0.95, 0.90, 0.55, 1.0]),
+                        '-' | '>' | ':' | '|' | ',' | '.' | '/' | '=' => Some([1.0, 0.47, 0.77, 1.0]),
+                        _ => None,
+                    };
+                    if let Some(c_color) = color {
+                        spans.push(crate::highlighter::ColorSpan { start: offset, end: offset + c.len_utf8(), color: c_color });
+                    }
+                }
+                char_idx += 1;
+            }
+
+            parsed_diags.push((clean_msg, words_meta, spans));
 
             let source_str = diag.source.as_deref().unwrap_or("LSP");
             let code_str = diag.code.as_deref().unwrap_or("");
@@ -43,22 +127,28 @@ impl Renderer {
             let mut line_count = 1;
             let mut max_line_w = 0.0;
 
-            for word in diag.message.split_whitespace() {
-                let w = self.measure_ui_width(word, 1.0);
-                let space_w = if cur_line_w > 0.0 {
-                    self.measure_ui_width(" ", 1.0)
-                } else {
-                    0.0
-                };
+            let (msg_ref, meta_ref, _) = &parsed_diags[i];
 
-                if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
+            for &(start, len, is_space, has_newline) in meta_ref {
+                let chunk = &msg_ref[start..start + len];
+                let w = self.measure_ui_width(chunk, 1.0);
+
+                if cur_line_w + w > max_text_w && cur_line_w > 0.0 && !is_space {
                     if cur_line_w > max_line_w {
                         max_line_w = cur_line_w;
                     }
                     line_count += 1;
                     cur_line_w = w;
                 } else {
-                    cur_line_w += space_w + w;
+                    cur_line_w += w;
+                }
+
+                if has_newline {
+                    if cur_line_w > max_line_w {
+                        max_line_w = cur_line_w;
+                    }
+                    line_count += 1;
+                    cur_line_w = 0.0;
                 }
             }
             if cur_line_w > max_line_w {
@@ -161,34 +251,51 @@ impl Renderer {
             } else {
                 self.measure_ui_width(")", 1.0)
             };
-            let source_full_w = prefix_w + suffix_w;
+                        let source_full_w = prefix_w + suffix_w;
 
             let mut lines_count = 1;
             let mut cur_line_w = 0.0;
             let mut text_y = current_y + line_h * 0.75;
             let mut draw_x = (bx + pad).round();
 
-            for word in diag.message.split_whitespace() {
-                let w = self.measure_ui_width(word, 1.0);
-                let space_w = if cur_line_w > 0.0 {
-                    self.measure_ui_width(" ", 1.0)
-                } else {
-                    0.0
-                };
+                        let (msg_ref, meta_ref, spans) = &parsed_diags[i];
 
-                if cur_line_w + space_w + w > max_text_w && cur_line_w > 0.0 {
+            for &(start, len, is_space, has_newline) in meta_ref {
+                let chunk = &msg_ref[start..start + len];
+                let w = self.measure_ui_width(chunk, 1.0);
+
+                if cur_line_w + w > max_text_w && cur_line_w > 0.0 && !is_space {
                     lines_count += 1;
                     cur_line_w = w;
                     text_y += line_h;
                     draw_x = (bx + pad).round();
                 } else {
-                    if cur_line_w > 0.0 {
-                        draw_x += space_w;
-                    }
-                    cur_line_w += space_w + w;
+                    cur_line_w += w;
                 }
-                self.draw_string_scaled(word, draw_x, text_y.round(), [0.9, 0.9, 0.9, 1.0], 1.0);
-                draw_x += w;
+
+                let mut current_byte = start;
+                for c in chunk.chars() {
+                    let mut color = [0.9, 0.9, 0.9, 1.0];
+                    for span in spans {
+                        if current_byte >= span.start && current_byte < span.end {
+                            color = span.color;
+                            break;
+                        }
+                    }
+
+                    let mut b = [0; 4];
+                    let s = c.encode_utf8(&mut b);
+                    self.draw_string_scaled(s, draw_x, text_y.round(), color, 1.0);
+                    draw_x += self.measure_ui_width(s, 1.0);
+                    current_byte += c.len_utf8();
+                }
+
+                if has_newline {
+                    lines_count += 1;
+                    text_y += line_h;
+                    draw_x = (bx + pad).round();
+                    cur_line_w = 0.0;
+                }
             }
 
             let source_on_new_line = cur_line_w + source_full_w + 10.0 * s > max_text_w;

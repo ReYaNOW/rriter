@@ -109,7 +109,35 @@ impl Renderer {
                 (0, &[] as &[crate::lsp::Diagnostic])
             };
 
+                        let mut get_byte_offset = |line: u32, utf16_col: u32| -> usize {
+                let line = line as usize;
+                if line >= editor.line_offsets.len() {
+                    return editor.len();
+                }
+                let start = editor.line_offsets[line];
+                let end = editor.line_offsets.get(line + 1).copied().unwrap_or(editor.len());
+                let mut current_utf16 = 0;
+                let mut current_byte = start;
+                let (first, second) = editor.text_parts();
+                let first_len = first.len();
+
+                while current_byte < end {
+                    if current_utf16 >= utf16_col {
+                        break;
+                    }
+                    let ch = if current_byte < first_len {
+                        first[current_byte..].chars().next().unwrap_or('\0')
+                    } else {
+                        second[current_byte - first_len..].chars().next().unwrap_or('\0')
+                    };
+                    current_utf16 += ch.len_utf16() as u32;
+                    current_byte += ch.len_utf8();
+                }
+                current_byte
+            };
+
             let mut lsp_diagnostics_filtered = Vec::new();
+            let mut unused_spans = Vec::new();
             for d in instant_raw {
                 let diag_line = d.start_line as usize;
                 let mut suppress = false;
@@ -127,8 +155,16 @@ impl Renderer {
 
                 if !suppress {
                     lsp_diagnostics_filtered.push(d.clone());
+                    if d.tags.contains(&1) || d.tags.contains(&2) {
+                        let start = get_byte_offset(d.start_line, d.start_col);
+                        let end = get_byte_offset(d.end_line, d.end_col);
+                        if start < end {
+                            unused_spans.push((start, end));
+                        }
+                    }
                 }
             }
+            unused_spans.sort_unstable_by_key(|&(s, _)| s);
             let lsp_diagnostics = &lsp_diagnostics_filtered;
 
             let delayed_diagnostics = if let Some(l) = lsp {
@@ -1157,10 +1193,11 @@ impl Renderer {
                 Err(idx) => idx.saturating_sub(1),
             };
 
-            let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
+                        let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
             let mut identical_idx = self
                 .identical_words_cache
                 .partition_point(|&(_, e)| e <= start_byte);
+            let mut unused_idx = unused_spans.partition_point(|&(_, e)| e <= start_byte);
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -1205,10 +1242,15 @@ impl Renderer {
                     {
                         search_idx += 1;
                     }
-                    while identical_idx < self.identical_words_cache.len()
+                                        while identical_idx < self.identical_words_cache.len()
                         && self.identical_words_cache[identical_idx].1 <= current_offset
                     {
                         identical_idx += 1;
+                    }
+                    while unused_idx < unused_spans.len()
+                        && unused_spans[unused_idx].1 <= current_offset
+                    {
+                        unused_idx += 1;
                     }
 
                     let is_newline = c == '\n';
@@ -1231,8 +1273,11 @@ impl Renderer {
                         }
                     }
 
-                    let is_identical = identical_idx < self.identical_words_cache.len()
+                                        let is_identical = identical_idx < self.identical_words_cache.len()
                         && current_offset >= self.identical_words_cache[identical_idx].0;
+
+                    let is_unused = unused_idx < unused_spans.len()
+                        && current_offset >= unused_spans[unused_idx].0;
 
                     let is_bracket = if let Some((b1, b2)) = bracket_pairs {
                         current_offset == b1 || current_offset == b2
@@ -1289,13 +1334,16 @@ impl Renderer {
                         if x - render_scroll_x + adv > 0.0 {
                             if let Some(g) = self.get_glyph(c) {
                                 let mut current_color = self.theme.fg;
-                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
+                                                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
                                 {
                                     current_color = spans[span_idx].color;
                                 }
 
-                                self.push_quad(
-                                    x - render_scroll_x + g.offset_x,
+                                                                if is_unused {
+                                    current_color = self.theme.unused;
+                                }
+
+                                self.push_quad(x - render_scroll_x + g.offset_x,
                                     y - g.offset_y,
                                     g.width,
                                     g.height,

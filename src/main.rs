@@ -339,8 +339,9 @@ fn load_dracula() -> Theme {
         minimap_cursor: sel_color,
         modified_unsaved: [1.0, 0.474, 0.776, 1.0],
         modified_saved: [0.313, 0.980, 0.482, 1.0],
-        diag_warn: [0.945, 0.980, 0.549, 1.0],
-        diag_error: [1.0, 0.333, 0.333, 1.0],
+                diag_warn:[0.945, 0.980, 0.549, 1.0],
+        diag_error:[1.0, 0.333, 0.333, 1.0],
+        unused:[0.48, 0.48, 0.48, 0.6],
     }
 }
 

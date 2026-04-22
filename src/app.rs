@@ -424,9 +424,9 @@ impl App {
             self.ide_panel.active_terminal = 0;
         }
 
-        if self.lsp.is_none() {
+                if self.lsp.is_none() {
             self.lsp = Some(crate::lsp::LspManager::new(
-                self.ide_workspaces.first().cloned(),
+                self.ide_workspaces.clone(),
             ));
         }
 
