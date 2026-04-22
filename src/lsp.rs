@@ -1196,7 +1196,10 @@ pub struct LspManager {
     python: Option<LspProcess>,
     workspace: Option<PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
-    pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
+            pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
+    pub instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    pub dirty_diagnostics: bool,
+    pub last_change: Option<std::time::Instant>,
     current_path: Option<PathBuf>,
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
@@ -1207,11 +1210,14 @@ pub struct LspManager {
 }
 
 impl LspManager {
-    pub fn new(workspace: Option<PathBuf>) -> Self {
+        pub fn new(workspace: Option<PathBuf>) -> Self {
         LspManager {
             python: None,
             workspace,
-            diagnostics: HashMap::new(),
+                        diagnostics: HashMap::new(),
+            instant_diagnostics: HashMap::new(),
+            dirty_diagnostics: false,
+            last_change: None,
             current_path: None,
             python_status: LspServerStatus::Disabled,
             python_disabled: false,
@@ -1240,13 +1246,15 @@ impl LspManager {
     }
 
     /// Отключить ruff (остановить и не перезапускать)
-    pub fn disable_python(&mut self) {
+        pub fn disable_python(&mut self) {
         self.python_disabled = true;
         self.python_status = LspServerStatus::Disabled;
         if let Some(p) = self.python.take() {
             p.shutdown();
         }
         self.diagnostics.clear();
+        self.instant_diagnostics.clear();
+        self.dirty_diagnostics = false;
         self.server_logs.clear();
     }
 
@@ -1309,8 +1317,9 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
-    pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+        pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
+        self.last_change = Some(std::time::Instant::now());
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1377,12 +1386,14 @@ impl LspManager {
             all.extend(proc.poll());
         }
 
-        // Обновляем кешированные диагностики и статусы
+                // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                LspEvent::Diagnostics { path, items, .. } => {
+                                                LspEvent::Diagnostics { path, version, items, .. } => {
                     if !self.suppress_diagnostics {
-                        self.diagnostics.insert(path.clone(), items.clone());
+                        let v = version.unwrap_or(0);
+                        self.instant_diagnostics.insert(path.clone(), (v, items.clone()));
+                        self.dirty_diagnostics = true;
                     }
                 }
                 LspEvent::StatusChanged { status, .. } => {
@@ -1409,14 +1420,33 @@ impl LspManager {
                         logs.remove(0);
                     }
                 }
-                _ => {}
+                                _ => {}
+            }
+        }
+
+                        if let Some(t) = self.last_change {
+            if t.elapsed().as_secs_f32() >= 3.0 {
+                if self.dirty_diagnostics {
+                    for (k, v) in &self.instant_diagnostics {
+                        self.diagnostics.insert(k.clone(), v.1.clone());
+                    }
+                    self.dirty_diagnostics = false;
+                }
+                self.last_change = None;
+            }
+        } else {
+            if self.dirty_diagnostics {
+                for (k, v) in &self.instant_diagnostics {
+                    self.diagnostics.insert(k.clone(), v.1.clone());
+                }
+                self.dirty_diagnostics = false;
             }
         }
 
         all
     }
 
-    pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
+        pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = &self.workspace {
@@ -1428,6 +1458,20 @@ impl LspManager {
             .get(&abs_path)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
+    }
+
+        pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = &self.workspace {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.instant_diagnostics
+            .get(&abs_path)
+            .map(|(v, d)| (*v, d.as_slice()))
+            .unwrap_or((0, &[]))
     }
 
     /// Диагностики для текущего файла, отфильтрованные по строке

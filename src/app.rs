@@ -30,8 +30,9 @@ pub struct EditorTab {
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
     pub spans: Vec<crate::highlighter::ColorSpan>,
-    pub completions: Vec<crate::highlighter::CompletionItem>,
+        pub completions: Vec<crate::highlighter::CompletionItem>,
     pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
+    pub syntax_errors: Vec<(usize, usize)>,
     pub last_sent_version: u64,
     pub search_results: Vec<(usize, usize)>,
     pub search_current_idx: Option<usize>,
@@ -442,14 +443,15 @@ impl App {
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
                 completions: Vec::new(),
-                foldable_ranges: Vec::new(),
-                last_sent_version: u64::MAX,
-                search_results: Vec::new(),
-                search_current_idx: None,
-                is_highlighted_once: false,
-                icon_key: "default_file",
-            });
-            self.active_tab = 0;
+                                    foldable_ranges: Vec::new(),
+                    last_sent_version: u64::MAX,
+                    search_results: Vec::new(),
+                    search_current_idx: None,
+                    is_highlighted_once: false,
+                    icon_key: "default_file",
+                    syntax_errors: Vec::new(),
+                });
+                self.active_tab = 0;
         }
 
         let (saved_tabs, saved_active) = crate::load_open_tabs(true);
@@ -530,9 +532,13 @@ impl App {
             &mut self.highlighter.completions,
             &mut self.tabs[ai].completions,
         );
-        std::mem::swap(
+                std::mem::swap(
             &mut self.highlighter.foldable_ranges,
             &mut self.tabs[ai].foldable_ranges,
+        );
+        std::mem::swap(
+            &mut self.highlighter.syntax_errors,
+            &mut self.tabs[ai].syntax_errors,
         );
         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
@@ -642,12 +648,13 @@ impl App {
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
                 completions: Vec::new(),
-                foldable_ranges: Vec::new(),
+                                foldable_ranges: Vec::new(),
                 last_sent_version: 0,
                 search_results: Vec::new(),
                 search_current_idx: None,
                 is_highlighted_once: false,
                 icon_key: "default_file",
+                syntax_errors: Vec::new(),
             });
             self.active_tab = 0;
             self.show_welcome = false;
@@ -682,12 +689,13 @@ impl App {
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
             completions: Vec::new(),
-            foldable_ranges: Vec::new(),
+                        foldable_ranges: Vec::new(),
             last_sent_version: u64::MAX,
             search_results: Vec::new(),
             search_current_idx: None,
             is_highlighted_once: false,
             icon_key: "default_file",
+            syntax_errors: Vec::new(),
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;

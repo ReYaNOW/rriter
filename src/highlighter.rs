@@ -54,15 +54,17 @@ pub enum HighlighterMessage {
 
 pub struct Highlighter {
     tx: Sender<HighlighterMessage>,
-    pub rx: Receiver<(
+        pub rx: Receiver<(
         u64,
         Vec<ColorSpan>,
         Vec<CompletionItem>,
         Vec<(usize, usize, bool, bool)>, // (start, end, is_autofold, is_sticky)
+        Vec<(usize, usize)>,             // syntax errors
     )>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
     pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
+    pub syntax_errors: Vec<(usize, usize)>,
     pub current_version: u64,
 }
 
@@ -181,11 +183,12 @@ fn resolve_color(
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
-        let (tx_out, rx_out) = mpsc::channel::<(
+                let (tx_out, rx_out) = mpsc::channel::<(
             u64,
             Vec<ColorSpan>,
             Vec<CompletionItem>,
             Vec<(usize, usize, bool, bool)>,
+            Vec<(usize, usize)>,
         )>();
 
         thread::spawn(move || {
@@ -959,12 +962,12 @@ impl Highlighter {
                 }
                 merged_spans.extend(spans);
 
-                let flat_spans = flatten_spans(
+                                let flat_spans = flatten_spans(
                     merged_spans,
                     text.len(),
                     text,
                     &mut byte_colors_buf,
-                    error_ranges,
+                    &error_ranges,
                     apply_rainbow_brackets,
                     is_log_or_huge,
                 );
@@ -1168,17 +1171,24 @@ impl Highlighter {
                         scope_end,
                     })
                     .collect();
-                completions.sort_by(|a, b| a.word.cmp(&b.word));
+                                completions.sort_by(|a, b| a.word.cmp(&b.word));
 
-                let _ = tx_out.send((final_version, flat_spans, completions, foldable_ranges));
+                let _ = tx_out.send((
+                    final_version,
+                    flat_spans,
+                    completions,
+                    foldable_ranges,
+                    error_ranges,
+                ));
             }
         });
         Self {
             tx: tx_in,
             rx: rx_out,
-            spans: vec![],
+                        spans: vec![],
             completions: vec![],
             foldable_ranges: vec![],
+            syntax_errors: vec![],
             current_version: 0,
         }
     }
@@ -1206,15 +1216,17 @@ impl Highlighter {
         }
     }
 
-    pub fn poll(&mut self, current_editor_version: u64) -> bool {
+        pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((ver, spans, completions, foldable_ranges)) = self.rx.try_recv() {
+        while let Ok((ver, spans, completions, foldable_ranges, syntax_errors)) = self.rx.try_recv()
+        {
             if ver >= self.current_version {
                 self.current_version = ver;
                 if ver == current_editor_version {
                     self.spans = spans;
                     self.completions = completions;
                     self.foldable_ranges = foldable_ranges;
+                    self.syntax_errors = syntax_errors;
                     updated = true;
                 }
             }
@@ -1233,8 +1245,8 @@ impl Highlighter {
                 return false;
             }
             let remaining = deadline - now;
-            match self.rx.recv_timeout(remaining) {
-                Ok((ver, spans, completions, foldable_ranges)) => {
+                        match self.rx.recv_timeout(remaining) {
+                Ok((ver, spans, completions, foldable_ranges, syntax_errors)) => {
                     if ver >= self.current_version {
                         self.current_version = ver;
                     }
@@ -1242,6 +1254,7 @@ impl Highlighter {
                         self.spans = spans;
                         self.completions = completions;
                         self.foldable_ranges = foldable_ranges;
+                        self.syntax_errors = syntax_errors;
                         // Дренируем оставшиеся ожидающие результаты
                         self.poll(version);
                         return true;
@@ -1382,7 +1395,7 @@ fn flatten_spans(
     len: usize,
     text: &str,
     byte_colors: &mut Vec<[f32; 4]>,
-    error_ranges: Vec<(usize, usize)>,
+    error_ranges: &[(usize, usize)],
     apply_rainbow_brackets: bool,
     is_log_or_huge: bool,
 ) -> Vec<ColorSpan> {

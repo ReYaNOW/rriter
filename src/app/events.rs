@@ -395,11 +395,12 @@ impl ApplicationHandler for App {
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
                     &self.ide_panel,
-                    self.show_settings,
-                    self.lsp.as_ref(),
-                    &mut self.ui_registry,
-                    self.tab_scroll.current.round(),
-                );
+                                            self.show_settings,
+                        self.lsp.as_ref(),
+                        &mut self.ui_registry,
+                        self.tab_scroll.current.round(),
+                        &self.highlighter.syntax_errors,
+                    );
 
                 self.target_sticky_lines = target_sticky;
 

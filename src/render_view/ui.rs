@@ -732,17 +732,20 @@ impl Renderer {
             return;
         }
 
-        let s = self.scale_factor;
+                let s = self.scale_factor;
         let minimap_w = self.minimap_width;
-        let max_scroll = self.get_max_scroll(editor, window_height);
+
+        let tab_bar_h = 44.0 * s;
+        let track_y = tab_bar_h;
+        let track_h = window_height - tab_bar_h;
+
+        let max_scroll = self.get_max_scroll(editor, track_h);
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-        let total_lines = editor.line_offsets.len() as f32;
-        if total_lines < 1.0 {
+        let total_vis_lines = self.phys_to_visual.last().copied().unwrap_or(0) as f32 + 2.0;
+        if total_vis_lines < 1.0 {
             return;
         }
-
-        let track_h = window_height;
 
         // Полоса слева от скроллбара
         let bar_w = (4.0 * s).max(2.0);
@@ -764,19 +767,21 @@ impl Renderer {
             }
         }
 
-        let indicator_h = (2.0 * s).max(1.0);
+                let indicator_h = (2.0 * s).max(1.0);
 
         // Сначала рисуем предупреждения
         for &line_num in &lines_with_warnings {
             if !lines_with_errors.contains(&line_num) {
-                let y = (line_num as f32 / total_lines * track_h).round();
+                let vis_line = *self.phys_to_visual.get(line_num as usize).unwrap_or(&0) as f32;
+                let y = (track_y + (vis_line / total_vis_lines * track_h)).round();
                 self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_warn);
             }
         }
 
         // Потом ошибки (поверх)
         for &line_num in &lines_with_errors {
-            let y = (line_num as f32 / total_lines * track_h).round();
+            let vis_line = *self.phys_to_visual.get(line_num as usize).unwrap_or(&0) as f32;
+            let y = (track_y + (vis_line / total_vis_lines * track_h)).round();
             self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_error);
         }
     }

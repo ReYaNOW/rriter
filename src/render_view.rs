@@ -85,21 +85,80 @@ impl Renderer {
         is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
-        lsp: Option<&crate::lsp::LspManager>,
+                lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
-        tab_scroll_x: f32,        ) -> (bool, Vec<(usize, usize)>) {
+        tab_scroll_x: f32,
+        syntax_errors: &[(usize, usize)],
+    ) -> (bool, Vec<(usize, usize)>) {
             let frame_start_time = Instant::now();
             let was_typing = self.last_editor_version_for_typing != editor.version;
-            let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1 || (self.last_scroll_x - scroll_x).abs() > 0.1;
+                        let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1 || (self.last_scroll_x - scroll_x).abs() > 0.1;
 
-            let lsp_diagnostics = if let Some(l) = lsp {
+                        let cursor_phys_line = editor
+                .line_offsets
+                .partition_point(|&o| o <= editor.cursor)
+                .saturating_sub(1);
+
+                        let (diag_version, instant_raw) = if let Some(l) = lsp {
                 if let Some(p) = editor_path {
-                    l.get_diagnostics(p)} else {
-                &[]
+                    l.get_instant_diagnostics_with_version(p)
+                } else {
+                    (0, &[] as &[crate::lsp::Diagnostic])
+                }
+            } else {
+                (0, &[] as &[crate::lsp::Diagnostic])
+            };
+
+            let mut lsp_diagnostics_filtered = Vec::new();
+            for d in instant_raw {
+                let diag_line = d.start_line as usize;
+                let mut suppress = false;
+
+                if diag_line == cursor_phys_line {
+                    for &(s, _) in syntax_errors {
+                        let err_line = editor
+                            .line_offsets
+                            .partition_point(|&o| o <= s)
+                            .saturating_sub(1);
+                        if err_line == diag_line {
+                            suppress = true;
+                            break;
+                        }
+                    }
+
+                                        if (diag_version as u64) < editor.version {
+                        suppress = true;
+                    }
+
+                    let line_start = editor.line_offsets.get(diag_line).copied().unwrap_or(0);
+                    let cursor_col = editor.cursor.saturating_sub(line_start) as u32;
+
+                    // Расширенная зона подавления (15 символов).
+                    // Скрывает "мигания" от линтера для незаконченных выражений вокруг курсора,
+                    // давая вам время дописать строку (или пока Tree-sitter не обновит AST).
+                    let start_zone = d.start_col.saturating_sub(15);
+                    let end_zone = d.end_col + 15;
+
+                    if cursor_col >= start_zone && cursor_col <= end_zone {
+                        suppress = true;
+                    }
+                }
+
+                if !suppress {
+                    lsp_diagnostics_filtered.push(d.clone());
+                }
             }
-        } else {
-            &[]
-        };
+            let lsp_diagnostics = &lsp_diagnostics_filtered;
+
+            let delayed_diagnostics = if let Some(l) = lsp {
+                if let Some(p) = editor_path {
+                    l.get_diagnostics(p)
+                } else {
+                    &[]
+                }
+            } else {
+                &[]
+            };
 
         if show_welcome && !is_ide_mode {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
@@ -1727,9 +1786,9 @@ impl Renderer {
             );
         }
 
-        // --- 8.5. Линейка диагностики на скроллбаре ---
+                // --- 8.5. Линейка диагностики на скроллбаре ---
         if !is_resizing && is_ide_mode && !dialog_window_open {
-            self.draw_diagnostics_ruler(editor, lsp_diagnostics, self.height);
+            self.draw_diagnostics_ruler(editor, delayed_diagnostics, self.height);
         }
 
         let mut tab_tooltip = None;
