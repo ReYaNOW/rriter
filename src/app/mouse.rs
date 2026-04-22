@@ -1770,34 +1770,39 @@ impl App {
                 / (track_w - thumb_w).max(0.0001);
             self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
             self.scroll_x.current = self.scroll_x.target;
-        } else if self.scroll_y.is_dragging {
+                } else if self.scroll_y.is_dragging {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_click_time).as_millis();
             let dy = (position.y as f32 - self.last_click_pos.1).abs();
 
             if elapsed > 120 || dy > 10.0 {
-                let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0)
-                    * self.renderer.as_ref().unwrap().line_height;
-                let s = self.renderer.as_ref().unwrap().scale_factor;
-                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * s
-                };
+                let r = self.renderer.as_ref().unwrap();
+                let s = r.scale_factor;
+                let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                 let editor_height = wh - tab_bar_h;
-                let thumb_h = (editor_height / total_content_height.max(editor_height)
-                    * editor_height)
-                    .max(20.0 * s);
+                let minimap_w = r.minimap_width;
+
+                let is_minimap_drag = self.last_click_pos.0 >= (self.window.as_ref().unwrap().inner_size().width as f32 - minimap_w);
+
+                let thumb_h = if is_minimap_drag {
+                    let total_lines_f32 = self.editor.line_offsets.len() as f32;
+                    let visible_minimap_lines = total_lines_f32.min(900.0);
+                    let minimap_line_h = (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
+                    let visible_lines = editor_height / r.line_height;
+                    (visible_lines * minimap_line_h).max(4.0)
+                } else {
+                    let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
+                    (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s)
+                };
+
                 let track_h = editor_height;
                 let track_start_y = tab_bar_h;
-
-                let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
+                let last_mouse_y = r.last_mouse_y;
 
                 let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
                     / (track_h - thumb_h).max(0.0001);
 
                 self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
-
                 self.scroll_y.anim_speed = 15.0;
             }
         } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {

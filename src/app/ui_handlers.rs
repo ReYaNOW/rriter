@@ -558,35 +558,50 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::EditorMinimap => {
+                        UiId::EditorMinimap => {
                 self.scroll_y.is_dragging = true;
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     self.last_click_pos = (mx, my);
-                    // Set time to the past so mouse.rs drag logic bypasses the 120ms delay instantly
                     self.last_click_time = std::time::Instant::now() - std::time::Duration::from_millis(200);
 
                     let s = r.scale_factor;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                        0.0
-                    } else {
-                        38.0 * s
-                    };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     let editor_height = wh - tab_bar_h;
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
-                    if max_scroll > 0.0 {
-                        let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
-                        let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+                                        if max_scroll > 0.0 {
+                        let total_lines_f32 = self.editor.line_offsets.len() as f32;
+                        let visible_minimap_lines = total_lines_f32.min(900.0);
+                        let minimap_line_h = (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
+                        let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
 
-                        // Center viewport on click
-                        self.scroll_y.drag_offset = thumb_h / 2.0;
-                        let scroll_ratio = (my - tab_bar_h - self.scroll_y.drag_offset) / (editor_height - thumb_h).max(0.0001);
+                        let scroll_ratio_y = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
+                        let current_minimap_scroll = scroll_ratio_y * max_minimap_scroll;
 
-                        self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
-                        self.scroll_y.anim_speed = 15.0;
+                        let visible_lines = editor_height / r.line_height;
+                        let thumb_h = (visible_lines * minimap_line_h).max(4.0);
+                        let viewport_y = tab_bar_h + scroll_ratio_y * (editor_height - thumb_h);
+
+                        if my >= viewport_y && my <= viewport_y + thumb_h {
+                            self.scroll_y.drag_offset = my - viewport_y;
+                        } else {
+                            let minimap_y = my - tab_bar_h;
+                            let abs_minimap_y = minimap_y + current_minimap_scroll;
+                            let target_line = abs_minimap_y / minimap_line_h;
+
+                            let target_scroll = target_line * r.line_height - editor_height / 2.0;
+                            let clamped_scroll = target_scroll.clamp(0.0, max_scroll).round();
+
+                            self.scroll_y.target = clamped_scroll;
+                            self.scroll_y.anim_speed = 15.0;
+
+                            let target_ratio = clamped_scroll / max_scroll;
+                            let thumb_visual_y = target_ratio * (editor_height - thumb_h);
+                            self.scroll_y.drag_offset = my - tab_bar_h - thumb_visual_y;
+                        }
                     }
                 }
                 self.window.as_ref().unwrap().request_redraw();

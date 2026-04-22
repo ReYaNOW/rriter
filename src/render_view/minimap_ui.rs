@@ -20,11 +20,12 @@ impl Renderer {
             0.0
         };
 
-        let minimap_w = self.minimap_width;
+                let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
 
-                let minimap_line_h = (editor_height / (total_lines_f32 + 2.0).max(1.0)).max(1.5);
+        let visible_minimap_lines = total_lines_f32.min(900.0);
+        let minimap_line_h = (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
 
         let max_minimap_scroll =
             ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
