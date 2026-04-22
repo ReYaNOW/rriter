@@ -64,7 +64,9 @@ Example — destructive op:
 
 Code/commits/PRs: write normal. Level persist until changed or session end.
 
-You must provide the changes in the following format (or ask for files if u do not have enough info):
+You must provide the changes in the following format (or ask for files if u do not have enough info): 
+
+**Following format is required only if you do not have access to write in files**
 
 1) path/to/file
 ```language
