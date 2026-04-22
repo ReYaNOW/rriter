@@ -86,9 +86,9 @@ impl Renderer {
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
                 lsp: Option<&crate::lsp::LspManager>,
-        ui_registry: &mut crate::ui_system::UiRegistry,
+                ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
-        syntax_errors: &[(usize, usize)],
+        _syntax_errors: &[(usize, usize)],
     ) -> (bool, Vec<(usize, usize)>) {
             let frame_start_time = Instant::now();
             let was_typing = self.last_editor_version_for_typing != editor.version;
@@ -114,32 +114,13 @@ impl Renderer {
                 let diag_line = d.start_line as usize;
                 let mut suppress = false;
 
-                if diag_line == cursor_phys_line {
-                    for &(s, _) in syntax_errors {
-                        let err_line = editor
-                            .line_offsets
-                            .partition_point(|&o| o <= s)
-                            .saturating_sub(1);
-                        if err_line == diag_line {
-                            suppress = true;
-                            break;
-                        }
-                    }
-
-                                        if (diag_version as u64) < editor.version {
+                                                                if diag_line == cursor_phys_line {
+                    if (diag_version as u64) < editor.version {
                         suppress = true;
                     }
 
-                    let line_start = editor.line_offsets.get(diag_line).copied().unwrap_or(0);
-                    let cursor_col = editor.cursor.saturating_sub(line_start) as u32;
-
-                    // Расширенная зона подавления (15 символов).
-                    // Скрывает "мигания" от линтера для незаконченных выражений вокруг курсора,
-                    // давая вам время дописать строку (или пока Tree-sitter не обновит AST).
-                    let start_zone = d.start_col.saturating_sub(15);
-                    let end_zone = d.end_col + 15;
-
-                    if cursor_col >= start_zone && cursor_col <= end_zone {
+                    let code = d.code.as_deref().unwrap_or("");
+                    if code == "W291" || code == "W293" {
                         suppress = true;
                     }
                 }
