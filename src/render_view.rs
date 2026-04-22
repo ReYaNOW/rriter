@@ -1510,11 +1510,11 @@ impl Renderer {
                 if !start_found {
                     x_start_px = cur_x;
                 }
-                if !end_found {
+                                if !end_found {
                     x_end_px = if diag.end_line == diag.start_line {
                         cur_x
                     } else {
-                        x_start_px + avg_adv * 8.0
+                        cur_x.max(x_start_px + avg_adv * 4.0)
                     };
                 }
                 let x_start = self.left_padding + x_start_px - render_scroll_x;

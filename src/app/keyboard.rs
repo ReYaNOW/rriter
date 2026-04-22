@@ -505,10 +505,9 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+                let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
-        let is_dot = key_event.logical_key.to_text() == Some(".");
 
         if self.show_welcome {
             match physical_key {
@@ -958,14 +957,16 @@ impl App {
                             _ => txt,
                         };
                         
-                        // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе". 
+                                                // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе". 
                         // Let's log any printable text that is typed.
-                        self.pending_key_log = Some(crate::app::KeyLog {
-                            key: txt.to_string(),
-                            t0,
-                            t_highlight: None,
-                            t_render: None,
-                        });
+                        if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                            self.pending_key_log = Some(crate::app::KeyLog {
+                                key: txt.to_string(),
+                                t0,
+                                t_highlight: None,
+                                t_render: None,
+                            });
+                        }
 
                         let (del_info, ins_len) = self.editor.insert_str(insert_txt);
                         if let Some((offset, len)) = del_info {
