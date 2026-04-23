@@ -159,7 +159,15 @@ pub fn highlight_hover_text(
     })})});
 
     spans.sort_unstable_by_key(|s| s.start);
-    let line_kinds = clean_msg.split('\n').map(|_| HoverLineKindPublic::Text).collect();
+        let line_kinds = clean_msg.split('\n').map(|line| {
+        if line.starts_with("## ") {
+            HoverLineKindPublic::Header2
+        } else if line.starts_with("# ") {
+            HoverLineKindPublic::Header1
+        } else {
+            HoverLineKindPublic::Text
+        }
+    }).collect();
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
@@ -196,6 +204,8 @@ enum HoverLineKind {
     Text,
     Code,
     Separator,
+    Header1,
+    Header2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +213,8 @@ pub enum HoverLineKindPublic {
     Text,
     Code,
     Separator,
+    Header1,
+    Header2,
 }
 
 fn normalize_inline_rst_code(line: &str) -> (String, Vec<(usize, usize)>) {
@@ -269,13 +281,49 @@ fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
     (out, ranges)
 }
 
-fn parse_param_line(trimmed: &str) -> Option<(String, String)> {
+fn flatten_rst_roles_and_code(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_role = false;
+    let mut in_code = false;
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '`' {
+            if i + 1 < chars.len() && chars[i+1] == '`' {
+                in_code = !in_code;
+                out.push('`');
+                out.push('`');
+                i += 2;
+                continue;
+            } else if !in_code {
+                in_role = !in_role;
+                out.push('`');
+                i += 1;
+                continue;
+            }
+        }
+        if chars[i] == '\n' && (in_role || in_code) {
+            out.push(' ');
+            i += 1;
+            while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn parse_param_line(trimmed: &str) -> Option<(String, String, String)> {
     if !trimmed.starts_with(":param ") {
         return None;
     }
     let rest = trimmed.trim_start_matches(":param ").replace("\\*", "*");
     let colon = rest.find(':')?;
     let head = rest[..colon].trim();
+    let desc = rest[colon + 1..].trim().to_string();
     if head.is_empty() {
         return None;
     }
@@ -285,7 +333,7 @@ fn parse_param_line(trimmed: &str) -> Option<(String, String)> {
     }
     let name = parts.pop()?.trim().to_string();
     let ty = parts.join(" ").trim().to_string();
-    Some((name, ty))
+    Some((name, ty, desc))
 }
 
 fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
@@ -293,8 +341,8 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
     let mut kinds = Vec::new();
     let mut inline_code_ranges = Vec::new();
     let mut parameters_header_added = false;
-    let raw = msg.replace('\r', "");
-    let lines: Vec<&str> = raw.lines().collect();
+    let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', ""));
+    let lines: Vec<&str> = flat_msg.lines().collect();
     let mut i = 0usize;
     let mut in_fence = false;
 
@@ -303,6 +351,12 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
         let trimmed = line.trim();
 
         if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
+            if in_fence {
+                while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
+                    out.pop();
+                    kinds.pop();
+                }
+            }
             in_fence = !in_fence;
             i += 1;
             continue;
@@ -316,7 +370,7 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             continue;
         }
 
-        if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+                if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
             i += 1;
             if i < lines.len() && lines[i].trim().is_empty() {
                 i += 1;
@@ -348,6 +402,31 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             continue;
         }
 
+        if trimmed.ends_with("::") && !trimmed.starts_with(".. ") {
+            let clean = trimmed.strip_suffix("::").unwrap_or(trimmed);
+            out.push_str(clean);
+            out.push_str(":\n");
+            kinds.push(HoverLineKind::Text);
+            i += 1;
+            while i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            while i < lines.len() {
+                let code_line = lines[i];
+                if code_line.trim().is_empty() {
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                } else if code_line.starts_with("    ") || code_line.starts_with('\t') {
+                    let stripped = if code_line.starts_with("    ") { &code_line[4..] } else { &code_line[1..] };
+                    out.push_str(stripped);
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                } else {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
         if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
             out.push_str("---");
             out.push('\n');
@@ -356,19 +435,61 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             continue;
         }
 
-        if trimmed == ".. warning::" {
-            out.push_str("## Warning");
+                        if trimmed == ".. warning::" {
+            out.push_str("Warning");
             out.push('\n');
-            kinds.push(HoverLineKind::Text);
+            kinds.push(HoverLineKind::Header2);
             i += 1;
             continue;
         }
 
-        if let Some((name, ty)) = parse_param_line(trimmed) {
-            if !parameters_header_added {
-                out.push_str("# Parameters");
+        if let Some(stripped) = trimmed.strip_prefix(":return:") {
+            out.push_str("Returns");
+            out.push('\n');
+            kinds.push(HoverLineKind::Header1);
+            let trimmed_rest = stripped.trim();
+            if !trimmed_rest.is_empty() {
+                let line_start = out.len();
+                let (roles_line, mut role_ranges) = normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
+                let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+                out.push_str(normalized_line.trim_end());
                 out.push('\n');
                 kinds.push(HoverLineKind::Text);
+                ranges.append(&mut role_ranges);
+                for (s, e) in ranges {
+                    inline_code_ranges.push((line_start + s, line_start + e));
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some(stripped) = trimmed.strip_prefix(".. versionchanged::") {
+            out.push_str("versionchanged");
+            out.push('\n');
+            kinds.push(HoverLineKind::Header2);
+            let trimmed_rest = stripped.trim();
+            if !trimmed_rest.is_empty() {
+                let line_start = out.len();
+                let (roles_line, mut role_ranges) = normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
+                let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+                out.push_str(normalized_line.trim_end());
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
+                ranges.append(&mut role_ranges);
+                for (s, e) in ranges {
+                    inline_code_ranges.push((line_start + s, line_start + e));
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some((name, ty, desc)) = parse_param_line(trimmed) {
+            if !parameters_header_added {
+                out.push_str("Parameters");
+                out.push('\n');
+                kinds.push(HoverLineKind::Header1);
                 parameters_header_added = true;
             }
             if ty.is_empty() {
@@ -378,6 +499,21 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             }
             out.push('\n');
             kinds.push(HoverLineKind::Text);
+
+            if !desc.is_empty() {
+                let line_start = out.len();
+                let (roles_line, mut role_ranges) = normalize_rst_roles(&desc);
+                let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+                out.push_str("    ");
+                let desc_start = out.len();
+                out.push_str(normalized_line.trim_end());
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
+                ranges.append(&mut role_ranges);
+                for (s, e) in ranges {
+                    inline_code_ranges.push((desc_start + s, desc_start + e));
+                }
+            }
             i += 1;
             continue;
         }
@@ -385,9 +521,20 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
         let line_start = out.len();
         let (roles_line, mut role_ranges) = normalize_rst_roles(&line.replace("\\*", "*"));
         let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
-        out.push_str(normalized_line.trim_end());
-        out.push('\n');
-        kinds.push(HoverLineKind::Text);
+        let mut trimmed_norm = normalized_line.trim_end();
+        if let Some(s) = trimmed_norm.strip_prefix("## ") {
+            out.push_str(s);
+            out.push('\n');
+            kinds.push(HoverLineKind::Header2);
+        } else if let Some(s) = trimmed_norm.strip_prefix("# ") {
+            out.push_str(s);
+            out.push('\n');
+            kinds.push(HoverLineKind::Header1);
+        } else {
+            out.push_str(trimmed_norm);
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+        }
         ranges.append(&mut role_ranges);
         for (start, end) in ranges {
             inline_code_ranges.push((line_start + start, line_start + end));
@@ -422,6 +569,8 @@ fn push_python_ts_spans(
     global_start: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
 ) {
+    let mut best_spans: HashMap<(usize, usize), (u8,[f32; 4])> = HashMap::new();
+
     TS_DIAG_PARSER.with(|p_cell| {
     TS_DIAG_QUERY.with(|q_cell| {
     TS_DIAG_CURSOR.with(|c_cell| {
@@ -438,16 +587,32 @@ fn push_python_ts_spans(
                         let Some(color) = ts_capture_color(name) else {
                             continue;
                         };
-                        spans.push(crate::highlighter::ColorSpan {
-                            start: global_start + cap.node.start_byte(),
-                            end: global_start + cap.node.end_byte(),
-                            color,
-                        });
+                        let prio = match name {
+                            "py_function" | "function" | "py_builtin_or_func" => 10,
+                            "keyword" | "keyword.control" | "operator" => 8,
+                            "string" | "number" => 8,
+                            "type" | "class_name" => 8,
+                            "parameter" => 5,
+                            "property" | "variable" | "py_assign" => 1,
+                            _ => 0,
+                        };
+                        let key = (
+                            global_start + cap.node.start_byte(),
+                            global_start + cap.node.end_byte(),
+                        );
+                        let entry = best_spans.entry(key).or_insert((prio, color));
+                        if prio >= entry.0 {
+                            *entry = (prio, color);
+                        }
                     }
                 }
             }
         }
     })})});
+
+    for ((start, end), (_, color)) in best_spans {
+        spans.push(crate::highlighter::ColorSpan { start, end, color });
+    }
 }
 
 fn highlight_python_hover_doc(
@@ -501,7 +666,7 @@ fn highlight_python_hover_doc(
                 break;
             }
         }
-        let def_shift = lines[start_line].find("def ").unwrap_or(0);
+                let def_shift = lines[start_line].find("def ").unwrap_or(0);
         let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
             line_starts[end_line + 1] - 1
@@ -509,7 +674,11 @@ fn highlight_python_hover_doc(
             msg.len()
         };
         if start < end && end <= msg.len() {
-            push_python_ts_spans(&msg[start..end], start, &mut spans);
+            let mut sig_code = msg[start..end].to_string();
+            if !sig_code.trim_end().ends_with(':') {
+                sig_code.push(':');
+            }
+            push_python_ts_spans(&sig_code, start, &mut spans);
         }
     }
 
@@ -536,7 +705,7 @@ fn highlight_python_hover_doc(
         i += 1;
     }
 
-    // light text lines after separator
+        // light text lines after separator
     let mut saw_separator = false;
     for (line_no, line) in lines.iter().enumerate() {
         let line_start = line_starts[line_no];
@@ -545,7 +714,7 @@ fn highlight_python_hover_doc(
         let is_blank = trimmed.is_empty();
         let kind = line_kinds.get(line_no).copied().unwrap_or(HoverLineKind::Text);
 
-        if kind == HoverLineKind::Separator {
+        if kind == HoverLineKind::Separator || kind == HoverLineKind::Header1 || kind == HoverLineKind::Header2 {
             saw_separator = true;
         }
 
@@ -557,62 +726,55 @@ fn highlight_python_hover_doc(
             });
         }
 
-        if trimmed.starts_with("# Parameters") || trimmed.starts_with("## Warning") {
-            spans.push(crate::highlighter::ColorSpan {
-                start: line_start,
-                end: line_end,
-                color: header,
-            });
-        }
-
-        if trimmed == "# Parameters" {
-            continue;
-        }
-
-        if let Some(colon_pos) = line.find(':') {
-            let lhs = line[..colon_pos].trim();
-            if !lhs.is_empty()
-                && lhs.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*')
-                && saw_separator
-            {
-                let lhs_start = line_start + line.find(lhs).unwrap_or(0);
-                let lhs_end = lhs_start + lhs.len();
-                spans.push(crate::highlighter::ColorSpan {
-                    start: lhs_start,
-                    end: lhs_end,
-                    color: param,
-                });
-                let rhs = line[colon_pos + 1..].trim_start();
-                if !rhs.is_empty() {
-                    let rhs_start = line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
-                    let rhs_end = rhs_start + rhs
-                        .chars()
-                        .take_while(|c| !c.is_whitespace())
-                        .map(|c| c.len_utf8())
-                        .sum::<usize>();
-                    if rhs_end > rhs_start {
-                        spans.push(crate::highlighter::ColorSpan {
-                            start: rhs_start,
-                            end: rhs_end,
-                            color: ty,
-                        });
+                if kind == HoverLineKind::Text {
+            if let Some(colon_pos) = line.find(':') {
+                let lhs = line[..colon_pos].trim();
+                let is_indented = line.starts_with(' ') || line.starts_with('\t');
+                if !lhs.is_empty()
+                    && !is_indented
+                    && lhs.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*')
+                    && saw_separator
+                {
+                    let lhs_start = line_start + line.find(lhs).unwrap_or(0);
+                    let lhs_end = lhs_start + lhs.len();
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: lhs_start,
+                        end: lhs_end,
+                        color: param,
+                    });
+                    let rhs = line[colon_pos + 1..].trim_start();
+                    if !rhs.is_empty() {
+                        let rhs_start = line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
+                        let rhs_end = rhs_start + rhs
+                            .chars()
+                            .take_while(|c| !c.is_whitespace())
+                            .map(|c| c.len_utf8())
+                            .sum::<usize>();
+                        if rhs_end > rhs_start {
+                            spans.push(crate::highlighter::ColorSpan {
+                                start: rhs_start,
+                                end: rhs_end,
+                                color: ty,
+                            });
+                        }
                     }
                 }
             }
         }
-
     }
 
-    for &(start, end) in &inline_code_ranges {
+        for &(start, end) in &inline_code_ranges {
         if end > start && end <= msg.len() {
             push_python_ts_spans(&msg[start..end], start, &mut spans);
         }
     }
 
-    let public_kinds = line_kinds.into_iter().map(|k| match k {
+        let public_kinds = line_kinds.into_iter().map(|k| match k {
         HoverLineKind::Text => HoverLineKindPublic::Text,
         HoverLineKind::Code => HoverLineKindPublic::Code,
         HoverLineKind::Separator => HoverLineKindPublic::Separator,
+        HoverLineKind::Header1 => HoverLineKindPublic::Header1,
+        HoverLineKind::Header2 => HoverLineKindPublic::Header2,
     }).collect();
 
     (msg, spans, public_kinds, inline_code_ranges)

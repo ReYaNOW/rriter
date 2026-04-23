@@ -416,10 +416,12 @@ pub fn get_ts_config(lang_name: &str) -> Option<(tree_sitter::Language, Vec<&'st
                 "[\"=\" \"==\" \"!=\" \"<\" \">\" \"<=\" \">=\" \"+\" \"-\" \"*\" \"/\" \"%\" \"+=\" \"-=\" \"*=\" \"/=\" \"%=\" \"&&\" \"||\" \"!\" \"?\" \"->\" \"=>\" \"&\" \"|\" \":\" \"::\"] @operator",
             ],
         )),
-        "py" => Some((
+                "py" => Some((
             tree_sitter_python::LANGUAGE.into(),
             vec![
-                                "(identifier) @py_ident",
+                "(parameters (list_splat_pattern (identifier) @parameter))",
+                "(parameters (dictionary_splat_pattern (identifier) @parameter))",
+                "(identifier) @py_ident",
                 "(attribute attribute: (identifier) @property)",
                 "((identifier) @type (#match? @type \"^_*[A-Z]\"))",
                 "((identifier) @type (#match? @type \"^(list|dict|set|tuple|str|int|bool|float|bytes|bytearray|complex|None|Any|Unknown|Sequence|Callable|Generator|AsyncGenerator|Coroutine|Iterable|Mapping|TypeVar|Generic)$\"))",

@@ -1285,7 +1285,7 @@ impl Highlighter {
                         predicted_color = DRACULA_PURPLE
                     }
                     "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
-                    "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def" | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl" | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield" => predicted_color = DRACULA_PINK,
+                                        "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def" | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl" | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield" | "try" | "except" | "finally" | "raise" | "with" => predicted_color = DRACULA_PINK,
                     "True" | "False" | "None" | "true" | "false" | "null" => predicted_color = DRACULA_PINK,
                     "int" | "float" | "str" | "bool" | "String" => predicted_color = DRACULA_CYAN,
                     "self" | "cls" => predicted_color = DRACULA_PURPLE,
