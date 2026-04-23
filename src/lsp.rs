@@ -109,7 +109,7 @@ thread_local! {
 }
 
 pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
-    let clean_msg = msg.replace('\r', "").replace("```python", "").replace("```", "").trim().to_string();
+    let clean_msg = normalize_hover_text(msg);
     if clean_msg.contains(":param ") {
         let mut spans = highlight_python_hover_doc(&clean_msg);
         spans.sort_unstable_by_key(|s| s.start);
@@ -155,6 +155,34 @@ pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::Color
     (clean_msg, spans)
 }
 
+fn normalize_hover_text(msg: &str) -> String {
+    let mut out = String::new();
+    let mut in_fence = false;
+    for raw in msg.replace('\r', "").lines() {
+        let trimmed = raw.trim();
+        if trimmed == "```" || trimmed == "```python" {
+            in_fence = !in_fence;
+            continue;
+        }
+        if trimmed.starts_with(".. code-block::") {
+            continue;
+        }
+        if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            out.push_str("---");
+            out.push('\n');
+            continue;
+        }
+        if in_fence {
+            out.push_str(raw.trim_start_matches("    "));
+            out.push('\n');
+            continue;
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
 fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
     let gray = [0.56, 0.60, 0.66, 1.0];
     let kw = [1.0, 0.474, 0.776, 1.0];
@@ -162,20 +190,30 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
     let arg = [1.0, 0.62, 0.24, 1.0];
     let func = [0.313, 0.980, 0.482, 1.0];
 
-    let mut spans = vec![crate::highlighter::ColorSpan {
-        start: 0,
-        end: msg.len(),
-        color: gray,
-    }];
+    let mut spans = Vec::new();
 
     let mut in_code_block = false;
     let mut in_signature = false;
+    let mut gray_intro_left = 2usize;
+    let mut passed_intro_blank = false;
     let mut byte = 0usize;
     for raw_line in msg.split('\n') {
         let line = raw_line;
         let line_start = byte;
         let line_end = line_start + line.len();
         let trimmed = line.trim_start();
+        let is_blank = trimmed.is_empty();
+
+        if !passed_intro_blank && is_blank {
+            passed_intro_blank = true;
+        } else if !passed_intro_blank && !is_blank && gray_intro_left > 0 {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start,
+                end: line_end,
+                color: gray,
+            });
+            gray_intro_left = gray_intro_left.saturating_sub(1);
+        }
 
         if trimmed.starts_with(".. code-block:: python") {
             in_code_block = true;

@@ -1019,6 +1019,21 @@ impl Renderer {
         let selected = selection.filter(|(a, b)| a != b);
         for line in lines {
             if text_y > by - line_h && text_y < by + box_h + line_h {
+                let is_separator = line
+                    .iter()
+                    .all(|(c, _, _)| *c == '-' || c.is_ascii_whitespace())
+                    && line.iter().any(|(c, _, _)| *c == '-');
+                if is_separator {
+                    self.push_rect(
+                        (bx + pad).round(),
+                        (text_y - line_h * 0.35).round(),
+                        (box_w - pad * 2.0).round(),
+                        1.0_f32.max(s.round()),
+                        [1.0, 1.0, 1.0, 0.10],
+                    );
+                    text_y += line_h;
+                    continue;
+                }
                 let mut draw_x = (bx + pad).round();
                 for &(c, color, offset) in &line {
                     let adv = self.char_advance(c);
