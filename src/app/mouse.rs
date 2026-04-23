@@ -9,6 +9,7 @@ pub struct HoverPopup {
     pub text: String,
     pub spans: Vec<crate::highlighter::ColorSpan>,
     pub line_kinds: Vec<crate::lsp::HoverLineKindPublic>,
+    pub inline_code_ranges: Vec<(usize, usize)>,
     pub byte_offset: usize,
     pub anchor_x: f32,
     pub scroll: crate::scroll::ScrollState,

@@ -1023,7 +1023,9 @@ impl Renderer {
 
         let mut text_y = by + pad + line_h * 0.75 - scroll_y;
         let selected = selection.filter(|(a, b)| a != b);
-        for (line, line_kind) in lines {
+        let mut idx = 0usize;
+        while idx < lines.len() {
+            let (line, line_kind) = &lines[idx];
             if text_y > by - line_h && text_y < by + box_h + line_h {
                 let is_separator = line
                     .iter()
@@ -1038,21 +1040,44 @@ impl Renderer {
                         [1.0, 1.0, 1.0, 0.10],
                     );
                     text_y += line_h;
+                    idx += 1;
                     continue;
                 }
-                if line_kind == crate::lsp::HoverLineKindPublic::Code {
+
+                if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                    let mut run_len = 1usize;
+                    while idx + run_len < lines.len()
+                        && lines[idx + run_len].1 == crate::lsp::HoverLineKindPublic::Code
+                    {
+                        run_len += 1;
+                    }
                     self.push_rounded_rect(
                         (bx + pad - 4.0 * s).round(),
                         (text_y - line_h * 0.82).round(),
                         (box_w - pad * 2.0 + 8.0 * s).round(),
-                        (line_h - 2.0 * s).round(),
+                        (line_h * run_len as f32 - 2.0 * s).round(),
                         4.0 * s,
                         [0.18, 0.20, 0.26, 0.96],
                     );
                 }
+
                 let mut draw_x = (bx + pad).round();
-                for &(c, color, offset) in &line {
+                for &(c, color, offset) in line {
                     let adv = self.char_advance(c);
+                    if popup
+                        .inline_code_ranges
+                        .iter()
+                        .any(|&(start, end)| offset >= start && offset < end)
+                    {
+                        self.push_rounded_rect(
+                            draw_x - 1.0 * s,
+                            (text_y - line_h * 0.74).round(),
+                            adv + 2.0 * s,
+                            (line_h - 6.0 * s).round(),
+                            3.0 * s,
+                            [0.26, 0.28, 0.34, 0.98],
+                        );
+                    }
                     if let Some((sel_start, sel_end)) = selected {
                         if offset >= sel_start && offset < sel_end {
                             self.push_rect(
@@ -1071,6 +1096,7 @@ impl Renderer {
                 }
             }
             text_y += line_h;
+            idx += 1;
         }
 
         self.flush();

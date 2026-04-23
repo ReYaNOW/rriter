@@ -108,11 +108,18 @@ thread_local! {
     static TS_DIAG_CURSOR: std::cell::RefCell<tree_sitter::QueryCursor> = std::cell::RefCell::new(tree_sitter::QueryCursor::new());
 }
 
-pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>) {
+pub fn highlight_hover_text(
+    msg: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
     if msg.contains(":param ") {
-        let (clean_msg, mut spans, line_kinds) = highlight_python_hover_doc(msg);
+        let (clean_msg, mut spans, line_kinds, inline_code_ranges) = highlight_python_hover_doc(msg);
         spans.sort_unstable_by_key(|s| s.start);
-        return (clean_msg, spans, line_kinds);
+        return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
     let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
@@ -153,7 +160,7 @@ pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::Color
 
     spans.sort_unstable_by_key(|s| s.start);
     let line_kinds = clean_msg.split('\n').map(|_| HoverLineKindPublic::Text).collect();
-    (clean_msg, spans, line_kinds)
+    (clean_msg, spans, line_kinds, Vec::new())
 }
 
 fn normalize_hover_text(msg: &str) -> String {
@@ -309,13 +316,16 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
 
 fn ts_capture_color(name: &str) -> Option<[f32; 4]> {
     match name {
-        "property" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
+        "fg" | "property" | "py_assign" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
         "string" => Some([0.945, 0.980, 0.549, 1.0]),
-        "type" | "class_name" => Some([0.545, 0.913, 0.992, 1.0]),
-        "keyword.control" | "keyword" | "operator" => Some([1.0, 0.474, 0.776, 1.0]),
-        "function" | "py_function" | "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
-        "number" => Some([0.741, 0.576, 0.976, 1.0]),
         "comment" => Some([0.384, 0.447, 0.643, 1.0]),
+        "function" | "py_function" => Some([0.313, 0.980, 0.482, 1.0]),
+        "keyword.control" | "operator" | "boolean" => Some([1.0, 0.474, 0.776, 1.0]),
+        "keyword" | "subst" | "type" | "function.builtin" => Some([0.545, 0.913, 0.992, 1.0]),
+        "class_name" => Some([0.45, 0.85, 0.90, 1.0]),
+        "constant" | "number" => Some([0.741, 0.576, 0.976, 1.0]),
+        "parameter" => Some([0.973, 0.584, 0.502, 1.0]),
+        "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
         _ => None,
     }
 }
@@ -353,7 +363,14 @@ fn push_python_ts_spans(
     })})});
 }
 
-fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>) {
+fn highlight_python_hover_doc(
+    raw_msg: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
     let text_light = [0.86, 0.87, 0.90, 1.0];
     let ty = [0.545, 0.913, 0.992, 1.0];
 
@@ -395,7 +412,8 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
                 break;
             }
         }
-        let start = line_starts[start_line];
+        let def_shift = lines[start_line].find("def ").unwrap_or(0);
+        let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
             line_starts[end_line + 1] - 1
         } else {
@@ -476,7 +494,7 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
 
     }
 
-    for (start, end) in inline_code_ranges {
+    for &(start, end) in &inline_code_ranges {
         if end > start && end <= msg.len() {
             push_python_ts_spans(&msg[start..end], start, &mut spans);
         }
@@ -488,7 +506,7 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
         HoverLineKind::Separator => HoverLineKindPublic::Separator,
     }).collect();
 
-    (msg, spans, public_kinds)
+    (msg, spans, public_kinds, inline_code_ranges)
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
