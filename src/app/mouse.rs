@@ -56,6 +56,14 @@ pub fn clear_hover_popup() -> bool {
     })
 }
 
+fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> bool {
+    if byte_offset >= editor.len() {
+        return false;
+    }
+    let b = editor.byte_at(byte_offset);
+    matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || b >= 0x80
+}
+
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
@@ -515,7 +523,7 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             HOVER_STATE.with(|hover_state| {
                 if let Some((x, y, w, h)) = hover_state.borrow().rect {
-                    let pad = 20.0 * s;
+                    let pad = 40.0 * s;
                     if mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad {
                         in_hover_popup = true;
                     }
@@ -1497,7 +1505,7 @@ impl App {
         HOVER_STATE.with(|state| {
             let state = state.borrow();
             if let Some(rect) = state.rect {
-                let pad = 20.0 * s;
+                let pad = 40.0 * s;
                 if position.x as f32 >= rect.0 - pad
                     && position.x as f32 <= rect.0 + rect.2 + pad
                     && position.y as f32 >= rect.1 - pad
@@ -1542,7 +1550,7 @@ impl App {
 
             HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
-                if is_text_area && byte_offset < self.editor.len() {
+                if is_text_area && is_hover_target_byte(&self.editor, byte_offset) {
                     if state.byte_offset != Some(byte_offset) {
                         state.byte_offset = Some(byte_offset);
                         state.timer = 0.0;
