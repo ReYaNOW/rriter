@@ -86,9 +86,10 @@ pub enum UiId {
     TerminalSearchClose,
     TerminalSearchNext,
     TerminalSearchPrev,
-    TerminalSearchCaseToggle,
-    TerminalSearchInput,
-}
+        TerminalSearchCaseToggle,
+        TerminalSearchInput,
+        HoverPopupScroll,
+    }
 
 /// Тип UI элемента с его геометрией
 #[derive(Debug, Clone)]

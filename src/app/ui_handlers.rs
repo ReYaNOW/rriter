@@ -6,8 +6,9 @@ use crate::ui_system::UiId;
 
 impl App {
     /// Обрабатывает клик по UI элементу
-    pub fn handle_ui_click(&mut self, id: UiId) {
+        pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
+            UiId::HoverPopupScroll => {}
             UiId::TerminalBody => {
                 self.is_dragging = true;
                 self.search_focused = false;

@@ -4,6 +4,40 @@ use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 
+#[derive(Debug, Clone)]
+pub struct HoverPopup {
+    pub text: String,
+    pub spans: Vec<crate::highlighter::ColorSpan>,
+    pub byte_offset: usize,
+    pub scroll: crate::scroll::ScrollState,
+}
+
+pub struct HoverState {
+    pub request_id: Option<i32>,
+    pub popup: Option<HoverPopup>,
+    pub timer: f32,
+    pub byte_offset: Option<usize>,
+    pub rect: Option<(f32, f32, f32, f32)>,
+    pub max_scroll: f32,
+}
+
+impl Default for HoverState {
+    fn default() -> Self {
+        Self {
+            request_id: None,
+            popup: None,
+            timer: 0.0,
+            byte_offset: None,
+            rect: None,
+            max_scroll: 0.0,
+        }
+    }
+}
+
+thread_local! {
+    pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
+}
+
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
@@ -16,6 +50,29 @@ impl App {
             MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
+
+                let mut consumed_by_hover = false;
+        HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if let Some(rect) = state.rect {
+                                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                let pad = 20.0 * s;
+                if mx >= rect.0 - pad && mx <= rect.0 + rect.2 + pad && my >= rect.1 - pad && my <= rect.1 + rect.3 + pad {
+                    let max_scroll = state.max_scroll;
+                    if let Some(popup) = &mut state.popup {
+                        popup.scroll.anim_speed = 7.0;
+                        popup.scroll.scroll_by(dy);
+                        popup.scroll.clamp_target(0.0, max_scroll);
+                        consumed_by_hover = true;
+                    }
+                }
+            }
+        });
+        if consumed_by_hover {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
@@ -744,9 +801,35 @@ impl App {
                     }
                 }
 
-                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
-                    let is_term = matches!(
-                        clicked_id,
+                                                                                                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    if clicked_id == crate::ui_system::UiId::HoverPopupScroll {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                                                crate::app::mouse::HOVER_STATE.with(|hover_state| {
+                            let mut state = hover_state.borrow_mut();
+                            if let Some(rect) = state.rect {
+                                let max_scroll = state.max_scroll;
+                                if let Some(popup) = &mut state.popup {
+                                    let (_, by, _, box_h) = rect;
+                                    let track_h = box_h - 16.0 * s;
+                                    let thumb_h = (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
+                                    let thumb_y = by + 8.0 * s + (popup.scroll.current / max_scroll) * (track_h - thumb_h);
+                                    if my >= thumb_y && my <= thumb_y + thumb_h {
+                                        popup.scroll.is_dragging = true;
+                                        popup.scroll.drag_offset = my - thumb_y;
+                                    } else {
+                                        popup.scroll.anim_speed = 15.0;
+                                        popup.scroll.drag_offset = thumb_h / 2.0;
+                                        let ratio = (my - by - 8.0 * s - popup.scroll.drag_offset) / (track_h - thumb_h).max(0.0001);
+                                        popup.scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                                        popup.scroll.is_dragging = true;
+                                    }
+                                }
+                            }
+                        });
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    let is_term = matches!(clicked_id,
                         crate::ui_system::UiId::TerminalBody
                             | crate::ui_system::UiId::TerminalScrollY
                             | crate::ui_system::UiId::TerminalTab(_)
@@ -1156,9 +1239,14 @@ impl App {
             for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
                 scroll.is_dragging = false;
             }
-            for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
+                        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
                 scroll.is_dragging = false;
             }
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                if let Some(popup) = &mut s.borrow_mut().popup {
+                    popup.scroll.is_dragging = false;
+                }
+            });
             self.scroll_y.target = self.scroll_y.target.round();
             self.scroll_x.target = self.scroll_x.target.round();
             self.window.as_ref().unwrap().request_redraw();
@@ -1385,9 +1473,52 @@ impl App {
             }
         }
 
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+        let mut in_hover_popup = false;
+        HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            if let Some(rect) = state.rect {
+                let pad = 20.0 * s;
+                if position.x as f32 >= rect.0 - pad && position.x as f32 <= rect.0 + rect.2 + pad &&
+                   position.y as f32 >= rect.1 - pad && position.y as f32 <= rect.1 + rect.3 + pad {
+                    in_hover_popup = true;
+                }
+            }
+        });
+
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
         let window_size = self.window.as_ref().unwrap().inner_size();
+
+        if !in_hover_popup {
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+            let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+                        let byte_offset = self.renderer.as_mut().unwrap().get_byte_at_xy(
+                &self.editor,
+                position.x as f32,
+                position.y as f32 + render_scroll_y,
+            );
+            let is_text_area = position.x as f32 > padding && (position.x as f32) < (window_size.width as f32 - minimap_w);
+
+            HOVER_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                if is_text_area && byte_offset < self.editor.len() {
+                    if state.byte_offset != Some(byte_offset) {
+                        state.byte_offset = Some(byte_offset);
+                        state.timer = 0.0;
+                        state.request_id = None;
+                        state.popup = None;
+                        state.rect = None;
+                    }
+                } else {
+                    state.byte_offset = None;
+                    state.timer = 0.0;
+                    state.request_id = None;
+                    state.popup = None;
+                    state.rect = None;
+                }
+            });
+        }
         let wh = window_size.height as f32;
 
         let max_scroll = self
@@ -1630,6 +1761,23 @@ impl App {
                 / (track_h - thumb_h).max(0.0001);
             self.ide_panel.problems_scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
             self.ide_panel.problems_scroll.current = self.ide_panel.problems_scroll.target;
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+                        } else if crate::app::mouse::HOVER_STATE.with(|s| s.borrow().popup.as_ref().map(|p| p.scroll.is_dragging).unwrap_or(false)) {
+            crate::app::mouse::HOVER_STATE.with(|hover_state| {
+                let mut state = hover_state.borrow_mut();
+                if let Some(rect) = state.rect {
+                    let (_, by, _, box_h) = rect;
+                    let max_scroll = state.max_scroll;
+                    let track_h = box_h - 16.0 * s;
+                    let thumb_h = (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
+                    if let Some(popup) = &mut state.popup {
+                        let ratio = (position.y as f32 - by - 8.0 * s - popup.scroll.drag_offset) / (track_h - thumb_h).max(0.0001);
+                        popup.scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                        popup.scroll.current = popup.scroll.target;
+                    }
+                }
+            });
             self.window.as_ref().unwrap().request_redraw();
             return;
         } else if self.ide_panel.lsp_scroll_y.is_dragging {

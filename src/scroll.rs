@@ -1,3 +1,4 @@
+#[derive(Clone, Debug)]
 pub struct ScrollState {
     pub current: f32,
     pub target: f32,

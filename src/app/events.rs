@@ -768,9 +768,37 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        if self.autocomplete_active && self.autocomplete_scroll.update(dt) {
+                if self.autocomplete_active && self.autocomplete_scroll.update(dt) {
             needs_redraw = true;
         }
+
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if let Some(popup) = &mut state.popup {
+                if popup.scroll.update(dt) {
+                    needs_redraw = true;
+                }
+            }
+            if let Some(byte_offset) = state.byte_offset {
+                if state.popup.is_none() && state.request_id.is_none() {
+                    state.timer += dt;
+                    if state.timer >= 0.3 {
+                        if self.is_ide_mode {
+                            if let Some(lsp) = &mut self.lsp {
+                                if let Some(path) = self.file_path.clone() {
+                                    let (line, col) = crate::lsp::offset_to_lsp_pos(
+                                        &self.editor.get_full_text(),
+                                        byte_offset,
+                                        &self.editor.line_offsets,
+                                    );
+                                    state.request_id = lsp.request_hover(&path, &self.file_extension, line, col);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         if self.show_settings && self.settings_tab == 0 && self.settings_ide_scroll.update(dt) {
             self.window.as_ref().unwrap().request_redraw();
@@ -1152,9 +1180,31 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
-                crate::lsp::LspEvent::ServerReady => {}
+                                crate::lsp::LspEvent::ServerReady => {}
                 crate::lsp::LspEvent::StatusChanged { .. } => {}
                 crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
+                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
+                    crate::app::mouse::HOVER_STATE.with(|state| {
+                        let mut state = state.borrow_mut();
+                        if state.request_id == Some(request_id) {
+                            state.request_id = None;
+                            if let Some(t) = text {
+                                if let Some(bo) = state.byte_offset {
+                                    let (clean_msg, spans) = crate::lsp::highlight_hover_text(&t);
+                                    state.popup = Some(crate::app::mouse::HoverPopup {
+                                        text: clean_msg,
+                                        spans,
+                                        byte_offset: bo,
+                                        scroll: crate::scroll::ScrollState::new(15.0),
+                                    });
+                                    if let Some(w) = self.window.as_ref() {
+                                        w.request_redraw();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
             }
         }
 

@@ -108,6 +108,48 @@ thread_local! {
     static TS_DIAG_CURSOR: std::cell::RefCell<tree_sitter::QueryCursor> = std::cell::RefCell::new(tree_sitter::QueryCursor::new());
 }
 
+pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
+    let clean_msg = msg.replace('\r', "").replace("```python", "").replace("```", "").trim().to_string();
+    let mut spans = Vec::new();
+
+    TS_DIAG_PARSER.with(|p_cell| {
+    TS_DIAG_QUERY.with(|q_cell| {
+    TS_DIAG_CURSOR.with(|c_cell| {
+        let mut parser = p_cell.borrow_mut();
+        let query_opt = q_cell.borrow();
+        let mut cursor = c_cell.borrow_mut();
+
+        if let Some(query) = query_opt.as_ref() {
+            if let Some(tree) = parser.parse(&clean_msg, None) {
+                let mut matches = cursor.matches(query, tree.root_node(), clean_msg.as_bytes());
+                while let Some(m) = matches.next() {
+                    for cap in m.captures {
+                        let name = query.capture_names()[cap.index as usize];
+                        let color = match name {
+                            "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
+                            "string" =>[0.945, 0.980, 0.549, 1.0],
+                            "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
+                            "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
+                            "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
+                            "number" =>[0.741, 0.576, 0.976, 1.0],
+                            "comment" =>[0.384, 0.447, 0.643, 1.0],
+                            _ => continue,
+                        };
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: cap.node.start_byte(),
+                            end: cap.node.end_byte(),
+                            color,
+                        });
+                    }
+                }
+            }
+        }
+    })})});
+
+    spans.sort_unstable_by_key(|s| s.start);
+    (clean_msg, spans)
+}
+
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
     let mut spans = Vec::new();
     let mut backtick_ranges = Vec::new();
@@ -221,11 +263,15 @@ pub enum LspEvent {
     },
     /// Сервер готов принимать запросы
     ServerReady,
-    /// Статус сервера изменился
+        /// Статус сервера изменился
     StatusChanged {
         #[allow(dead_code)]
         name: &'static str,
         status: LspServerStatus,
+    },
+    HoverResponse {
+        request_id: i32,
+        text: Option<String>,
     },
 }
 
@@ -296,7 +342,13 @@ enum Cmd {
         diagnostics_json: String,
         only: Option<Vec<String>>,
     },
-    Shutdown,
+        Shutdown,
+    Hover {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+    },
 }
 
 // ── Конвертация byte-offset → LSP Position ───────────────────────────────────
@@ -458,6 +510,13 @@ fn make_code_action(
         json_escape(uri)
     );
     body.into_bytes()
+}
+
+fn make_hover(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        id, json_escape(uri), line, col
+    ).into_bytes()
 }
 
 fn make_shutdown(id: i32) -> Vec<u8> {
@@ -646,6 +705,34 @@ fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
     edit
 }
 
+fn parse_hover_value(v: &serde_json::Value) -> Option<String> {
+    let contents = v.get("contents")?;
+    if let Some(s) = contents.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = contents.as_object() {
+        if let Some(val) = obj.get("value").and_then(|v| v.as_str()) {
+            return Some(val.to_string());
+        }
+    }
+    if let Some(arr) = contents.as_array() {
+        let mut out = String::new();
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                out.push_str(s);
+                out.push('\n');
+            } else if let Some(obj) = item.as_object() {
+                if let Some(val) = obj.get("value").and_then(|v| v.as_str()) {
+                    out.push_str(val);
+                    out.push('\n');
+                }
+            }
+        }
+        return Some(out.trim_end().to_string());
+    }
+    None
+}
+
 fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
     let title = v
         .get("title")
@@ -798,15 +885,27 @@ fn dispatch_frame(
                 }
             }
         }
-        None => {
+                None => {
             if let Some(req_id) = id {
                 if let Some(result) = msg.get("result") {
-                    if let Some(arr) = result.as_array() {
+                    if result.get("contents").is_some() {
+                        if let Some(hover) = parse_hover_value(result) {
+                            let _ = event_tx.send(LspEvent::HoverResponse {
+                                request_id: req_id as i32,
+                                text: Some(hover),
+                            });
+                        }
+                    } else if let Some(arr) = result.as_array() {
                         let actions: Vec<CodeAction> =
                             arr.iter().filter_map(parse_code_action_value).collect();
                         let _ = event_tx.send(LspEvent::CodeActions {
                             request_id: req_id as i32,
                             actions,
+                        });
+                    } else if result.is_null() {
+                        let _ = event_tx.send(LspEvent::HoverResponse {
+                            request_id: req_id as i32,
+                            text: None,
                         });
                     }
                 }
@@ -1118,6 +1217,12 @@ fn run_supervisor(
                         }
                         open_file = None;
                     }
+                                        Ok(Cmd::Hover { id, uri, line, col }) => {
+                        let msg = make_hover(id, &uri, line, col);
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
                     Ok(Cmd::CodeAction {
                         id,
                         uri,
@@ -1252,6 +1357,18 @@ impl LspProcess {
             version,
             text: text.to_string(),
         });
+    }
+
+        pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = self.cmd_tx.send(Cmd::Hover {
+            id,
+            uri,
+            line,
+            col,
+        });
+        id
     }
 
     /// textDocument/didClose
@@ -1536,6 +1653,21 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_change(&abs_path, text, version);
             }
+        }
+    }
+
+                pub fn request_hover(&mut self, path: &PathBuf, _ext: &str, line: u32, col: u32) -> Option<i32> {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        if let Some(proc) = &mut self.ty_process {
+            Some(proc.request_hover(&abs_path, line, col))
+        } else {
+            None
         }
     }
 

@@ -2152,7 +2152,7 @@ impl Renderer {
         }
         let popup_ready = self.diag_hover_timer >= 0.2;
 
-        if popup_ready && !self.hovered_diags_cache.is_empty() {
+                if popup_ready && !self.hovered_diags_cache.is_empty() {
             self.draw_diagnostic_popup(
                 &lsp_diagnostics,
                 ide_panel,
@@ -2161,6 +2161,26 @@ impl Renderer {
                 my,
                 &mut wants_pointer,
             );
+        }
+
+        let hover_popup_opt = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().popup.clone());
+        if let Some(popup) = &hover_popup_opt {
+            let (bx, by, bw, bh, ms) = self.draw_hover_popup(
+                popup,
+                editor,
+                ui_registry,
+                mx,
+                my,
+                render_scroll_y,
+                &mut wants_pointer,
+            );
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                let mut state = s.borrow_mut();
+                state.rect = Some((bx, by, bw, bh));
+                state.max_scroll = ms;
+            });
+        } else {
+            crate::app::mouse::HOVER_STATE.with(|s| s.borrow_mut().rect = None);
         }
 
         if let Some((path, tx, ty)) = tab_tooltip {

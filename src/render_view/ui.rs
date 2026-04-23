@@ -898,6 +898,154 @@ impl Renderer {
         self.flush();
     }
 
+        pub fn draw_hover_popup(
+        &mut self,
+        popup: &crate::app::mouse::HoverPopup,
+        editor: &crate::editor::Editor,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        render_scroll_y: f32,
+        wants_pointer: &mut bool,
+    ) -> (f32, f32, f32, f32, f32) {
+        let s = self.scale_factor;
+        let pad = 12.0 * s;
+        let line_h = 22.0 * s;
+        let max_text_w = (self.width - 80.0 * s).max(400.0 * s).min(self.width - 40.0 * s);
+
+        let mut lines = Vec::new();
+        let mut cur_line_w = 0.0;
+        let mut cur_line: Vec<(char,[f32; 4])> = Vec::new();
+        let mut last_space_idx = None;
+
+        for (offset, c) in popup.text.char_indices() {
+            if c == '\n' {
+                lines.push(std::mem::take(&mut cur_line));
+                cur_line_w = 0.0;
+                last_space_idx = None;
+                continue;
+            }
+
+            let adv = self.char_advance(c);
+            if cur_line_w + adv > max_text_w && cur_line_w > 40.0 * s {
+                if let Some(space_pos) = last_space_idx {
+                    let mut remainder = cur_line.split_off(space_pos);
+                    if !remainder.is_empty() && remainder[0].0 == ' ' {
+                        remainder.remove(0);
+                    }
+                    lines.push(std::mem::take(&mut cur_line));
+                    cur_line = remainder;
+                    cur_line_w = cur_line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+                } else {
+                    lines.push(std::mem::take(&mut cur_line));
+                    cur_line_w = 0.0;
+                }
+                last_space_idx = None;
+            }
+
+            let mut color =[0.972, 0.972, 0.949, 1.0];
+            for span in &popup.spans {
+                if offset >= span.start && offset < span.end {
+                    color = span.color;
+                    break;
+                }
+            }
+
+            cur_line.push((c, color));
+            cur_line_w += adv;
+
+            if c == ' ' {
+                last_space_idx = Some(cur_line.len() - 1);
+            }
+        }
+        if !cur_line.is_empty() {
+            lines.push(cur_line);
+        }
+
+        let mut max_line_w = 0.0;
+        for line in &lines {
+            let w: f32 = line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+            if w > max_line_w { max_line_w = w; }
+        }
+
+        let box_w = max_line_w + pad * 2.0;
+        let total_text_h = lines.len() as f32 * line_h;
+        let max_visible_h = (self.height * 0.45).min(total_text_h + pad * 2.0);
+        let box_h = max_visible_h;
+
+        let mut bx = mx;
+        if bx + box_w > self.width - 20.0 * s {
+            bx = self.width - box_w - 20.0 * s;
+        }
+
+        let phys_line = editor.line_offsets.partition_point(|&o| o <= popup.byte_offset).saturating_sub(1);
+        let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
+        let line_y = self.baseline_offset + (vis_line_idx * self.line_height) - render_scroll_y;
+
+        let mut by = line_y + self.line_height + 4.0 * s;
+        if by + box_h > self.height - 20.0 * s {
+            by = line_y - box_h - 4.0 * s;
+        }
+        if by < 0.0 {
+            by = 10.0 * s;
+        }
+
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::BottomPanelBody,
+            bx, by, box_w, box_h, mx, my
+        );
+
+        let max_scroll = (total_text_h + pad * 2.0 - box_h).max(0.0);
+        let scroll_y = popup.scroll.current;
+
+        self.push_rounded_rect(bx.round() - 1.0, by.round() - 1.0, box_w.round() + 2.0, box_h.round() + 2.0, 6.0 * s,[0.4, 0.4, 0.45, 0.6]);
+        self.push_rounded_rect(bx.round(), by.round(), box_w.round(), box_h.round(), 6.0 * s,[self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0]);
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (by + box_h)).round() as i32;
+            self.gl.scissor(bx.round() as i32, sy, box_w.round() as i32, box_h.round() as i32);
+        }
+
+        let mut text_y = by + pad + line_h * 0.75 - scroll_y;
+        for line in lines {
+            if text_y > by - line_h && text_y < by + box_h + line_h {
+                let mut draw_x = (bx + pad).round();
+                for &(c, color) in &line {
+                    let mut b =[0; 4];
+                    let s_str = c.encode_utf8(&mut b);
+                    self.draw_string_mono_scaled(s_str, draw_x, text_y.round(), color, 1.0);
+                    draw_x += self.char_advance(c);
+                }
+            }
+            text_y += line_h;
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        if max_scroll > 0.0 {
+            let track_h = box_h - 16.0 * s;
+            let thumb_h = (box_h / (total_text_h + pad * 2.0) * track_h).max(20.0 * s);
+            let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
+
+            self.push_rounded_rect(bx + box_w - 8.0 * s, thumb_y.round(), 4.0 * s, thumb_h, 2.0 * s,[1.0, 1.0, 1.0, 0.2]);
+
+            ui_registry.register_rect(
+                crate::ui_system::UiId::HoverPopupScroll,
+                bx + box_w - 12.0 * s, by, 12.0 * s, box_h, mx, my
+            );
+            if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
+                *wants_pointer = true;
+            }
+        }
+
+        (bx, by, box_w, box_h, max_scroll)
+    }
+
     pub fn draw_problems_panel(
         &mut self,
         content_x: f32,
