@@ -1062,22 +1062,42 @@ impl Renderer {
                 }
 
                 let mut draw_x = (bx + pad).round();
+                let mut inline_run_start_x: Option<f32> = None;
+                for &(c, _, offset) in line {
+                    let adv = self.char_advance(c);
+                    let in_inline = popup.inline_code_ranges.iter().any(|&(start, end)| {
+                        offset >= start && offset < end
+                    });
+                    if in_inline && inline_run_start_x.is_none() {
+                        inline_run_start_x = Some(draw_x - 1.0 * s);
+                    } else if !in_inline {
+                        if let Some(run_x) = inline_run_start_x.take() {
+                            self.push_rounded_rect(
+                                run_x,
+                                (text_y - line_h * 0.74).round(),
+                                (draw_x - run_x + 1.0 * s).max(2.0 * s),
+                                (line_h - 6.0 * s).round(),
+                                3.0 * s,
+                                [0.26, 0.28, 0.34, 0.98],
+                            );
+                        }
+                    }
+                    draw_x += adv;
+                }
+                if let Some(run_x) = inline_run_start_x.take() {
+                    self.push_rounded_rect(
+                        run_x,
+                        (text_y - line_h * 0.74).round(),
+                        (draw_x - run_x + 1.0 * s).max(2.0 * s),
+                        (line_h - 6.0 * s).round(),
+                        3.0 * s,
+                        [0.26, 0.28, 0.34, 0.98],
+                    );
+                }
+
+                draw_x = (bx + pad).round();
                 for &(c, color, offset) in line {
                     let adv = self.char_advance(c);
-                    if popup
-                        .inline_code_ranges
-                        .iter()
-                        .any(|&(start, end)| offset >= start && offset < end)
-                    {
-                        self.push_rounded_rect(
-                            draw_x - 1.0 * s,
-                            (text_y - line_h * 0.74).round(),
-                            adv + 2.0 * s,
-                            (line_h - 6.0 * s).round(),
-                            3.0 * s,
-                            [0.26, 0.28, 0.34, 0.98],
-                        );
-                    }
                     if let Some((sel_start, sel_end)) = selected {
                         if offset >= sel_start && offset < sel_end {
                             self.push_rect(

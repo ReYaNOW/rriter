@@ -230,10 +230,69 @@ fn normalize_inline_rst_code(line: &str) -> (String, Vec<(usize, usize)>) {
     (out, ranges)
 }
 
+fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
+    let mut out = String::with_capacity(line.len());
+    let mut ranges = Vec::new();
+    let mut i = 0usize;
+    while i < line.len() {
+        let rest = &line[i..];
+        let role_prefix = [":meth:`", ":func:`", ":class:`", ":exc:`"]
+            .iter()
+            .find(|p| rest.starts_with(**p))
+            .copied();
+        if let Some(prefix) = role_prefix {
+            i += prefix.len();
+            if let Some(end_rel) = line[i..].find('`') {
+                let raw = &line[i..i + end_rel];
+                let mut display = raw;
+                if let Some(lt_pos) = raw.find(" <") {
+                    display = &raw[..lt_pos];
+                } else if let Some(stripped) = raw.strip_prefix('~') {
+                    display = stripped;
+                }
+                let start = out.len();
+                out.push_str(display);
+                let end = out.len();
+                if end > start {
+                    ranges.push((start, end));
+                }
+                i += end_rel + 1;
+                continue;
+            }
+            out.push_str(prefix);
+            continue;
+        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    (out, ranges)
+}
+
+fn parse_param_line(trimmed: &str) -> Option<(String, String)> {
+    if !trimmed.starts_with(":param ") {
+        return None;
+    }
+    let rest = trimmed.trim_start_matches(":param ").replace("\\*", "*");
+    let colon = rest.find(':')?;
+    let head = rest[..colon].trim();
+    if head.is_empty() {
+        return None;
+    }
+    let mut parts = head.split_whitespace().collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let name = parts.pop()?.trim().to_string();
+    let ty = parts.join(" ").trim().to_string();
+    Some((name, ty))
+}
+
 fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut kinds = Vec::new();
     let mut inline_code_ranges = Vec::new();
+    let mut parameters_header_added = false;
     let raw = msg.replace('\r', "");
     let lines: Vec<&str> = raw.lines().collect();
     let mut i = 0usize;
@@ -297,11 +356,39 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             continue;
         }
 
+        if trimmed == ".. warning::" {
+            out.push_str("## Warning");
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+            i += 1;
+            continue;
+        }
+
+        if let Some((name, ty)) = parse_param_line(trimmed) {
+            if !parameters_header_added {
+                out.push_str("# Parameters");
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
+                parameters_header_added = true;
+            }
+            if ty.is_empty() {
+                out.push_str(&format!("{}:", name));
+            } else {
+                out.push_str(&format!("{}: {}", name, ty));
+            }
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+            i += 1;
+            continue;
+        }
+
         let line_start = out.len();
-        let (normalized_line, ranges) = normalize_inline_rst_code(line);
-        out.push_str(&normalized_line);
+        let (roles_line, mut role_ranges) = normalize_rst_roles(&line.replace("\\*", "*"));
+        let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+        out.push_str(normalized_line.trim_end());
         out.push('\n');
         kinds.push(HoverLineKind::Text);
+        ranges.append(&mut role_ranges);
         for (start, end) in ranges {
             inline_code_ranges.push((line_start + start, line_start + end));
         }
@@ -373,6 +460,8 @@ fn highlight_python_hover_doc(
 ) {
     let text_light = [0.86, 0.87, 0.90, 1.0];
     let ty = [0.545, 0.913, 0.992, 1.0];
+    let header = [0.98, 0.79, 0.40, 1.0];
+    let param = [0.973, 0.584, 0.502, 1.0];
 
     let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
@@ -468,26 +557,46 @@ fn highlight_python_hover_doc(
             });
         }
 
-        if trimmed.starts_with(":param ") {
-            let pfx = line.find(":param ").unwrap_or(0);
-            let rest = &line[pfx + 7..];
-            let mut ws = rest.char_indices().filter(|(_, c)| !c.is_whitespace());
-            if let Some((type_start_rel, _)) = ws.next() {
-                let type_start = line_start + pfx + 7 + type_start_rel;
-                let mut type_end = type_start;
-                while type_end < line_end {
-                    let b = msg.as_bytes()[type_end];
-                    if b == b' ' || b == b':' {
-                        break;
+        if trimmed.starts_with("# Parameters") || trimmed.starts_with("## Warning") {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start,
+                end: line_end,
+                color: header,
+            });
+        }
+
+        if trimmed == "# Parameters" {
+            continue;
+        }
+
+        if let Some(colon_pos) = line.find(':') {
+            let lhs = line[..colon_pos].trim();
+            if !lhs.is_empty()
+                && lhs.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*')
+                && saw_separator
+            {
+                let lhs_start = line_start + line.find(lhs).unwrap_or(0);
+                let lhs_end = lhs_start + lhs.len();
+                spans.push(crate::highlighter::ColorSpan {
+                    start: lhs_start,
+                    end: lhs_end,
+                    color: param,
+                });
+                let rhs = line[colon_pos + 1..].trim_start();
+                if !rhs.is_empty() {
+                    let rhs_start = line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
+                    let rhs_end = rhs_start + rhs
+                        .chars()
+                        .take_while(|c| !c.is_whitespace())
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    if rhs_end > rhs_start {
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: rhs_start,
+                            end: rhs_end,
+                            color: ty,
+                        });
                     }
-                    type_end += 1;
-                }
-                if type_end > type_start {
-                    spans.push(crate::highlighter::ColorSpan {
-                        start: type_start,
-                        end: type_end,
-                        color: ty,
-                    });
                 }
             }
         }
