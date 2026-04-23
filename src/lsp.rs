@@ -115,6 +115,10 @@ pub fn highlight_hover_text(
         if let Some(query) = query_opt.as_ref() {
             let mut offset = 0usize;
             for line in clean_msg.lines() {
+                if add_bound_method_signature_spans(line, offset, &mut spans) {
+                    offset += line.len() + 1;
+                    continue;
+                }
                 if looks_like_python_code_line(line) {
                     if let Some(tree) = parser.parse(line, None) {
                         let mut matches = cursor.matches(query, tree.root_node(), line.as_bytes());
@@ -186,6 +190,76 @@ fn looks_like_python_code_line(line: &str) -> bool {
         && (t.contains('(') || t.contains(':') || t.contains('='))
 }
 
+fn add_bound_method_signature_spans(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) -> bool {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("bound method ") || !line.contains("->") {
+        return false;
+    }
+
+    let function_color = [0.313, 0.980, 0.482, 1.0];
+    let type_color = [0.545, 0.913, 0.992, 1.0];
+    let param_color = [0.973, 0.584, 0.502, 1.0];
+
+    if let Some(open_paren) = line.find('(') {
+        if let Some(dot_pos) = line[..open_paren].rfind('.') {
+            let name_start = dot_pos + 1;
+            if name_start < open_paren {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + name_start,
+                    end: line_offset + open_paren,
+                    color: function_color,
+                });
+            }
+        }
+    }
+
+    if let Some(arrow) = line.rfind("->") {
+        let after_arrow = arrow + 2;
+        let return_ty = line[after_arrow..].trim_start();
+        if !return_ty.is_empty() {
+            let ws = line[after_arrow..].len() - return_ty.len();
+            let ty_start = after_arrow + ws;
+            let ty_len = return_ty
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+            if ty_len > 0 {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + ty_start,
+                    end: line_offset + ty_start + ty_len,
+                    color: type_color,
+                });
+            }
+        }
+    }
+
+    if let (Some(open), Some(close)) = (line.find('('), line.rfind(')')) {
+        if close > open {
+            let args = &line[open + 1..close];
+            if let Some(colon_rel) = args.find(':') {
+                let lhs = args[..colon_rel].trim();
+                if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    if let Some(lhs_pos) = line[open + 1..close].find(lhs) {
+                        let start = open + 1 + lhs_pos;
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: line_offset + start,
+                            end: line_offset + start + lhs.len(),
+                            color: param_color,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    true
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
@@ -252,9 +326,11 @@ In either case, this is followed by: for k, v in F.items(): D[k] = v";
         let raw = "bound method dict[str, Provide].copy() -> dict[str, Provide]\n\
 Return a shallow copy of the dict.";
         let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let first_line_len = raw.lines().next().unwrap_or("").len();
+        let prose_offset = first_line_len + 1;
         assert!(
-            spans.is_empty(),
-            "generic prose hover should not receive python syntax spans",
+            spans.iter().all(|s| s.end <= prose_offset),
+            "prose line must stay uncolored",
         );
     }
 
@@ -282,6 +358,21 @@ Can be used either with an ``async with`` block:\n\
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
         assert!(text.contains("Parameters"));
         assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Header1));
+    }
+
+    #[test]
+    fn bound_method_signature_line_is_highlighted_but_prose_stays_plain() {
+        let raw = "bound method list[<class 'AuthController'> | Router].append(object: <class 'AuthController'> | Router, /) -> None\n\
+Append object to the end of the list.";
+        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(!spans.is_empty(), "signature line should receive highlighting");
+
+        let first_line_len = raw.lines().next().unwrap_or("").len();
+        let prose_offset = first_line_len + 1;
+        assert!(
+            spans.iter().all(|s| s.end <= prose_offset),
+            "prose description line must stay uncolored",
+        );
     }
 }
 
