@@ -898,9 +898,10 @@ impl Renderer {
         self.flush();
     }
 
-        pub fn draw_hover_popup(
+    pub fn draw_hover_popup(
         &mut self,
         popup: &crate::app::mouse::HoverPopup,
+        selection: Option<(usize, usize)>,
         editor: &crate::editor::Editor,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
@@ -915,7 +916,7 @@ impl Renderer {
 
         let mut lines = Vec::new();
         let mut cur_line_w = 0.0;
-        let mut cur_line: Vec<(char,[f32; 4])> = Vec::new();
+        let mut cur_line: Vec<(char,[f32; 4], usize)> = Vec::new();
         let mut last_space_idx = None;
 
         for (offset, c) in popup.text.char_indices() {
@@ -935,7 +936,7 @@ impl Renderer {
                     }
                     lines.push(std::mem::take(&mut cur_line));
                     cur_line = remainder;
-                    cur_line_w = cur_line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+                    cur_line_w = cur_line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
                 } else {
                     lines.push(std::mem::take(&mut cur_line));
                     cur_line_w = 0.0;
@@ -947,11 +948,10 @@ impl Renderer {
             for span in &popup.spans {
                 if offset >= span.start && offset < span.end {
                     color = span.color;
-                    break;
                 }
             }
 
-            cur_line.push((c, color));
+            cur_line.push((c, color, offset));
             cur_line_w += adv;
 
             if c == ' ' {
@@ -964,7 +964,7 @@ impl Renderer {
 
         let mut max_line_w = 0.0;
         for line in &lines {
-            let w: f32 = line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+            let w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
             if w > max_line_w { max_line_w = w; }
         }
 
@@ -973,9 +973,12 @@ impl Renderer {
         let max_visible_h = (self.height * 0.45).min(total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
-        let mut bx = mx;
+        let mut bx = popup.anchor_x;
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
+        }
+        if bx < 20.0 * s {
+            bx = 20.0 * s;
         }
 
         let phys_line = editor.line_offsets.partition_point(|&o| o <= popup.byte_offset).saturating_sub(1);
@@ -994,6 +997,10 @@ impl Renderer {
             crate::ui_system::UiId::BottomPanelBody,
             bx, by, box_w, box_h, mx, my
         );
+        let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
+        if popup_hovered && !*wants_pointer {
+            ui_registry.reset_cursor_state();
+        }
 
         let max_scroll = (total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
@@ -1009,14 +1016,27 @@ impl Renderer {
         }
 
         let mut text_y = by + pad + line_h * 0.75 - scroll_y;
+        let selected = selection.filter(|(a, b)| a != b);
         for line in lines {
             if text_y > by - line_h && text_y < by + box_h + line_h {
                 let mut draw_x = (bx + pad).round();
-                for &(c, color) in &line {
+                for &(c, color, offset) in &line {
+                    let adv = self.char_advance(c);
+                    if let Some((sel_start, sel_end)) = selected {
+                        if offset >= sel_start && offset < sel_end {
+                            self.push_rect(
+                                draw_x,
+                                (text_y - line_h * 0.75 + 2.0 * s).round(),
+                                adv,
+                                (line_h - 3.0 * s).round(),
+                                self.theme.sel,
+                            );
+                        }
+                    }
                     let mut b =[0; 4];
                     let s_str = c.encode_utf8(&mut b);
                     self.draw_string_mono_scaled(s_str, draw_x, text_y.round(), color, 1.0);
-                    draw_x += self.char_advance(c);
+                    draw_x += adv;
                 }
             }
             text_y += line_h;
@@ -1039,7 +1059,7 @@ impl Renderer {
                 bx + box_w - 12.0 * s, by, 12.0 * s, box_h, mx, my
             );
             if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
-                *wants_pointer = true;
+                ui_registry.reset_cursor_state();
             }
         }
 

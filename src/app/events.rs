@@ -686,7 +686,16 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if is_text || self.ui_registry.wants_text() {
+                    let hover_popup_hovered = crate::app::mouse::HOVER_STATE.with(|state| {
+                        if let Some((x, y, w, h)) = state.borrow().rect {
+                            mx >= x && mx <= x + w && my >= y && my <= y + h
+                        } else {
+                            false
+                        }
+                    });
+                    if hover_popup_hovered {
+                        winit::window::CursorIcon::Default
+                    } else if is_text || self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else {
                         winit::window::CursorIcon::Default
@@ -1209,8 +1218,16 @@ impl ApplicationHandler for App {
                                         text: clean_msg,
                                         spans,
                                         byte_offset: bo,
+                                        anchor_x: self
+                                            .renderer
+                                            .as_ref()
+                                            .map(|r| r.last_mouse_x)
+                                            .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                     });
+                                    state.selection_anchor = None;
+                                    state.selection_cursor = None;
+                                    state.selecting = false;
                                     if let Some(w) = self.window.as_ref() {
                                         w.request_redraw();
                                     }

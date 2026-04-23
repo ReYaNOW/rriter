@@ -110,6 +110,11 @@ thread_local! {
 
 pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
     let clean_msg = msg.replace('\r', "").replace("```python", "").replace("```", "").trim().to_string();
+    if clean_msg.contains(":param ") {
+        let mut spans = highlight_python_hover_doc(&clean_msg);
+        spans.sort_unstable_by_key(|s| s.start);
+        return (clean_msg, spans);
+    }
     let mut spans = Vec::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
@@ -148,6 +153,212 @@ pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::Color
 
     spans.sort_unstable_by_key(|s| s.start);
     (clean_msg, spans)
+}
+
+fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
+    let gray = [0.56, 0.60, 0.66, 1.0];
+    let kw = [1.0, 0.474, 0.776, 1.0];
+    let ty = [0.545, 0.913, 0.992, 1.0];
+    let arg = [1.0, 0.62, 0.24, 1.0];
+    let func = [0.313, 0.980, 0.482, 1.0];
+
+    let mut spans = vec![crate::highlighter::ColorSpan {
+        start: 0,
+        end: msg.len(),
+        color: gray,
+    }];
+
+    let mut in_code_block = false;
+    let mut in_signature = false;
+    let mut byte = 0usize;
+    for raw_line in msg.split('\n') {
+        let line = raw_line;
+        let line_start = byte;
+        let line_end = line_start + line.len();
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with(".. code-block:: python") {
+            in_code_block = true;
+        } else if in_code_block && !line.starts_with("    ") && !trimmed.is_empty() {
+            in_code_block = false;
+        }
+
+        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+            in_signature = true;
+            // function name
+            if let Some(def_pos) = line.find("def ") {
+                let fn_start = line_start + def_pos + 4;
+                let mut fn_end = fn_start;
+                while fn_end < line_end {
+                    let ch = msg.as_bytes()[fn_end];
+                    if ch == b'(' || ch == b' ' || ch == b':' {
+                        break;
+                    }
+                    fn_end += 1;
+                }
+                if fn_end > fn_start {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: fn_start,
+                        end: fn_end,
+                        color: func,
+                    });
+                }
+            }
+
+            // args in signature -> orange
+            if let (Some(lp), Some(rp)) = (line.find('('), line.rfind(')')) {
+                let args = &line[lp + 1..rp];
+                let mut off = line_start + lp + 1;
+                let mut tok_start: Option<usize> = None;
+                for c in args.chars() {
+                    let is_ident = c == '_' || c.is_ascii_alphanumeric();
+                    if is_ident {
+                        if tok_start.is_none() {
+                            tok_start = Some(off);
+                        }
+                    } else if let Some(st) = tok_start.take() {
+                        let token = &msg[st..off];
+                        if token != "None" && token != "Any" {
+                            spans.push(crate::highlighter::ColorSpan {
+                                start: st,
+                                end: off,
+                                color: arg,
+                            });
+                        }
+                    }
+                    off += c.len_utf8();
+                }
+                if let Some(st) = tok_start.take() {
+                    let token = &msg[st..off];
+                    if token != "None" && token != "Any" {
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: st,
+                            end: off,
+                            color: arg,
+                        });
+                    }
+                }
+            }
+        }
+
+        if in_signature {
+            let mut token_start: Option<usize> = None;
+            let mut offset = 0usize;
+            for ch in line.chars() {
+                let is_ident = ch == '_' || ch.is_ascii_alphanumeric();
+                if is_ident {
+                    if token_start.is_none() {
+                        token_start = Some(offset);
+                    }
+                } else if let Some(st_rel) = token_start.take() {
+                    let en_rel = offset;
+                    let tok = &line[st_rel..en_rel];
+                    if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
+                        let mut left = st_rel;
+                        while left > 0 && line.as_bytes()[left - 1].is_ascii_whitespace() {
+                            left -= 1;
+                        }
+                        let prev = if left > 0 {
+                            line.as_bytes()[left - 1] as char
+                        } else {
+                            '\0'
+                        };
+                        let mut right = en_rel;
+                        while right < line.len() && line.as_bytes()[right].is_ascii_whitespace() {
+                            right += 1;
+                        }
+                        let next = if right < line.len() {
+                            line.as_bytes()[right] as char
+                        } else {
+                            '\0'
+                        };
+
+                        let color = if prev == ':' {
+                            ty
+                        } else if next == ':' || next == '=' || next == ',' || next == ')' {
+                            arg
+                        } else {
+                            gray
+                        };
+                        if color != gray {
+                            spans.push(crate::highlighter::ColorSpan {
+                                start: line_start + st_rel,
+                                end: line_start + en_rel,
+                                color,
+                            });
+                        }
+                    }
+                }
+                offset += ch.len_utf8();
+            }
+            if let Some(st_rel) = token_start.take() {
+                let en_rel = line.len();
+                let tok = &line[st_rel..en_rel];
+                if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: line_start + st_rel,
+                        end: line_start + en_rel,
+                        color: arg,
+                    });
+                }
+            }
+            if line.contains(") ->") || trimmed.ends_with(')') || trimmed.ends_with(") -> Unknown") {
+                in_signature = false;
+            }
+        }
+
+        if trimmed.starts_with(":param ") {
+            let pfx = line.find(":param ").unwrap_or(0);
+            let rest = &line[pfx + 7..];
+            let mut ws = rest.char_indices().filter(|(_, c)| !c.is_whitespace());
+            if let Some((type_start_rel, _)) = ws.next() {
+                let type_start = line_start + pfx + 7 + type_start_rel;
+                let mut type_end = type_start;
+                while type_end < line_end {
+                    let b = msg.as_bytes()[type_end];
+                    if b == b' ' || b == b':' {
+                        break;
+                    }
+                    type_end += 1;
+                }
+                if type_end > type_start {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: type_start,
+                        end: type_end,
+                        color: ty,
+                    });
+                }
+            }
+        }
+
+        if in_code_block || line.contains("``async with``") {
+            let kws = ["async", "with", "await", "def", "try", "finally", "as"];
+            for kwd in kws {
+                let mut from = 0usize;
+                while let Some(pos) = line[from..].find(kwd) {
+                    let s = from + pos;
+                    let e = s + kwd.len();
+                    let prev_ok = s == 0 || !line.as_bytes()[s - 1].is_ascii_alphanumeric();
+                    let next_ok = e >= line.len() || !line.as_bytes()[e].is_ascii_alphanumeric();
+                    if prev_ok && next_ok {
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: line_start + s,
+                            end: line_start + e,
+                            color: kw,
+                        });
+                    }
+                    from = e;
+                    if from >= line.len() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        byte = line_end + 1;
+    }
+
+    spans
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
