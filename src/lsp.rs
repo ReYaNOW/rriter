@@ -97,12 +97,13 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-            if msg.contains(":param ") {
-            let (clean_msg, mut spans, line_kinds, inline_code_ranges) = crate::languages::python::highlight_python_hover_doc(msg);
-            spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
-            return (clean_msg, spans, line_kinds, inline_code_ranges);
-        }
-        let clean_msg = normalize_hover_text(msg);
+    if should_use_python_hover_parser(msg) {
+        let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
+            crate::languages::python::highlight_python_hover_doc(msg);
+        spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+        return (clean_msg, spans, line_kinds, inline_code_ranges);
+    }
+    let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
@@ -150,6 +151,30 @@ pub fn highlight_hover_text(
         }
     }).collect();
     (clean_msg, spans, line_kinds, Vec::new())
+}
+
+fn should_use_python_hover_parser(msg: &str) -> bool {
+    if msg.contains(":param ") {
+        return true;
+    }
+
+    let normalized = msg.replace('\r', "");
+    let first_non_empty = normalized
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim_start);
+
+    if let Some(sig) = first_non_empty {
+        if sig.starts_with("def ")
+            || sig.starts_with("async def ")
+            || sig.contains(" def ")
+            || sig.contains(" async def ")
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn normalize_hover_text(msg: &str) -> String {
