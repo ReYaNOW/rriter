@@ -2,6 +2,7 @@ mod app;
 mod editor;
 // mod generated;
 mod highlighter;
+mod languages;
 mod lsp;
 mod queries;
 mod render_view;

@@ -711,22 +711,24 @@ impl ApplicationHandler for App {
 
                 gl_surface.swap_buffers(gl_context).unwrap();
 
-                if let Some(log) = self.pending_key_log.take() {
+                                if let Some(log) = self.pending_key_log.take() {
                     let now = std::time::Instant::now();
                     let t_total = now.duration_since(log.t0).as_secs_f64() * 1000.0;
-                    
+
                     let t_highlight = log.t_highlight.unwrap_or(log.t0);
                     let input_to_hl = t_highlight.duration_since(log.t0).as_secs_f64() * 1000.0;
-                    
+
                     let t_render = log.t_render.unwrap_or(t_highlight);
                     let hl_to_render = t_render.duration_since(t_highlight).as_secs_f64() * 1000.0;
-                    
+
                     let render_to_swap = now.duration_since(t_render).as_secs_f64() * 1000.0;
 
-                    println!(
-                        "Key: {:?} | Total: {:.2}ms (Input->HL: {:.2}ms, HL->RenderPrep: {:.2}ms, Render+Swap: {:.2}ms)",
-                        log.key, t_total, input_to_hl, hl_to_render, render_to_swap
-                    );
+                    if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                        println!(
+                            "Key: {:?} | Total: {:.2}ms (Input->HL: {:.2}ms, HL->RenderPrep: {:.2}ms, Render+Swap: {:.2}ms)",
+                            log.key, t_total, input_to_hl, hl_to_render, render_to_swap
+                        );
+                    }
                 }
             }
             _ => (),
@@ -1206,9 +1208,11 @@ impl ApplicationHandler for App {
                                 crate::lsp::LspEvent::ServerReady => {}
                 crate::lsp::LspEvent::StatusChanged { .. } => {}
                 crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
-                                                                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
+                                                                                                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
                     if let Some(ref t) = text {
-                        println!("--- HOVER TEXT ---\n{}\n------------------", t);
+                        if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                            println!("--- HOVER TEXT ---\n{}\n------------------", t);
+                        }
                     }
                     crate::app::mouse::HOVER_STATE.with(|state| {
                         let mut state = state.borrow_mut();

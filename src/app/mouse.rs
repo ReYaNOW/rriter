@@ -94,7 +94,7 @@ fn hover_popup_byte_at(
     let mut last_space_idx = None;
     let mut raw_line_no = 0usize;
 
-    let mut push_line = |lines: &mut Vec<_>, cur_line: Vec<(char, usize)>, kind: crate::lsp::HoverLineKindPublic| {
+        let push_line = |lines: &mut Vec<_>, cur_line: Vec<(char, usize)>, kind: crate::lsp::HoverLineKindPublic| {
         lines.push((cur_line, kind));
     };
 
@@ -158,7 +158,7 @@ fn hover_popup_byte_at(
     let mut current_top = by + pad - popup.scroll.current;
     let mut found_line_idx = lines.len().saturating_sub(1);
 
-    for (i, (line, kind)) in lines.iter().enumerate() {
+        for (i, (_line, kind)) in lines.iter().enumerate() {
         let scale_mul = match kind {
             crate::lsp::HoverLineKindPublic::Header1 => 1.15,
             crate::lsp::HoverLineKindPublic::Header2 => 1.05,
@@ -188,8 +188,8 @@ fn hover_popup_byte_at(
                 }
             }
         }
-        for next_idx in (found_line_idx + 1)..lines.len() {
-            if let Some(&(next_ch, next_off)) = lines[next_idx].0.first() {
+                for next_idx in (found_line_idx + 1)..lines.len() {
+            if let Some(&(_next_ch, next_off)) = lines[next_idx].0.first() {
                 return next_off;
             }
         }
