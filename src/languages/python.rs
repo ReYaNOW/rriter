@@ -163,14 +163,15 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
     let mut parameters_header_added = false;
     let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', ""));
     let lines: Vec<&str> = flat_msg.lines().collect();
-    let mut i = 0usize;
+        let mut i = 0usize;
     let mut in_fence = false;
+    let mut in_fence_is_code = false;
 
     while i < lines.len() {
         let line = lines[i];
         let trimmed = line.trim();
 
-        if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
+                if trimmed.starts_with("```") {
             if in_fence {
                 while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
                     out.pop();
@@ -180,8 +181,12 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                     out.push('\n');
                     kinds.push(HoverLineKind::Text);
                 }
+                in_fence = false;
+            } else {
+                                in_fence = true;
+                let lang = trimmed.strip_prefix("```").unwrap_or("").trim();
+                in_fence_is_code = lang.is_empty() || lang == "python" || lang == "py";
             }
-            in_fence = !in_fence;
             i += 1;
             continue;
         }
@@ -189,7 +194,11 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         if in_fence {
             out.push_str(line);
             out.push('\n');
-            kinds.push(HoverLineKind::Code);
+            if in_fence_is_code {
+                kinds.push(HoverLineKind::Code);
+            } else {
+                kinds.push(HoverLineKind::Text);
+            }
             i += 1;
             continue;
         }

@@ -225,9 +225,9 @@
     <fn name="flatten_rst_roles_and_code" line="97" pub="true" ret="String" />
     <fn name="parse_param_line" line="139" pub="true" ret="Option&lt;(String, String, String)&gt;" />
     <fn name="normalize_python_hover_doc" line="159" pub="true" ret="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" calls="self: flatten_rst_roles_and_code, normalize_inline_rst_code, normalize_rst_roles, parse_param_line" />
-    <fn name="ts_capture_color" line="413" pub="true" ret="Option&lt;[f32; 4]&gt;" />
-    <fn name="push_python_ts_spans" line="429" pub="true" calls="self: ts_capture_color" />
-    <fn name="highlight_python_hover_doc" line="480" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="self: normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
+    <fn name="ts_capture_color" line="422" pub="true" ret="Option&lt;[f32; 4]&gt;" />
+    <fn name="push_python_ts_spans" line="438" pub="true" calls="self: ts_capture_color" />
+    <fn name="highlight_python_hover_doc" line="489" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="self: normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
   </mod>
   <mod path="src/lsp.rs" name="lsp">
     <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
@@ -383,7 +383,7 @@
     <fn name="draw_diagnostics_ruler" line="725" pub="true" reads="minimap_width, phys_to_visual, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
     <fn name="draw_empty_ide" line="790" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
     <fn name="draw_hover_popup" line="901" pub="true" ret="(f32, f32, f32, f32, f32)" reads="gl, height, last_diag_popup_rect, line_height, phys_to_visual, scale_factor, theme, width" calls="self: char_advance, draw_string_mono_scaled, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; ui_system: hovered, register_blocker, register_rect, reset_cursor_state" />
-    <fn name="draw_problems_panel" line="1241" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
+    <fn name="draw_problems_panel" line="1229" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
   </mod>
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>

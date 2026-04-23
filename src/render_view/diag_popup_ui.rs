@@ -205,10 +205,20 @@ impl Renderer {
         total_h = total_h.min(self.height - 60.0 * s);
         let box_w = global_max_w;
 
-        let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
+                let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
         let mut bx = first_diag_x;
+
+        crate::app::mouse::HOVER_STATE.with(|s| {
+            if let Some(popup) = &s.borrow().popup {
+                bx = bx.min(popup.anchor_x);
+            }
+        });
+
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
+        }
+        if bx < 20.0 * s {
+            bx = 20.0 * s;
         }
         let mut by = first_line_y_top - total_h - 8.0 * s;
         if by < 0.0 {

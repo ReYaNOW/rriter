@@ -1011,11 +1011,14 @@ impl Renderer {
         let max_visible_h = (self.height * 0.45).min(total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
-        let mut bx = popup.anchor_x;
+                let mut bx = popup.anchor_x;
+        if let Some(diag_rect) = self.last_diag_popup_rect {
+            bx = diag_rect.0;
+        }
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
         }
-                if bx < 20.0 * s {
+        if bx < 20.0 * s {
             bx = 20.0 * s;
         }
         let phys_line = editor.line_offsets.partition_point(|&o| o <= popup.byte_offset).saturating_sub(1);
@@ -1221,22 +1224,7 @@ impl Renderer {
             }
         }
 
-                        let mut state_x = bx;
-                        let mut state_y = by;
-                        let mut state_w = box_w;
-                        let mut state_h = box_h;
-
-                        if let Some(diag_rect) = self.last_diag_popup_rect {
-                            if (by + box_h - diag_rect.1).abs() <= 10.0 * s || (diag_rect.1 + diag_rect.3 - by).abs() <= 10.0 * s {
-                                state_x = bx.min(diag_rect.0);
-                                state_y = by.min(diag_rect.1);
-                                state_w = (bx + box_w).max(diag_rect.0 + diag_rect.2) - state_x;
-                                state_h = (by + box_h).max(diag_rect.1 + diag_rect.3) - state_y;
-                            }
-                        }
-
-                        (state_x, state_y, state_w, state_h, max_scroll)
-    }
+                                                (bx, by, box_w, box_h, max_scroll)}
 
     pub fn draw_problems_panel(
         &mut self,
