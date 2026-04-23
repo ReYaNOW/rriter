@@ -156,6 +156,26 @@ pub fn parse_param_line(trimmed: &str) -> Option<(String, String, String)> {
     Some((name, ty, desc))
 }
 
+fn split_inline_python_after_colon(line: &str) -> Option<(String, String)> {
+    let colon = line.find(':')?;
+    let head = line[..=colon].trim_end();
+    let tail = line[colon + 1..].trim_start();
+    if head.is_empty() || tail.is_empty() {
+        return None;
+    }
+    let looks_like_inline_code = (tail.starts_with("for ")
+        || tail.starts_with("if ")
+        || tail.starts_with("while ")
+        || tail.starts_with("try")
+        || tail.starts_with("await ")
+        || tail.starts_with("return "))
+        && (tail.contains(':') || tail.contains('=') || tail.contains('('));
+    if !looks_like_inline_code {
+        return None;
+    }
+    Some((head.to_string(), tail.to_string()))
+}
+
 pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut kinds = Vec::new();
@@ -385,6 +405,18 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                     inline_code_ranges.push((desc_start + s, desc_start + e));
                 }
             }
+            i += 1;
+            continue;
+        }
+
+        if let Some((head, code_tail)) = split_inline_python_after_colon(trimmed) {
+            out.push_str(&head);
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+            out.push_str("    ");
+            out.push_str(&code_tail);
+            out.push('\n');
+            kinds.push(HoverLineKind::Code);
             i += 1;
             continue;
         }

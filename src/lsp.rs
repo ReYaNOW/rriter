@@ -113,28 +113,34 @@ pub fn highlight_hover_text(
         let mut cursor = c_cell.borrow_mut();
 
         if let Some(query) = query_opt.as_ref() {
-            if let Some(tree) = parser.parse(&clean_msg, None) {
-                let mut matches = cursor.matches(query, tree.root_node(), clean_msg.as_bytes());
-                while let Some(m) = matches.next() {
-                    for cap in m.captures {
-                        let name = query.capture_names()[cap.index as usize];
-                        let color = match name {
-                            "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
-                            "string" =>[0.945, 0.980, 0.549, 1.0],
-                            "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
-                            "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
-                            "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
-                            "number" =>[0.741, 0.576, 0.976, 1.0],
-                            "comment" =>[0.384, 0.447, 0.643, 1.0],
-                            _ => continue,
-                        };
-                        spans.push(crate::highlighter::ColorSpan {
-                            start: cap.node.start_byte(),
-                            end: cap.node.end_byte(),
-                            color,
-                        });
+            let mut offset = 0usize;
+            for line in clean_msg.lines() {
+                if looks_like_python_code_line(line) {
+                    if let Some(tree) = parser.parse(line, None) {
+                        let mut matches = cursor.matches(query, tree.root_node(), line.as_bytes());
+                        while let Some(m) = matches.next() {
+                            for cap in m.captures {
+                                let name = query.capture_names()[cap.index as usize];
+                                let color = match name {
+                                    "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
+                                    "string" =>[0.945, 0.980, 0.549, 1.0],
+                                    "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
+                                    "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
+                                    "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
+                                    "number" =>[0.741, 0.576, 0.976, 1.0],
+                                    "comment" =>[0.384, 0.447, 0.643, 1.0],
+                                    _ => continue,
+                                };
+                                spans.push(crate::highlighter::ColorSpan {
+                                    start: offset + cap.node.start_byte(),
+                                    end: offset + cap.node.end_byte(),
+                                    color,
+                                });
+                            }
+                        }
                     }
                 }
+                offset += line.len() + 1;
             }
         }
             })})});
@@ -158,6 +164,26 @@ fn looks_like_python_hover(msg: &str) -> bool {
     };
     let first = first_non_empty.trim_start();
     first.starts_with("def ") || first.starts_with("async def ") || first.starts_with("class ")
+}
+
+fn looks_like_python_code_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return false;
+    }
+    (t.starts_with("def ")
+        || t.starts_with("class ")
+        || t.starts_with("async def ")
+        || t.starts_with("for ")
+        || t.starts_with("if ")
+        || t.starts_with("while ")
+        || t.starts_with("try:")
+        || t.starts_with("except ")
+        || t.starts_with("return ")
+        || t.starts_with("await ")
+        || t.starts_with("import ")
+        || t.starts_with("from "))
+        && (t.contains('(') || t.contains(':') || t.contains('='))
 }
 
 fn normalize_hover_text(msg: &str) -> String {
@@ -212,9 +238,50 @@ In either case, this is followed by: for k, v in F.items(): D[k] = v";
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
         assert!(text.starts_with("def update("));
         assert!(
-            kinds.iter().all(|kind| *kind != HoverLineKindPublic::Code),
-            "built-in docs must stay prose, without code block styling",
+            kinds.iter().any(|kind| *kind == HoverLineKindPublic::Text),
+            "built-in docs must preserve prose lines",
         );
+        assert!(
+            kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code),
+            "inline python fragments should be promoted to code lines",
+        );
+    }
+
+    #[test]
+    fn plain_bound_method_prose_stays_uncolored() {
+        let raw = "bound method dict[str, Provide].copy() -> dict[str, Provide]\n\
+Return a shallow copy of the dict.";
+        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(
+            spans.is_empty(),
+            "generic prose hover should not receive python syntax spans",
+        );
+    }
+
+    #[test]
+    fn inline_for_fragment_becomes_separate_code_line() {
+        let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
+In either case, this is followed by: for k, v in F.items(): D[k] = v";
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"));
+        assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code));
+    }
+
+    #[test]
+    fn rich_rst_docstring_path_is_preserved() {
+        let raw = "def create_pool() -> Unknown\n\
+Can be used either with an ``async with`` block:\n\
+\n\
+.. code-block:: python\n\
+\n\
+    async with asyncpg.create_pool(user='postgres') as pool:\n\
+        await pool.fetch('SELECT 1')\n\
+\n\
+:param str dsn:\n\
+    Connection string.";
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("Parameters"));
+        assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Header1));
     }
 }
 
