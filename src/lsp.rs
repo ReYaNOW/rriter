@@ -118,7 +118,7 @@ pub fn highlight_hover_text(
 ) {
     if msg.contains(":param ") {
         let (clean_msg, mut spans, line_kinds, inline_code_ranges) = highlight_python_hover_doc(msg);
-        spans.sort_unstable_by_key(|s| s.start);
+        spans.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
     let clean_msg = normalize_hover_text(msg);
@@ -158,7 +158,7 @@ pub fn highlight_hover_text(
         }
     })})});
 
-    spans.sort_unstable_by_key(|s| s.start);
+    spans.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
     let line_kinds = clean_msg.split('\n').map(|_| HoverLineKindPublic::Text).collect();
     (clean_msg, spans, line_kinds, Vec::new())
 }
@@ -288,6 +288,24 @@ fn parse_param_line(trimmed: &str) -> Option<(String, String)> {
     Some((name, ty))
 }
 
+fn is_probably_python_code_line(trimmed: &str) -> bool {
+    if trimmed.is_empty() {
+        return false;
+    }
+    let starters = [
+        "async with ", "with ", "await ", "try:", "finally:", "except ", "for ", "while ",
+        "if ", "elif ", "else:", "return ", "pool = ", "con = ", "def ", "class ",
+    ];
+    if starters.iter().any(|s| trimmed.starts_with(s)) {
+        return true;
+    }
+    (trimmed.contains('(') && trimmed.ends_with(':'))
+        || trimmed.contains(" = await ")
+        || trimmed.contains(".")
+            && trimmed.contains('(')
+            && (trimmed.contains("await ") || trimmed.contains("asyncpg"))
+}
+
 fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut kinds = Vec::new();
@@ -357,7 +375,7 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
         }
 
         if trimmed == ".. warning::" {
-            out.push_str("## Warning");
+            out.push_str("Warning");
             out.push('\n');
             kinds.push(HoverLineKind::Text);
             i += 1;
@@ -366,7 +384,7 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
 
         if let Some((name, ty)) = parse_param_line(trimmed) {
             if !parameters_header_added {
-                out.push_str("# Parameters");
+                out.push_str("Parameters");
                 out.push('\n');
                 kinds.push(HoverLineKind::Text);
                 parameters_header_added = true;
@@ -379,6 +397,30 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             out.push('\n');
             kinds.push(HoverLineKind::Text);
             i += 1;
+            continue;
+        }
+
+        if is_probably_python_code_line(trimmed) {
+            while i < lines.len() {
+                let code_line = lines[i];
+                let code_trimmed = code_line.trim();
+                if code_trimmed.is_empty() {
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    break;
+                }
+                if !is_probably_python_code_line(code_trimmed)
+                    && !code_line.starts_with(' ')
+                    && !code_line.starts_with('\t')
+                {
+                    break;
+                }
+                out.push_str(code_line.trim_start_matches("    "));
+                out.push('\n');
+                kinds.push(HoverLineKind::Code);
+                i += 1;
+            }
             continue;
         }
 
@@ -557,7 +599,7 @@ fn highlight_python_hover_doc(
             });
         }
 
-        if trimmed.starts_with("# Parameters") || trimmed.starts_with("## Warning") {
+        if trimmed == "Parameters" || trimmed == "Warning" {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
@@ -565,7 +607,7 @@ fn highlight_python_hover_doc(
             });
         }
 
-        if trimmed == "# Parameters" {
+        if trimmed == "Parameters" {
             continue;
         }
 
