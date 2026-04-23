@@ -89,6 +89,25 @@ pub struct Diagnostic {
     pub spans: Vec<crate::highlighter::ColorSpan>,
 }
 
+thread_local! {
+    static TS_DIAG_PARSER: std::cell::RefCell<tree_sitter::Parser> = {
+        let mut parser = tree_sitter::Parser::new();
+        if let Some((lang, _)) = crate::queries::get_ts_config("py") {
+            let _ = parser.set_language(&lang);
+        }
+        std::cell::RefCell::new(parser)
+    };
+    static TS_DIAG_QUERY: std::cell::RefCell<Option<tree_sitter::Query>> = std::cell::RefCell::new({
+        if let Some((lang, queries)) = crate::queries::get_ts_config("py") {
+            let full = queries.join("\n");
+            tree_sitter::Query::new(&lang, &full).ok()
+        } else {
+            None
+        }
+    });
+    static TS_DIAG_CURSOR: std::cell::RefCell<tree_sitter::QueryCursor> = std::cell::RefCell::new(tree_sitter::QueryCursor::new());
+}
+
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
     let mut spans = Vec::new();
     let mut backtick_ranges = Vec::new();
@@ -118,17 +137,20 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
         }
     }
 
-    let mut parser = tree_sitter::Parser::new();
-    if let Some((lang, queries)) = crate::queries::get_ts_config("py") {
-        let _ = parser.set_language(&lang);
-        for &(start, end) in &backtick_ranges {
-            if start >= end { continue; }
-            let code = &msg[start..end];
-            if let Some(tree) = parser.parse(code, None) {
-                for q_str in &queries {
-                    if let Ok(query) = tree_sitter::Query::new(&lang, q_str) {
-                        let mut cursor = tree_sitter::QueryCursor::new();
-                        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        if !backtick_ranges.is_empty() {
+        TS_DIAG_PARSER.with(|p_cell| {
+        TS_DIAG_QUERY.with(|q_cell| {
+        TS_DIAG_CURSOR.with(|c_cell| {
+            let mut parser = p_cell.borrow_mut();
+            let query_opt = q_cell.borrow();
+            let mut cursor = c_cell.borrow_mut();
+
+            if let Some(query) = query_opt.as_ref() {
+                for &(start, end) in &backtick_ranges {
+                    if start >= end { continue; }
+                    let code = &msg[start..end];
+                    if let Some(tree) = parser.parse(code, None) {
+                        let mut matches = cursor.matches(query, tree.root_node(), code.as_bytes());
                         while let Some(m) = matches.next() {
                             for cap in m.captures {
                                 let name = query.capture_names()[cap.index as usize];
@@ -154,10 +176,10 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
                     }
                 }
             }
-        }
+        })})});
     }
 
-    spans.sort_by_key(|s| s.start);
+    spans.sort_unstable_by_key(|s| s.start);
     spans
 }
 
