@@ -909,10 +909,10 @@ impl Renderer {
         render_scroll_y: f32,
         wants_pointer: &mut bool,
     ) -> (f32, f32, f32, f32, f32) {
-        let s = self.scale_factor;
+                let s = self.scale_factor;
         let pad = 12.0 * s;
         let line_h = 22.0 * s;
-        let max_text_w = (self.width - 80.0 * s).max(400.0 * s).min(self.width - 40.0 * s);
+        let max_text_w = (self.width - 80.0 * s).min(800.0 * s).max(400.0 * s);
 
                 let mut lines: Vec<(Vec<(char,[f32; 4], usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
         let mut cur_line_w = 0.0;
@@ -971,9 +971,17 @@ impl Renderer {
                 last_space_idx = Some(cur_line.len() - 1);
             }
         }
-        if !cur_line.is_empty() {
+                if !cur_line.is_empty() {
             let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
             push_line(&mut lines, cur_line, kind);
+        }
+
+        while let Some((line, _)) = lines.last() {
+            if line.is_empty() {
+                lines.pop();
+            } else {
+                break;
+            }
         }
 
                 let mut max_line_w = 0.0;
@@ -989,8 +997,11 @@ impl Renderer {
                 for &(c, _, _) in line { s_buf.push(c); }
                 let w = self.measure_ui_width(&s_buf, scale_mul);
                 if w > max_line_w { max_line_w = w; }
-            } else {
-                let w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
+                        } else {
+                let mut w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
+                if *kind == crate::lsp::HoverLineKindPublic::Code {
+                    w += 16.0 * s;
+                }
                 if w > max_line_w { max_line_w = w; }
             }
             total_text_h += line_h * scale_mul;
@@ -1088,9 +1099,14 @@ impl Renderer {
                                         (line_h * run_len as f32).round(),
                                         4.0 * s,[0.15, 0.16, 0.20, 0.96],
                                     );
-                                }
+                                                                }
 
-                                let mut draw_x = (bx + pad).round();
+                                let start_x = if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                                    (bx + pad + 8.0 * s).round()
+                                } else {
+                                    (bx + pad).round()
+                                };
+                                let mut draw_x = start_x;
                                 let is_header = matches!(*line_kind, crate::lsp::HoverLineKindPublic::Header1 | crate::lsp::HoverLineKindPublic::Header2);
 
                                 if is_header {
@@ -1119,7 +1135,7 @@ impl Renderer {
                                         }
                                         draw_x += adv;
                                     }
-                                    if let Some(run_x) = inline_run_start_x.take() {
+                                                                        if let Some(run_x) = inline_run_start_x.take() {
                                         self.push_rounded_rect(
                                             run_x,
                                             rounded_top + (cur_line_h * 0.1).round(),
@@ -1129,7 +1145,7 @@ impl Renderer {
                                         );
                                     }
 
-                                    draw_x = (bx + pad).round();
+                                    draw_x = start_x;
                                     for &(c, color, offset) in line {
                                         let adv = self.char_advance(c);
                                         if let Some((sel_start, sel_end)) = selected {

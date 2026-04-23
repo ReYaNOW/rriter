@@ -1206,11 +1206,9 @@ impl ApplicationHandler for App {
                                 crate::lsp::LspEvent::ServerReady => {}
                 crate::lsp::LspEvent::StatusChanged { .. } => {}
                 crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
-                                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
-                    if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-                        if let Some(ref t) = text {
-                            println!("--- HOVER TEXT ---\n{}\n------------------", t);
-                        }
+                                                                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
+                    if let Some(ref t) = text {
+                        println!("--- HOVER TEXT ---\n{}\n------------------", t);
                     }
                     crate::app::mouse::HOVER_STATE.with(|state| {
                         let mut state = state.borrow_mut();

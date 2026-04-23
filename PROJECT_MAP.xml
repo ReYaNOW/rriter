@@ -379,7 +379,7 @@
     <fn name="draw_diagnostics_ruler" line="725" pub="true" reads="minimap_width, phys_to_visual, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
     <fn name="draw_empty_ide" line="790" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
     <fn name="draw_hover_popup" line="901" pub="true" ret="(f32, f32, f32, f32, f32)" reads="baseline_offset, gl, height, line_height, phys_to_visual, scale_factor, theme, width" calls="self: char_advance, draw_string_mono_scaled, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; ui_system: hovered, register_blocker, register_rect, reset_cursor_state" />
-    <fn name="draw_problems_panel" line="1181" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
+    <fn name="draw_problems_panel" line="1197" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
   </mod>
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
