@@ -898,9 +898,10 @@ impl Renderer {
         self.flush();
     }
 
-        pub fn draw_hover_popup(
+    pub fn draw_hover_popup(
         &mut self,
         popup: &crate::app::mouse::HoverPopup,
+        selection: Option<(usize, usize)>,
         editor: &crate::editor::Editor,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
@@ -915,7 +916,7 @@ impl Renderer {
 
         let mut lines = Vec::new();
         let mut cur_line_w = 0.0;
-        let mut cur_line: Vec<(char,[f32; 4])> = Vec::new();
+        let mut cur_line: Vec<(char,[f32; 4], usize)> = Vec::new();
         let mut last_space_idx = None;
 
         for (offset, c) in popup.text.char_indices() {
@@ -935,7 +936,7 @@ impl Renderer {
                     }
                     lines.push(std::mem::take(&mut cur_line));
                     cur_line = remainder;
-                    cur_line_w = cur_line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+                    cur_line_w = cur_line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
                 } else {
                     lines.push(std::mem::take(&mut cur_line));
                     cur_line_w = 0.0;
@@ -951,7 +952,7 @@ impl Renderer {
                 }
             }
 
-            cur_line.push((c, color));
+            cur_line.push((c, color, offset));
             cur_line_w += adv;
 
             if c == ' ' {
@@ -964,7 +965,7 @@ impl Renderer {
 
         let mut max_line_w = 0.0;
         for line in &lines {
-            let w: f32 = line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+            let w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
             if w > max_line_w { max_line_w = w; }
         }
 
@@ -1016,14 +1017,27 @@ impl Renderer {
         }
 
         let mut text_y = by + pad + line_h * 0.75 - scroll_y;
+        let selected = selection.filter(|(a, b)| a != b);
         for line in lines {
             if text_y > by - line_h && text_y < by + box_h + line_h {
                 let mut draw_x = (bx + pad).round();
-                for &(c, color) in &line {
+                for &(c, color, offset) in &line {
+                    let adv = self.char_advance(c);
+                    if let Some((sel_start, sel_end)) = selected {
+                        if offset >= sel_start && offset < sel_end {
+                            self.push_rect(
+                                draw_x,
+                                (text_y - line_h * 0.75 + 2.0 * s).round(),
+                                adv,
+                                (line_h - 3.0 * s).round(),
+                                [0.33, 0.49, 0.86, 0.45],
+                            );
+                        }
+                    }
                     let mut b =[0; 4];
                     let s_str = c.encode_utf8(&mut b);
                     self.draw_string_mono_scaled(s_str, draw_x, text_y.round(), color, 1.0);
-                    draw_x += self.char_advance(c);
+                    draw_x += adv;
                 }
             }
             text_y += line_h;

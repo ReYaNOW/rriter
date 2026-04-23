@@ -1225,6 +1225,9 @@ impl ApplicationHandler for App {
                                             .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                     });
+                                    state.selection_anchor = None;
+                                    state.selection_cursor = None;
+                                    state.selecting = false;
                                     if let Some(w) = self.window.as_ref() {
                                         w.request_redraw();
                                     }

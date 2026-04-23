@@ -20,6 +20,9 @@ pub struct HoverState {
     pub byte_offset: Option<usize>,
     pub rect: Option<(f32, f32, f32, f32)>,
     pub max_scroll: f32,
+    pub selection_anchor: Option<usize>,
+    pub selection_cursor: Option<usize>,
+    pub selecting: bool,
 }
 
 impl Default for HoverState {
@@ -31,6 +34,9 @@ impl Default for HoverState {
             byte_offset: None,
             rect: None,
             max_scroll: 0.0,
+            selection_anchor: None,
+            selection_cursor: None,
+            selecting: false,
         }
     }
 }
@@ -52,6 +58,9 @@ pub fn clear_hover_popup() -> bool {
         state.byte_offset = None;
         state.rect = None;
         state.max_scroll = 0.0;
+        state.selection_anchor = None;
+        state.selection_cursor = None;
+        state.selecting = false;
         had_popup
     })
 }
@@ -62,6 +71,83 @@ fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> b
     }
     let b = editor.byte_at(byte_offset);
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || b >= 0x80
+}
+
+fn hover_popup_byte_at(
+    renderer: &mut crate::renderer::Renderer,
+    popup: &HoverPopup,
+    rect: (f32, f32, f32, f32),
+    x: f32,
+    y: f32,
+) -> usize {
+    let s = renderer.scale_factor;
+    let pad = 12.0 * s;
+    let line_h = 22.0 * s;
+    let max_text_w = (renderer.width - 80.0 * s)
+        .max(400.0 * s)
+        .min(renderer.width - 40.0 * s);
+    let (bx, by, _bw, _bh) = rect;
+
+    let mut lines: Vec<Vec<(char, usize)>> = Vec::new();
+    let mut cur_line: Vec<(char, usize)> = Vec::new();
+    let mut cur_line_w = 0.0;
+    let mut last_space_idx: Option<usize> = None;
+
+    for (offset, c) in popup.text.char_indices() {
+        if c == '\n' {
+            lines.push(std::mem::take(&mut cur_line));
+            cur_line_w = 0.0;
+            last_space_idx = None;
+            continue;
+        }
+        let adv = renderer.char_advance(c);
+        if cur_line_w + adv > max_text_w && cur_line_w > 40.0 * s {
+            if let Some(space_pos) = last_space_idx {
+                let mut remainder = cur_line.split_off(space_pos);
+                if !remainder.is_empty() && remainder[0].0 == ' ' {
+                    remainder.remove(0);
+                }
+                lines.push(std::mem::take(&mut cur_line));
+                cur_line = remainder;
+                cur_line_w = cur_line.iter().map(|&(ch, _)| renderer.char_advance(ch)).sum();
+            } else {
+                lines.push(std::mem::take(&mut cur_line));
+                cur_line_w = 0.0;
+            }
+            last_space_idx = None;
+        }
+        cur_line.push((c, offset));
+        cur_line_w += adv;
+        if c == ' ' {
+            last_space_idx = Some(cur_line.len() - 1);
+        }
+    }
+    if !cur_line.is_empty() {
+        lines.push(cur_line);
+    }
+    if lines.is_empty() {
+        return 0;
+    }
+
+    let mut line_idx = (((y - by) + popup.scroll.current - pad) / line_h).floor() as isize;
+    line_idx = line_idx.clamp(0, lines.len().saturating_sub(1) as isize);
+    let line = &lines[line_idx as usize];
+    if line.is_empty() {
+        return popup.text.len();
+    }
+
+    let target_x = (x - (bx + pad)).max(0.0);
+    let mut draw_x = 0.0;
+    for i in 0..line.len() {
+        let (ch, off) = line[i];
+        let adv = renderer.char_advance(ch);
+        if target_x <= draw_x + adv * 0.5 {
+            return off;
+        }
+        draw_x += adv;
+    }
+    let (last_ch, last_off) = line[line.len() - 1];
+    last_off + last_ch.len_utf8()
 }
 
 impl App {
@@ -855,7 +941,28 @@ impl App {
                             }
                         });
                     if in_hover_popup_body {
-                        self.handle_ui_click(crate::ui_system::UiId::EditorTextBody);
+                        if button == winit::event::MouseButton::Left {
+                            HOVER_STATE.with(|hover_state| {
+                                let mut hs = hover_state.borrow_mut();
+                                if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
+                                    let byte = hover_popup_byte_at(
+                                        self.renderer.as_mut().unwrap(),
+                                        popup,
+                                        rect,
+                                        mx,
+                                        my,
+                                    );
+                                    if state == ElementState::Pressed {
+                                        hs.selection_anchor = Some(byte);
+                                        hs.selection_cursor = Some(byte);
+                                        hs.selecting = true;
+                                    } else {
+                                        hs.selecting = false;
+                                    }
+                                }
+                            });
+                            self.window.as_ref().unwrap().request_redraw();
+                        }
                         return;
                     } else if clicked_id == crate::ui_system::UiId::BottomPanelBody {
                         self.handle_ui_click(clicked_id);
@@ -1308,9 +1415,11 @@ impl App {
                 scroll.is_dragging = false;
             }
             crate::app::mouse::HOVER_STATE.with(|s| {
-                if let Some(popup) = &mut s.borrow_mut().popup {
+                let mut state = s.borrow_mut();
+                if let Some(popup) = &mut state.popup {
                     popup.scroll.is_dragging = false;
                 }
+                state.selecting = false;
             });
             self.scroll_y.target = self.scroll_y.target.round();
             self.scroll_x.target = self.scroll_x.target.round();
@@ -1390,6 +1499,28 @@ impl App {
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
 
         if self.dialog_window.is_some() {
+            return;
+        }
+
+        let mut popup_selecting = false;
+        HOVER_STATE.with(|hover_state| {
+            let mut hs = hover_state.borrow_mut();
+            if hs.selecting {
+                if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
+                    let byte = hover_popup_byte_at(
+                        self.renderer.as_mut().unwrap(),
+                        popup,
+                        rect,
+                        position.x as f32,
+                        position.y as f32,
+                    );
+                    hs.selection_cursor = Some(byte);
+                    popup_selecting = true;
+                }
+            }
+        });
+        if popup_selecting {
+            self.window.as_ref().unwrap().request_redraw();
             return;
         }
 

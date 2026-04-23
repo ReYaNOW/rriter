@@ -2166,8 +2166,13 @@ impl Renderer {
         crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
             if let Some(popup) = state.popup.as_ref() {
+                let selection = match (state.selection_anchor, state.selection_cursor) {
+                    (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+                    _ => None,
+                };
                 let (bx, by, bw, bh, ms) = self.draw_hover_popup(
                     popup,
+                    selection,
                     editor,
                     ui_registry,
                     mx,
