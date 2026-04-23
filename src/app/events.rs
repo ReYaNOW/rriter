@@ -796,7 +796,7 @@ impl ApplicationHandler for App {
             if let Some(byte_offset) = state.byte_offset {
                 if state.popup.is_none() && state.request_id.is_none() {
                     state.timer += raw_dt;
-                    if state.timer >= 0.3 {
+                                        if state.timer >= 0.2 {
                         state.timer = 0.0;
                         if self.is_ide_mode {
                             if let Some(lsp) = &mut self.lsp {
@@ -814,9 +814,9 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                    } else {
+                                        } else {
                         hover_wake_at = Some(
-                            now + std::time::Duration::from_secs_f32(0.3 - state.timer),
+                            now + std::time::Duration::from_secs_f32(0.2 - state.timer),
                         );
                     }
                 } else if state.request_id.is_some() {

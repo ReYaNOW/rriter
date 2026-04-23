@@ -3,8 +3,48 @@ use crate::lsp::Diagnostic;
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 
+pub struct DiagChar {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub byte_offset: usize,
+}
+
 thread_local! {
     static TS_SPANS_CACHE: std::cell::RefCell<std::collections::HashMap<String, Vec<crate::highlighter::ColorSpan>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    pub static DIAG_CHARS: std::cell::RefCell<Vec<DiagChar>> = std::cell::RefCell::new(Vec::new());
+}
+
+pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
+    DIAG_CHARS.with(|chars| {
+        let chars = chars.borrow();
+        if chars.is_empty() { return 0; }
+
+        let mut best_y_dist = f32::MAX;
+        let mut best_y = chars[0].y;
+        for c in chars.iter() {
+            let dist = (my - (c.y + c.h / 2.0)).abs();
+            if dist < best_y_dist {
+                best_y_dist = dist;
+                best_y = c.y;
+            }
+        }
+
+        let mut closest = 0;
+        let mut best_x_dist = f32::MAX;
+        for c in chars.iter() {
+            if (c.y - best_y).abs() < 1.0 {
+                let cx = c.x + c.w / 2.0;
+                let dist = (mx - cx).abs();
+                if dist < best_x_dist {
+                    best_x_dist = dist;
+                    closest = if mx > cx { c.byte_offset + c.w as usize * 0 + 1 } else { c.byte_offset };
+                }
+            }
+        }
+        closest
+    })
 }
 
 impl Renderer {
@@ -26,7 +66,17 @@ impl Renderer {
         let mut global_max_w = 180.0 * s;
         let mut total_h = pad * 2.0;
 
-        let mut parsed_diags = Vec::new();
+                let mut parsed_diags = Vec::new();
+
+        DIAG_CHARS.with(|c| c.borrow_mut().clear());
+        let mut global_byte_offset = 0;
+        let (sel_anchor, sel_cursor) = crate::app::mouse::HOVER_STATE.with(|s| {
+            let s = s.borrow();
+            (s.diag_selection_anchor, s.diag_selection_cursor)
+        });
+        let sel_start = sel_anchor.unwrap_or(0).min(sel_cursor.unwrap_or(0));
+        let sel_end = sel_anchor.unwrap_or(0).max(sel_cursor.unwrap_or(0));
+        let has_sel = sel_anchor.is_some() && sel_cursor.is_some() && sel_start != sel_end;
 
         for i in 0..self.hovered_diags_cache.len() {
             let (idx, _, _, _) = self.hovered_diags_cache[i];
@@ -221,18 +271,38 @@ impl Renderer {
 
             let (lines, source_on_new_line, last_line_w, line_count) = &parsed_diags[i];
 
-            let mut text_y = current_y + line_h * 0.75;
+                        let mut text_y = current_y + line_h * 0.75;
             let mut draw_x = (bx + pad).round();
 
             for line in lines {
                 for &(c, color) in line {
+                    let adv = self.char_advance(c);
+                    let char_len = c.len_utf8();
+                    let ch_y = text_y.round() - line_h * 0.75;
+
+                    DIAG_CHARS.with(|chars| {
+                        chars.borrow_mut().push(DiagChar {
+                            x: draw_x,
+                            y: ch_y,
+                            w: adv,
+                            h: line_h,
+                            byte_offset: global_byte_offset,
+                        });
+                    });
+
+                    if has_sel && global_byte_offset >= sel_start && global_byte_offset < sel_end {
+                        self.push_rect(draw_x, ch_y, adv, line_h, self.theme.sel);
+                    }
+
                     let mut b = [0; 4];
                     let s_str = c.encode_utf8(&mut b);
                     self.draw_string_mono_scaled(s_str, draw_x, text_y.round(), color, 1.0);
-                    draw_x += self.char_advance(c);
+                    draw_x += adv;
+                    global_byte_offset += char_len;
                 }
                 text_y += line_h;
                 draw_x = (bx + pad).round();
+                global_byte_offset += 1;
             }
 
             if !*source_on_new_line {

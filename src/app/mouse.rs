@@ -25,6 +25,9 @@ pub struct HoverState {
     pub selection_anchor: Option<usize>,
     pub selection_cursor: Option<usize>,
     pub selecting: bool,
+    pub diag_selection_anchor: Option<usize>,
+    pub diag_selection_cursor: Option<usize>,
+    pub diag_selecting: bool,
 }
 
 impl Default for HoverState {
@@ -39,6 +42,9 @@ impl Default for HoverState {
             selection_anchor: None,
             selection_cursor: None,
             selecting: false,
+            diag_selection_anchor: None,
+            diag_selection_cursor: None,
+            diag_selecting: false,
         }
     }
 }
@@ -60,9 +66,12 @@ pub fn clear_hover_popup() -> bool {
         state.byte_offset = None;
         state.rect = None;
         state.max_scroll = 0.0;
-        state.selection_anchor = None;
+                state.selection_anchor = None;
         state.selection_cursor = None;
         state.selecting = false;
+        state.diag_selection_anchor = None;
+        state.diag_selection_cursor = None;
+        state.diag_selecting = false;
         had_popup
     })
 }
@@ -1002,7 +1011,7 @@ impl App {
                     }
                 }
 
-                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
                     let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
                         && HOVER_STATE.with(|hover_state| {
                             if let Some((x, y, w, h)) = hover_state.borrow().rect {
@@ -1011,27 +1020,46 @@ impl App {
                                 false
                             }
                         });
-                    if in_hover_popup_body {
+                    let in_diag_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
+                        && self.renderer.as_ref().unwrap().last_diag_popup_rect.map_or(false, |(x, y, w, h)| {
+                            mx >= x && mx <= x + w && my >= y && my <= y + h
+                        });
+
+                    if in_hover_popup_body || in_diag_popup_body {
                         if button == winit::event::MouseButton::Left {
-                            HOVER_STATE.with(|hover_state| {
-                                let mut hs = hover_state.borrow_mut();
-                                if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
-                                    let byte = hover_popup_byte_at(
-                                        self.renderer.as_mut().unwrap(),
-                                        popup,
-                                        rect,
-                                        mx,
-                                        my,
-                                    );
-                                    if state == ElementState::Pressed {
-                                        hs.selection_anchor = Some(byte);
-                                        hs.selection_cursor = Some(byte);
-                                        hs.selecting = true;
-                                    } else {
-                                        hs.selecting = false;
+                            if in_hover_popup_body {
+                                HOVER_STATE.with(|hover_state| {
+                                    let mut hs = hover_state.borrow_mut();
+                                    if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
+                                        let byte = hover_popup_byte_at(
+                                            self.renderer.as_mut().unwrap(),
+                                            popup,
+                                            rect,
+                                            mx,
+                                            my,
+                                        );
+                                        if state == ElementState::Pressed {
+                                            hs.selection_anchor = Some(byte);
+                                            hs.selection_cursor = Some(byte);
+                                            hs.selecting = true;
+                                        } else {
+                                            hs.selecting = false;
+                                        }
                                     }
-                                }
-                            });
+                                });
+                            } else {
+                                HOVER_STATE.with(|hover_state| {
+                                    let mut hs = hover_state.borrow_mut();
+                                    let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(mx, my);
+                                    if state == ElementState::Pressed {
+                                        hs.diag_selection_anchor = Some(byte);
+                                        hs.diag_selection_cursor = Some(byte);
+                                        hs.diag_selecting = true;
+                                    } else {
+                                        hs.diag_selecting = false;
+                                    }
+                                });
+                            }
                             self.window.as_ref().unwrap().request_redraw();
                         }
                         return;
@@ -1485,12 +1513,13 @@ impl App {
             for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
                 scroll.is_dragging = false;
             }
-            crate::app::mouse::HOVER_STATE.with(|s| {
+                        crate::app::mouse::HOVER_STATE.with(|s| {
                 let mut state = s.borrow_mut();
                 if let Some(popup) = &mut state.popup {
                     popup.scroll.is_dragging = false;
                 }
                 state.selecting = false;
+                state.diag_selecting = false;
             });
             self.scroll_y.target = self.scroll_y.target.round();
             self.scroll_x.target = self.scroll_x.target.round();
@@ -1573,7 +1602,7 @@ impl App {
             return;
         }
 
-        let mut popup_selecting = false;
+                let mut popup_selecting = false;
         HOVER_STATE.with(|hover_state| {
             let mut hs = hover_state.borrow_mut();
             if hs.selecting {
@@ -1588,6 +1617,10 @@ impl App {
                     hs.selection_cursor = Some(byte);
                     popup_selecting = true;
                 }
+            } else if hs.diag_selecting {
+                let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(position.x as f32, position.y as f32);
+                hs.diag_selection_cursor = Some(byte);
+                popup_selecting = true;
             }
         });
         if popup_selecting {
@@ -1797,10 +1830,27 @@ impl App {
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
 
-            HOVER_STATE.with(|state| {
+                        HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 if is_text_area && is_hover_target_byte(&self.editor, byte_offset) {
-                    if state.byte_offset != Some(byte_offset) {
+                    let mut same_word = false;
+                    if let Some(old_byte) = state.byte_offset {
+                        if old_byte == byte_offset {
+                            same_word = true;
+                        } else {
+                            let min_b = old_byte.min(byte_offset);
+                            let max_b = old_byte.max(byte_offset);
+                            let mut all_target = true;
+                            for b in min_b..=max_b {
+                                if !is_hover_target_byte(&self.editor, b) {
+                                    all_target = false;
+                                    break;
+                                }
+                            }
+                            same_word = all_target;
+                        }
+                    }
+                    if !same_word {
                         state.byte_offset = Some(byte_offset);
                         state.timer = 0.0;
                         state.request_id = None;

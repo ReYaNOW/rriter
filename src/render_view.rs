@@ -2147,16 +2147,10 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        self.last_hovered_diags.clear();
+                self.last_hovered_diags.clear();
         self.last_hovered_diags
             .extend(self.hovered_diags_cache.iter().map(|h| h.0));
-                let first_idx = self.last_hovered_diags.first().copied();
-
-        let (has_type_popup, is_hover_pending) = crate::app::mouse::HOVER_STATE.with(|s| {
-            let state = s.borrow();
-            (state.popup.is_some(), state.request_id.is_some())
-        });
-                        let first_idx = self.last_hovered_diags.first().copied();
+        let first_idx = self.last_hovered_diags.first().copied();
 
         let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) = crate::app::mouse::HOVER_STATE.with(|s| {
             let state = s.borrow();
