@@ -120,8 +120,19 @@ pub fn highlight_hover_text(
                     continue;
                 }
                 if looks_like_python_code_line(line) {
-                    if let Some(tree) = parser.parse(line, None) {
-                        let mut matches = cursor.matches(query, tree.root_node(), line.as_bytes());
+                    let mut parse_line_owned = String::new();
+                    let parse_line = if (line.trim_start().starts_with("def ")
+                        || line.trim_start().starts_with("async def "))
+                        && !line.trim_end().ends_with(':')
+                    {
+                        parse_line_owned.push_str(line);
+                        parse_line_owned.push(':');
+                        parse_line_owned.as_str()
+                    } else {
+                        line
+                    };
+                    if let Some(tree) = parser.parse(parse_line, None) {
+                        let mut matches = cursor.matches(query, tree.root_node(), parse_line.as_bytes());
                         while let Some(m) = matches.next() {
                             for cap in m.captures {
                                 let name = query.capture_names()[cap.index as usize];
@@ -143,6 +154,7 @@ pub fn highlight_hover_text(
                             }
                         }
                     }
+                    add_self_param_span_for_signature(line, offset, &mut spans);
                 }
                 offset += line.len() + 1;
             }
@@ -327,6 +339,30 @@ fn add_bound_method_signature_spans(
     true
 }
 
+fn add_self_param_span_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    if let Some(open) = line.find('(') {
+        let after = &line[open + 1..];
+        if let Some(rest) = after.strip_prefix("self") {
+            let next = rest.chars().next();
+            if next.is_none() || next == Some(',') || next == Some(')') || next == Some(':') {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + open + 1,
+                    end: line_offset + open + 1 + 4,
+                    color: [0.741, 0.576, 0.976, 1.0],
+                });
+            }
+        }
+    }
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
@@ -400,6 +436,21 @@ Return a shallow copy of the dict.";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
         assert!(text.starts_with("def copy(self"));
         assert!(!text.contains("bound method"));
+        let first_line = text.lines().next().unwrap_or("");
+        let def_start = first_line.find("def").unwrap_or(0);
+        let self_start = first_line.find("self").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= def_start && s.end >= def_start + 3 && s.color == [1.0, 0.474, 0.776, 1.0]
+            ),
+            "`def` should be highlighted as keyword (pink)",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
+            ),
+            "`self` should be highlighted in violet",
+        );
         let first_line_len = text.lines().next().unwrap_or("").len();
         let prose_offset = first_line_len + 1;
         assert!(
@@ -458,6 +509,14 @@ Append object to the end of the list.";
         assert!(text.starts_with("def append(self, object: AuthController | Router | DiscountsController | OmittedUnionElements) -> None"));
         assert!(!text.contains("bound method"));
         assert!(!spans.is_empty(), "normalized signature should get syntax spans");
+        let first_line = text.lines().next().unwrap_or("");
+        let self_start = first_line.find("self").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
+            ),
+            "`self` should stay violet in long normalized signatures",
+        );
     }
 }
 
