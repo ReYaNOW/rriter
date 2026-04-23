@@ -85,9 +85,7 @@ fn hover_popup_byte_at(
     let s = renderer.scale_factor;
     let pad = 12.0 * s;
     let line_h = 22.0 * s;
-    let max_text_w = (renderer.width - 80.0 * s)
-        .max(400.0 * s)
-        .min(renderer.width - 40.0 * s);
+    let max_text_w = (renderer.width - 80.0 * s).min(600.0 * s).max(300.0 * s);
     let (bx, by, _bw, _bh) = rect;
 
     let mut lines: Vec<Vec<(char, usize)>> = Vec::new();
@@ -111,7 +109,10 @@ fn hover_popup_byte_at(
                 }
                 lines.push(std::mem::take(&mut cur_line));
                 cur_line = remainder;
-                cur_line_w = cur_line.iter().map(|&(ch, _)| renderer.char_advance(ch)).sum();
+                cur_line_w = cur_line
+                    .iter()
+                    .map(|&(ch, _)| renderer.char_advance(ch))
+                    .sum();
             } else {
                 lines.push(std::mem::take(&mut cur_line));
                 cur_line_w = 0.0;
@@ -182,11 +183,7 @@ impl App {
             if let Some(rect) = state.rect {
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                if mx >= rect.0
-                    && mx <= rect.0 + rect.2
-                    && my >= rect.1
-                    && my <= rect.1 + rect.3
-                {
+                if mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3 {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
                         popup.scroll.anim_speed = 7.0;

@@ -909,10 +909,10 @@ impl Renderer {
         render_scroll_y: f32,
         wants_pointer: &mut bool,
     ) -> (f32, f32, f32, f32, f32) {
-                let s = self.scale_factor;
+                        let s = self.scale_factor;
         let pad = 12.0 * s;
         let line_h = 22.0 * s;
-        let max_text_w = (self.width - 80.0 * s).min(800.0 * s).max(400.0 * s);
+        let max_text_w = (self.width - 80.0 * s).min(600.0 * s).max(300.0 * s);
 
                 let mut lines: Vec<(Vec<(char,[f32; 4], usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
         let mut cur_line_w = 0.0;
@@ -1101,7 +1101,7 @@ impl Renderer {
                                     );
                                                                 }
 
-                                let start_x = if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                                                                let start_x = if *line_kind == crate::lsp::HoverLineKindPublic::Code {
                                     (bx + pad + 8.0 * s).round()
                                 } else {
                                     (bx + pad).round()
@@ -1111,7 +1111,23 @@ impl Renderer {
 
                                 if is_header {
                                     let mut s_buf = String::new();
-                                    for &(c, _, _) in line { s_buf.push(c); }
+                                    let mut h_draw_x = draw_x;
+                                    for &(c, _, offset) in line {
+                                        let adv = self.char_advance(c) * scale_mul;
+                                        if let Some((sel_start, sel_end)) = selected {
+                                            if offset >= sel_start && offset < sel_end {
+                                                self.push_rect(
+                                                    h_draw_x,
+                                                    rounded_top,
+                                                    adv,
+                                                    cur_line_h.round(),
+                                                    self.theme.sel,
+                                                );
+                                            }
+                                        }
+                                        s_buf.push(c);
+                                        h_draw_x += adv;
+                                    }
                                     self.draw_string_scaled(&s_buf, draw_x, text_y,[1.0, 1.0, 1.0, 1.0], scale_mul);
                                 } else {
                                     let mut inline_run_start_x: Option<f32> = None;

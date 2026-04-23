@@ -116,12 +116,12 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    if msg.contains(":param ") {
-        let (clean_msg, mut spans, line_kinds, inline_code_ranges) = highlight_python_hover_doc(msg);
-        spans.sort_unstable_by_key(|s| s.start);
-        return (clean_msg, spans, line_kinds, inline_code_ranges);
-    }
-    let clean_msg = normalize_hover_text(msg);
+            if msg.contains(":param ") {
+            let (clean_msg, mut spans, line_kinds, inline_code_ranges) = highlight_python_hover_doc(msg);
+            spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+            return (clean_msg, spans, line_kinds, inline_code_ranges);
+        }
+        let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
@@ -156,9 +156,9 @@ pub fn highlight_hover_text(
                 }
             }
         }
-    })})});
+            })})});
 
-    spans.sort_unstable_by_key(|s| s.start);
+    spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
         let line_kinds = clean_msg.split('\n').map(|line| {
         if line.starts_with("## ") {
             HoverLineKindPublic::Header2
@@ -390,7 +390,7 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
                     i += 1;
                     continue;
                 }
-                if let Some(stripped) = code_line.strip_prefix('\t') {
+                                if let Some(stripped) = code_line.strip_prefix('\t') {
                     out.push_str(stripped);
                     out.push('\n');
                     kinds.push(HoverLineKind::Code);
@@ -399,14 +399,28 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
                 }
                 break;
             }
+            while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
+                out.pop();
+                kinds.pop();
+            }
             continue;
         }
 
         if trimmed.ends_with("::") && !trimmed.starts_with(".. ") {
             let clean = trimmed.strip_suffix("::").unwrap_or(trimmed);
-            out.push_str(clean);
+            let line_start = out.len();
+            let (roles_line, mut role_ranges) = normalize_rst_roles(&clean.replace("\\*", "*"));
+            let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+
+            out.push_str(normalized_line.trim_end());
             out.push_str(":\n");
             kinds.push(HoverLineKind::Text);
+
+            ranges.append(&mut role_ranges);
+            for (s, e) in ranges {
+                inline_code_ranges.push((line_start + s, line_start + e));
+            }
+
             i += 1;
             while i < lines.len() && lines[i].trim().is_empty() { i += 1; }
             while i < lines.len() {
@@ -414,7 +428,7 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
                 if code_line.trim().is_empty() {
                     out.push('\n');
                     kinds.push(HoverLineKind::Code);
-                } else if code_line.starts_with("    ") || code_line.starts_with('\t') {
+                                } else if code_line.starts_with("    ") || code_line.starts_with('\t') {
                     let stripped = if code_line.starts_with("    ") { &code_line[4..] } else { &code_line[1..] };
                     out.push_str(stripped);
                     out.push('\n');
@@ -423,6 +437,10 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
                     break;
                 }
                 i += 1;
+            }
+            while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
+                out.pop();
+                kinds.pop();
             }
             continue;
         }
