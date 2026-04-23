@@ -248,7 +248,7 @@ fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
     let mut i = 0usize;
     while i < line.len() {
         let rest = &line[i..];
-        let role_prefix = [":meth:`", ":func:`", ":class:`", ":exc:`"]
+        let role_prefix =[":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`"]
             .iter()
             .find(|p| rest.starts_with(**p))
             .copied();
@@ -257,8 +257,8 @@ fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
             if let Some(end_rel) = line[i..].find('`') {
                 let raw = &line[i..i + end_rel];
                 let mut display = raw;
-                if let Some(lt_pos) = raw.find(" <") {
-                    display = &raw[..lt_pos];
+                if let Some(lt_pos) = raw.find('<') {
+                    display = raw[..lt_pos].trim();
                 } else if let Some(stripped) = raw.strip_prefix('~') {
                     display = stripped;
                 }
@@ -288,6 +288,13 @@ fn flatten_rst_roles_and_code(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i+1] == '\n' {
+            i += 2;
+            while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
         if chars[i] == '`' {
             if i + 1 < chars.len() && chars[i+1] == '`' {
                 in_code = !in_code;
@@ -350,11 +357,15 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
         let line = lines[i];
         let trimmed = line.trim();
 
-        if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
+                if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
             if in_fence {
                 while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
                     out.pop();
                     kinds.pop();
+                }
+                if !out.ends_with("\n\n") && !out.is_empty() {
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Text);
                 }
             }
             in_fence = !in_fence;
@@ -370,50 +381,60 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             continue;
         }
 
-                if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+                                if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+            if !out.ends_with("\n\n") && !out.is_empty() {
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
+            }
+            let base_indent = line.len() - line.trim_start().len();
             i += 1;
-            if i < lines.len() && lines[i].trim().is_empty() {
-                i += 1;
-            }
-            while i < lines.len() {
-                let code_line = lines[i];
-                if code_line.trim().is_empty() {
-                    out.push('\n');
-                    kinds.push(HoverLineKind::Code);
-                    i += 1;
-                    continue;
-                }
-                if let Some(stripped) = code_line.strip_prefix("    ") {
-                    out.push_str(stripped);
-                    out.push('\n');
-                    kinds.push(HoverLineKind::Code);
-                    i += 1;
-                    continue;
-                }
-                                if let Some(stripped) = code_line.strip_prefix('\t') {
-                    out.push_str(stripped);
-                    out.push('\n');
-                    kinds.push(HoverLineKind::Code);
-                    i += 1;
-                    continue;
-                }
-                break;
-            }
-            while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
-                out.pop();
-                kinds.pop();
-            }
-            continue;
-        }
+                        if i < lines.len() && lines[i].trim().is_empty() {
+                            i += 1;
+                        }
+                        while i < lines.len() {
+                            let code_line = lines[i];
+                            if code_line.trim().is_empty() {
+                                out.push('\n');
+                                kinds.push(HoverLineKind::Code);
+                                i += 1;
+                                continue;
+                            }
+                            let current_indent = code_line.len() - code_line.trim_start().len();
+                            if current_indent > base_indent {
+                                let stripped = if current_indent >= base_indent + 4 {
+                                    &code_line[base_indent + 4..]
+                                } else {
+                                    code_line.trim_start()
+                                };
+                                out.push_str(stripped);
+                                out.push('\n');
+                                kinds.push(HoverLineKind::Code);
+                                i += 1;
+                                continue;
+                            }
+                            break;
+                        }
+                        while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
+                            out.pop();
+                            kinds.pop();
+                        }
+                        if !out.ends_with("\n\n") && !out.is_empty() {
+                            out.push('\n');
+                            kinds.push(HoverLineKind::Text);
+                        }
+                        continue;
+                    }
 
-        if trimmed.ends_with("::") && !trimmed.starts_with(".. ") {
+                        if trimmed.ends_with("::") && !trimmed.starts_with(".. ") {
+            let base_indent = line.len() - line.trim_start().len();
             let clean = trimmed.strip_suffix("::").unwrap_or(trimmed);
             let line_start = out.len();
             let (roles_line, mut role_ranges) = normalize_rst_roles(&clean.replace("\\*", "*"));
             let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
 
             out.push_str(normalized_line.trim_end());
-            out.push_str(":\n");
+            out.push_str(":\n\n");
+            kinds.push(HoverLineKind::Text);
             kinds.push(HoverLineKind::Text);
 
             ranges.append(&mut role_ranges);
@@ -422,25 +443,36 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(us
             }
 
             i += 1;
-            while i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
             while i < lines.len() {
                 let code_line = lines[i];
                 if code_line.trim().is_empty() {
                     out.push('\n');
                     kinds.push(HoverLineKind::Code);
-                                } else if code_line.starts_with("    ") || code_line.starts_with('\t') {
-                    let stripped = if code_line.starts_with("    ") { &code_line[4..] } else { &code_line[1..] };
-                    out.push_str(stripped);
-                    out.push('\n');
-                    kinds.push(HoverLineKind::Code);
                 } else {
-                    break;
+                    let current_indent = code_line.len() - code_line.trim_start().len();
+                    if current_indent > base_indent {
+                        let stripped = if current_indent >= base_indent + 4 {
+                            &code_line[base_indent + 4..]
+                        } else {
+                            code_line.trim_start()
+                        };
+                        out.push_str(stripped);
+                        out.push('\n');
+                        kinds.push(HoverLineKind::Code);
+                    } else {
+                        break;
+                    }
                 }
                 i += 1;
             }
             while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
                 out.pop();
                 kinds.pop();
+            }
+            if !out.ends_with("\n\n") && !out.is_empty() {
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
             }
             continue;
         }

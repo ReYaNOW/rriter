@@ -85,83 +85,131 @@ fn hover_popup_byte_at(
     let s = renderer.scale_factor;
     let pad = 12.0 * s;
     let line_h = 22.0 * s;
-    let max_text_w = (renderer.width - 80.0 * s).min(600.0 * s).max(300.0 * s);
+    let max_text_w = (renderer.width - 80.0 * s).min(750.0 * s).max(300.0 * s);
     let (bx, by, _bw, _bh) = rect;
 
-    let mut lines: Vec<Vec<(char, usize)>> = Vec::new();
-    let mut cur_line: Vec<(char, usize)> = Vec::new();
+    let mut lines: Vec<(Vec<(char, usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
     let mut cur_line_w = 0.0;
-    let mut last_space_idx: Option<usize> = None;
+    let mut cur_line: Vec<(char, usize)> = Vec::new();
+    let mut last_space_idx = None;
+    let mut raw_line_no = 0usize;
+
+    let mut push_line = |lines: &mut Vec<_>, cur_line: Vec<(char, usize)>, kind: crate::lsp::HoverLineKindPublic| {
+        lines.push((cur_line, kind));
+    };
 
     for (offset, c) in popup.text.char_indices() {
+        let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+        let scale_mul = match kind {
+            crate::lsp::HoverLineKindPublic::Header1 => 1.3,
+            crate::lsp::HoverLineKindPublic::Header2 => 1.15,
+            _ => 1.0,
+        };
+
         if c == '\n' {
-            lines.push(std::mem::take(&mut cur_line));
+            push_line(&mut lines, std::mem::take(&mut cur_line), kind);
             cur_line_w = 0.0;
             last_space_idx = None;
+            raw_line_no += 1;
             continue;
         }
-        let adv = renderer.char_advance(c);
+
+        let adv = renderer.char_advance(c) * scale_mul;
         if cur_line_w + adv > max_text_w && cur_line_w > 40.0 * s {
             if let Some(space_pos) = last_space_idx {
                 let mut remainder = cur_line.split_off(space_pos);
                 if !remainder.is_empty() && remainder[0].0 == ' ' {
                     remainder.remove(0);
                 }
-                lines.push(std::mem::take(&mut cur_line));
+                push_line(&mut lines, std::mem::take(&mut cur_line), kind);
                 cur_line = remainder;
-                cur_line_w = cur_line
-                    .iter()
-                    .map(|&(ch, _)| renderer.char_advance(ch))
-                    .sum();
+                cur_line_w = cur_line.iter().map(|&(ch, _)| renderer.char_advance(ch) * scale_mul).sum();
             } else {
-                lines.push(std::mem::take(&mut cur_line));
+                push_line(&mut lines, std::mem::take(&mut cur_line), kind);
                 cur_line_w = 0.0;
             }
             last_space_idx = None;
         }
+
         cur_line.push((c, offset));
         cur_line_w += adv;
+
         if c == ' ' {
             last_space_idx = Some(cur_line.len() - 1);
         }
     }
     if !cur_line.is_empty() {
-        lines.push(cur_line);
+        let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+        push_line(&mut lines, cur_line, kind);
     }
+
+    while let Some((line, _)) = lines.last() {
+        if line.is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+
     if lines.is_empty() {
         return 0;
     }
 
-    let mut line_idx = (((y - by) + popup.scroll.current - pad) / line_h).floor() as isize;
-    line_idx = line_idx.clamp(0, lines.len().saturating_sub(1) as isize);
-    let line = &lines[line_idx as usize];
-    if line.is_empty() {
-        if line_idx > 0 {
-            if let Some(prev_line) = lines.get((line_idx - 1) as usize) {
-                if let Some((prev_ch, prev_off)) = prev_line.last().copied() {
+    let mut current_top = by + pad - popup.scroll.current;
+    let mut found_line_idx = lines.len().saturating_sub(1);
+
+    for (i, (line, kind)) in lines.iter().enumerate() {
+        let scale_mul = match kind {
+            crate::lsp::HoverLineKindPublic::Header1 => 1.15,
+            crate::lsp::HoverLineKindPublic::Header2 => 1.05,
+            _ => 1.0,
+        };
+        let cur_line_h = line_h * scale_mul;
+
+        if y >= current_top && y < current_top + cur_line_h {
+            found_line_idx = i;
+            break;
+        }
+        current_top += cur_line_h;
+    }
+
+    let (found_line, found_kind) = &lines[found_line_idx];
+    let found_scale = match found_kind {
+        crate::lsp::HoverLineKindPublic::Header1 => 1.15,
+        crate::lsp::HoverLineKindPublic::Header2 => 1.05,
+        _ => 1.0,
+    };
+
+    if found_line.is_empty() {
+        if found_line_idx > 0 {
+            if let Some((prev_line, _)) = lines.get(found_line_idx - 1) {
+                if let Some(&(prev_ch, prev_off)) = prev_line.last() {
                     return prev_off + prev_ch.len_utf8();
                 }
             }
         }
-        for next_idx in (line_idx as usize + 1)..lines.len() {
-            if let Some((_, next_off)) = lines[next_idx].first().copied() {
+        for next_idx in (found_line_idx + 1)..lines.len() {
+            if let Some(&(next_ch, next_off)) = lines[next_idx].0.first() {
                 return next_off;
             }
         }
         return 0;
     }
 
-    let target_x = (x - (bx + pad)).max(0.0);
+    let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
+    let start_x = if is_code { bx + pad + 8.0 * s } else { bx + pad };
+    let target_x = (x - start_x).max(0.0);
     let mut draw_x = 0.0;
-    for i in 0..line.len() {
-        let (ch, off) = line[i];
-        let adv = renderer.char_advance(ch);
+
+    for i in 0..found_line.len() {
+        let (ch, off) = found_line[i];
+        let adv = renderer.char_advance(ch) * found_scale;
         if target_x <= draw_x + adv * 0.5 {
             return off;
         }
         draw_x += adv;
     }
-    let (last_ch, last_off) = line[line.len() - 1];
+    let (last_ch, last_off) = found_line[found_line.len() - 1];
     last_off + last_ch.len_utf8()
 }
 
