@@ -1053,9 +1053,9 @@ impl Renderer {
                     }
                     self.push_rounded_rect(
                         (bx + pad - 4.0 * s).round(),
-                        (text_y - line_h * 0.72).round(),
+                        (text_y - line_h * 0.82).round(),
                         (box_w - pad * 2.0 + 8.0 * s).round(),
-                        (line_h * run_len as f32 - 4.0 * s).round(),
+                        (line_h * run_len as f32 - 2.0 * s).round(),
                         4.0 * s,
                         [0.18, 0.20, 0.26, 0.96],
                     );
@@ -1074,9 +1074,9 @@ impl Renderer {
                         if let Some(run_x) = inline_run_start_x.take() {
                             self.push_rounded_rect(
                                 run_x,
-                                (text_y - line_h * 0.75 + 2.0 * s).round(),
+                                (text_y - line_h * 0.74).round(),
                                 (draw_x - run_x + 1.0 * s).max(2.0 * s),
-                                (line_h - 3.0 * s).round(),
+                                (line_h - 6.0 * s).round(),
                                 3.0 * s,
                                 [0.26, 0.28, 0.34, 0.98],
                             );
@@ -1087,9 +1087,9 @@ impl Renderer {
                 if let Some(run_x) = inline_run_start_x.take() {
                     self.push_rounded_rect(
                         run_x,
-                        (text_y - line_h * 0.75 + 2.0 * s).round(),
+                        (text_y - line_h * 0.74).round(),
                         (draw_x - run_x + 1.0 * s).max(2.0 * s),
-                        (line_h - 3.0 * s).round(),
+                        (line_h - 6.0 * s).round(),
                         3.0 * s,
                         [0.26, 0.28, 0.34, 0.98],
                     );
