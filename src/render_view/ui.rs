@@ -914,16 +914,19 @@ impl Renderer {
         let line_h = 22.0 * s;
         let max_text_w = (self.width - 80.0 * s).max(400.0 * s).min(self.width - 40.0 * s);
 
-        let mut lines = Vec::new();
+        let mut lines: Vec<(Vec<(char,[f32; 4], usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
         let mut cur_line_w = 0.0;
         let mut cur_line: Vec<(char,[f32; 4], usize)> = Vec::new();
         let mut last_space_idx = None;
+        let mut raw_line_no = 0usize;
 
         for (offset, c) in popup.text.char_indices() {
             if c == '\n' {
-                lines.push(std::mem::take(&mut cur_line));
+                let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+                lines.push((std::mem::take(&mut cur_line), kind));
                 cur_line_w = 0.0;
                 last_space_idx = None;
+                raw_line_no += 1;
                 continue;
             }
 
@@ -934,11 +937,13 @@ impl Renderer {
                     if !remainder.is_empty() && remainder[0].0 == ' ' {
                         remainder.remove(0);
                     }
-                    lines.push(std::mem::take(&mut cur_line));
+                    let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+                    lines.push((std::mem::take(&mut cur_line), kind));
                     cur_line = remainder;
                     cur_line_w = cur_line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
                 } else {
-                    lines.push(std::mem::take(&mut cur_line));
+                    let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+                    lines.push((std::mem::take(&mut cur_line), kind));
                     cur_line_w = 0.0;
                 }
                 last_space_idx = None;
@@ -959,11 +964,12 @@ impl Renderer {
             }
         }
         if !cur_line.is_empty() {
-            lines.push(cur_line);
+            let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+            lines.push((cur_line, kind));
         }
 
         let mut max_line_w = 0.0;
-        for line in &lines {
+        for (line, _) in &lines {
             let w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
             if w > max_line_w { max_line_w = w; }
         }
@@ -1017,7 +1023,9 @@ impl Renderer {
 
         let mut text_y = by + pad + line_h * 0.75 - scroll_y;
         let selected = selection.filter(|(a, b)| a != b);
-        for line in lines {
+        let mut idx = 0usize;
+        while idx < lines.len() {
+            let (line, line_kind) = &lines[idx];
             if text_y > by - line_h && text_y < by + box_h + line_h {
                 let is_separator = line
                     .iter()
@@ -1032,10 +1040,63 @@ impl Renderer {
                         [1.0, 1.0, 1.0, 0.10],
                     );
                     text_y += line_h;
+                    idx += 1;
                     continue;
                 }
+
+                if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                    let mut run_len = 1usize;
+                    while idx + run_len < lines.len()
+                        && lines[idx + run_len].1 == crate::lsp::HoverLineKindPublic::Code
+                    {
+                        run_len += 1;
+                    }
+                    self.push_rounded_rect(
+                        (bx + pad - 4.0 * s).round(),
+                        (text_y - line_h * 0.82).round(),
+                        (box_w - pad * 2.0 + 8.0 * s).round(),
+                        (line_h * run_len as f32 - 2.0 * s).round(),
+                        4.0 * s,
+                        [0.18, 0.20, 0.26, 0.96],
+                    );
+                }
+
                 let mut draw_x = (bx + pad).round();
-                for &(c, color, offset) in &line {
+                let mut inline_run_start_x: Option<f32> = None;
+                for &(c, _, offset) in line {
+                    let adv = self.char_advance(c);
+                    let in_inline = popup.inline_code_ranges.iter().any(|&(start, end)| {
+                        offset >= start && offset < end
+                    });
+                    if in_inline && inline_run_start_x.is_none() {
+                        inline_run_start_x = Some(draw_x - 1.0 * s);
+                    } else if !in_inline {
+                        if let Some(run_x) = inline_run_start_x.take() {
+                            self.push_rounded_rect(
+                                run_x,
+                                (text_y - line_h * 0.74).round(),
+                                (draw_x - run_x + 1.0 * s).max(2.0 * s),
+                                (line_h - 6.0 * s).round(),
+                                3.0 * s,
+                                [0.26, 0.28, 0.34, 0.98],
+                            );
+                        }
+                    }
+                    draw_x += adv;
+                }
+                if let Some(run_x) = inline_run_start_x.take() {
+                    self.push_rounded_rect(
+                        run_x,
+                        (text_y - line_h * 0.74).round(),
+                        (draw_x - run_x + 1.0 * s).max(2.0 * s),
+                        (line_h - 6.0 * s).round(),
+                        3.0 * s,
+                        [0.26, 0.28, 0.34, 0.98],
+                    );
+                }
+
+                draw_x = (bx + pad).round();
+                for &(c, color, offset) in line {
                     let adv = self.char_advance(c);
                     if let Some((sel_start, sel_end)) = selected {
                         if offset >= sel_start && offset < sel_end {
@@ -1055,6 +1116,7 @@ impl Renderer {
                 }
             }
             text_y += line_h;
+            idx += 1;
         }
 
         self.flush();

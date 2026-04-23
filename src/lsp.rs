@@ -108,11 +108,18 @@ thread_local! {
     static TS_DIAG_CURSOR: std::cell::RefCell<tree_sitter::QueryCursor> = std::cell::RefCell::new(tree_sitter::QueryCursor::new());
 }
 
-pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
+pub fn highlight_hover_text(
+    msg: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
     if msg.contains(":param ") {
-        let (clean_msg, mut spans) = highlight_python_hover_doc(msg);
+        let (clean_msg, mut spans, line_kinds, inline_code_ranges) = highlight_python_hover_doc(msg);
         spans.sort_unstable_by_key(|s| s.start);
-        return (clean_msg, spans);
+        return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
     let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
@@ -152,7 +159,8 @@ pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::Color
     })})});
 
     spans.sort_unstable_by_key(|s| s.start);
-    (clean_msg, spans)
+    let line_kinds = clean_msg.split('\n').map(|_| HoverLineKindPublic::Text).collect();
+    (clean_msg, spans, line_kinds, Vec::new())
 }
 
 fn normalize_hover_text(msg: &str) -> String {
@@ -190,9 +198,101 @@ enum HoverLineKind {
     Separator,
 }
 
-fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoverLineKindPublic {
+    Text,
+    Code,
+    Separator,
+}
+
+fn normalize_inline_rst_code(line: &str) -> (String, Vec<(usize, usize)>) {
+    let mut out = String::with_capacity(line.len());
+    let mut ranges = Vec::new();
+    let mut from = 0usize;
+    while let Some(open_rel) = line[from..].find("``") {
+        let open = from + open_rel;
+        out.push_str(&line[from..open]);
+        let body_start = open + 2;
+        let Some(close_rel) = line[body_start..].find("``") else {
+            out.push_str(&line[open..]);
+            return (out, ranges);
+        };
+        let close = body_start + close_rel;
+        let start_in_out = out.len();
+        out.push_str(&line[body_start..close]);
+        let end_in_out = out.len();
+        if end_in_out > start_in_out {
+            ranges.push((start_in_out, end_in_out));
+        }
+        from = close + 2;
+    }
+    out.push_str(&line[from..]);
+    (out, ranges)
+}
+
+fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
+    let mut out = String::with_capacity(line.len());
+    let mut ranges = Vec::new();
+    let mut i = 0usize;
+    while i < line.len() {
+        let rest = &line[i..];
+        let role_prefix = [":meth:`", ":func:`", ":class:`", ":exc:`"]
+            .iter()
+            .find(|p| rest.starts_with(**p))
+            .copied();
+        if let Some(prefix) = role_prefix {
+            i += prefix.len();
+            if let Some(end_rel) = line[i..].find('`') {
+                let raw = &line[i..i + end_rel];
+                let mut display = raw;
+                if let Some(lt_pos) = raw.find(" <") {
+                    display = &raw[..lt_pos];
+                } else if let Some(stripped) = raw.strip_prefix('~') {
+                    display = stripped;
+                }
+                let start = out.len();
+                out.push_str(display);
+                let end = out.len();
+                if end > start {
+                    ranges.push((start, end));
+                }
+                i += end_rel + 1;
+                continue;
+            }
+            out.push_str(prefix);
+            continue;
+        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    (out, ranges)
+}
+
+fn parse_param_line(trimmed: &str) -> Option<(String, String)> {
+    if !trimmed.starts_with(":param ") {
+        return None;
+    }
+    let rest = trimmed.trim_start_matches(":param ").replace("\\*", "*");
+    let colon = rest.find(':')?;
+    let head = rest[..colon].trim();
+    if head.is_empty() {
+        return None;
+    }
+    let mut parts = head.split_whitespace().collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let name = parts.pop()?.trim().to_string();
+    let ty = parts.join(" ").trim().to_string();
+    Some((name, ty))
+}
+
+fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut kinds = Vec::new();
+    let mut inline_code_ranges = Vec::new();
+    let mut parameters_header_added = false;
     let raw = msg.replace('\r', "");
     let lines: Vec<&str> = raw.lines().collect();
     let mut i = 0usize;
@@ -256,27 +356,63 @@ fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>) {
             continue;
         }
 
-        out.push_str(line);
+        if trimmed == ".. warning::" {
+            out.push_str("## Warning");
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+            i += 1;
+            continue;
+        }
+
+        if let Some((name, ty)) = parse_param_line(trimmed) {
+            if !parameters_header_added {
+                out.push_str("# Parameters");
+                out.push('\n');
+                kinds.push(HoverLineKind::Text);
+                parameters_header_added = true;
+            }
+            if ty.is_empty() {
+                out.push_str(&format!("{}:", name));
+            } else {
+                out.push_str(&format!("{}: {}", name, ty));
+            }
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+            i += 1;
+            continue;
+        }
+
+        let line_start = out.len();
+        let (roles_line, mut role_ranges) = normalize_rst_roles(&line.replace("\\*", "*"));
+        let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
+        out.push_str(normalized_line.trim_end());
         out.push('\n');
         kinds.push(HoverLineKind::Text);
+        ranges.append(&mut role_ranges);
+        for (start, end) in ranges {
+            inline_code_ranges.push((line_start + start, line_start + end));
+        }
         i += 1;
     }
 
     while out.ends_with('\n') {
         out.pop();
     }
-    (out, kinds)
+    (out, kinds, inline_code_ranges)
 }
 
 fn ts_capture_color(name: &str) -> Option<[f32; 4]> {
     match name {
-        "property" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
+        "fg" | "property" | "py_assign" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
         "string" => Some([0.945, 0.980, 0.549, 1.0]),
-        "type" | "class_name" => Some([0.545, 0.913, 0.992, 1.0]),
-        "keyword.control" | "keyword" | "operator" => Some([1.0, 0.474, 0.776, 1.0]),
-        "function" | "py_function" | "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
-        "number" => Some([0.741, 0.576, 0.976, 1.0]),
         "comment" => Some([0.384, 0.447, 0.643, 1.0]),
+        "function" | "py_function" => Some([0.313, 0.980, 0.482, 1.0]),
+        "keyword.control" | "operator" | "boolean" => Some([1.0, 0.474, 0.776, 1.0]),
+        "keyword" | "subst" | "type" | "function.builtin" => Some([0.545, 0.913, 0.992, 1.0]),
+        "class_name" => Some([0.45, 0.85, 0.90, 1.0]),
+        "constant" | "number" => Some([0.741, 0.576, 0.976, 1.0]),
+        "parameter" => Some([0.973, 0.584, 0.502, 1.0]),
+        "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
         _ => None,
     }
 }
@@ -314,11 +450,20 @@ fn push_python_ts_spans(
     })})});
 }
 
-fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
-    let gray = [0.70, 0.72, 0.76, 1.0];
+fn highlight_python_hover_doc(
+    raw_msg: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
+    let text_light = [0.86, 0.87, 0.90, 1.0];
     let ty = [0.545, 0.913, 0.992, 1.0];
+    let header = [0.98, 0.79, 0.40, 1.0];
+    let param = [0.973, 0.584, 0.502, 1.0];
 
-    let (msg, line_kinds) = normalize_python_hover_doc(raw_msg);
+    let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
     let mut line_starts = Vec::with_capacity(lines.len());
     let mut at = 0usize;
@@ -332,7 +477,11 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
     let mut sig_start_line = None;
     for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+        if trimmed.starts_with("def ")
+            || trimmed.starts_with("async def ")
+            || trimmed.contains(" def ")
+            || trimmed.contains(" async def ")
+        {
             sig_start_line = Some(idx);
             break;
         }
@@ -352,7 +501,8 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
                 break;
             }
         }
-        let start = line_starts[start_line];
+        let def_shift = lines[start_line].find("def ").unwrap_or(0);
+        let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
             line_starts[end_line + 1] - 1
         } else {
@@ -386,9 +536,8 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
         i += 1;
     }
 
-    // gray intro lines after separator
+    // light text lines after separator
     let mut saw_separator = false;
-    let mut gray_intro_left = 2usize;
     for (line_no, line) in lines.iter().enumerate() {
         let line_start = line_starts[line_no];
         let line_end = line_start + line.len();
@@ -400,66 +549,73 @@ fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter:
             saw_separator = true;
         }
 
-        if saw_separator && kind == HoverLineKind::Text && !is_blank && gray_intro_left > 0 {
+        if saw_separator && kind == HoverLineKind::Text && !is_blank {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
-                color: gray,
+                color: text_light,
             });
-            gray_intro_left = gray_intro_left.saturating_sub(1);
         }
 
-        if trimmed.starts_with(":param ") {
-            let pfx = line.find(":param ").unwrap_or(0);
-            let rest = &line[pfx + 7..];
-            let mut ws = rest.char_indices().filter(|(_, c)| !c.is_whitespace());
-            if let Some((type_start_rel, _)) = ws.next() {
-                let type_start = line_start + pfx + 7 + type_start_rel;
-                let mut type_end = type_start;
-                while type_end < line_end {
-                    let b = msg.as_bytes()[type_end];
-                    if b == b' ' || b == b':' {
-                        break;
+        if trimmed.starts_with("# Parameters") || trimmed.starts_with("## Warning") {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start,
+                end: line_end,
+                color: header,
+            });
+        }
+
+        if trimmed == "# Parameters" {
+            continue;
+        }
+
+        if let Some(colon_pos) = line.find(':') {
+            let lhs = line[..colon_pos].trim();
+            if !lhs.is_empty()
+                && lhs.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*')
+                && saw_separator
+            {
+                let lhs_start = line_start + line.find(lhs).unwrap_or(0);
+                let lhs_end = lhs_start + lhs.len();
+                spans.push(crate::highlighter::ColorSpan {
+                    start: lhs_start,
+                    end: lhs_end,
+                    color: param,
+                });
+                let rhs = line[colon_pos + 1..].trim_start();
+                if !rhs.is_empty() {
+                    let rhs_start = line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
+                    let rhs_end = rhs_start + rhs
+                        .chars()
+                        .take_while(|c| !c.is_whitespace())
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    if rhs_end > rhs_start {
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: rhs_start,
+                            end: rhs_end,
+                            color: ty,
+                        });
                     }
-                    type_end += 1;
-                }
-                if type_end > type_start {
-                    spans.push(crate::highlighter::ColorSpan {
-                        start: type_start,
-                        end: type_end,
-                        color: ty,
-                    });
                 }
             }
         }
 
-        // inline RST code: ``...`` -> tree-sitter python only for inner range
-        let mut from = 0usize;
-        while let Some(open_rel) = line[from..].find("``") {
-            let open = from + open_rel;
-            let body_start = open + 2;
-            let Some(close_rel) = line[body_start..].find("``") else {
-                break;
-            };
-            let close = body_start + close_rel;
-            spans.push(crate::highlighter::ColorSpan {
-                start: line_start + open,
-                end: line_start + open + 2,
-                color: [0.62, 0.62, 0.68, 1.0],
-            });
-            spans.push(crate::highlighter::ColorSpan {
-                start: line_start + close,
-                end: line_start + close + 2,
-                color: [0.62, 0.62, 0.68, 1.0],
-            });
-            if close > body_start {
-                push_python_ts_spans(&line[body_start..close], line_start + body_start, &mut spans);
-            }
-            from = close + 2;
+    }
+
+    for &(start, end) in &inline_code_ranges {
+        if end > start && end <= msg.len() {
+            push_python_ts_spans(&msg[start..end], start, &mut spans);
         }
     }
 
-    (msg, spans)
+    let public_kinds = line_kinds.into_iter().map(|k| match k {
+        HoverLineKind::Text => HoverLineKindPublic::Text,
+        HoverLineKind::Code => HoverLineKindPublic::Code,
+        HoverLineKind::Separator => HoverLineKindPublic::Separator,
+    }).collect();
+
+    (msg, spans, public_kinds, inline_code_ranges)
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {

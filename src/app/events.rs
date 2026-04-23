@@ -1213,10 +1213,13 @@ impl ApplicationHandler for App {
                             state.request_id = None;
                             if let Some(t) = text {
                                 if let Some(bo) = state.byte_offset {
-                                    let (clean_msg, spans) = crate::lsp::highlight_hover_text(&t);
+                                    let (clean_msg, spans, line_kinds, inline_code_ranges) =
+                                        crate::lsp::highlight_hover_text(&t);
                                     state.popup = Some(crate::app::mouse::HoverPopup {
                                         text: clean_msg,
                                         spans,
+                                        line_kinds,
+                                        inline_code_ranges,
                                         byte_offset: bo,
                                         anchor_x: self
                                             .renderer
