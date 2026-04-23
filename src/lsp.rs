@@ -190,6 +190,73 @@ fn looks_like_python_code_line(line: &str) -> bool {
         && (t.contains('(') || t.contains(':') || t.contains('='))
 }
 
+fn sanitize_hover_type_expr(mut s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    while let Some(pos) = s.find("<class '") {
+        out.push_str(&s[..pos]);
+        let rest = &s[pos + "<class '".len()..];
+        if let Some(end) = rest.find("'>") {
+            out.push_str(&rest[..end]);
+            s = &rest[end + 2..];
+        } else {
+            out.push_str(&s[pos..]);
+            s = "";
+        }
+    }
+    out.push_str(s);
+    out = out.replace("... omitted 3 union elements", "OmittedUnionElements");
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_bound_method_signature(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let (is_async, body) = if let Some(rest) = trimmed.strip_prefix("bound async method ") {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix("bound method ") {
+        (false, rest)
+    } else {
+        return None;
+    };
+
+    let open = body.find('(')?;
+    let close = body.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let target = body[..open].trim();
+    let method = target.rsplit('.').next()?.trim();
+    if method.is_empty() {
+        return None;
+    }
+
+    let mut params = vec!["self".to_string()];
+    for raw in body[open + 1..close].split(',') {
+        let part = raw.trim();
+        if part.is_empty() || part == "/" || part == "*" {
+            continue;
+        }
+        if let Some(colon) = part.find(':') {
+            let name = part[..colon].trim();
+            let ty = sanitize_hover_type_expr(part[colon + 1..].trim());
+            if !name.is_empty() && !ty.is_empty() {
+                params.push(format!("{name}: {ty}"));
+            } else if !name.is_empty() {
+                params.push(name.to_string());
+            }
+        } else {
+            params.push(part.to_string());
+        }
+    }
+
+    let ret_ty = if let Some(arrow) = body.rfind("->") {
+        sanitize_hover_type_expr(body[arrow + 2..].trim())
+    } else {
+        "Any".to_string()
+    };
+    let def_kw = if is_async { "async def" } else { "def" };
+    Some(format!("{def_kw} {method}({}) -> {ret_ty}", params.join(", ")))
+}
+
 fn add_bound_method_signature_spans(
     line: &str,
     line_offset: usize,
@@ -265,6 +332,11 @@ fn normalize_hover_text(msg: &str) -> String {
     let mut in_fence = false;
     for raw in msg.replace('\r', "").lines() {
         let trimmed = raw.trim();
+        if let Some(normalized) = normalize_bound_method_signature(trimmed) {
+            out.push_str(&normalized);
+            out.push('\n');
+            continue;
+        }
         if trimmed == "```" || trimmed == "```python" {
             in_fence = !in_fence;
             continue;
@@ -325,8 +397,10 @@ In either case, this is followed by: for k, v in F.items(): D[k] = v";
     fn plain_bound_method_prose_stays_uncolored() {
         let raw = "bound method dict[str, Provide].copy() -> dict[str, Provide]\n\
 Return a shallow copy of the dict.";
-        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
-        let first_line_len = raw.lines().next().unwrap_or("").len();
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def copy(self"));
+        assert!(!text.contains("bound method"));
+        let first_line_len = text.lines().next().unwrap_or("").len();
         let prose_offset = first_line_len + 1;
         assert!(
             spans.iter().all(|s| s.end <= prose_offset),
@@ -364,15 +438,26 @@ Can be used either with an ``async with`` block:\n\
     fn bound_method_signature_line_is_highlighted_but_prose_stays_plain() {
         let raw = "bound method list[<class 'AuthController'> | Router].append(object: <class 'AuthController'> | Router, /) -> None\n\
 Append object to the end of the list.";
-        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def append(self, object: AuthController | Router) -> None"));
+        assert!(!text.contains("bound method"));
         assert!(!spans.is_empty(), "signature line should receive highlighting");
 
-        let first_line_len = raw.lines().next().unwrap_or("").len();
+        let first_line_len = text.lines().next().unwrap_or("").len();
         let prose_offset = first_line_len + 1;
         assert!(
             spans.iter().all(|s| s.end <= prose_offset),
             "prose description line must stay uncolored",
         );
+    }
+
+    #[test]
+    fn long_bound_method_signature_is_normalized_and_highlighted() {
+        let raw = "bound method list[<class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements].append(object: <class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements, /) -> None";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def append(self, object: AuthController | Router | DiscountsController | OmittedUnionElements) -> None"));
+        assert!(!text.contains("bound method"));
+        assert!(!spans.is_empty(), "normalized signature should get syntax spans");
     }
 }
 
