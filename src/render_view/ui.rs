@@ -1030,7 +1030,7 @@ impl Renderer {
                                 (text_y - line_h * 0.75 + 2.0 * s).round(),
                                 adv,
                                 (line_h - 3.0 * s).round(),
-                                [0.33, 0.49, 0.86, 0.45],
+                                self.theme.sel,
                             );
                         }
                     }

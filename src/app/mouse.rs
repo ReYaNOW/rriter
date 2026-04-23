@@ -133,7 +133,19 @@ fn hover_popup_byte_at(
     line_idx = line_idx.clamp(0, lines.len().saturating_sub(1) as isize);
     let line = &lines[line_idx as usize];
     if line.is_empty() {
-        return popup.text.len();
+        if line_idx > 0 {
+            if let Some(prev_line) = lines.get((line_idx - 1) as usize) {
+                if let Some((prev_ch, prev_off)) = prev_line.last().copied() {
+                    return prev_off + prev_ch.len_utf8();
+                }
+            }
+        }
+        for next_idx in (line_idx as usize + 1)..lines.len() {
+            if let Some((_, next_off)) = lines[next_idx].first().copied() {
+                return next_off;
+            }
+        }
+        return 0;
     }
 
     let target_x = (x - (bx + pad)).max(0.0);

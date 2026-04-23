@@ -916,8 +916,27 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                 let mut copied = false;
+                crate::app::mouse::HOVER_STATE.with(|state| {
+                    let mut state = state.borrow_mut();
+                    if let (Some(popup), Some(a), Some(b)) = (
+                        state.popup.as_ref(),
+                        state.selection_anchor,
+                        state.selection_cursor,
+                    ) {
+                        let start = a.min(b);
+                        let end = a.max(b);
+                        if start < end && end <= popup.text.len() && popup.text.is_char_boundary(start) && popup.text.is_char_boundary(end) {
+                            let _ = self.clipboard.set_text(&popup.text[start..end]);
+                            state.selection_anchor = None;
+                            state.selection_cursor = None;
+                            state.selecting = false;
+                            copied = true;
+                        }
+                    }
+                });
                 if let Some(r) = self.renderer.as_ref() {
-                    if let Some((rx, ry, rw, rh)) = r.last_diag_popup_rect {
+                    if !copied {
+                        if let Some((rx, ry, rw, rh)) = r.last_diag_popup_rect {
                         let mx = r.last_mouse_x;
                         let my = r.last_mouse_y;
                         if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
@@ -927,11 +946,15 @@ impl App {
                             }
                         }
                     }
+                    }
                 }
                 if !copied {
                     if let Some(text) = self.editor.get_selection() {
                         let _ = self.clipboard.set_text(text);
                     }
+                }
+                if copied {
+                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
