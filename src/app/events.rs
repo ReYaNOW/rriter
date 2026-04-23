@@ -731,11 +731,14 @@ impl ApplicationHandler for App {
             return; // Пропускаем один кадр, чтобы избежать гонок состояний
         }
 
-        let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.016);
+                let now = Instant::now();
+        let raw_dt = (now - self.last_frame).as_secs_f32();
+        let dt = raw_dt.min(0.016);
         self.last_frame = now;
 
         let mut needs_redraw = false;
+        let mut hover_wake_at: Option<Instant> = None;
+        let mut hover_poll_pending = false;
 
         if self.current_sticky_lines != self.target_sticky_lines {
             let old_len = self.current_sticky_lines.len();
@@ -772,7 +775,7 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-        crate::app::mouse::HOVER_STATE.with(|state| {
+                crate::app::mouse::HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(popup) = &mut state.popup {
                 if popup.scroll.update(dt) {
@@ -781,8 +784,9 @@ impl ApplicationHandler for App {
             }
             if let Some(byte_offset) = state.byte_offset {
                 if state.popup.is_none() && state.request_id.is_none() {
-                    state.timer += dt;
+                    state.timer += raw_dt;
                     if state.timer >= 0.3 {
+                        state.timer = 0.0;
                         if self.is_ide_mode {
                             if let Some(lsp) = &mut self.lsp {
                                 if let Some(path) = self.file_path.clone() {
@@ -791,11 +795,21 @@ impl ApplicationHandler for App {
                                         byte_offset,
                                         &self.editor.line_offsets,
                                     );
-                                    state.request_id = lsp.request_hover(&path, &self.file_extension, line, col);
+                                    state.request_id =
+                                        lsp.request_hover(&path, &self.file_extension, line, col);
+                                    if state.request_id.is_some() {
+                                        hover_poll_pending = true;
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        hover_wake_at = Some(
+                            now + std::time::Duration::from_secs_f32(0.3 - state.timer),
+                        );
                     }
+                } else if state.request_id.is_some() {
+                    hover_poll_pending = true;
                 }
             }
         });
@@ -1307,7 +1321,12 @@ impl ApplicationHandler for App {
             }
         }
 
-        let is_highlighting = !self.is_highlighted_once;
+                let is_highlighting = !self.is_highlighted_once;
+        let hover_poll_wake_at = if hover_poll_pending {
+            Some(now + std::time::Duration::from_millis(16))
+        } else {
+            None
+        };
 
         if needs_redraw || (self.show_welcome && self.is_ide_mode) {
             if let Some(w) = self.window.as_ref() {
@@ -1315,15 +1334,35 @@ impl ApplicationHandler for App {
             }
             event_loop.set_control_flow(ControlFlow::Wait);
         } else if is_highlighting {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                now + std::time::Duration::from_millis(5),
-            ));
+            let mut wake_at = now + std::time::Duration::from_millis(5);
+            if let Some(t) = hover_wake_at {
+                if t < wake_at {
+                    wake_at = t;
+                }
+            }
+            if let Some(t) = hover_poll_wake_at {
+                if t < wake_at {
+                    wake_at = t;
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
         } else {
             let next_blink = self.last_action
                 + std::time::Duration::from_millis(
                     (now.duration_since(self.last_action).as_millis() / 500 + 1) as u64 * 500,
                 );
-            event_loop.set_control_flow(ControlFlow::WaitUntil(next_blink));
+            let mut wake_at = next_blink;
+            if let Some(t) = hover_wake_at {
+                if t < wake_at {
+                    wake_at = t;
+                }
+            }
+            if let Some(t) = hover_poll_wake_at {
+                if t < wake_at {
+                    wake_at = t;
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
         }
     }
 }
