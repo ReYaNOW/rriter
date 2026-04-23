@@ -846,6 +846,25 @@ impl App {
                 }
 
                 if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                    let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
+                        && HOVER_STATE.with(|hover_state| {
+                            if let Some((x, y, w, h)) = hover_state.borrow().rect {
+                                mx >= x && mx <= x + w && my >= y && my <= y + h
+                            } else {
+                                false
+                            }
+                        });
+                    if in_hover_popup_body {
+                        // Не блокируем выделение текста: клики по hover popup должны
+                        // проходить в редактор, как и по обычному текстовому слою.
+                    } else if clicked_id == crate::ui_system::UiId::BottomPanelBody {
+                        self.handle_ui_click(clicked_id);
+                        return;
+                    }
+                    if in_hover_popup_body {
+                        // Пропускаем обработку UI-элемента и даём нижележащему
+                        // editor-механизму обработать клик/drag-selection.
+                    } else
                     if clicked_id == crate::ui_system::UiId::HoverPopupScroll {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
                         crate::app::mouse::HOVER_STATE.with(|hover_state| {
@@ -878,6 +897,9 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
+                    if in_hover_popup_body {
+                        // no-op
+                    } else {
                     let is_term = matches!(
                         clicked_id,
                         crate::ui_system::UiId::TerminalBody
@@ -926,6 +948,7 @@ impl App {
                         self.handle_ui_click(clicked_id);
                     }
                     return;
+                    }
                 }
             }
         }

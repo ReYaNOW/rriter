@@ -686,7 +686,17 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if is_text || self.ui_registry.wants_text() {
+                    let hover_popup_hovered = crate::app::mouse::HOVER_STATE.with(|state| {
+                        if let Some((x, y, w, h)) = state.borrow().rect {
+                            let pad = 40.0 * s;
+                            mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad
+                        } else {
+                            false
+                        }
+                    });
+                    if hover_popup_hovered {
+                        winit::window::CursorIcon::Default
+                    } else if is_text || self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else {
                         winit::window::CursorIcon::Default
