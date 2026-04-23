@@ -828,20 +828,6 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::PopupCopyDiagnostic(idx) => {
-                if let Some(path) = &self.file_path {
-                    if let Some(diag) = self
-                        .lsp
-                        .as_ref()
-                        .and_then(|l| l.diagnostics.get(path))
-                        .and_then(|diags| diags.get(idx))
-                    {
-                        let _ = self.clipboard.set_text(&diag.message);
-                        self.ide_panel.diag_copied_idx = Some(idx);
-                    }
-                }
-                self.window.as_ref().unwrap().request_redraw();
-            }
             UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     self.ide_panel.lsp_logs_focused =

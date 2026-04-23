@@ -775,8 +775,21 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
+        let suppress_hover_popup = self
+            .renderer
+            .as_ref()
+            .and_then(|r| r.last_diag_popup_rect)
+            .is_some();
                 crate::app::mouse::HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
+            if suppress_hover_popup {
+                state.request_id = None;
+                state.popup = None;
+                state.timer = 0.0;
+                state.byte_offset = None;
+                state.rect = None;
+                return;
+            }
             if let Some(popup) = &mut state.popup {
                 if popup.scroll.update(dt) {
                     needs_redraw = true;

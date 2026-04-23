@@ -1,4 +1,3 @@
-use crate::app::IdePanelState;
 use crate::lsp::Diagnostic;
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
@@ -11,7 +10,6 @@ impl Renderer {
         pub fn draw_diagnostic_popup(
         &mut self,
         lsp_diagnostics: &[Diagnostic],
-        ide_panel: &IdePanelState,
         ui_registry: &mut UiRegistry,
         mx: f32,
         my: f32,
@@ -302,55 +300,6 @@ impl Renderer {
 
             let total_text_h = *line_count as f32 * line_h;
             self.push_rect(bx + 4.0 * s, current_y, 3.0 * s, total_text_h, border_color);
-
-            let is_copied = ide_panel.diag_copied_idx == Some(idx);
-            let btn_x = (bx + box_w - pad - icon_sz).round();
-            let btn_y = (current_y + (total_text_h - icon_sz) / 2.0).round();
-            let btn_hovered = mx >= btn_x - 4.0 * s
-                && mx <= btn_x + icon_sz + 4.0 * s
-                && my >= btn_y - 2.0 * s
-                && my <= btn_y + icon_sz + 4.0 * s;
-
-            if btn_hovered {
-                self.push_rounded_rect(
-                    btn_x - 4.0 * s,
-                    btn_y - 2.0 * s,
-                    icon_sz + 8.0 * s,
-                    icon_sz + 4.0 * s,
-                    4.0 * s,
-                    [1.0, 1.0, 1.0, 0.1],
-                );
-                *wants_pointer = true;
-            }
-            let icon_type = if is_copied {
-                crate::widgets::IconType::Check
-            } else {
-                crate::widgets::IconType::Copy
-            };
-            let icon_color = if is_copied {
-                [0.3, 0.9, 0.4, 1.0]
-            } else {
-                self.theme.fg
-            };
-            let icon_render_sz = 16.0 * s;
-            let offset = (icon_sz - icon_render_sz) / 2.0;
-            self.draw_atlas_icon(
-                icon_type,
-                btn_x + offset,
-                btn_y + offset,
-                icon_render_sz,
-                icon_color,
-            );
-
-            ui_registry.register_rect(
-                crate::ui_system::UiId::PopupCopyDiagnostic(idx),
-                btn_x - 4.0 * s,
-                btn_y - 2.0 * s,
-                icon_sz + 8.0 * s,
-                icon_sz + 4.0 * s,
-                mx,
-                my,
-            );
 
             current_y += total_text_h + line_h * 0.5;
         }

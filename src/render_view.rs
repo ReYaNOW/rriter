@@ -2155,7 +2155,6 @@ impl Renderer {
                 if popup_ready && !self.hovered_diags_cache.is_empty() {
             self.draw_diagnostic_popup(
                 &lsp_diagnostics,
-                ide_panel,
                 ui_registry,
                 mx,
                 my,

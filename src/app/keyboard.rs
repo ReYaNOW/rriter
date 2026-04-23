@@ -913,8 +913,33 @@ impl App {
                 return;
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                if let Some(text) = self.editor.get_selection() {
-                    let _ = self.clipboard.set_text(text);
+                let mut copied_from_diag_popup = false;
+                if let Some(renderer) = self.renderer.as_ref() {
+                    if let Some((bx, by, bw, bh)) = renderer.last_diag_popup_rect {
+                        let mx = renderer.last_mouse_x;
+                        let my = renderer.last_mouse_y;
+                        let inside_popup = mx >= bx && mx <= bx + bw && my >= by && my <= by + bh;
+                        if inside_popup {
+                            if let Some(path) = &self.file_path {
+                                if let Some(idx) = renderer.last_hovered_diags.first().copied() {
+                                    if let Some(diag) = self
+                                        .lsp
+                                        .as_ref()
+                                        .and_then(|l| l.diagnostics.get(path))
+                                        .and_then(|diags| diags.get(idx))
+                                    {
+                                        let _ = self.clipboard.set_text(&diag.message);
+                                        copied_from_diag_popup = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !copied_from_diag_popup {
+                    if let Some(text) = self.editor.get_selection() {
+                        let _ = self.clipboard.set_text(text);
+                    }
                 }
             }
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {

@@ -71,7 +71,6 @@ pub enum UiId {
     LspLogScrollY(usize),
     LspLogScrollX(usize),
     CopyDiagnostic(usize),
-    PopupCopyDiagnostic(usize),
     OpenDiagUrl(usize),
     PopupOpenDiagUrl(usize),
     ProblemJump(usize),

@@ -1511,11 +1511,13 @@ impl App {
                         state.rect = None;
                     }
                 } else {
-                    state.byte_offset = None;
-                    state.timer = 0.0;
-                    state.request_id = None;
-                    state.popup = None;
-                    state.rect = None;
+                    if state.popup.is_none() {
+                        state.byte_offset = None;
+                        state.timer = 0.0;
+                        state.request_id = None;
+                        state.popup = None;
+                        state.rect = None;
+                    }
                 }
             });
         }
