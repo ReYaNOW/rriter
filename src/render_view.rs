@@ -109,12 +109,12 @@ impl Renderer {
                 (0, &[] as &[crate::lsp::Diagnostic])
             };
 
-                        let mut get_byte_offset = |line: u32, utf16_col: u32| -> usize {
-                let line = line as usize;
-                if line >= editor.line_offsets.len() {
-                    return editor.len();
-                }
-                let start = editor.line_offsets[line];
+                                                                let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
+                                let line = line as usize;
+                                if line >= editor.line_offsets.len() {
+                                    return editor.len();
+                                }
+                    let start = editor.line_offsets[line];
                 let end = editor.line_offsets.get(line + 1).copied().unwrap_or(editor.len());
                 let mut current_utf16 = 0;
                 let mut current_byte = start;

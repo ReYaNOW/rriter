@@ -216,7 +216,7 @@
     <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
     <type name="CodeAction">{ title: String, kind: Option&lt;String&gt;, edit: Option&lt;WorkspaceEdit&gt;, code: Option&lt;String&gt; }</type>
     <type name="DiagSeverity">{ Error, Warning, Info, Hint }</type>
-    <type name="Diagnostic">{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, source: Option&lt;String&gt;, quickfixes: Vec&lt;QuickFix&gt;, tags: Vec&lt;u32&gt; }</type>
+    <type name="Diagnostic">{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, source: Option&lt;String&gt;, quickfixes: Vec&lt;QuickFix&gt;, tags: Vec&lt;u32&gt;, spans: Vec&lt;crate::highlighter::ColorSpan&gt; }</type>
     <type name="LogEntry">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }</type>
     <type name="LspEvent">{ Log { name: &amp;'static str, message: String }</type>
     <type name="LspManager">{ python: Option&lt;LspProcess&gt;, ty_process: Option&lt;LspProcess&gt;, workspaces: Vec&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, merged_instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, ty_instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, dirty_diagnostics: bool, last_change: Option&lt;std::time::Instant&gt;, current_path: Option&lt;PathBuf&gt;, python_status: LspServerStatus, ty_status: LspServerStatus, python_disabled: bool, server_logs: HashMap&lt;&amp;'static str, Vec&lt;LogEntry&gt;&gt;, suppress_diagnostics: bool }</type>
@@ -230,56 +230,57 @@
     <type name="TextChange">{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, new_text: String }</type>
     <type name="WorkspaceEdit">{ changes: HashMap&lt;PathBuf, Vec&lt;TextChange&gt;&gt; }</type>
     <fn name="next_id" line="30" ret="i32" />
-    <fn name="offset_to_lsp_pos" line="214" pub="true" ret="(u32, u32)" />
-    <fn name="json_escape" line="234" ret="String" />
-    <fn name="path_to_uri" line="253" ret="String" />
-    <fn name="uri_to_path" line="267" ret="PathBuf" />
-    <fn name="make_initialize" line="278" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
-    <fn name="make_initialized" line="308" ret="Vec&lt;u8&gt;" />
-    <fn name="make_did_open" line="312" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_change_full" line="323" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_close" line="333" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_code_action" line="341" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_shutdown" line="368" ret="Vec&lt;u8&gt;" />
-    <fn name="make_exit" line="372" ret="Vec&lt;u8&gt;" />
-    <fn name="write_frame" line="378" ret="bool" calls="render_view::core_text: flush" />
-    <fn name="parse_diagnostic_value" line="390" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
-    <fn name="parse_text_edit_value" line="491" ret="Option&lt;TextChange&gt;" />
-    <fn name="parse_workspace_edit_value" line="516" ret="WorkspaceEdit" calls="self: uri_to_path" />
-    <fn name="parse_code_action_value" line="552" ret="Option&lt;CodeAction&gt;" />
-    <fn name="dispatch_frame" line="587" calls="self: parse_diagnostic_value, parse_workspace_edit_value, uri_to_path" />
-    <fn name="spawn_server" line="728" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
-    <fn name="send_and_log" line="852" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
-    <fn name="run_supervisor" line="885" calls="self: make_code_action, make_did_change_full, make_did_close, make_did_open, make_exit, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
-    <fn name="start" line="1079" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
-    <fn name="notify_open" line="1100" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
-    <fn name="restart" line="1144" pub="true" reads="cmd_tx" />
-    <fn name="notify_change" line="1150" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="notify_close" line="1161" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_code_actions" line="1169" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
-    <fn name="poll" line="1199" pub="true" reads="event_rx" />
-    <fn name="shutdown" line="1208" pub="true" reads="cmd_tx" />
-    <fn name="encode_diagnostics_json" line="1215" ret="String" calls="self: json_escape" />
-    <fn name="new" line="1271" pub="true" ret="Self" />
-    <fn name="ensure_python" line="1292" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
-    <fn name="restart_python" line="1304" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
-    <fn name="disable_python" line="1322" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
-    <fn name="enable_python" line="1341" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
-    <fn name="servers_info" line="1364" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
-    <fn name="process_for_ext" line="1390" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
-    <fn name="notify_open" line="1401" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="notify_change" line="1424" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="notify_close" line="1446" pub="true" reads="python, ty_process, workspaces" />
-    <fn name="request_code_actions" line="1465" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
-    <fn name="poll" line="1497" pub="true" ret="Vec&lt;LspEvent&gt;" reads="python, server_logs, suppress_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, instant_diagnostics.insert(), last_change=, merged_instant_diagnostics.insert(), python_status=, ty_instant_diagnostics.insert(), ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="1604" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
-    <fn name="get_instant_diagnostics_with_version" line="1618" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
-    <fn name="diagnostics_for_line" line="1633" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="1641" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="request_organize_imports" line="1665" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="shutdown" line="1690" pub="true" reads="python, ty_process" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="1705" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="1731" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
+    <fn name="highlight_diagnostic_message" line="92" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" calls="queries: get_ts_config" />
+    <fn name="offset_to_lsp_pos" line="287" pub="true" ret="(u32, u32)" />
+    <fn name="json_escape" line="307" ret="String" />
+    <fn name="path_to_uri" line="326" ret="String" />
+    <fn name="uri_to_path" line="340" ret="PathBuf" />
+    <fn name="make_initialize" line="351" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
+    <fn name="make_initialized" line="381" ret="Vec&lt;u8&gt;" />
+    <fn name="make_did_open" line="385" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_change_full" line="396" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_close" line="406" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_code_action" line="414" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_shutdown" line="441" ret="Vec&lt;u8&gt;" />
+    <fn name="make_exit" line="445" ret="Vec&lt;u8&gt;" />
+    <fn name="write_frame" line="451" ret="bool" calls="render_view::core_text: flush" />
+    <fn name="parse_diagnostic_value" line="463" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
+    <fn name="parse_text_edit_value" line="566" ret="Option&lt;TextChange&gt;" />
+    <fn name="parse_workspace_edit_value" line="591" ret="WorkspaceEdit" calls="self: uri_to_path" />
+    <fn name="parse_code_action_value" line="627" ret="Option&lt;CodeAction&gt;" />
+    <fn name="dispatch_frame" line="662" calls="self: parse_diagnostic_value, parse_workspace_edit_value, uri_to_path" />
+    <fn name="spawn_server" line="803" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
+    <fn name="send_and_log" line="927" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
+    <fn name="run_supervisor" line="960" calls="self: make_code_action, make_did_change_full, make_did_close, make_did_open, make_exit, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
+    <fn name="start" line="1154" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
+    <fn name="notify_open" line="1175" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
+    <fn name="restart" line="1219" pub="true" reads="cmd_tx" />
+    <fn name="notify_change" line="1225" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="notify_close" line="1236" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_code_actions" line="1244" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
+    <fn name="poll" line="1274" pub="true" reads="event_rx" />
+    <fn name="shutdown" line="1283" pub="true" reads="cmd_tx" />
+    <fn name="encode_diagnostics_json" line="1290" ret="String" calls="self: json_escape" />
+    <fn name="new" line="1346" pub="true" ret="Self" />
+    <fn name="ensure_python" line="1367" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
+    <fn name="restart_python" line="1379" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
+    <fn name="disable_python" line="1397" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
+    <fn name="enable_python" line="1416" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
+    <fn name="servers_info" line="1439" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
+    <fn name="process_for_ext" line="1465" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
+    <fn name="notify_open" line="1476" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="notify_change" line="1499" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="notify_close" line="1521" pub="true" reads="python, ty_process, workspaces" />
+    <fn name="request_code_actions" line="1540" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
+    <fn name="poll" line="1572" pub="true" ret="Vec&lt;LspEvent&gt;" reads="python, server_logs, suppress_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, instant_diagnostics.insert(), last_change=, merged_instant_diagnostics.insert(), python_status=, ty_instant_diagnostics.insert(), ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
+    <fn name="get_diagnostics" line="1679" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
+    <fn name="get_instant_diagnostics_with_version" line="1693" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
+    <fn name="diagnostics_for_line" line="1708" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
+    <fn name="request_fix_all" line="1716" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="request_organize_imports" line="1740" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="shutdown" line="1765" pub="true" reads="python, ty_process" writes="python_disabled=" />
+    <fn name="lsp_pos_to_offset" line="1780" pub="true" ret="usize" />
+    <fn name="format_and_highlight_json" line="1806" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
   </mod>
   <mod path="src/main.rs" name="main">
     <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }</type>
@@ -302,7 +303,7 @@
     <fn name="get_injection_query" line="82" pub="true" ret="Option&lt;&amp;'static str&gt;" />
     <fn name="get_folding_query" line="131" pub="true" ret="Option&lt;&amp;'static str&gt;" />
     <fn name="get_ts_config" line="336" pub="true" ret="Option&lt;(tree_sitter::Language, Vec&lt;&amp;'static str&gt;)&gt;" />
-    <fn name="test_all_tree_sitter_queries_are_valid" line="925" calls="self: get_folding_query, get_injection_query, get_params_query, get_ts_config" />
+    <fn name="test_all_tree_sitter_queries_are_valid" line="928" calls="self: get_folding_query, get_injection_query, get_params_query, get_ts_config" />
   </mod>
   <mod path="src/render_view/core_text.rs" name="render_view::core_text">
     <fn name="update_cache" line="6" pub="true" reads="height, left_padding, line_height, scale_factor, width" writes="last_editor_version=, last_height=, last_scroll_x=, last_scroll_y=, last_width=, visual_lines.clear(), visual_lines.push()" calls="self: char_advance, measure_ui_width; editor: byte_at, text_parts; ui_system: contains" />
@@ -320,7 +321,7 @@
     <fn name="push_rounded_rect" line="693" pub="true" reads="vertices" />
   </mod>
   <mod path="src/render_view/diag_popup_ui.rs" name="render_view::diag_popup_ui">
-    <fn name="draw_diagnostic_popup" line="7" pub="true" reads="hovered_diags_cache, scale_factor, theme, width" writes="last_diag_href=, last_diag_popup_rect=" calls="self: draw_atlas_icon, draw_string_scaled, measure_ui_width, push_rect, push_rounded_rect; ui_system: register_blocker, register_rect, reset_cursor_state" />
+    <fn name="draw_diagnostic_popup" line="11" pub="true" reads="height, hovered_diags_cache, scale_factor, theme, width" writes="last_diag_href=, last_diag_popup_rect=" calls="self: char_advance, draw_atlas_icon, draw_string_mono_scaled, measure_mono_width, push_rect, push_rounded_rect; lsp: highlight_diagnostic_message; ui_system: register_blocker, register_rect, reset_cursor_state" />
   </mod>
   <mod path="src/render_view/lsp_ui.rs" name="render_view::lsp_ui">
     <fn name="draw_lsp_servers_panel" line="6" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: char_advance, draw_string_scaled, flush, get_glyph, measure_ui_width, measure_width, push_quad, push_rounded_rect; editor: text_parts; ui_system: contains, register_blocker, register_rect" />

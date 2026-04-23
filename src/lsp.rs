@@ -82,10 +82,83 @@ pub struct Diagnostic {
     pub code: Option<String>,
     /// Ссылка на документацию (из codeDescription.href)
     pub code_href: Option<String>,
-        pub message: String,
+            pub message: String,
     pub source: Option<String>,
     pub quickfixes: Vec<QuickFix>,
     pub tags: Vec<u32>,
+    pub spans: Vec<crate::highlighter::ColorSpan>,
+}
+
+pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
+    let mut spans = Vec::new();
+    let mut backtick_ranges = Vec::new();
+    let mut in_tick = false;
+    let mut tick_start = 0;
+
+    for (offset, c) in msg.char_indices() {
+        if c == '`' {
+            if in_tick {
+                backtick_ranges.push((tick_start, offset));
+                in_tick = false;
+            } else {
+                tick_start = offset + 1;
+                in_tick = true;
+            }
+            spans.push(crate::highlighter::ColorSpan {
+                start: offset,
+                end: offset + c.len_utf8(),
+                color: [0.6, 0.6, 0.65, 1.0],
+            });
+        } else if c == '├' || c == '─' || c == '│' || c == '└' {
+            spans.push(crate::highlighter::ColorSpan {
+                start: offset,
+                end: offset + c.len_utf8(),
+                color: [0.45, 0.45, 0.50, 1.0],
+            });
+        }
+    }
+
+    let mut parser = tree_sitter::Parser::new();
+    if let Some((lang, queries)) = crate::queries::get_ts_config("py") {
+        let _ = parser.set_language(&lang);
+        for &(start, end) in &backtick_ranges {
+            if start >= end { continue; }
+            let code = &msg[start..end];
+            if let Some(tree) = parser.parse(code, None) {
+                for q_str in &queries {
+                    if let Ok(query) = tree_sitter::Query::new(&lang, q_str) {
+                        let mut cursor = tree_sitter::QueryCursor::new();
+                        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+                        while let Some(m) = matches.next() {
+                            for cap in m.captures {
+                                let name = query.capture_names()[cap.index as usize];
+                                let color = match name {
+                                    "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
+                                    "string" => [0.945, 0.980, 0.549, 1.0],
+                                    "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
+                                    "keyword.control" | "keyword" | "operator" => [1.0, 0.474, 0.776, 1.0],
+                                    "function" | "py_function" | "py_builtin_or_func" => [0.313, 0.980, 0.482, 1.0],
+                                    "number" => [0.741, 0.576, 0.976, 1.0],
+                                    "comment" => [0.384, 0.447, 0.643, 1.0],
+                                    _ => [0.972, 0.972, 0.949, 1.0],
+                                };
+                                if color != [0.972, 0.972, 0.949, 1.0] {
+                                    spans.push(crate::highlighter::ColorSpan {
+                                        start: start + cap.node.start_byte(),
+                                        end: start + cap.node.end_byte(),
+                                        color,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    spans.sort_by_key(|s| s.start);
+    spans
 }
 
 /// Одна замена текста (из workspace/applyEdit или codeAction)
@@ -463,30 +536,32 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
                         edits.push(tc);
                     }
                 }
-                if !edits.is_empty() {
-                    quickfixes.push(QuickFix {
-                        title: title.to_string(),
-                        edits,
-                    });
+                                    if !edits.is_empty() {
+                        quickfixes.push(QuickFix {
+                            title: title.to_string(),
+                            edits,
+                        });
+                    }
                 }
             }
         }
-    }
 
-    Some(Diagnostic {
-        start_line: sl,
-        start_col: sc,
-        end_line: el,
-        end_col: ec,
-        severity,
-        code,
-        code_href,
-                message,
-        source,
-        quickfixes,
-        tags,
-    })
-}
+                message = message.replace("\\n", "\n").replace("\\t", "    ").replace('\r', "");
+
+        Some(Diagnostic {
+            start_line: sl,
+            start_col: sc,
+            end_line: el,
+            end_col: ec,
+            severity,
+            code,
+            code_href,
+            message,
+            source,
+            quickfixes,
+            tags,
+            spans: Vec::new(),
+        })}
 
 fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
     let range = v.get("range")?;
