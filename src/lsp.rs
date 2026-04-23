@@ -97,7 +97,7 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-            if msg.contains(":param ") {
+            if msg.contains(":param ") || looks_like_python_hover(msg) {
             let (clean_msg, mut spans, line_kinds, inline_code_ranges) = crate::languages::python::highlight_python_hover_doc(msg);
             spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
             return (clean_msg, spans, line_kinds, inline_code_ranges);
@@ -152,6 +152,14 @@ pub fn highlight_hover_text(
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
+fn looks_like_python_hover(msg: &str) -> bool {
+    let Some(first_non_empty) = msg.lines().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let first = first_non_empty.trim_start();
+    first.starts_with("def ") || first.starts_with("async def ") || first.starts_with("class ")
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
@@ -187,6 +195,27 @@ pub enum HoverLineKindPublic {
     Separator,
     Header1,
     Header2,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{highlight_hover_text, HoverLineKindPublic};
+
+    #[test]
+    fn uses_python_hover_pipeline_for_builtin_signatures() {
+        let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
+D.update([E, ]**F) -> None.  Update D from mapping/iterable E and F.\n\
+If E present and has a .keys() method, does:     for k in E.keys(): D[k] = E[k]\n\
+If E present and lacks .keys() method, does:     for (k, v) in E: D[k] = v\n\
+In either case, this is followed by: for k, v in F.items(): D[k] = v";
+
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def update("));
+        assert!(
+            kinds.iter().all(|kind| *kind != HoverLineKindPublic::Code),
+            "built-in docs must stay prose, without code block styling",
+        );
+    }
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
