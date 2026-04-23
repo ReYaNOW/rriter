@@ -9,6 +9,7 @@ pub struct HoverPopup {
     pub text: String,
     pub spans: Vec<crate::highlighter::ColorSpan>,
     pub byte_offset: usize,
+    pub anchor_x: f32,
     pub scroll: crate::scroll::ScrollState,
 }
 
@@ -38,6 +39,23 @@ thread_local! {
     pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
 }
 
+pub fn clear_hover_popup() -> bool {
+    HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let had_popup = state.popup.is_some()
+            || state.request_id.is_some()
+            || state.byte_offset.is_some()
+            || state.rect.is_some();
+        state.request_id = None;
+        state.popup = None;
+        state.timer = 0.0;
+        state.byte_offset = None;
+        state.rect = None;
+        state.max_scroll = 0.0;
+        had_popup
+    })
+}
+
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
@@ -50,32 +68,8 @@ impl App {
             MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
-
-        let mut consumed_by_hover = false;
-        HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if let Some(rect) = state.rect {
-                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                let pad = 20.0 * s;
-                if mx >= rect.0 - pad
-                    && mx <= rect.0 + rect.2 + pad
-                    && my >= rect.1 - pad
-                    && my <= rect.1 + rect.3 + pad
-                {
-                    let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup {
-                        popup.scroll.anim_speed = 7.0;
-                        popup.scroll.scroll_by(dy);
-                        popup.scroll.clamp_target(0.0, max_scroll);
-                        consumed_by_hover = true;
-                    }
-                }
-            }
-        });
-        if consumed_by_hover {
+        if clear_hover_popup() {
             self.window.as_ref().unwrap().request_redraw();
-            return;
         }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
@@ -516,6 +510,21 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+            let mut in_hover_popup = false;
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            HOVER_STATE.with(|hover_state| {
+                if let Some((x, y, w, h)) = hover_state.borrow().rect {
+                    let pad = 20.0 * s;
+                    if mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad {
+                        in_hover_popup = true;
+                    }
+                }
+            });
+            if !in_hover_popup {
+                clear_hover_popup();
+            }
+        }
 
         if self.is_ide_mode
             && self.ide_panel.is_open(crate::app::PanelId::Terminal)

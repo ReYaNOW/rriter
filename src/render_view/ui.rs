@@ -973,9 +973,12 @@ impl Renderer {
         let max_visible_h = (self.height * 0.45).min(total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
-        let mut bx = mx;
+        let mut bx = popup.anchor_x;
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
+        }
+        if bx < 20.0 * s {
+            bx = 20.0 * s;
         }
 
         let phys_line = editor.line_offsets.partition_point(|&o| o <= popup.byte_offset).saturating_sub(1);
@@ -993,6 +996,15 @@ impl Renderer {
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
             bx, by, box_w, box_h, mx, my
+        );
+        ui_registry.register_rect(
+            crate::ui_system::UiId::BottomPanelBody,
+            bx,
+            by,
+            box_w,
+            box_h,
+            mx,
+            my,
         );
 
         let max_scroll = (total_text_h + pad * 2.0 - box_h).max(0.0);

@@ -1209,6 +1209,11 @@ impl ApplicationHandler for App {
                                         text: clean_msg,
                                         spans,
                                         byte_offset: bo,
+                                        anchor_x: self
+                                            .renderer
+                                            .as_ref()
+                                            .map(|r| r.last_mouse_x)
+                                            .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                     });
                                     if let Some(w) = self.window.as_ref() {

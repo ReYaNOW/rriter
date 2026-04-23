@@ -1314,6 +1314,11 @@ impl App {
         }
 
         if key_event.state == ElementState::Pressed {
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                && crate::app::mouse::clear_hover_popup()
+            {
+                self.window.as_ref().unwrap().request_redraw();
+            }
             // ── Ввод в поле игнора настроек ──────────────────────────────
             if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
                 self.last_action = std::time::Instant::now();
