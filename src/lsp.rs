@@ -109,12 +109,12 @@ thread_local! {
 }
 
 pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
-    let clean_msg = msg.replace('\r', "").replace("```python", "").replace("```", "").trim().to_string();
-    if clean_msg.contains(":param ") {
-        let mut spans = highlight_python_hover_doc(&clean_msg);
+    if msg.contains(":param ") {
+        let (clean_msg, mut spans) = highlight_python_hover_doc(msg);
         spans.sort_unstable_by_key(|s| s.start);
         return (clean_msg, spans);
     }
+    let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
@@ -155,156 +155,258 @@ pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::Color
     (clean_msg, spans)
 }
 
-fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
-    let gray = [0.56, 0.60, 0.66, 1.0];
-    let kw = [1.0, 0.474, 0.776, 1.0];
-    let ty = [0.545, 0.913, 0.992, 1.0];
-    let arg = [1.0, 0.62, 0.24, 1.0];
-    let func = [0.313, 0.980, 0.482, 1.0];
+fn normalize_hover_text(msg: &str) -> String {
+    let mut out = String::new();
+    let mut in_fence = false;
+    for raw in msg.replace('\r', "").lines() {
+        let trimmed = raw.trim();
+        if trimmed == "```" || trimmed == "```python" {
+            in_fence = !in_fence;
+            continue;
+        }
+        if trimmed.starts_with(".. code-block::") {
+            continue;
+        }
+        if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            out.push_str("---");
+            out.push('\n');
+            continue;
+        }
+        if in_fence {
+            out.push_str(raw.trim_start_matches("    "));
+            out.push('\n');
+            continue;
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
 
-    let mut spans = vec![crate::highlighter::ColorSpan {
-        start: 0,
-        end: msg.len(),
-        color: gray,
-    }];
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoverLineKind {
+    Text,
+    Code,
+    Separator,
+}
 
-    let mut in_code_block = false;
-    let mut in_signature = false;
-    let mut byte = 0usize;
-    for raw_line in msg.split('\n') {
-        let line = raw_line;
-        let line_start = byte;
-        let line_end = line_start + line.len();
-        let trimmed = line.trim_start();
+fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>) {
+    let mut out = String::new();
+    let mut kinds = Vec::new();
+    let raw = msg.replace('\r', "");
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut i = 0usize;
+    let mut in_fence = false;
 
-        if trimmed.starts_with(".. code-block:: python") {
-            in_code_block = true;
-        } else if in_code_block && !line.starts_with("    ") && !trimmed.is_empty() {
-            in_code_block = false;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
+            in_fence = !in_fence;
+            i += 1;
+            continue;
         }
 
-        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
-            in_signature = true;
-            // function name
-            if let Some(def_pos) = line.find("def ") {
-                let fn_start = line_start + def_pos + 4;
-                let mut fn_end = fn_start;
-                while fn_end < line_end {
-                    let ch = msg.as_bytes()[fn_end];
-                    if ch == b'(' || ch == b' ' || ch == b':' {
-                        break;
-                    }
-                    fn_end += 1;
-                }
-                if fn_end > fn_start {
-                    spans.push(crate::highlighter::ColorSpan {
-                        start: fn_start,
-                        end: fn_end,
-                        color: func,
-                    });
-                }
-            }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            kinds.push(HoverLineKind::Code);
+            i += 1;
+            continue;
+        }
 
-            // args in signature -> orange
-            if let (Some(lp), Some(rp)) = (line.find('('), line.rfind(')')) {
-                let args = &line[lp + 1..rp];
-                let mut off = line_start + lp + 1;
-                let mut tok_start: Option<usize> = None;
-                for c in args.chars() {
-                    let is_ident = c == '_' || c.is_ascii_alphanumeric();
-                    if is_ident {
-                        if tok_start.is_none() {
-                            tok_start = Some(off);
-                        }
-                    } else if let Some(st) = tok_start.take() {
-                        let token = &msg[st..off];
-                        if token != "None" && token != "Any" {
-                            spans.push(crate::highlighter::ColorSpan {
-                                start: st,
-                                end: off,
-                                color: arg,
-                            });
-                        }
-                    }
-                    off += c.len_utf8();
+        if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+            i += 1;
+            if i < lines.len() && lines[i].trim().is_empty() {
+                i += 1;
+            }
+            while i < lines.len() {
+                let code_line = lines[i];
+                if code_line.trim().is_empty() {
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
                 }
-                if let Some(st) = tok_start.take() {
-                    let token = &msg[st..off];
-                    if token != "None" && token != "Any" {
+                if let Some(stripped) = code_line.strip_prefix("    ") {
+                    out.push_str(stripped);
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
+                }
+                if let Some(stripped) = code_line.strip_prefix('\t') {
+                    out.push_str(stripped);
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
+                }
+                break;
+            }
+            continue;
+        }
+
+        if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            out.push_str("---");
+            out.push('\n');
+            kinds.push(HoverLineKind::Separator);
+            i += 1;
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+        kinds.push(HoverLineKind::Text);
+        i += 1;
+    }
+
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    (out, kinds)
+}
+
+fn ts_capture_color(name: &str) -> Option<[f32; 4]> {
+    match name {
+        "property" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
+        "string" => Some([0.945, 0.980, 0.549, 1.0]),
+        "type" | "class_name" => Some([0.545, 0.913, 0.992, 1.0]),
+        "keyword.control" | "keyword" | "operator" => Some([1.0, 0.474, 0.776, 1.0]),
+        "function" | "py_function" | "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
+        "number" => Some([0.741, 0.576, 0.976, 1.0]),
+        "comment" => Some([0.384, 0.447, 0.643, 1.0]),
+        _ => None,
+    }
+}
+
+fn push_python_ts_spans(
+    code: &str,
+    global_start: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    TS_DIAG_PARSER.with(|p_cell| {
+    TS_DIAG_QUERY.with(|q_cell| {
+    TS_DIAG_CURSOR.with(|c_cell| {
+        let mut parser = p_cell.borrow_mut();
+        let query_opt = q_cell.borrow();
+        let mut cursor = c_cell.borrow_mut();
+
+        if let Some(query) = query_opt.as_ref() {
+            if let Some(tree) = parser.parse(code, None) {
+                let mut matches = cursor.matches(query, tree.root_node(), code.as_bytes());
+                while let Some(m) = matches.next() {
+                    for cap in m.captures {
+                        let name = query.capture_names()[cap.index as usize];
+                        let Some(color) = ts_capture_color(name) else {
+                            continue;
+                        };
                         spans.push(crate::highlighter::ColorSpan {
-                            start: st,
-                            end: off,
-                            color: arg,
+                            start: global_start + cap.node.start_byte(),
+                            end: global_start + cap.node.end_byte(),
+                            color,
                         });
                     }
                 }
             }
         }
+    })})});
+}
 
-        if in_signature {
-            let mut token_start: Option<usize> = None;
-            let mut offset = 0usize;
-            for ch in line.chars() {
-                let is_ident = ch == '_' || ch.is_ascii_alphanumeric();
-                if is_ident {
-                    if token_start.is_none() {
-                        token_start = Some(offset);
-                    }
-                } else if let Some(st_rel) = token_start.take() {
-                    let en_rel = offset;
-                    let tok = &line[st_rel..en_rel];
-                    if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
-                        let mut left = st_rel;
-                        while left > 0 && line.as_bytes()[left - 1].is_ascii_whitespace() {
-                            left -= 1;
-                        }
-                        let prev = if left > 0 {
-                            line.as_bytes()[left - 1] as char
-                        } else {
-                            '\0'
-                        };
-                        let mut right = en_rel;
-                        while right < line.len() && line.as_bytes()[right].is_ascii_whitespace() {
-                            right += 1;
-                        }
-                        let next = if right < line.len() {
-                            line.as_bytes()[right] as char
-                        } else {
-                            '\0'
-                        };
+fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
+    let gray = [0.70, 0.72, 0.76, 1.0];
+    let ty = [0.545, 0.913, 0.992, 1.0];
 
-                        let color = if prev == ':' {
-                            ty
-                        } else if next == ':' || next == '=' || next == ',' || next == ')' {
-                            arg
-                        } else {
-                            gray
-                        };
-                        if color != gray {
-                            spans.push(crate::highlighter::ColorSpan {
-                                start: line_start + st_rel,
-                                end: line_start + en_rel,
-                                color,
-                            });
-                        }
-                    }
-                }
-                offset += ch.len_utf8();
+    let (msg, line_kinds) = normalize_python_hover_doc(raw_msg);
+    let lines: Vec<&str> = msg.split('\n').collect();
+    let mut line_starts = Vec::with_capacity(lines.len());
+    let mut at = 0usize;
+    for line in &lines {
+        line_starts.push(at);
+        at += line.len() + 1;
+    }
+    let mut spans = Vec::new();
+
+    // signature block -> tree-sitter python highlight
+    let mut sig_start_line = None;
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+            sig_start_line = Some(idx);
+            break;
+        }
+        if !trimmed.is_empty() && line_kinds.get(idx) != Some(&HoverLineKind::Text) {
+            break;
+        }
+    }
+    if let Some(start_line) = sig_start_line {
+        let mut end_line = start_line;
+        for i in start_line..lines.len() {
+            let trimmed = lines[i].trim_end();
+            end_line = i;
+            if trimmed.ends_with(") -> Unknown")
+                || trimmed.ends_with(')')
+                || lines[i].contains(") ->")
+            {
+                break;
             }
-            if let Some(st_rel) = token_start.take() {
-                let en_rel = line.len();
-                let tok = &line[st_rel..en_rel];
-                if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
-                    spans.push(crate::highlighter::ColorSpan {
-                        start: line_start + st_rel,
-                        end: line_start + en_rel,
-                        color: arg,
-                    });
-                }
+        }
+        let start = line_starts[start_line];
+        let end = if end_line + 1 < line_starts.len() {
+            line_starts[end_line + 1] - 1
+        } else {
+            msg.len()
+        };
+        if start < end && end <= msg.len() {
+            push_python_ts_spans(&msg[start..end], start, &mut spans);
+        }
+    }
+
+    // code blocks -> tree-sitter python highlight
+    let mut i = 0usize;
+    while i < lines.len() {
+        if line_kinds.get(i) == Some(&HoverLineKind::Code) {
+            let block_start = i;
+            while i < lines.len() && line_kinds.get(i) == Some(&HoverLineKind::Code) {
+                i += 1;
             }
-            if line.contains(") ->") || trimmed.ends_with(')') || trimmed.ends_with(") -> Unknown") {
-                in_signature = false;
+            let block_end_line = i.saturating_sub(1);
+            let start = line_starts[block_start];
+            let end = if block_end_line + 1 < line_starts.len() {
+                line_starts[block_end_line + 1] - 1
+            } else {
+                msg.len()
+            };
+            if start < end && end <= msg.len() {
+                push_python_ts_spans(&msg[start..end], start, &mut spans);
             }
+            continue;
+        }
+        i += 1;
+    }
+
+    // gray intro lines after separator
+    let mut saw_separator = false;
+    let mut gray_intro_left = 2usize;
+    for (line_no, line) in lines.iter().enumerate() {
+        let line_start = line_starts[line_no];
+        let line_end = line_start + line.len();
+        let trimmed = line.trim_start();
+        let is_blank = trimmed.is_empty();
+        let kind = line_kinds.get(line_no).copied().unwrap_or(HoverLineKind::Text);
+
+        if kind == HoverLineKind::Separator {
+            saw_separator = true;
+        }
+
+        if saw_separator && kind == HoverLineKind::Text && !is_blank && gray_intro_left > 0 {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start,
+                end: line_end,
+                color: gray,
+            });
+            gray_intro_left = gray_intro_left.saturating_sub(1);
         }
 
         if trimmed.starts_with(":param ") {
@@ -331,34 +433,33 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
             }
         }
 
-        if in_code_block || line.contains("``async with``") {
-            let kws = ["async", "with", "await", "def", "try", "finally", "as"];
-            for kwd in kws {
-                let mut from = 0usize;
-                while let Some(pos) = line[from..].find(kwd) {
-                    let s = from + pos;
-                    let e = s + kwd.len();
-                    let prev_ok = s == 0 || !line.as_bytes()[s - 1].is_ascii_alphanumeric();
-                    let next_ok = e >= line.len() || !line.as_bytes()[e].is_ascii_alphanumeric();
-                    if prev_ok && next_ok {
-                        spans.push(crate::highlighter::ColorSpan {
-                            start: line_start + s,
-                            end: line_start + e,
-                            color: kw,
-                        });
-                    }
-                    from = e;
-                    if from >= line.len() {
-                        break;
-                    }
-                }
+        // inline RST code: ``...`` -> tree-sitter python only for inner range
+        let mut from = 0usize;
+        while let Some(open_rel) = line[from..].find("``") {
+            let open = from + open_rel;
+            let body_start = open + 2;
+            let Some(close_rel) = line[body_start..].find("``") else {
+                break;
+            };
+            let close = body_start + close_rel;
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start + open,
+                end: line_start + open + 2,
+                color: [0.62, 0.62, 0.68, 1.0],
+            });
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start + close,
+                end: line_start + close + 2,
+                color: [0.62, 0.62, 0.68, 1.0],
+            });
+            if close > body_start {
+                push_python_ts_spans(&line[body_start..close], line_start + body_start, &mut spans);
             }
+            from = close + 2;
         }
-
-        byte = line_end + 1;
     }
 
-    spans
+    (msg, spans)
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
