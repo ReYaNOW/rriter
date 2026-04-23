@@ -17,9 +17,9 @@ pub struct Theme {
     pub minimap_cursor: [f32; 4],
     pub modified_unsaved: [f32; 4],
     pub modified_saved: [f32; 4],
-        pub diag_warn: [f32; 4],
+    pub diag_warn: [f32; 4],
     pub diag_error: [f32; 4],
-    pub unused:[f32; 4],
+    pub unused: [f32; 4],
 }
 
 #[repr(C)]
@@ -198,6 +198,7 @@ pub struct Renderer {
     pub phys_to_visual: Vec<usize>,
     pub last_hovered_diags: Vec<usize>,
     pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
+    pub last_diag_popup_text: String,
     pub last_diag_href: Option<String>,
     pub hide_popups_until_mouse_move: bool,
     pub diag_hover_timer: f32,
@@ -222,7 +223,7 @@ impl Renderer {
     pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
         unsafe {
             let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-                        gl.shader_source(
+            gl.shader_source(
                 v_shader,
                 "#version 330
                 in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;
@@ -236,7 +237,7 @@ impl Renderer {
             gl.compile_shader(v_shader);
 
             let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-                        gl.shader_source(f_shader, "#version 330
+            gl.shader_source(f_shader, "#version 330
                 in vec2 v_uv; in vec4 v_col; in float v_mode; flat in vec3 v_sdf_params;
                 out vec4 out_color;
                 uniform sampler2D tex;
@@ -501,6 +502,7 @@ impl Renderer {
                 phys_to_visual: Vec::new(),
                 last_hovered_diags: Vec::new(),
                 last_diag_popup_rect: None,
+                last_diag_popup_text: String::new(),
                 last_diag_href: None,
                 hide_popups_until_mouse_move: false,
                 diag_hover_timer: 0.0,
@@ -630,7 +632,7 @@ impl Renderer {
         };
 
         for idx in indices {
-                        self.fonts[idx].ensure_loaded();
+            self.fonts[idx].ensure_loaded();
             let font_data = &self.fonts[idx];
             let data = font_data.data_slice();
             if data.is_empty() {
@@ -666,7 +668,7 @@ impl Renderer {
             }
         }
 
-                if rendered_image.is_none() {
+        if rendered_image.is_none() {
             if c != '□' {
                 let fallback = self.get_glyph('□');
                 if let Some(info) = fallback {
@@ -677,7 +679,7 @@ impl Renderer {
             return None;
         }
 
-                let img = rendered_image.unwrap();
+        let img = rendered_image.unwrap();
         let w = img.placement.width as i32;
         let h = img.placement.height as i32;
 
@@ -802,7 +804,7 @@ impl Renderer {
         };
 
         for idx in indices {
-                        self.ui_fonts[idx].ensure_loaded();
+            self.ui_fonts[idx].ensure_loaded();
             let font_data = &self.ui_fonts[idx];
             let data = font_data.data_slice();
             if data.is_empty() {
@@ -838,7 +840,7 @@ impl Renderer {
             }
         }
 
-                if rendered_image.is_none() {
+        if rendered_image.is_none() {
             if c != '□' {
                 let fallback = self.get_ui_glyph('□');
                 if let Some(info) = fallback {
@@ -849,7 +851,7 @@ impl Renderer {
             return None;
         }
 
-                let img = rendered_image.unwrap();
+        let img = rendered_image.unwrap();
         let w = img.placement.width as i32;
         let h = img.placement.height as i32;
 

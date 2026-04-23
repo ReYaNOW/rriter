@@ -505,7 +505,7 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-                let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
 
@@ -514,7 +514,7 @@ impl App {
                 PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
                     self.trigger_file_picker();
                 }
-                                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {
@@ -530,7 +530,8 @@ impl App {
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed),
                     });
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);
@@ -571,7 +572,7 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-                                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
                     self.apply_autocomplete();
                     let edits = std::mem::take(&mut self.editor.sync_edits);
                     if !edits.is_empty() {
@@ -583,7 +584,8 @@ impl App {
                                 lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                             }
                         }
-                        self.highlighter.apply_edits(self.editor.version, edits, None, None);
+                        self.highlighter
+                            .apply_edits(self.editor.version, edits, None, None);
                     }
                     self.last_sent_version = self.editor.version;
                     return;
@@ -913,8 +915,23 @@ impl App {
                 return;
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                if let Some(text) = self.editor.get_selection() {
-                    let _ = self.clipboard.set_text(text);
+                let mut copied = false;
+                if let Some(r) = self.renderer.as_ref() {
+                    if let Some((rx, ry, rw, rh)) = r.last_diag_popup_rect {
+                        let mx = r.last_mouse_x;
+                        let my = r.last_mouse_y;
+                        if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                            if !r.last_diag_popup_text.is_empty() {
+                                let _ = self.clipboard.set_text(&r.last_diag_popup_text);
+                                copied = true;
+                            }
+                        }
+                    }
+                }
+                if !copied {
+                    if let Some(text) = self.editor.get_selection() {
+                        let _ = self.clipboard.set_text(text);
+                    }
                 }
             }
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
@@ -956,10 +973,12 @@ impl App {
                             "{" => "{}",
                             _ => txt,
                         };
-                        
-                                                // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе". 
+
+                        // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе".
                         // Let's log any printable text that is typed.
-                        if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                        if crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
                             self.pending_key_log = Some(crate::app::KeyLog {
                                 key: txt.to_string(),
                                 t0,
@@ -1023,7 +1042,7 @@ impl App {
             if should_sync {
                 if !self.editor.sync_edits.is_empty() {
                     let edits = std::mem::take(&mut self.editor.sync_edits);
-                                        // LSP didChange — отправляем полный текст только если файл Python и IDE режим
+                    // LSP didChange — отправляем полный текст только если файл Python и IDE режим
                     if self.is_ide_mode {
                         if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                             let text = self.editor.get_full_text();
@@ -1043,20 +1062,30 @@ impl App {
 
                     let edit_end_byte = if let Some(edit) = edits.last() {
                         match edit {
-                            crate::highlighter::SyncEdit::Insert { offset, text } => Some(offset + text.len()),
+                            crate::highlighter::SyncEdit::Insert { offset, text } => {
+                                Some(offset + text.len())
+                            }
                             crate::highlighter::SyncEdit::Delete { offset, .. } => Some(*offset),
                         }
                     } else {
                         None
                     };
-                    
+
                     let mut line_start_byte = None;
                     let mut line_end_byte = None;
-                    
+
                     if let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) {
-                        let sl = self.editor.line_offsets.partition_point(|&x| x <= sb).saturating_sub(1);
-                        let el = self.editor.line_offsets.partition_point(|&x| x <= eb).saturating_sub(1);
-                        
+                        let sl = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= sb)
+                            .saturating_sub(1);
+                        let el = self
+                            .editor
+                            .line_offsets
+                            .partition_point(|&x| x <= eb)
+                            .saturating_sub(1);
+
                         line_start_byte = Some(self.editor.line_offsets[sl]);
                         line_end_byte = if el + 1 < self.editor.line_offsets.len() {
                             Some(self.editor.line_offsets[el + 1])
@@ -1065,7 +1094,12 @@ impl App {
                         };
                     }
 
-                    self.highlighter.apply_edits(self.editor.version, edits, line_start_byte, line_end_byte);
+                    self.highlighter.apply_edits(
+                        self.editor.version,
+                        edits,
+                        line_start_byte,
+                        line_end_byte,
+                    );
                 }
                 self.last_sent_version = self.editor.version;
 
@@ -1105,7 +1139,7 @@ impl App {
                         self.update_autocomplete();
                     }
                 }
-                
+
                 if let Some(log) = &mut self.pending_key_log {
                     log.t_highlight = Some(std::time::Instant::now());
                 }
@@ -1291,7 +1325,7 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                                        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
                         let trimmed = self
                             .settings_ignore_editor
                             .get_full_text()
@@ -1309,7 +1343,8 @@ impl App {
                                 maximized,
                                 ide_workspaces: self.ide_workspaces.clone(),
                                 ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                                enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                                    .load(std::sync::atomic::Ordering::Relaxed),
                             });
                             self.refresh_file_tree();
                         }
