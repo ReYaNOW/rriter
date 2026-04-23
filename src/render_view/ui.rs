@@ -997,15 +997,10 @@ impl Renderer {
             crate::ui_system::UiId::BottomPanelBody,
             bx, by, box_w, box_h, mx, my
         );
-        ui_registry.register_rect(
-            crate::ui_system::UiId::BottomPanelBody,
-            bx,
-            by,
-            box_w,
-            box_h,
-            mx,
-            my,
-        );
+        let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
+        if popup_hovered && !*wants_pointer {
+            ui_registry.reset_cursor_state();
+        }
 
         let max_scroll = (total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
@@ -1051,7 +1046,7 @@ impl Renderer {
                 bx + box_w - 12.0 * s, by, 12.0 * s, box_h, mx, my
             );
             if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
-                *wants_pointer = true;
+                ui_registry.reset_cursor_state();
             }
         }
 

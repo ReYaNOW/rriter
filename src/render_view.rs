@@ -2163,25 +2163,24 @@ impl Renderer {
             );
         }
 
-        let hover_popup_opt = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().popup.clone());
-        if let Some(popup) = &hover_popup_opt {
-            let (bx, by, bw, bh, ms) = self.draw_hover_popup(
-                popup,
-                editor,
-                ui_registry,
-                mx,
-                my,
-                render_scroll_y,
-                &mut wants_pointer,
-            );
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
+        crate::app::mouse::HOVER_STATE.with(|s| {
+            let mut state = s.borrow_mut();
+            if let Some(popup) = state.popup.as_ref() {
+                let (bx, by, bw, bh, ms) = self.draw_hover_popup(
+                    popup,
+                    editor,
+                    ui_registry,
+                    mx,
+                    my,
+                    render_scroll_y,
+                    &mut wants_pointer,
+                );
                 state.rect = Some((bx, by, bw, bh));
                 state.max_scroll = ms;
-            });
-        } else {
-            crate::app::mouse::HOVER_STATE.with(|s| s.borrow_mut().rect = None);
-        }
+            } else {
+                state.rect = None;
+            }
+        });
 
         if let Some((path, tx, ty)) = tab_tooltip {
             self.draw_tab_tooltip(&path, tx, ty, s);

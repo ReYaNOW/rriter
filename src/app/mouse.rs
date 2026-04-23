@@ -76,8 +76,31 @@ impl App {
             MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
-        if clear_hover_popup() {
+        let mut consumed_by_hover = false;
+        HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if let Some(rect) = state.rect {
+                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+                let my = self.renderer.as_ref().unwrap().last_mouse_y;
+                let pad = 40.0 * s;
+                if mx >= rect.0 - pad
+                    && mx <= rect.0 + rect.2 + pad
+                    && my >= rect.1 - pad
+                    && my <= rect.1 + rect.3 + pad
+                {
+                    let max_scroll = state.max_scroll;
+                    if let Some(popup) = &mut state.popup {
+                        popup.scroll.anim_speed = 7.0;
+                        popup.scroll.scroll_by(dy);
+                        popup.scroll.clamp_target(0.0, max_scroll);
+                        consumed_by_hover = true;
+                    }
+                }
+            }
+        });
+        if consumed_by_hover {
             self.window.as_ref().unwrap().request_redraw();
+            return;
         }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
