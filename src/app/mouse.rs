@@ -1683,10 +1683,11 @@ impl App {
         HOVER_STATE.with(|state| {
             let state = state.borrow();
             if let Some(rect) = state.rect {
-                if position.x as f32 >= rect.0
-                    && position.x as f32 <= rect.0 + rect.2
-                    && position.y as f32 >= rect.1
-                    && position.y as f32 <= rect.1 + rect.3
+                let pad = 40.0 * s;
+                if position.x as f32 >= rect.0 - pad
+                    && position.x as f32 <= rect.0 + rect.2 + pad
+                    && position.y as f32 >= rect.1 - pad
+                    && position.y as f32 <= rect.1 + rect.3 + pad
                 {
                     in_hover_popup = true;
                 }

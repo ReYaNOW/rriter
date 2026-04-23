@@ -169,6 +169,7 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
     }];
 
     let mut in_code_block = false;
+    let mut in_signature = false;
     let mut byte = 0usize;
     for raw_line in msg.split('\n') {
         let line = raw_line;
@@ -183,6 +184,7 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
         }
 
         if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+            in_signature = true;
             // function name
             if let Some(def_pos) = line.find("def ") {
                 let fn_start = line_start + def_pos + 4;
@@ -236,6 +238,72 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
                         });
                     }
                 }
+            }
+        }
+
+        if in_signature {
+            let mut token_start: Option<usize> = None;
+            let mut offset = 0usize;
+            for ch in line.chars() {
+                let is_ident = ch == '_' || ch.is_ascii_alphanumeric();
+                if is_ident {
+                    if token_start.is_none() {
+                        token_start = Some(offset);
+                    }
+                } else if let Some(st_rel) = token_start.take() {
+                    let en_rel = offset;
+                    let tok = &line[st_rel..en_rel];
+                    if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
+                        let mut left = st_rel;
+                        while left > 0 && line.as_bytes()[left - 1].is_ascii_whitespace() {
+                            left -= 1;
+                        }
+                        let prev = if left > 0 {
+                            line.as_bytes()[left - 1] as char
+                        } else {
+                            '\0'
+                        };
+                        let mut right = en_rel;
+                        while right < line.len() && line.as_bytes()[right].is_ascii_whitespace() {
+                            right += 1;
+                        }
+                        let next = if right < line.len() {
+                            line.as_bytes()[right] as char
+                        } else {
+                            '\0'
+                        };
+
+                        let color = if prev == ':' {
+                            ty
+                        } else if next == ':' || next == '=' || next == ',' || next == ')' {
+                            arg
+                        } else {
+                            gray
+                        };
+                        if color != gray {
+                            spans.push(crate::highlighter::ColorSpan {
+                                start: line_start + st_rel,
+                                end: line_start + en_rel,
+                                color,
+                            });
+                        }
+                    }
+                }
+                offset += ch.len_utf8();
+            }
+            if let Some(st_rel) = token_start.take() {
+                let en_rel = line.len();
+                let tok = &line[st_rel..en_rel];
+                if tok != "def" && tok != "async" && tok != "None" && tok != "Any" {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: line_start + st_rel,
+                        end: line_start + en_rel,
+                        color: arg,
+                    });
+                }
+            }
+            if line.contains(") ->") || trimmed.ends_with(')') || trimmed.ends_with(") -> Unknown") {
+                in_signature = false;
             }
         }
 
