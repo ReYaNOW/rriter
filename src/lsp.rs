@@ -109,12 +109,12 @@ thread_local! {
 }
 
 pub fn highlight_hover_text(msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
-    let clean_msg = normalize_hover_text(msg);
-    if clean_msg.contains(":param ") {
-        let mut spans = highlight_python_hover_doc(&clean_msg);
+    if msg.contains(":param ") {
+        let (clean_msg, mut spans) = highlight_python_hover_doc(msg);
         spans.sort_unstable_by_key(|s| s.start);
         return (clean_msg, spans);
     }
+    let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
@@ -183,42 +183,124 @@ fn normalize_hover_text(msg: &str) -> String {
     out.trim_end().to_string()
 }
 
-fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoverLineKind {
+    Text,
+    Code,
+    Separator,
+}
+
+fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>) {
+    let mut out = String::new();
+    let mut kinds = Vec::new();
+    let raw = msg.replace('\r', "");
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut i = 0usize;
+    let mut in_fence = false;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        if trimmed == "```python" || trimmed == "```py" || trimmed == "```" {
+            in_fence = !in_fence;
+            i += 1;
+            continue;
+        }
+
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            kinds.push(HoverLineKind::Code);
+            i += 1;
+            continue;
+        }
+
+        if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+            i += 1;
+            if i < lines.len() && lines[i].trim().is_empty() {
+                i += 1;
+            }
+            while i < lines.len() {
+                let code_line = lines[i];
+                if code_line.trim().is_empty() {
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
+                }
+                if let Some(stripped) = code_line.strip_prefix("    ") {
+                    out.push_str(stripped);
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
+                }
+                if let Some(stripped) = code_line.strip_prefix('\t') {
+                    out.push_str(stripped);
+                    out.push('\n');
+                    kinds.push(HoverLineKind::Code);
+                    i += 1;
+                    continue;
+                }
+                break;
+            }
+            continue;
+        }
+
+        if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            out.push_str("---");
+            out.push('\n');
+            kinds.push(HoverLineKind::Separator);
+            i += 1;
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+        kinds.push(HoverLineKind::Text);
+        i += 1;
+    }
+
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    (out, kinds)
+}
+
+fn highlight_python_hover_doc(raw_msg: &str) -> (String, Vec<crate::highlighter::ColorSpan>) {
     let gray = [0.56, 0.60, 0.66, 1.0];
     let kw = [1.0, 0.474, 0.776, 1.0];
     let ty = [0.545, 0.913, 0.992, 1.0];
     let arg = [1.0, 0.62, 0.24, 1.0];
     let func = [0.313, 0.980, 0.482, 1.0];
 
+    let (msg, line_kinds) = normalize_python_hover_doc(raw_msg);
     let mut spans = Vec::new();
 
-    let mut in_code_block = false;
     let mut in_signature = false;
+    let mut saw_separator = false;
     let mut gray_intro_left = 2usize;
-    let mut passed_intro_blank = false;
     let mut byte = 0usize;
-    for raw_line in msg.split('\n') {
+    for (line_no, raw_line) in msg.split('\n').enumerate() {
         let line = raw_line;
         let line_start = byte;
         let line_end = line_start + line.len();
         let trimmed = line.trim_start();
         let is_blank = trimmed.is_empty();
+        let kind = line_kinds.get(line_no).copied().unwrap_or(HoverLineKind::Text);
 
-        if !passed_intro_blank && is_blank {
-            passed_intro_blank = true;
-        } else if !passed_intro_blank && !is_blank && gray_intro_left > 0 {
+        if kind == HoverLineKind::Separator {
+            saw_separator = true;
+        }
+
+        if saw_separator && kind == HoverLineKind::Text && !is_blank && gray_intro_left > 0 {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
                 color: gray,
             });
             gray_intro_left = gray_intro_left.saturating_sub(1);
-        }
-
-        if trimmed.starts_with(".. code-block:: python") {
-            in_code_block = true;
-        } else if in_code_block && !line.starts_with("    ") && !trimmed.is_empty() {
-            in_code_block = false;
         }
 
         if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
@@ -369,7 +451,7 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
             }
         }
 
-        if in_code_block || line.contains("``async with``") {
+        if kind == HoverLineKind::Code || line.contains("``async with``") {
             let kws = ["async", "with", "await", "def", "try", "finally", "as"];
             for kwd in kws {
                 let mut from = 0usize;
@@ -396,7 +478,7 @@ fn highlight_python_hover_doc(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
         byte = line_end + 1;
     }
 
-    spans
+    (msg, spans)
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
