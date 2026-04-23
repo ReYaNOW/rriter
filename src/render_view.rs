@@ -1523,17 +1523,25 @@ impl Renderer {
 
         self.flush();
 
-        self.hovered_diags_cache.clear();
+                self.hovered_diags_cache.clear();
         let mut mouse_in_popup = false;
-        if let Some(rect) = self.last_diag_popup_rect {
-            // Расширяем "зону безопасности" попапа на 40px во все стороны,
-            // чтобы можно было вести мышь по диагонали от волнистой линии, и он не закрывался.
+
+        let type_rect = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().rect);
+        let diag_rect = self.last_diag_popup_rect;
+
+        if let Some(rect) = diag_rect {
+            let mut union_rect = rect;
+            if let Some(tr) = type_rect {
+                let x_min = union_rect.0.min(tr.0);
+                let y_min = union_rect.1.min(tr.1);
+                let x_max = (union_rect.0 + union_rect.2).max(tr.0 + tr.2);
+                let y_max = (union_rect.1 + union_rect.3).max(tr.1 + tr.3);
+                union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
+            }
+
             let pad = 40.0 * self.scale_factor;
-            if mx >= rect.0 - pad
-                && mx <= rect.0 + rect.2 + pad
-                && my >= rect.1 - pad
-                && my <= rect.1 + rect.3 + pad
-            {
+            if mx >= union_rect.0 - pad && mx <= union_rect.0 + union_rect.2 + pad 
+               && my >= union_rect.1 - pad && my <= union_rect.1 + union_rect.3 + pad {
                 mouse_in_popup = true;
             }
         }
@@ -2142,17 +2150,42 @@ impl Renderer {
         self.last_hovered_diags.clear();
         self.last_hovered_diags
             .extend(self.hovered_diags_cache.iter().map(|h| h.0));
-        let first_idx = self.last_hovered_diags.first().copied();
+                let first_idx = self.last_hovered_diags.first().copied();
+
+        let (has_type_popup, is_hover_pending) = crate::app::mouse::HOVER_STATE.with(|s| {
+            let state = s.borrow();
+            (state.popup.is_some(), state.request_id.is_some())
+        });
+                        let first_idx = self.last_hovered_diags.first().copied();
+
+        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) = crate::app::mouse::HOVER_STATE.with(|s| {
+            let state = s.borrow();
+            (state.popup.is_some(), state.request_id.is_some(), state.timer, state.byte_offset.is_some())
+        });
+
+        let type_in_progress = has_byte_offset && !has_type_popup && (hover_timer < 0.2 || is_hover_pending);
+        let is_error_hovered = !self.hovered_diags_cache.is_empty();
 
         if first_idx != self.diag_hover_timer_idx {
             self.diag_hover_timer_idx = first_idx;
             self.diag_hover_timer = 0.0;
-        } else if first_idx.is_some() {
+        } else if first_idx.is_some() || has_type_popup || type_in_progress {
             self.diag_hover_timer += popup_dt;
         }
-        let popup_ready = self.diag_hover_timer >= 0.2;
 
-                if popup_ready && !self.hovered_diags_cache.is_empty() {
+        let error_timer_ready = self.diag_hover_timer >= 0.2;
+
+        let mut show_error = is_error_hovered && error_timer_ready;
+        let mut show_type = has_type_popup;
+
+        if is_error_hovered && type_in_progress {
+            show_error = false;
+        }
+        if has_byte_offset && is_error_hovered && !error_timer_ready {
+            show_type = false;
+        }
+
+        if show_error {
             self.draw_diagnostic_popup(
                 &lsp_diagnostics,
                 ide_panel,
@@ -2161,27 +2194,33 @@ impl Renderer {
                 my,
                 &mut wants_pointer,
             );
+        } else {
+            self.last_diag_popup_rect = None;
         }
 
         crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
-            if let Some(popup) = state.popup.as_ref() {
-                let selection = match (state.selection_anchor, state.selection_cursor) {
-                    (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
-                    _ => None,
-                };
-                let (bx, by, bw, bh, ms) = self.draw_hover_popup(
-                    popup,
-                    selection,
-                    editor,
-                    ui_registry,
-                    mx,
-                    my,
-                    render_scroll_y,
-                    &mut wants_pointer,
-                );
-                state.rect = Some((bx, by, bw, bh));
-                state.max_scroll = ms;
+            if show_type {
+                if let Some(popup) = state.popup.as_ref() {
+                    let selection = match (state.selection_anchor, state.selection_cursor) {
+                        (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+                        _ => None,
+                    };
+                    let (bx, by, bw, bh, ms) = self.draw_hover_popup(
+                        popup,
+                        selection,
+                        editor,
+                        ui_registry,
+                        mx,
+                        my,
+                        render_scroll_y,
+                        &mut wants_pointer,
+                    );
+                    state.rect = Some((bx, by, bw, bh));
+                    state.max_scroll = ms;
+                } else {
+                    state.rect = None;
+                }
             } else {
                 state.rect = None;
             }

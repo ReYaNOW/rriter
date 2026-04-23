@@ -685,15 +685,30 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
-        if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+                if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             let mut in_hover_popup = false;
-            HOVER_STATE.with(|hover_state| {
-                if let Some((x, y, w, h)) = hover_state.borrow().rect {
-                    if mx >= x && mx <= x + w && my >= y && my <= y + h {
-                        in_hover_popup = true;
-                    }
+            let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
+            let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
+
+            if type_rect.is_some() || diag_rect.is_some() {
+                let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
+                if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
+                    let x_min = r1.0.min(r2.0);
+                    let y_min = r1.1.min(r2.1);
+                    let x_max = (r1.0 + r1.2).max(r2.0 + r2.2);
+                    let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
+                    union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
                 }
-            });
+                let pad = 40.0 * self.renderer.as_ref().unwrap().scale_factor;
+                if mx >= union_rect.0 - pad
+                    && mx <= union_rect.0 + union_rect.2 + pad
+                    && my >= union_rect.1 - pad
+                    && my <= union_rect.1 + union_rect.3 + pad
+                {
+                    in_hover_popup = true;
+                }
+            }
+
             if !in_hover_popup {
                 clear_hover_popup();
             }
@@ -1725,21 +1740,30 @@ impl App {
             }
         }
 
-        let s = self.renderer.as_ref().unwrap().scale_factor;
+                let s = self.renderer.as_ref().unwrap().scale_factor;
         let mut in_hover_popup = false;
-        HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            if let Some(rect) = state.rect {
-                let pad = 40.0 * s;
-                if position.x as f32 >= rect.0 - pad
-                    && position.x as f32 <= rect.0 + rect.2 + pad
-                    && position.y as f32 >= rect.1 - pad
-                    && position.y as f32 <= rect.1 + rect.3 + pad
-                {
-                    in_hover_popup = true;
-                }
+
+        let type_rect = HOVER_STATE.with(|state| state.borrow().rect);
+        let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
+
+        if type_rect.is_some() || diag_rect.is_some() {
+            let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
+            if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
+                let x_min = r1.0.min(r2.0);
+                let y_min = r1.1.min(r2.1);
+                let x_max = (r1.0 + r1.2).max(r2.0 + r2.2);
+                let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
+                union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-        });
+            let pad = 40.0 * s;
+            if position.x as f32 >= union_rect.0 - pad
+                && position.x as f32 <= union_rect.0 + union_rect.2 + pad
+                && position.y as f32 >= union_rect.1 - pad
+                && position.y as f32 <= union_rect.1 + union_rect.3 + pad
+            {
+                in_hover_popup = true;
+            }
+        }
 
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;

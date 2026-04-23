@@ -1015,24 +1015,38 @@ impl Renderer {
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
         }
-        if bx < 20.0 * s {
+                if bx < 20.0 * s {
             bx = 20.0 * s;
         }
-
         let phys_line = editor.line_offsets.partition_point(|&o| o <= popup.byte_offset).saturating_sub(1);
-        let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
-        let line_y = self.baseline_offset + (vis_line_idx * self.line_height) - render_scroll_y;
+                let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
+                let line_top_y = (vis_line_idx * self.line_height) - render_scroll_y;
 
-        let mut by = line_y + self.line_height + 4.0 * s;
-        if by + box_h > self.height - 20.0 * s {
-            by = line_y - box_h - 4.0 * s;
-        }
-        if by < 0.0 {
-            by = 10.0 * s;
-        }
+                let mut by = line_top_y - box_h - 8.0 * s;
 
-        ui_registry.register_blocker(
-            crate::ui_system::UiId::BottomPanelBody,
+                if let Some(diag_rect) = self.last_diag_popup_rect {
+                    let diag_y = diag_rect.1;
+                    let diag_h = diag_rect.3;
+                    if diag_y > line_top_y {
+                        by = line_top_y - box_h - 8.0 * s;
+                    } else {
+                        by = diag_y - box_h - 6.0 * s;
+                    }
+                    if by < 0.0 {
+                        if diag_y < line_top_y + self.line_height * 0.5 {
+                            by = line_top_y + self.line_height + 8.0 * s;
+                        } else {
+                            by = diag_y + diag_h + 6.0 * s;
+                        }
+                    }
+                } else if by < 0.0 {
+                    by = line_top_y + self.line_height + 8.0 * s;
+                }
+
+                if by + box_h > self.height - 20.0 * s {
+                    by = (self.height - box_h - 20.0 * s).max(10.0 * s);
+                }
+        ui_registry.register_blocker(crate::ui_system::UiId::BottomPanelBody,
             bx, by, box_w, box_h, mx, my
         );
         let popup_hovered = mx >= bx && mx <= bx + box_w && my >= by && my <= by + box_h;
@@ -1202,12 +1216,26 @@ impl Renderer {
                 crate::ui_system::UiId::HoverPopupScroll,
                 bx + box_w - 12.0 * s, by, 12.0 * s, box_h, mx, my
             );
-            if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
+                        if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
                 ui_registry.reset_cursor_state();
             }
         }
 
-        (bx, by, box_w, box_h, max_scroll)
+                        let mut state_x = bx;
+                        let mut state_y = by;
+                        let mut state_w = box_w;
+                        let mut state_h = box_h;
+
+                        if let Some(diag_rect) = self.last_diag_popup_rect {
+                            if (by + box_h - diag_rect.1).abs() <= 10.0 * s || (diag_rect.1 + diag_rect.3 - by).abs() <= 10.0 * s {
+                                state_x = bx.min(diag_rect.0);
+                                state_y = by.min(diag_rect.1);
+                                state_w = (bx + box_w).max(diag_rect.0 + diag_rect.2) - state_x;
+                                state_h = (by + box_h).max(diag_rect.1 + diag_rect.3) - state_y;
+                            }
+                        }
+
+                        (state_x, state_y, state_w, state_h, max_scroll)
     }
 
     pub fn draw_problems_panel(
