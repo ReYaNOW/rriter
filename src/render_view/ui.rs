@@ -948,7 +948,6 @@ impl Renderer {
             for span in &popup.spans {
                 if offset >= span.start && offset < span.end {
                     color = span.color;
-                    break;
                 }
             }
 

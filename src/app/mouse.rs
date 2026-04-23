@@ -180,11 +180,10 @@ impl App {
             if let Some(rect) = state.rect {
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                let pad = 40.0 * s;
-                if mx >= rect.0 - pad
-                    && mx <= rect.0 + rect.2 + pad
-                    && my >= rect.1 - pad
-                    && my <= rect.1 + rect.3 + pad
+                if mx >= rect.0
+                    && mx <= rect.0 + rect.2
+                    && my >= rect.1
+                    && my <= rect.1 + rect.3
                 {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
@@ -641,11 +640,9 @@ impl App {
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             let mut in_hover_popup = false;
-            let s = self.renderer.as_ref().unwrap().scale_factor;
             HOVER_STATE.with(|hover_state| {
                 if let Some((x, y, w, h)) = hover_state.borrow().rect {
-                    let pad = 40.0 * s;
-                    if mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad {
+                    if mx >= x && mx <= x + w && my >= y && my <= y + h {
                         in_hover_popup = true;
                     }
                 }
@@ -1686,11 +1683,10 @@ impl App {
         HOVER_STATE.with(|state| {
             let state = state.borrow();
             if let Some(rect) = state.rect {
-                let pad = 40.0 * s;
-                if position.x as f32 >= rect.0 - pad
-                    && position.x as f32 <= rect.0 + rect.2 + pad
-                    && position.y as f32 >= rect.1 - pad
-                    && position.y as f32 <= rect.1 + rect.3 + pad
+                if position.x as f32 >= rect.0
+                    && position.x as f32 <= rect.0 + rect.2
+                    && position.y as f32 >= rect.1
+                    && position.y as f32 <= rect.1 + rect.3
                 {
                     in_hover_popup = true;
                 }
