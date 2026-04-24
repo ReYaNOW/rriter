@@ -131,33 +131,44 @@ fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
 ) -> Option<String> {
-    fn is_ident_byte(b: u8) -> bool {
-        matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-    }
-    fn symbol_at_offset(editor: &crate::editor::Editor, byte_offset: usize) -> Option<String> {
-        if byte_offset >= editor.len() {
-            return None;
-        }
-        let mut pos = byte_offset;
-        if !is_ident_byte(editor.byte_at(pos)) {
-            if pos > 0 && is_ident_byte(editor.byte_at(pos - 1)) {
-                pos -= 1;
-            } else {
-                return None;
+    fn source_attribute_hover_for_symbol(
+        text: &str,
+        line_offsets: &[usize],
+        symbol: &str,
+    ) -> Option<String> {
+        for idx in 0..line_offsets.len() {
+            let line = source_line(text, line_offsets, idx)?;
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
             }
+            let mut matched = false;
+            if let Some(rest) = trimmed.strip_prefix(symbol) {
+                matched = rest.starts_with(':') || rest.starts_with(" =");
+            }
+            if !matched {
+                continue;
+            }
+            let mut class_name = None;
+            for up in (0..idx).rev() {
+                let class_line = source_line(text, line_offsets, up)?.trim_start();
+                if let Some(rest) = class_line.strip_prefix("class ") {
+                    class_name = rest
+                        .split(|c: char| c == '(' || c == ':' || c.is_whitespace())
+                        .next()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    break;
+                }
+            }
+            let header = if let Some(class_name) = class_name {
+                format!("Class attribute {symbol} of {class_name}")
+            } else {
+                format!("Attribute {symbol}")
+            };
+            return Some(format!("{header}\n{}", trimmed.trim_end()));
         }
-        let mut start = pos;
-        while start > 0 && is_ident_byte(editor.byte_at(start - 1)) {
-            start -= 1;
-        }
-        let mut end = pos + 1;
-        while end < editor.len() && is_ident_byte(editor.byte_at(end)) {
-            end += 1;
-        }
-        editor
-            .get_full_text()
-            .get(start..end)
-            .map(|s| s.to_string())
+        None
     }
     fn def_name(line: &str) -> Option<&str> {
         let trimmed = line.trim_start();
@@ -189,6 +200,15 @@ fn source_signature_for_hover(
         }
         None
     });
+    if def_line_idx.is_none() {
+        if let Some(symbol) = hovered_symbol.as_deref() {
+            if let Some(attr_hover) =
+                source_attribute_hover_for_symbol(&text, &editor.line_offsets, symbol)
+            {
+                return Some(attr_hover);
+            }
+        }
+    }
     if def_line_idx.is_none() {
         for up in 0..=24usize {
             let idx = line_idx.saturating_sub(up);
@@ -249,6 +269,36 @@ fn source_signature_for_hover(
     Some(signature)
 }
 
+fn is_ident_byte(b: u8) -> bool {
+    matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+}
+
+fn symbol_at_offset(editor: &crate::editor::Editor, byte_offset: usize) -> Option<String> {
+    if byte_offset >= editor.len() {
+        return None;
+    }
+    let mut pos = byte_offset;
+    if !is_ident_byte(editor.byte_at(pos)) {
+        if pos > 0 && is_ident_byte(editor.byte_at(pos - 1)) {
+            pos -= 1;
+        } else {
+            return None;
+        }
+    }
+    let mut start = pos;
+    while start > 0 && is_ident_byte(editor.byte_at(start - 1)) {
+        start -= 1;
+    }
+    let mut end = pos + 1;
+    while end < editor.len() && is_ident_byte(editor.byte_at(end)) {
+        end += 1;
+    }
+    editor
+        .get_full_text()
+        .get(start..end)
+        .map(|s| s.to_string())
+}
+
 fn wrap_signature_after_first_param(
     signature: &str,
     line_prefix: &str,
@@ -284,8 +334,8 @@ fn wrap_signature_after_first_param(
 #[cfg(test)]
 mod tests {
     use super::{
-        module_path_from_definition_path, source_signature_for_hover,
-        wrap_signature_after_first_param,
+        module_path_from_definition_path, should_replace_hover_with_source_signature,
+        source_signature_for_hover, symbol_at_offset, wrap_signature_after_first_param,
     };
 
     #[test]
@@ -335,6 +385,45 @@ mod tests {
     }
 
     #[test]
+    fn attribute_hover_uses_source_attribute_line() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class FcmSenderService:\n    client: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))\n\nasync def close_client():\n    if FcmSenderService.client:\n        pass\n",
+        );
+        let hover_offset = editor
+            .get_full_text()
+            .rfind("client")
+            .expect("expected client usage");
+        let signature =
+            source_signature_for_hover(&editor, hover_offset).expect("expected attribute hover");
+        assert_eq!(
+            signature,
+            "Class attribute client of FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))"
+        );
+    }
+
+    #[test]
+    fn simple_type_hover_triggers_source_replacement() {
+        assert!(should_replace_hover_with_source_signature(
+            "AsyncFirebaseClient"
+        ));
+    }
+
+    #[test]
+    fn symbol_at_offset_reads_identifier_from_nearby_position() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("await service.client\n");
+        let client_offset = editor
+            .get_full_text()
+            .find("client")
+            .expect("expected client token");
+        assert_eq!(
+            symbol_at_offset(&editor, client_offset + 1).as_deref(),
+            Some("client")
+        );
+    }
+
+    #[test]
     fn module_path_from_site_packages_strips_noise_segments() {
         let path = std::path::Path::new(
             "/usr/lib/python3.12/site-packages/litestar/exceptions/http_exceptions.py",
@@ -356,8 +445,19 @@ mod tests {
 
 fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
     let trimmed = clean_msg.trim_start();
+    let simple_type = !trimmed.contains('\n')
+        && !trimmed.contains(' ')
+        && !trimmed.contains("::")
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && trimmed
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.');
     (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
         && clean_msg.contains("_AsyncGeneratorContextManager")
+        || simple_type
 }
 
 impl ApplicationHandler for App {
@@ -1554,6 +1654,17 @@ impl ApplicationHandler for App {
                                 if let Some(bo) = state.byte_offset {
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         crate::lsp::highlight_hover_text(&t);
+                                    let hovered_symbol = symbol_at_offset(&self.editor, bo);
+                                    if clean_msg.trim() == "None"
+                                        && hovered_symbol.as_deref() == Some("await")
+                                    {
+                                        state.popup = None;
+                                        state.pending_popup = None;
+                                        if let Some(w) = self.window.as_ref() {
+                                            w.request_redraw();
+                                        }
+                                        return;
+                                    }
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         if should_replace_hover_with_source_signature(&clean_msg) {
                                             if let Some(sig) =
