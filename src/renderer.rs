@@ -197,7 +197,7 @@ pub struct Renderer {
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub last_hovered_diags: Vec<usize>,
-    pub last_diag_popup_rect: Option<(f32, f32, f32, f32)>,
+    pub last_diag_popup_rect: Option<(f32, f32, f32, f32, f32, f32, f32)>,
     pub last_diag_popup_text: String,
     pub last_diag_href: Option<String>,
     pub hide_popups_until_mouse_move: bool,
@@ -212,7 +212,7 @@ pub struct Renderer {
 
     pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
-    pub hovered_diags_cache: Vec<(usize, f32, f32, f32)>,
+    pub hovered_diags_cache: Vec<(usize, f32, f32, f32, f32)>,
     pub identical_words_cache: Vec<(usize, usize)>,
     pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,

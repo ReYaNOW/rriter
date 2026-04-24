@@ -1532,33 +1532,70 @@ impl Renderer {
 
         self.flush();
 
-        self.hovered_diags_cache.clear();
         let mut mouse_in_popup = false;
 
         let type_rect = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().rect);
         let diag_rect = self.last_diag_popup_rect;
 
-        if let Some(rect) = diag_rect {
-            let mut union_rect = rect;
-            if let Some(tr) = type_rect {
-                let x_min = union_rect.0.min(tr.0);
-                let y_min = union_rect.1.min(tr.1);
-                let x_max = (union_rect.0 + union_rect.2).max(tr.0 + tr.2);
-                let y_max = (union_rect.1 + union_rect.3).max(tr.1 + tr.3);
-                union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
-            }
-
-            let pad = 40.0 * self.scale_factor;
-            if mx >= union_rect.0 - pad
-                && mx <= union_rect.0 + union_rect.2 + pad
-                && my >= union_rect.1 - pad
-                && my <= union_rect.1 + union_rect.3 + pad
-            {
+        if let Some((rx, ry, rw, rh, anchor_x_start, anchor_x_end, anchor_y)) = diag_rect {
+            let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
+            if crate::app::mouse::is_in_hover_popup_or_bridge(
+                mx,
+                my,
+                (rx, ry, rw, rh),
+                anchor_x,
+                anchor_y,
+                anchor_y - 10.0 * self.scale_factor,
+                anchor_y + 10.0 * self.scale_factor,
+                self.width,
+                self.scale_factor,
+            ) {
                 mouse_in_popup = true;
+            }
+        }
+        
+        if !mouse_in_popup {
+            if let Some(tr) = type_rect {
+                let (has_type_meta, anchor_x, anchor_y, line_top_y, line_bottom_y) = crate::app::mouse::HOVER_STATE.with(|s| {
+                    let s = s.borrow();
+                    if let Some(popup) = &s.popup {
+                        // Assuming phys_line mapping happens correctly in mouse.rs, here we just do a pad fallback
+                        // if we don't have all the exact details. Or we can just use the popup rect + padding.
+                        (true, popup.anchor_x, popup.anchor_y, popup.anchor_y - 10.0 * self.scale_factor, popup.anchor_y + 10.0 * self.scale_factor)
+                    } else {
+                        (false, 0.0, 0.0, 0.0, 0.0)
+                    }
+                });
+
+                if has_type_meta {
+                    if crate::app::mouse::is_in_hover_popup_or_bridge(
+                        mx,
+                        my,
+                        tr,
+                        anchor_x,
+                        anchor_y,
+                        line_top_y,
+                        line_bottom_y,
+                        self.width,
+                        self.scale_factor,
+                    ) {
+                        mouse_in_popup = true;
+                    }
+                } else {
+                    let pad = 24.0 * self.scale_factor;
+                    if mx >= tr.0 - pad
+                        && mx <= tr.0 + tr.2 + pad
+                        && my >= tr.1 - pad
+                        && my <= tr.1 + tr.3 + pad
+                    {
+                        mouse_in_popup = true;
+                    }
+                }
             }
         }
 
         // LSP squiggles — волнистые подчёркивания диагностик
+        self.hovered_diags_cache.clear();
         if !lsp_diagnostics.is_empty() {
             let render_scroll_x = scroll_x.round();
             for (idx, diag) in lsp_diagnostics.iter().enumerate() {
@@ -1660,7 +1697,7 @@ impl Renderer {
 
                 if in_hitbox {
                     self.hovered_diags_cache
-                        .push((idx, x_start, top_y, top_y + self.line_height));
+                        .push((idx, x_start, top_y, top_y + self.line_height, x_end));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {

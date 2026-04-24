@@ -940,7 +940,7 @@ impl App {
                 });
                 if let Some(r) = self.renderer.as_ref() {
                     if !copied {
-                        if let Some((rx, ry, rw, rh)) = r.last_diag_popup_rect {
+                        if let Some((rx, ry, rw, rh, _, _, _)) = r.last_diag_popup_rect {
                             let mx = r.last_mouse_x;
                             let my = r.last_mouse_y;
                             if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
@@ -1342,7 +1342,7 @@ impl App {
 
         if key_event.state == ElementState::Pressed {
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                && crate::app::mouse::clear_hover_popup()
+                && crate::app::mouse::clear_hover_popup(self.renderer.as_mut())
             {
                 self.window.as_ref().unwrap().request_redraw();
             }

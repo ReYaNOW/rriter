@@ -1513,7 +1513,7 @@ impl ApplicationHandler for App {
                         .as_ref()
                         .unwrap()
                         .last_diag_popup_rect
-                        .map(|(rx, ry, rw, rh)| {
+                        .map(|(rx, ry, rw, rh, _, _, _)| {
                             mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh
                         })
                         .unwrap_or(false);

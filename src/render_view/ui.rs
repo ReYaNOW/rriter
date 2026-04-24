@@ -1096,8 +1096,8 @@ impl Renderer {
         let box_h = max_visible_h;
 
         let mut bx = popup.anchor_x;
-        if let Some(diag_rect) = self.last_diag_popup_rect {
-            bx = diag_rect.0;
+        if let Some((rx, _, _, _, _, _, _)) = self.last_diag_popup_rect {
+            bx = rx;
         }
         if bx + box_w > self.width - 20.0 * s {
             bx = self.width - box_w - 20.0 * s;
@@ -1119,9 +1119,9 @@ impl Renderer {
             line_top_y - box_h - 8.0 * s
         };
 
-        if let Some(diag_rect) = self.last_diag_popup_rect {
-            let diag_y = diag_rect.1;
-            let diag_h = diag_rect.3;
+        if let Some((_, ry, _, rh, _, _, _)) = self.last_diag_popup_rect {
+            let diag_y = ry;
+            let diag_h = rh;
             if prefer_below {
                 by = diag_y + diag_h + 6.0 * s;
             } else {
