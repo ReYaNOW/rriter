@@ -243,6 +243,11 @@ fn looks_like_python_code_line(line: &str) -> bool {
     if t.is_empty() {
         return false;
     }
+    let assignment_like = t.contains('=')
+        && !t.starts_with("## ")
+        && t.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
     (t.starts_with("def ")
         || t.starts_with("class ")
         || t.starts_with("async def ")
@@ -254,7 +259,8 @@ fn looks_like_python_code_line(line: &str) -> bool {
         || t.starts_with("return ")
         || t.starts_with("await ")
         || t.starts_with("import ")
-        || t.starts_with("from "))
+        || t.starts_with("from ")
+        || assignment_like)
         && (t.contains('(') || t.contains(':') || t.contains('='))
 }
 
@@ -1014,6 +1020,19 @@ Append object to the end of the list.";
         assert!(spans
             .iter()
             .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+    }
+
+    #[test]
+    fn assignment_line_is_highlighted_in_hover_text() {
+        let raw = "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\n\
+client = AsyncFirebaseClient(\n\
+    request_timeout=RequestTimeout(timeout=50)\n\
+    )";
+        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(
+            spans.iter().any(|s| s.color != [0.972, 0.972, 0.949, 1.0]),
+            "assignment hover should not stay fully white",
+        );
     }
 
     #[test]

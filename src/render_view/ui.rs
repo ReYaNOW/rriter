@@ -912,7 +912,7 @@ impl Renderer {
         let s = self.scale_factor;
         let pad = 12.0 * s;
         let line_h = 22.0 * s;
-        let max_text_w = (self.width - 80.0 * s).min(750.0 * s).max(300.0 * s);
+        let max_text_w = (self.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
 
         let mut lines: Vec<(
             Vec<(char, [f32; 4], usize)>,

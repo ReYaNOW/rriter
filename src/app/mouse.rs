@@ -137,7 +137,7 @@ fn hover_popup_byte_at(
     let s = renderer.scale_factor;
     let pad = 12.0 * s;
     let line_h = 22.0 * s;
-    let max_text_w = (renderer.width - 80.0 * s).min(750.0 * s).max(300.0 * s);
+    let max_text_w = (renderer.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
     let (bx, by, _bw, _bh) = rect;
 
     let mut lines: Vec<(Vec<(char, usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();

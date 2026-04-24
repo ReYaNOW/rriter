@@ -132,6 +132,29 @@ fn source_signature_for_hover(
     byte_offset: usize,
     allow_nearby_fallback: bool,
 ) -> Option<String> {
+    fn format_attribute_assignment_line(line: &str) -> String {
+        let trimmed = line.trim_end();
+        let Some(eq_idx) = trimmed.find('=') else {
+            return trimmed.to_string();
+        };
+        let lhs = trimmed[..eq_idx].trim_end();
+        let rhs = trimmed[eq_idx + 1..].trim_start();
+        if rhs.len() < 56 {
+            return format!("{lhs} = {rhs}");
+        }
+        let Some(open_idx) = rhs.find('(') else {
+            return format!("{lhs} = {rhs}");
+        };
+        if !rhs.ends_with(')') {
+            return format!("{lhs} = {rhs}");
+        }
+        let head = &rhs[..=open_idx];
+        let inner = rhs[open_idx + 1..rhs.len().saturating_sub(1)].trim();
+        if inner.is_empty() {
+            return format!("{lhs} = {rhs}");
+        }
+        format!("{lhs} = {head}\n    {inner}\n    )")
+    }
     fn source_attribute_hover_for_symbol(
         text: &str,
         line_offsets: &[usize],
@@ -163,11 +186,14 @@ fn source_signature_for_hover(
                 }
             }
             let header = if let Some(class_name) = class_name {
-                format!("Class attribute {symbol} of {class_name}")
+                format!("## Атрибут класса {symbol} в {class_name}")
             } else {
-                format!("Attribute {symbol}")
+                format!("## Атрибут {symbol}")
             };
-            return Some(format!("{header}\n{}", trimmed.trim_end()));
+            return Some(format!(
+                "{header}\n{}",
+                format_attribute_assignment_line(trimmed)
+            ));
         }
         None
     }
@@ -275,6 +301,29 @@ fn source_attribute_hover_from_definition_file(
     symbol: &str,
     module_path: &str,
 ) -> Option<String> {
+    fn format_attribute_assignment_line(line: &str) -> String {
+        let trimmed = line.trim_end();
+        let Some(eq_idx) = trimmed.find('=') else {
+            return trimmed.to_string();
+        };
+        let lhs = trimmed[..eq_idx].trim_end();
+        let rhs = trimmed[eq_idx + 1..].trim_start();
+        if rhs.len() < 56 {
+            return format!("{lhs} = {rhs}");
+        }
+        let Some(open_idx) = rhs.find('(') else {
+            return format!("{lhs} = {rhs}");
+        };
+        if !rhs.ends_with(')') {
+            return format!("{lhs} = {rhs}");
+        }
+        let head = &rhs[..=open_idx];
+        let inner = rhs[open_idx + 1..rhs.len().saturating_sub(1)].trim();
+        if inner.is_empty() {
+            return format!("{lhs} = {rhs}");
+        }
+        format!("{lhs} = {head}\n    {inner}\n    )")
+    }
     let text = std::fs::read_to_string(path).ok()?;
     let lines: Vec<&str> = text.lines().collect();
     for idx in 0..lines.len() {
@@ -314,8 +363,8 @@ fn source_attribute_hover_from_definition_file(
             return None;
         }
         return Some(format!(
-            "Class attribute {symbol} of {fq_owner}\n{}",
-            trimmed.trim_end()
+            "## Атрибут класса {symbol} в {fq_owner}\n{}",
+            format_attribute_assignment_line(trimmed)
         ));
     }
     None
@@ -451,7 +500,7 @@ mod tests {
             .expect("expected attribute hover");
         assert_eq!(
             signature,
-            "Class attribute client of FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))"
+            "## Атрибут класса client в FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
     }
 
@@ -508,7 +557,7 @@ mod tests {
         .expect("expected attribute hover text");
         assert_eq!(
             hover,
-            "Class attribute client of car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))"
+            "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
         let _ = std::fs::remove_file(&tmp);
     }
