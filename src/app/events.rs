@@ -63,6 +63,34 @@ fn module_path_from_definition_path(
     }
 }
 
+fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_path: &str) {
+    let header = format!("📁 {}", module_path);
+    if popup.text.starts_with(&header) {
+        return;
+    }
+
+    let prefix = format!("{header}\n---\n\n");
+    let shift = prefix.len();
+
+    popup.text.insert_str(0, &prefix);
+
+    for span in &mut popup.spans {
+        span.start += shift;
+        span.end += shift;
+    }
+    for (start, end) in &mut popup.inline_code_ranges {
+        *start += shift;
+        *end += shift;
+    }
+
+    let mut new_line_kinds = Vec::with_capacity(popup.line_kinds.len() + 3);
+    new_line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
+    new_line_kinds.push(crate::lsp::HoverLineKindPublic::Separator);
+    new_line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
+    new_line_kinds.extend(popup.line_kinds.iter().copied());
+    popup.line_kinds = new_line_kinds;
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -1291,17 +1319,9 @@ impl ApplicationHandler for App {
                                 {
                                     if let Some(popup) = &mut state.popup {
                                         if popup.text.starts_with("class ")
-                                            && !popup
-                                                .text
-                                                .starts_with(&(module_path.clone() + "\n"))
+                                            && !popup.text.starts_with("📁 ")
                                         {
-                                            let merged = format!("{}\n{}", module_path, popup.text);
-                                            let (clean_msg, spans, line_kinds, inline_code_ranges) =
-                                                crate::lsp::highlight_hover_text(&merged);
-                                            popup.text = clean_msg;
-                                            popup.spans = spans;
-                                            popup.line_kinds = line_kinds;
-                                            popup.inline_code_ranges = inline_code_ranges;
+                                            prepend_hover_module_path(popup, &module_path);
                                             if let Some(w) = self.window.as_ref() {
                                                 w.request_redraw();
                                             }
