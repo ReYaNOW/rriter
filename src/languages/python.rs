@@ -559,12 +559,10 @@ pub fn highlight_python_hover_doc(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    let text_light = [0.86, 0.87, 0.90, 1.0];
-    let pink = [1.0, 0.474, 0.776, 1.0];
-    let green = [0.313, 0.980, 0.482, 1.0];
-    let ty = [0.545, 0.913, 0.992, 1.0];
-    let neutral = [0.972, 0.972, 0.949, 1.0];
-    let param = [0.973, 0.584, 0.502, 1.0];
+    let text_light = crate::highlighter::DRACULA_FG;
+    let ty = crate::highlighter::DRACULA_CYAN;
+    let neutral = crate::highlighter::DRACULA_FG;
+    let param = crate::highlighter::DRACULA_ORANGE;
 
     let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
@@ -614,7 +612,7 @@ pub fn highlight_python_hover_doc(
             spans.push(crate::highlighter::ColorSpan {
                 start: at_pos,
                 end: at_pos + 1,
-                color: pink,
+                color: crate::highlighter::DRACULA_PINK,
             });
             let name = trimmed[1..]
                 .split(|c: char| c == '(' || c.is_whitespace())
@@ -626,7 +624,7 @@ pub fn highlight_python_hover_doc(
                 spans.push(crate::highlighter::ColorSpan {
                     start: name_start,
                     end: name_start + name.len(),
-                    color: green,
+                    color: crate::highlighter::DRACULA_GREEN,
                 });
             }
         }
