@@ -1702,9 +1702,18 @@ impl ApplicationHandler for App {
                     needs_redraw = true;
                 }
             }
-            if let Some(byte_offset) = state.byte_offset {
-                if state.popup.is_none()
-                    && state.pending_popup.is_none()
+                        if let Some(byte_offset) = state.byte_offset {
+                let popup_matches_byte = state
+                    .popup
+                    .as_ref()
+                    .is_some_and(|popup| popup.byte_offset == byte_offset);
+                let pending_popup_matches_byte = state
+                    .pending_popup
+                    .as_ref()
+                    .is_some_and(|popup| popup.byte_offset == byte_offset);
+
+                if !popup_matches_byte
+                    && !pending_popup_matches_byte
                     && state.request_id.is_none()
                     && state.definition_request_id.is_none()
                 {
@@ -2136,16 +2145,24 @@ impl ApplicationHandler for App {
                         let mut state = state.borrow_mut();
                         if state.request_id == Some(request_id) {
                             state.request_id = None;
-                            if let Some(t) = text {
-                                if let Some(bo) = state.byte_offset {
-                                    let (clean_msg, spans, line_kinds, inline_code_ranges) =
-                                        crate::lsp::highlight_hover_text(&t);
+                                                        let Some(t) = text else {
+                                state.popup = None;
+                                state.pending_popup = None;
+                                state.rect = None;
+                                if let Some(w) = self.window.as_ref() {
+                                    w.request_redraw();
+                                }
+                                return;
+                            };
+                            if let Some(bo) = state.byte_offset {
+                                let (clean_msg, spans, line_kinds, inline_code_ranges) =crate::lsp::highlight_hover_text(&t);
                                     let hovered_symbol = symbol_at_offset(&self.editor, bo);
                                     if clean_msg.trim() == "None"
                                         && hovered_symbol.as_deref() == Some("await")
                                     {
-                                        state.popup = None;
+                                                                                state.popup = None;
                                         state.pending_popup = None;
+                                        state.rect = None;
                                         if let Some(w) = self.window.as_ref() {
                                             w.request_redraw();
                                         }
@@ -2200,8 +2217,8 @@ impl ApplicationHandler for App {
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                         layout_cache: None,
                                     };
-                                    state.popup = None;
-                                    state.pending_popup = None;
+                                                                        state.pending_popup = None;
+                                    state.definition_request_id = None;
                                     if let Some(path) = self.file_path.clone() {
                                         let (line, col) = crate::lsp::offset_to_lsp_pos(
                                             &self.editor.get_full_text(),
@@ -2228,11 +2245,10 @@ impl ApplicationHandler for App {
                                     state.selection_anchor = None;
                                     state.selection_cursor = None;
                                     state.selecting = false;
-                                    if let Some(w) = self.window.as_ref() {
+                                                                        if let Some(w) = self.window.as_ref() {
                                         w.request_redraw();
                                     }
                                 }
-                            }
                         }
                     });
                 }

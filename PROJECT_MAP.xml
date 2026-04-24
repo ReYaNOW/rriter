@@ -235,8 +235,8 @@
     <fn name="move_up" line="1522" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
     <fn name="move_down" line="1528" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
     <fn name="set_cursor_at_pos" line="1534" pub="true" writes="cursor=, selection_anchor=" calls="render_view::core_text: get_byte_at_xy" />
-    <fn name="move_page_up" line="1548" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="move_page_down" line="1554" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="move_page_up" line="1549" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
+    <fn name="move_page_down" line="1555" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
   </mod>
   <mod path="src/highlighter.rs" name="highlighter">
     <type name="ColorSpan">{ start: usize, end: usize, color: [f32; 4] }</type>

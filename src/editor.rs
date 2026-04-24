@@ -1531,15 +1531,16 @@ impl Editor {
         self.cursor = renderer.get_byte_at_xy(self, x, y + renderer.line_height * 0.5);
     }
 
-    pub fn set_cursor_at_pos(
+        pub fn set_cursor_at_pos(
         &mut self,
         target_x: f32,
         target_y: f32,
         renderer: &mut Renderer,
-        is_click: bool,        ) {
-            let target_y = (target_y - renderer.line_height * 0.5).max(0.0);
-            let idx = renderer.get_byte_at_xy(self, target_x, target_y);
-            if is_click {
+        is_click: bool,
+    ) {
+        let target_y = (target_y - renderer.line_height * 0.5).max(0.0);
+        let idx = renderer.get_byte_at_xy(self, target_x, target_y);
+        if is_click {
             self.selection_anchor = Some(idx);
         }
         self.cursor = idx;

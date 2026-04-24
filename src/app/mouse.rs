@@ -141,7 +141,7 @@ mod tests {
         ));
     }
 
-            #[test]
+                    #[test]
     fn hover_bridge_keeps_popup_when_moving_up_from_token_anchor() {
         let popup_rect = (96.0, 80.0, 760.0, 210.0);
         let line_top_y = 340.0;
@@ -2115,17 +2115,18 @@ impl App {
             }
         }
 
-        let s = self.renderer.as_ref().unwrap().scale_factor;
+                let s = self.renderer.as_ref().unwrap().scale_factor;
         let mut in_hover_popup = false;
+        let mut in_hover_source_line = false;
 
         let (type_rect, popup_meta) = HOVER_STATE.with(|state| {
             let state = state.borrow();
             (
                 state.rect,
-        state
-            .popup
-            .as_ref()
-            .map(|popup| (popup.anchor_x, popup.anchor_y, popup.byte_offset)),
+                state
+                    .popup
+                    .as_ref()
+                    .map(|popup| (popup.anchor_x, popup.anchor_y, popup.byte_offset)),
             )
         });
         let diag_rect_full = self.renderer.as_ref().unwrap().last_diag_popup_rect;
@@ -2150,7 +2151,7 @@ impl App {
             }
         }
 
-        if !in_hover_popup {
+                        if type_rect.is_some() || diag_rect_full.is_some() {
             if let (Some((rx, ry, rw, rh)), Some((anchor_x, anchor_y, popup_byte_offset))) =
                 (type_rect, popup_meta)
             {
@@ -2178,7 +2179,7 @@ impl App {
 
                 let px = position.x as f32;
                 let py = position.y as f32;
-                if is_in_hover_popup_or_bridge(
+                                if is_in_hover_popup_or_bridge(
                     px,
                     py,
                     (rx, ry, rw, rh),
@@ -2190,6 +2191,9 @@ impl App {
                     s,
                 ) {
                     in_hover_popup = true;
+                    if py >= line_top_y && py <= line_bottom_y {
+                        in_hover_source_line = true;
+                    }
                 }
             }
 
@@ -2217,9 +2221,9 @@ impl App {
 
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
-        let window_size = self.window.as_ref().unwrap().inner_size();
+                let window_size = self.window.as_ref().unwrap().inner_size();
 
-        if !in_hover_popup {
+        if !in_hover_popup || in_hover_source_line {
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                 0.0
             } else {
@@ -2247,7 +2251,7 @@ impl App {
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
 
-            HOVER_STATE.with(|state| {
+                        HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 if is_text_area {
                     let normalized = normalize_hover_byte(&self.editor, byte_offset);
@@ -2256,6 +2260,7 @@ impl App {
                             state.byte_offset = None;
                             state.timer = 0.0;
                             state.request_id = None;
+                            state.definition_request_id = None;
                             state.popup = None;
                             state.pending_popup = None;
                             state.rect = None;
@@ -2269,18 +2274,30 @@ impl App {
                         let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
                         same_word = old_start == new_start && old_end == new_end;
                     }
-                    if !same_word && !in_hover_popup {
+                    if !same_word && (!in_hover_popup || in_hover_source_line) {
+                        let keep_visible_popup = state.popup.is_some();
                         state.byte_offset = Some(byte_offset);
-                        state.timer = 0.0;
+                        state.timer = if keep_visible_popup {
+                            HOVER_REQUEST_DELAY_SEC
+                        } else {
+                            0.0
+                        };
                         state.request_id = None;
-                        state.popup = None;
+                        state.definition_request_id = None;
                         state.pending_popup = None;
-                        state.rect = None;
+                        state.selection_anchor = None;
+                        state.selection_cursor = None;
+                        state.selecting = false;
+                        if !keep_visible_popup {
+                            state.popup = None;
+                            state.rect = None;
+                        }
                     }
                 } else if !in_hover_popup {
                     state.byte_offset = None;
                     state.timer = 0.0;
                     state.request_id = None;
+                    state.definition_request_id = None;
                     state.popup = None;
                     state.pending_popup = None;
                     state.rect = None;

@@ -347,7 +347,7 @@ impl Renderer {
         (self.left_padding - self.last_scroll_x, current_y)
     }
 
-        pub fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize {
+                pub fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize {
         let target_y = target_y.max(0.0);
         let mut current_y = 0.0;
         let mut phys_line = 0;
