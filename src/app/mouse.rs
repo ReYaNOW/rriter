@@ -1825,7 +1825,7 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-            let pad = 40.0 * s;
+            let pad = 4.0 * s;
             if position.x as f32 >= union_rect.0 - pad
                 && position.x as f32 <= union_rect.0 + union_rect.2 + pad
                 && position.y as f32 >= union_rect.1 - pad
