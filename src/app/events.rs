@@ -88,12 +88,12 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
     HOVER_FOLDER_ICON_PREWARM.call_once(|| {
         crate::app::file_tree::pre_rasterize_icon("folder", true);
     });
-    let header = format!("{}{}", HOVER_MODULE_PREFIX, module_path);
-    if popup.text.starts_with(&header) {
+    let legacy_header = format!("{}{}", HOVER_MODULE_PREFIX, module_path);
+    if popup.text.starts_with(module_path) || popup.text.starts_with(&legacy_header) {
         return;
     }
 
-    let prefix = format!("{header}\n---\n");
+    let prefix = format!("{module_path}\n---\n");
     let shift = prefix.len();
 
     popup.text.insert_str(0, &prefix);
@@ -1534,6 +1534,7 @@ impl ApplicationHandler for App {
                                 {
                                     if let Some(popup) = &mut popup {
                                         if popup.text.starts_with("class ")
+                                            && !popup.text.starts_with(&module_path)
                                             && !popup.text.starts_with(HOVER_MODULE_PREFIX)
                                         {
                                             prepend_hover_module_path(popup, &module_path);

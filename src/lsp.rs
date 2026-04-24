@@ -312,6 +312,18 @@ fn sanitize_hover_type_expr(mut s: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn sanitize_module_path(path: &str) -> String {
+    let mut parts: Vec<&str> = path
+        .split('.')
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "__init__")
+        .collect();
+    if let Some(site_idx) = parts.iter().position(|p| *p == "site-packages") {
+        parts = parts.into_iter().skip(site_idx + 1).collect();
+    }
+    parts.join(".")
+}
+
 fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     let trimmed = line.trim();
     let unquoted = trimmed.trim_matches('`').trim();
@@ -327,10 +339,10 @@ fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     }
 
     if let Some(dot) = type_name.rfind('.') {
-        let module_path = type_name[..dot].trim();
+        let module_path = sanitize_module_path(type_name[..dot].trim());
         let class_name = type_name[dot + 1..].trim();
         if !module_path.is_empty() && !class_name.is_empty() {
-            return Some((Some(module_path.to_string()), class_name.to_string()));
+            return Some((Some(module_path), class_name.to_string()));
         }
     }
 
@@ -346,11 +358,11 @@ fn normalize_module_object_repr(line: &str) -> Option<String> {
     if !unquoted[..start].trim().is_empty() || !rest[end + 2..].trim().is_empty() {
         return None;
     }
-    let module_path = rest[..end].trim();
+    let module_path = sanitize_module_path(rest[..end].trim());
     if module_path.is_empty() {
         return None;
     }
-    Some(module_path.to_string())
+    Some(module_path)
 }
 
 fn normalize_bound_method_signature(line: &str) -> Option<String> {
@@ -659,7 +671,6 @@ fn normalize_hover_text(msg: &str) -> String {
             continue;
         }
         if let Some(module_path) = normalize_module_object_repr(trimmed) {
-            out.push_str("[[MODULE]] ");
             out.push_str(&module_path);
             out.push('\n');
             continue;
@@ -982,7 +993,18 @@ Append object to the end of the list.";
     fn module_object_repr_is_normalized_to_module_header() {
         let raw = "<module 'car_wash.domains.policies.controller'>";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "[[MODULE]] car_wash.domains.policies.controller");
+        assert_eq!(text, "car_wash.domains.policies.controller");
+    }
+
+    #[test]
+    fn site_packages_and_init_are_removed_from_module_and_class_repr() {
+        let module_raw = "<module 'site-packages.msgspec.__init__'>";
+        let (module_text, _spans, _kinds, _inline) = highlight_hover_text(module_raw);
+        assert_eq!(module_text, "msgspec");
+
+        let class_raw = "<class 'site-packages.msgspec.__init__.UnsetType'>";
+        let (class_text, _spans, _kinds, _inline) = highlight_hover_text(class_raw);
+        assert_eq!(class_text, "msgspec\nclass UnsetType");
     }
 
     #[test]
