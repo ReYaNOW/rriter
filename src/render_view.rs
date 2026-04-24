@@ -2154,7 +2154,12 @@ impl Renderer {
 
         let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) = crate::app::mouse::HOVER_STATE.with(|s| {
             let state = s.borrow();
-            (state.popup.is_some(), state.request_id.is_some(), state.timer, state.byte_offset.is_some())
+            (
+                state.popup.is_some(),
+                state.request_id.is_some() || state.definition_request_id.is_some(),
+                state.timer,
+                state.byte_offset.is_some(),
+            )
         });
 
         let type_in_progress = has_byte_offset

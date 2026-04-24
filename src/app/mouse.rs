@@ -19,6 +19,7 @@ pub struct HoverState {
     pub request_id: Option<i32>,
     pub definition_request_id: Option<i32>,
     pub popup: Option<HoverPopup>,
+    pub pending_popup: Option<HoverPopup>,
     pub timer: f32,
     pub byte_offset: Option<usize>,
     pub rect: Option<(f32, f32, f32, f32)>,
@@ -37,6 +38,7 @@ impl Default for HoverState {
             request_id: None,
             definition_request_id: None,
             popup: None,
+            pending_popup: None,
             timer: 0.0,
             byte_offset: None,
             rect: None,
@@ -55,7 +57,7 @@ thread_local! {
     pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
 }
 
-pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.08;
+pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.2;
 
 pub fn clear_hover_popup() -> bool {
     HOVER_STATE.with(|state| {
@@ -68,6 +70,7 @@ pub fn clear_hover_popup() -> bool {
         state.request_id = None;
         state.definition_request_id = None;
         state.popup = None;
+        state.pending_popup = None;
         state.timer = 0.0;
         state.byte_offset = None;
         state.rect = None;
@@ -1905,6 +1908,7 @@ impl App {
                         state.timer = 0.0;
                         state.request_id = None;
                         state.popup = None;
+                        state.pending_popup = None;
                         state.rect = None;
                         return;
                     }
@@ -1920,6 +1924,7 @@ impl App {
                         state.timer = 0.0;
                         state.request_id = None;
                         state.popup = None;
+                        state.pending_popup = None;
                         state.rect = None;
                     }
                 } else {
@@ -1927,6 +1932,7 @@ impl App {
                     state.timer = 0.0;
                     state.request_id = None;
                     state.popup = None;
+                    state.pending_popup = None;
                     state.rect = None;
                 }
             });

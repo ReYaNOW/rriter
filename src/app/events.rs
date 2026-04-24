@@ -856,7 +856,11 @@ impl ApplicationHandler for App {
                 }
             }
             if let Some(byte_offset) = state.byte_offset {
-                if state.popup.is_none() && state.request_id.is_none() {
+                if state.popup.is_none()
+                    && state.pending_popup.is_none()
+                    && state.request_id.is_none()
+                    && state.definition_request_id.is_none()
+                {
                     state.timer += raw_dt;
                     if state.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
                         state.timer = 0.0;
@@ -1289,7 +1293,7 @@ impl ApplicationHandler for App {
                                 if let Some(bo) = state.byte_offset {
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         crate::lsp::highlight_hover_text(&t);
-                                    state.popup = Some(crate::app::mouse::HoverPopup {
+                                    let popup = crate::app::mouse::HoverPopup {
                                         text: clean_msg,
                                         spans,
                                         line_kinds,
@@ -1301,7 +1305,9 @@ impl ApplicationHandler for App {
                                             .map(|r| r.last_mouse_x)
                                             .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
-                                    });
+                                    };
+                                    state.popup = None;
+                                    state.pending_popup = None;
                                     if let Some(path) = self.file_path.clone() {
                                         let (line, col) = crate::lsp::offset_to_lsp_pos(
                                             &self.editor.get_full_text(),
@@ -1317,6 +1323,13 @@ impl ApplicationHandler for App {
                                                     col,
                                                 )
                                             });
+                                    } else {
+                                        state.definition_request_id = None;
+                                    }
+                                    if state.definition_request_id.is_some() {
+                                        state.pending_popup = Some(popup);
+                                    } else {
+                                        state.popup = Some(popup);
                                     }
                                     state.selection_anchor = None;
                                     state.selection_cursor = None;
@@ -1334,20 +1347,27 @@ impl ApplicationHandler for App {
                         let mut state = state.borrow_mut();
                         if state.definition_request_id == Some(request_id) {
                             state.definition_request_id = None;
+                            let mut popup = state.pending_popup.take();
+                            if popup.is_none() {
+                                popup = state.popup.take();
+                            }
                             if let Some(path) = path {
                                 if let Some(module_path) =
                                     module_path_from_definition_path(&path, &self.ide_workspaces)
                                 {
-                                    if let Some(popup) = &mut state.popup {
+                                    if let Some(popup) = &mut popup {
                                         if popup.text.starts_with("class ")
                                             && !popup.text.starts_with(HOVER_MODULE_PREFIX)
                                         {
                                             prepend_hover_module_path(popup, &module_path);
-                                            if let Some(w) = self.window.as_ref() {
-                                                w.request_redraw();
-                                            }
                                         }
                                     }
+                                }
+                            }
+                            if let Some(popup) = popup {
+                                state.popup = Some(popup);
+                                if let Some(w) = self.window.as_ref() {
+                                    w.request_redraw();
                                 }
                             }
                         }
