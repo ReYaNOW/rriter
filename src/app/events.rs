@@ -131,19 +131,72 @@ fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
 ) -> Option<String> {
+    fn is_ident_byte(b: u8) -> bool {
+        matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+    }
+    fn symbol_at_offset(editor: &crate::editor::Editor, byte_offset: usize) -> Option<String> {
+        if byte_offset >= editor.len() {
+            return None;
+        }
+        let mut pos = byte_offset;
+        if !is_ident_byte(editor.byte_at(pos)) {
+            if pos > 0 && is_ident_byte(editor.byte_at(pos - 1)) {
+                pos -= 1;
+            } else {
+                return None;
+            }
+        }
+        let mut start = pos;
+        while start > 0 && is_ident_byte(editor.byte_at(start - 1)) {
+            start -= 1;
+        }
+        let mut end = pos + 1;
+        while end < editor.len() && is_ident_byte(editor.byte_at(end)) {
+            end += 1;
+        }
+        editor
+            .get_full_text()
+            .get(start..end)
+            .map(|s| s.to_string())
+    }
+    fn def_name(line: &str) -> Option<&str> {
+        let trimmed = line.trim_start();
+        let rest = trimmed
+            .strip_prefix("async def ")
+            .or_else(|| trimmed.strip_prefix("def "))?;
+        let open = rest.find('(')?;
+        let name = rest[..open].trim();
+        if name.is_empty() {
+            None
+        } else {
+            Some(name)
+        }
+    }
+
     let text = editor.get_full_text();
     let line_idx = editor
         .line_offsets
         .partition_point(|&o| o <= byte_offset)
         .saturating_sub(1);
 
-    let mut def_line_idx = None;
-    for up in 0..=10usize {
-        let idx = line_idx.saturating_sub(up);
-        let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
-        if line.starts_with("async def ") || line.starts_with("def ") {
-            def_line_idx = Some(idx);
-            break;
+    let hovered_symbol = symbol_at_offset(editor, byte_offset);
+    let mut def_line_idx = hovered_symbol.as_deref().and_then(|symbol| {
+        for idx in 0..editor.line_offsets.len() {
+            let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
+            if def_name(line) == Some(symbol) {
+                return Some(idx);
+            }
+        }
+        None
+    });
+    if def_line_idx.is_none() {
+        for up in 0..=24usize {
+            let idx = line_idx.saturating_sub(up);
+            let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
+            if line.starts_with("async def ") || line.starts_with("def ") {
+                def_line_idx = Some(idx);
+                break;
+            }
         }
     }
     let def_line_idx = def_line_idx?;
@@ -185,9 +238,9 @@ fn source_signature_for_hover(
             "AsyncGenerator[None, Any]",
         );
     }
+    signature = signature.trim_end_matches(':').trim_start().to_string();
     if decorators.len() == 1 && decorators[0].trim() == "@asynccontextmanager" {
         let mut def_signature = signature.trim_start().to_string();
-        def_signature = def_signature.trim_end_matches(':').to_string();
         def_signature = wrap_signature_after_first_param(&def_signature, "", "async def ");
         signature = format!("@asynccontextmanager\n{}", def_signature.trim_start());
     } else if !decorators.is_empty() {
@@ -260,6 +313,24 @@ mod tests {
         assert_eq!(
             signature,
             "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+    }
+
+    #[test]
+    fn classmethod_asynccontextmanager_source_signature_keeps_both_decorators() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class LitestarCache:\n    @classmethod\n    @asynccontextmanager\n    async def setup(cls) -> AsyncGenerator[None, Any]:\n        yield\n\nasync def use_cache():\n    async with LitestarCache.setup():\n        pass\n",
+        );
+        let hover_offset = editor
+            .get_full_text()
+            .rfind("setup")
+            .expect("expected setup call");
+        let signature =
+            source_signature_for_hover(&editor, hover_offset).expect("expected signature");
+        assert_eq!(
+            signature,
+            "@classmethod\n@asynccontextmanager\nasync def setup(cls) -> AsyncGenerator[None, Any]"
         );
     }
 

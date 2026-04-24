@@ -269,8 +269,13 @@ fn looks_like_type_expr_line(line: &str) -> bool {
     if t.contains("->") || t.contains('(') || t.contains(')') || t.contains(':') {
         return false;
     }
-    t.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' '))
+    t.chars().all(|c| {
+        c.is_alphanumeric()
+            || matches!(
+                c,
+                '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' ' | '"' | '\''
+            )
+    })
 }
 
 fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool {
@@ -980,6 +985,28 @@ Append object to the end of the list.";
             .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.color == cyan));
         assert!(spans.iter().any(|s| s.start <= provide_start
             && s.end >= provide_start + "Provide".len()
+            && s.color == cyan));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+    }
+
+    #[test]
+    fn literal_type_line_is_highlighted() {
+        let raw = "Literal[\"513\"]";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "Literal[\"513\"]");
+        let literal_start = text.find("Literal").unwrap_or(0);
+        let l_bracket = text.find('[').unwrap_or(0);
+        let r_bracket = text.rfind(']').unwrap_or(0);
+        let cyan = [0.545, 0.913, 0.992, 1.0];
+        let white = [0.972, 0.972, 0.949, 1.0];
+
+        assert!(spans.iter().any(|s| s.start <= literal_start
+            && s.end >= literal_start + "Literal".len()
             && s.color == cyan));
         assert!(spans
             .iter()
