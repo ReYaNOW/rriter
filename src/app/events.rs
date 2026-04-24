@@ -44,6 +44,21 @@ fn module_path_from_definition_path(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
 ) -> Option<String> {
+    let path_str = path.to_string_lossy();
+    if let Some(std_idx) = path_str.rfind("/lib/python") {
+        let stdlib_rel = &path_str[std_idx + "/lib/python".len()..];
+        let after_version = stdlib_rel
+            .split_once('/')
+            .map(|(_, tail)| tail)
+            .unwrap_or(stdlib_rel);
+        let trimmed = after_version
+            .strip_suffix(".pyi")
+            .or_else(|| after_version.strip_suffix(".py"))
+            .unwrap_or(after_version);
+        if !trimmed.is_empty() && trimmed != "__init__" {
+            return Some(trimmed.trim_start_matches('/').replace('/', "."));
+        }
+    }
     let rel = workspaces
         .iter()
         .find_map(|ws| path.strip_prefix(ws).ok())
@@ -53,7 +68,7 @@ fn module_path_from_definition_path(
     let mut parts: Vec<String> = no_ext
         .iter()
         .filter_map(|c| c.to_str())
-        .filter(|p| !p.is_empty() && *p != "__init__")
+        .filter(|p| !p.is_empty() && *p != "__init__" && *p != "/")
         .map(|p| p.to_string())
         .collect();
     if let Some(site_idx) = parts.iter().position(|p| p == "site-packages") {
