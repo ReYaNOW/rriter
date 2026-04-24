@@ -1870,11 +1870,27 @@ impl App {
             HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 if is_text_area && is_hover_target_byte(&self.editor, byte_offset) {
-                    if state.byte_offset != Some(byte_offset) {
+                    let mut same_word = false;
+                    if let Some(old_byte) = state.byte_offset {
+                        if old_byte == byte_offset {
+                            same_word = true;
+                        } else {
+                            let min_b = old_byte.min(byte_offset);
+                            let max_b = old_byte.max(byte_offset);
+                            let mut all_target = true;
+                            for b in min_b..=max_b {
+                                if !is_hover_target_byte(&self.editor, b) {
+                                    all_target = false;
+                                    break;
+                                }
+                            }
+                            same_word = all_target;
+                        }
+                    }
+                    if !same_word {
                         state.byte_offset = Some(byte_offset);
                         state.timer = 0.0;
                         state.request_id = None;
-                        state.definition_request_id = None;
                         state.popup = None;
                         state.rect = None;
                     }
@@ -1882,7 +1898,6 @@ impl App {
                     state.byte_offset = None;
                     state.timer = 0.0;
                     state.request_id = None;
-                    state.definition_request_id = None;
                     state.popup = None;
                     state.rect = None;
                 }
