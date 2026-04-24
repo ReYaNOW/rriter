@@ -914,8 +914,8 @@ impl Renderer {
         let line_h = 22.0 * s;
         let max_text_w = (self.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
 
-        let mut lines: Vec<(
-            Vec<(char, [f32; 4], usize)>,
+                let mut lines: Vec<(
+            Vec<(char,[f32; 4], usize)>,
             crate::lsp::HoverLineKindPublic,
         )> = Vec::new();
         let mut cur_line_w = 0.0;
@@ -928,6 +928,9 @@ impl Renderer {
                          kind: crate::lsp::HoverLineKindPublic| {
             lines.push((cur_line, kind));
         };
+
+        let mut leading_spaces = 0;
+        let mut counting_leading = true;
 
         for (offset, c) in popup.text.char_indices() {
             let kind = popup
@@ -946,7 +949,17 @@ impl Renderer {
                 cur_line_w = 0.0;
                 last_space_idx = None;
                 raw_line_no += 1;
+                counting_leading = true;
+                leading_spaces = 0;
                 continue;
+            }
+
+            if counting_leading {
+                if c == ' ' {
+                    leading_spaces += 1;
+                } else {
+                    counting_leading = false;
+                }
             }
 
             let adv = self.char_advance(c) * scale_mul;
@@ -956,6 +969,15 @@ impl Renderer {
                     if !remainder.is_empty() && remainder[0].0 == ' ' {
                         remainder.remove(0);
                     }
+
+                    let hanging_spaces = (leading_spaces + 4).min(20);
+                    let mut new_remainder = Vec::with_capacity(hanging_spaces + remainder.len());
+                    for _ in 0..hanging_spaces {
+                        new_remainder.push((' ',[0.0, 0.0, 0.0, 0.0], offset));
+                    }
+                    new_remainder.extend(remainder);
+                    remainder = new_remainder;
+
                     push_line(&mut lines, std::mem::take(&mut cur_line), kind);
                     cur_line = remainder;
                     cur_line_w = cur_line
@@ -969,7 +991,7 @@ impl Renderer {
                 last_space_idx = None;
             }
 
-            let mut color = [0.972, 0.972, 0.949, 1.0];
+            let mut color =[0.972, 0.972, 0.949, 1.0];
             for span in &popup.spans {
                 if offset >= span.start && offset < span.end {
                     color = span.color;
@@ -1029,10 +1051,7 @@ impl Renderer {
                     max_line_w = w;
                 }
             }
-            total_text_h += line_h * scale_mul;
-        }
-        if popup.text.starts_with("class ") && !popup.text.starts_with("[[MODULE]] ") {
-            total_text_h += line_h * 2.0;
+                        total_text_h += line_h * scale_mul;
         }
 
         let box_w = max_line_w + pad * 2.0;

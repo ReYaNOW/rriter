@@ -672,7 +672,7 @@ pub fn highlight_python_hover_doc(
     }
     let mut spans = Vec::new();
 
-    // signature block -> tree-sitter python highlight
+        // signature block -> tree-sitter python highlight
     let mut sig_start_line = None;
     for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
@@ -680,6 +680,7 @@ pub fn highlight_python_hover_doc(
             || trimmed.starts_with("async def ")
             || trimmed.contains(" def ")
             || trimmed.contains(" async def ")
+            || trimmed.starts_with("class ")
         {
             sig_start_line = Some(idx);
             break;
@@ -738,9 +739,10 @@ pub fn highlight_python_hover_doc(
                 break;
             }
         }
-        let def_shift = lines[start_line]
+                let def_shift = lines[start_line]
             .find("async def ")
             .or_else(|| lines[start_line].find("def "))
+            .or_else(|| lines[start_line].find("class "))
             .unwrap_or(0);
         let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
@@ -748,13 +750,17 @@ pub fn highlight_python_hover_doc(
         } else {
             msg.len()
         };
-                if start < end && end <= msg.len() {
+                        if start < end && end <= msg.len() {
             let mut sig_code = msg[start..end].to_string();
             if !sig_code.trim_end().ends_with(':') {
                 sig_code.push(':');
             }
             push_python_ts_spans(&sig_code, start, &mut spans);
             color_keyword_args_orange(&sig_code, start, &mut spans);
+
+            for k in line_kinds.iter_mut().take(end_line + 1).skip(start_line) {
+                *k = HoverLineKind::Code;
+            }
         }
 
         let mut signature_brackets = Vec::new();
@@ -771,7 +777,7 @@ pub fn highlight_python_hover_doc(
         }
     }
 
-    let mut assignment_start = None;
+        let mut assignment_start = None;
     let mut saw_sep_for_assignment = false;
     for (idx, kind) in line_kinds.iter().enumerate() {
         if *kind == HoverLineKind::Separator {
@@ -780,7 +786,7 @@ pub fn highlight_python_hover_doc(
         }
         if saw_sep_for_assignment && *kind == HoverLineKind::Text && !lines[idx].trim().is_empty() {
             let trimmed = lines[idx].trim();
-            let is_assignment = trimmed.contains('=') 
+            let is_assignment = (trimmed.contains('=') || trimmed.contains(':')) 
                 && trimmed.chars().next().map_or(false, |c| c.is_ascii_alphabetic() || c == '_');
             if is_assignment {
                 assignment_start = Some(idx);
@@ -789,7 +795,13 @@ pub fn highlight_python_hover_doc(
         }
     }
 
-    if let Some(start_idx) = assignment_start {
+            if let Some(start_idx) = assignment_start {
+        let line = lines[start_idx];
+        let line_offset = line_starts[start_idx];
+
+        let end_idx = line.find(':').unwrap_or_else(|| line.find('=').unwrap_or(0));
+        let var_name = line[..end_idx].trim();
+
         for k in line_kinds.iter_mut().skip(start_idx) {
             *k = HoverLineKind::Code;
         }
@@ -847,18 +859,34 @@ pub fn highlight_python_hover_doc(
             });
         }
 
-                if kind == HoverLineKind::Header2 && line.starts_with("Class attribute ") {
-            if let Some(of_idx) = line.find(" of ") {
-                spans.push(crate::highlighter::ColorSpan {
-                    start: line_start + 16,
-                    end: line_start + of_idx,
-                    color: crate::highlighter::DRACULA_PINK,
-                });
-                spans.push(crate::highlighter::ColorSpan {
-                    start: line_start + of_idx + 4,
-                    end: line_end,
-                    color: ty,
-                });
+                        if kind == HoverLineKind::Header2 {
+            let is_en_attr = line.starts_with("Class attribute ");
+            let is_ru_attr = line.starts_with("Атрибут класса ");
+            let is_en_var = line.starts_with("Variable ");
+            let is_ru_var = line.starts_with("Переменная ");
+
+            if is_en_attr || is_ru_attr || is_en_var || is_ru_var {
+                let separator = if is_en_attr || is_en_var { " of " } else { " в " };
+                let prefix_len = if is_en_attr { 16 } else if is_ru_attr { 15 } else if is_en_var { 9 } else { 11 };
+
+                if let Some(of_idx) = line.find(separator) {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: line_start + prefix_len,
+                        end: line_start + of_idx,
+                        color: crate::highlighter::DRACULA_PINK,
+                    });
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: line_start + of_idx + separator.len(),
+                        end: line_end,
+                        color: ty,
+                    });
+                } else {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: line_start + prefix_len,
+                        end: line_end,
+                        color: crate::highlighter::DRACULA_PINK,
+                    });
+                }
             }
         }
 
@@ -903,7 +931,7 @@ pub fn highlight_python_hover_doc(
         }
     }
 
-        for &(start, end) in &inline_code_ranges {
+                for &(start, end) in &inline_code_ranges {
         if end > start && end <= msg.len() {
             let code_chunk = &msg[start..end];
             push_python_ts_spans(code_chunk, start, &mut spans);
@@ -922,8 +950,7 @@ pub fn highlight_python_hover_doc(
         })
         .collect();
 
-    (msg, spans, public_kinds, inline_code_ranges)
-}
+    (msg, spans, public_kinds, inline_code_ranges)}
 
 fn force_color_on_ranges(
     spans: &mut Vec<crate::highlighter::ColorSpan>,

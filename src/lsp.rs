@@ -775,6 +775,18 @@ enum PendingRequestKind {
 mod tests {
     use super::{highlight_hover_text, HoverLineKindPublic};
 
+        #[test]
+    fn variable_header_highlights_name_pink() {
+        let raw = "## Variable handlers of main\nhandlers: list[Router]";
+        let (text, spans, kinds, _inline) = highlight_hover_text(raw);
+        let handlers_idx = text.find("handlers").unwrap();
+        assert!(
+            spans.iter().any(|s| s.start == handlers_idx && s.end == handlers_idx + 8 && s.color == [1.0, 0.474, 0.776, 1.0]),
+            "Header variable name should be pink"
+        );
+                assert_eq!(kinds[2], HoverLineKindPublic::Code, "Assignment line should become code");
+    }
+
     #[test]
     fn uses_python_hover_pipeline_for_builtin_signatures() {
         let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
@@ -1147,6 +1159,22 @@ client = AsyncFirebaseClient(\n\
             s.end == timeout_offset + "timeout".len() && 
             s.color ==[0.973, 0.584, 0.502, 1.0]
         ));
+    }
+
+        #[test]
+    fn class_signature_is_highlighted() {
+        let raw = "class ValueError(...)\n\
+        ---\n\
+        Inappropriate argument value (of correct type).";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("class ValueError"));
+        let class_kw = text.find("class").unwrap();
+        assert!(
+            spans.iter().any(|s| s.start <= class_kw
+                && s.end >= class_kw + 5
+                && (s.color ==[0.545, 0.913, 0.992, 1.0] || s.color ==[1.0, 0.474, 0.776, 1.0])),
+            "`class` keyword should be highlighted in signatures",
+        );
     }
 
     #[test]

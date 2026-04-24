@@ -60,7 +60,7 @@ fn module_path_from_definition_path(
         }
     }
 
-    let path_str = path.to_string_lossy();
+                                let path_str = path.to_string_lossy();
     if let Some(std_idx) = path_str.rfind("/lib/python") {
         let stdlib_rel = &path_str[std_idx + "/lib/python".len()..];
         let after_version = stdlib_rel
@@ -75,13 +75,26 @@ fn module_path_from_definition_path(
             return sanitize_module_path_parts(trimmed.trim_start_matches('/').split('/'));
         }
     }
-    let rel = workspaces
-        .iter()
-        .find_map(|ws| path.strip_prefix(ws).ok())
-        .unwrap_or(path);
-    let mut no_ext = rel.to_path_buf();
-    no_ext.set_extension("");
-    sanitize_module_path_parts(no_ext.iter().filter_map(|c| c.to_str()).collect::<Vec<_>>())
+    if !workspaces.iter().any(|ws| path.starts_with(ws)) {
+        if let Some(ts_idx) = path_str.find("/stdlib/") {
+            let rel = &path_str[ts_idx + "/stdlib/".len()..];
+            let trimmed = rel.strip_suffix(".pyi").unwrap_or(rel);
+            return sanitize_module_path_parts(trimmed.split('/'));
+        }
+        if let Some(ts_idx) = path_str.find("/stubs/") {
+            let rel = &path_str[ts_idx + "/stubs/".len()..];
+            let after_pkg = rel.split_once('/').map(|(_, tail)| tail).unwrap_or(rel);
+            let trimmed = after_pkg.strip_suffix(".pyi").unwrap_or(after_pkg);
+            return sanitize_module_path_parts(trimmed.split('/'));
+        }
+    }
+    let rel = workspaces.iter().find_map(|ws| path.strip_prefix(ws).ok());
+    if let Some(rel_path) = rel {
+        let mut no_ext = rel_path.to_path_buf();
+        no_ext.set_extension("");
+        return sanitize_module_path_parts(no_ext.iter().filter_map(|c| c.to_str()).collect::<Vec<_>>());
+    }
+    None
 }
 
 const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
@@ -257,10 +270,26 @@ fn source_signature_for_hover(
                 }
             }
 
-                                    let full_statement = statement_lines.join("\n");
+                                                let full_statement = statement_lines.join("\n");
 
             let mut assignment = format_attribute_assignment_line(&full_statement);
-            if let Some(ty) = lsp_type {
+            if let Some(raw_ty) = lsp_type {
+                let mut ty = String::with_capacity(raw_ty.len());
+                let mut s = raw_ty;
+                while let Some(pos) = s.find("<class '") {
+                    ty.push_str(&s[..pos]);
+                    let rest = &s[pos + "<class '".len()..];
+                    if let Some(end) = rest.find("'>") {
+                        ty.push_str(&rest[..end]);
+                        s = &rest[end + 2..];
+                    } else {
+                        ty.push_str(&s[pos..]);
+                        s = "";
+                    }
+                }
+                ty.push_str(s);
+                let ty = ty.replace("... omitted 3 union elements", "OmittedUnionElements").split_whitespace().collect::<Vec<_>>().join(" ");
+
                 if assignment.starts_with(&format!("{symbol} =")) {
                     let replacement = format!("{symbol}: {ty} =");
                     assignment = assignment.replacen(&format!("{symbol} ="), &replacement, 1);
@@ -271,7 +300,7 @@ fn source_signature_for_hover(
             }
 
             let mut class_name = None;
-            for up in (0..idx).rev() {
+                    for up in (0..idx).rev() {
                 let class_line = source_line(text, line_offsets, up)?.trim_start();
                 if let Some(rest) = class_line.strip_prefix("class ") {
                     class_name = rest
@@ -399,6 +428,7 @@ fn source_attribute_hover_from_definition_file(
     path: &std::path::Path,
     symbol: &str,
     module_path: &str,
+    lsp_type: Option<&str>,
 ) -> Option<String> {
     fn format_attribute_assignment_line(line: &str) -> String {
         let mut lines_iter = line.lines();
@@ -503,7 +533,34 @@ fn source_attribute_hover_from_definition_file(
             }
         }
 
-        let full_statement = statement_lines.join("\n");
+                        let full_statement = statement_lines.join("\n");
+
+        let mut assignment = format_attribute_assignment_line(&full_statement);
+        if let Some(raw_ty) = lsp_type {
+            let mut ty = String::with_capacity(raw_ty.len());
+            let mut s = raw_ty;
+            while let Some(pos) = s.find("<class '") {
+                ty.push_str(&s[..pos]);
+                let rest = &s[pos + "<class '".len()..];
+                if let Some(end) = rest.find("'>") {
+                    ty.push_str(&rest[..end]);
+                    s = &rest[end + 2..];
+                } else {
+                    ty.push_str(&s[pos..]);
+                    s = "";
+                }
+            }
+            ty.push_str(s);
+            let ty = ty.replace("... omitted 3 union elements", "OmittedUnionElements").split_whitespace().collect::<Vec<_>>().join(" ");
+
+            if assignment.starts_with(&format!("{symbol} =")) {
+                let replacement = format!("{symbol}: {ty} =");
+                assignment = assignment.replacen(&format!("{symbol} ="), &replacement, 1);
+            } else if assignment.starts_with(&format!("{symbol}=")) {
+                let replacement = format!("{symbol}: {ty} =");
+                assignment = assignment.replacen(&format!("{symbol}="), &replacement, 1);
+            }
+        }
 
         let mut class_name = None;
         for up in (0..idx).rev() {
@@ -528,16 +585,16 @@ fn source_attribute_hover_from_definition_file(
             ("Variable", module_path.to_string())
         };
 
-        if fq_owner.is_empty() {
+                if fq_owner.is_empty() {
             return Some(format!(
                 "## {header_prefix} {symbol}\n{}",
-                format_attribute_assignment_line(&full_statement)
+                assignment
             ));
         }
 
         return Some(format!(
             "## {header_prefix} {symbol} of {fq_owner}\n{}",
-            format_attribute_assignment_line(&full_statement)
+            assignment
         ));
     }
     None
@@ -719,16 +776,39 @@ mod tests {
         ));
         let src = "class FcmSenderService:\n    client: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))\n";
         std::fs::write(&tmp, src).expect("expected temp file write");
-        let hover = source_attribute_hover_from_definition_file(
+                let hover = source_attribute_hover_from_definition_file(
             &tmp,
             "client",
             "car_wash.core.fcm.service",
+            None,
         )
         .expect("expected attribute hover text");
                 assert_eq!(
             hover,
             "## Class attribute client of car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+        #[test]
+    fn definition_file_attribute_hover_includes_lsp_type() {
+        let mut tmp = std::env::temp_dir();
+        tmp.push(format!(
+            "rriter_attr_hover_{}_{}.py",
+            std::process::id(),
+            2usize
+        ));
+        let src = "cars_router = Router(\n    path='/cars'\n)\n";
+        std::fs::write(&tmp, src).expect("expected temp file write");
+        let hover = source_attribute_hover_from_definition_file(
+            &tmp,
+            "cars_router",
+            "car_wash",
+            Some("Router"),
+        )
+        .expect("expected attribute hover text");
+
+        assert!(hover.contains("cars_router: Router = Router("));
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -2090,13 +2170,13 @@ impl ApplicationHandler for App {
                                             if let Some(symbol) =
                                                 symbol_at_offset(&self.editor, popup.byte_offset)
                                             {
-                                                if let Some(attr_hover) =
-                                                    source_attribute_hover_from_definition_file(
-                                                        &path,
-                                                        &symbol,
-                                                        &module_path,
-                                                    )
-                                                {
+                                                                                            if let Some(attr_hover) =
+                                                source_attribute_hover_from_definition_file(
+                                                    &path,
+                                                    &symbol,
+                                                    &module_path,
+                                                    Some(&popup.text),
+                                                ){
                                                     let (clean, spans, kinds, inline) =
                                                         crate::lsp::highlight_hover_text(
                                                             &attr_hover,

@@ -314,6 +314,9 @@ Project divided into several independent, tightly coupled subsystems.
     │   ├── mouse.rs
     │   ├── terminal.rs
     │   └── ui_handlers.rs
+    ├── languages
+    │   ├── mod.rs
+    │   └── python.rs
     ├── app.rs
     ├── editor.rs
     ├── fonts

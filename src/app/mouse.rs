@@ -57,7 +57,7 @@ thread_local! {
     pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
 }
 
-pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.2;
+pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
 
 pub fn clear_hover_popup() -> bool {
     HOVER_STATE.with(|state| {
@@ -783,7 +783,7 @@ impl App {
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
             let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
 
-            if type_rect.is_some() || diag_rect.is_some() {
+                        if type_rect.is_some() || diag_rect.is_some() {
                 let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
                 if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
                     let x_min = r1.0.min(r2.0);
@@ -792,7 +792,7 @@ impl App {
                     let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                     union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
                 }
-                let pad = 40.0 * self.renderer.as_ref().unwrap().scale_factor;
+                                let pad = 24.0 * self.renderer.as_ref().unwrap().scale_factor;
                 if mx >= union_rect.0 - pad
                     && mx <= union_rect.0 + union_rect.2 + pad
                     && my >= union_rect.1 - pad
@@ -1884,7 +1884,7 @@ impl App {
         });
         let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
 
-        if type_rect.is_some() || diag_rect.is_some() {
+                if type_rect.is_some() || diag_rect.is_some() {
             let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
             if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
                 let x_min = r1.0.min(r2.0);
@@ -1893,12 +1893,12 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-                                                let pad = 12.0 * s;
-                        if position.x as f32 >= union_rect.0 - pad
-                            && position.x as f32 <= union_rect.0 + union_rect.2 + pad
-                            && position.y as f32 >= union_rect.1 - pad
-                            && position.y as f32 <= union_rect.1 + union_rect.3 + pad
-                        {
+                        let pad = 24.0 * s;
+            if position.x as f32 >= union_rect.0 - pad
+                && position.x as f32 <= union_rect.0 + union_rect.2 + pad
+                && position.y as f32 >= union_rect.1 - pad
+                && position.y as f32 <= union_rect.1 + union_rect.3 + pad
+            {
                 in_hover_popup = true;
             }
         }
@@ -1927,10 +1927,10 @@ impl App {
                         } else {
                             38.0 * s
                         });
-                                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
+                                                                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
 
-                let bridge_w = 400.0 * s;
-                let mut bridge_x = anchor_x - bridge_w * 0.5;
+                                                                let bridge_w = 300.0 * s;
+                                                                let mut bridge_x = anchor_x - bridge_w * 0.5;
                 if bridge_x < 0.0 {
                     bridge_x = 0.0;
                 }
