@@ -601,7 +601,10 @@ pub fn highlight_python_hover_doc(
                 break;
             }
         }
-        let def_shift = lines[start_line].find("def ").unwrap_or(0);
+        let def_shift = lines[start_line]
+            .find("async def ")
+            .or_else(|| lines[start_line].find("def "))
+            .unwrap_or(0);
         let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
             line_starts[end_line + 1] - 1

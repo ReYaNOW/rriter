@@ -684,10 +684,17 @@ Append object to the end of the list.";
     #[test]
     fn coroutine_return_signature_becomes_async_def() {
         let raw = "def add_default_users_and_roles_session() -> CoroutineType[Any, Any, Unknown]";
-        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
         assert!(text.starts_with(
             "async def add_default_users_and_roles_session() -> CoroutineType[Any, Any, Unknown]"
         ));
+        let async_start = text.find("async").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= async_start
+                && s.end >= async_start + 5
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
+            "`async` keyword should be pink in normalized coroutine signatures",
+        );
     }
 
     #[test]
