@@ -1044,6 +1044,34 @@ Special type indicating an unconstrained type.";
                 && s.color == [0.545, 0.913, 0.992, 1.0]),
             "type names in signature should be cyan",
         );
+        let decorator_at = text.find('@').unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= decorator_at
+                && s.end >= decorator_at + 1
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
+            "decorator @ should be pink",
+        );
+        let decorator_name = text.find("asynccontextmanager").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= decorator_name
+                && s.end >= decorator_name + "asynccontextmanager".len()
+                && s.color == [0.313, 0.980, 0.482, 1.0]),
+            "decorator name should be green",
+        );
+        let l_bracket = text.find('[').unwrap_or(0);
+        let r_bracket = text.rfind(']').unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= l_bracket
+                && s.end >= l_bracket + 1
+                && s.color == [0.972, 0.972, 0.949, 1.0]),
+            "left bracket in return type should be neutral white",
+        );
+        assert!(
+            spans.iter().any(|s| s.start <= r_bracket
+                && s.end >= r_bracket + 1
+                && s.color == [0.972, 0.972, 0.949, 1.0]),
+            "right bracket in return type should be neutral white",
+        );
     }
 }
 

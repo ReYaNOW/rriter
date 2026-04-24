@@ -560,7 +560,10 @@ pub fn highlight_python_hover_doc(
     Vec<(usize, usize)>,
 ) {
     let text_light = [0.86, 0.87, 0.90, 1.0];
+    let pink = [1.0, 0.474, 0.776, 1.0];
+    let green = [0.313, 0.980, 0.482, 1.0];
     let ty = [0.545, 0.913, 0.992, 1.0];
+    let neutral = [0.972, 0.972, 0.949, 1.0];
     let param = [0.973, 0.584, 0.502, 1.0];
 
     let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
@@ -590,6 +593,44 @@ pub fn highlight_python_hover_doc(
         }
     }
     if let Some(start_line) = sig_start_line {
+        let mut decorator_start_line = start_line;
+        while decorator_start_line > 0 {
+            let prev = lines[decorator_start_line - 1].trim_start();
+            if prev.starts_with('@') {
+                decorator_start_line -= 1;
+            } else {
+                break;
+            }
+        }
+        for line_no in decorator_start_line..start_line {
+            let line = lines[line_no];
+            let line_offset = line_starts[line_no];
+            let leading_ws = line.len().saturating_sub(line.trim_start().len());
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with('@') {
+                continue;
+            }
+            let at_pos = line_offset + leading_ws;
+            spans.push(crate::highlighter::ColorSpan {
+                start: at_pos,
+                end: at_pos + 1,
+                color: pink,
+            });
+            let name = trimmed[1..]
+                .split(|c: char| c == '(' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !name.is_empty() {
+                let name_start = at_pos + 1;
+                spans.push(crate::highlighter::ColorSpan {
+                    start: name_start,
+                    end: name_start + name.len(),
+                    color: green,
+                });
+            }
+        }
+
         let mut end_line = start_line;
         for i in start_line..lines.len() {
             let trimmed = lines[i].trim_end();
@@ -617,6 +658,19 @@ pub fn highlight_python_hover_doc(
                 sig_code.push(':');
             }
             push_python_ts_spans(&sig_code, start, &mut spans);
+        }
+
+        let mut signature_brackets = Vec::new();
+        for line_no in start_line..=end_line {
+            for (idx, ch) in lines[line_no].char_indices() {
+                if ch == '[' || ch == ']' {
+                    let abs = line_starts[line_no] + idx;
+                    signature_brackets.push((abs, abs + 1));
+                }
+            }
+        }
+        if !signature_brackets.is_empty() {
+            force_color_on_ranges(&mut spans, &signature_brackets, neutral);
         }
     }
 
@@ -729,4 +783,46 @@ pub fn highlight_python_hover_doc(
         .collect();
 
     (msg, spans, public_kinds, inline_code_ranges)
+}
+
+fn force_color_on_ranges(
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+    ranges: &[(usize, usize)],
+    color: [f32; 4],
+) {
+    let mut out = Vec::with_capacity(spans.len() + ranges.len());
+    for span in spans.drain(..) {
+        let mut pieces = vec![span];
+        for &(force_start, force_end) in ranges {
+            let mut next = Vec::with_capacity(pieces.len() + 1);
+            for piece in pieces {
+                if piece.end <= force_start || piece.start >= force_end {
+                    next.push(piece);
+                    continue;
+                }
+                if piece.start < force_start {
+                    next.push(crate::highlighter::ColorSpan {
+                        start: piece.start,
+                        end: force_start,
+                        color: piece.color,
+                    });
+                }
+                if piece.end > force_end {
+                    next.push(crate::highlighter::ColorSpan {
+                        start: force_end,
+                        end: piece.end,
+                        color: piece.color,
+                    });
+                }
+            }
+            pieces = next;
+        }
+        out.extend(pieces);
+    }
+    out.extend(
+        ranges
+            .iter()
+            .map(|&(start, end)| crate::highlighter::ColorSpan { start, end, color }),
+    );
+    *spans = out;
 }
