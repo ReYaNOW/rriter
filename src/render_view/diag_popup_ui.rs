@@ -19,7 +19,9 @@ thread_local! {
 pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
     DIAG_CHARS.with(|chars| {
         let chars = chars.borrow();
-        if chars.is_empty() { return 0; }
+        if chars.is_empty() {
+            return 0;
+        }
 
         let mut best_y_dist = f32::MAX;
         let mut best_y = chars[0].y;
@@ -39,7 +41,11 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
                 let dist = (mx - cx).abs();
                 if dist < best_x_dist {
                     best_x_dist = dist;
-                    closest = if mx > cx { c.byte_offset + c.w as usize * 0 + 1 } else { c.byte_offset };
+                    closest = if mx > cx {
+                        c.byte_offset + c.w as usize * 0 + 1
+                    } else {
+                        c.byte_offset
+                    };
                 }
             }
         }
@@ -48,7 +54,7 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
 }
 
 impl Renderer {
-        pub fn draw_diagnostic_popup(
+    pub fn draw_diagnostic_popup(
         &mut self,
         lsp_diagnostics: &[Diagnostic],
         ide_panel: &IdePanelState,
@@ -61,12 +67,14 @@ impl Renderer {
         let pad = 12.0 * s;
         let line_h = 22.0 * s;
         let icon_sz = 20.0 * s;
-        let max_text_w = (self.width - 80.0 * s).max(400.0 * s).min(self.width - 40.0 * s);
+        let max_text_w = (self.width - 80.0 * s)
+            .max(400.0 * s)
+            .min(self.width - 40.0 * s);
 
         let mut global_max_w = 180.0 * s;
         let mut total_h = pad * 2.0;
 
-                let mut parsed_diags = Vec::new();
+        let mut parsed_diags = Vec::new();
 
         DIAG_CHARS.with(|c| c.borrow_mut().clear());
         let mut global_byte_offset = 0;
@@ -81,9 +89,13 @@ impl Renderer {
         for i in 0..self.hovered_diags_cache.len() {
             let (idx, _, _, _) = self.hovered_diags_cache[i];
             let diag = &lsp_diagnostics[idx];
-            let clean_msg = diag.message.replace('\r', "").replace("\\n", "\n").replace("\\t", "    ");
+            let clean_msg = diag
+                .message
+                .replace('\r', "")
+                .replace("\\n", "\n")
+                .replace("\\t", "    ");
 
-                        let mut spans = TS_SPANS_CACHE.with(|cache| {
+            let mut spans = TS_SPANS_CACHE.with(|cache| {
                 let mut cache = cache.borrow_mut();
                 if let Some(cached) = cache.get(&clean_msg) {
                     cached.clone()
@@ -99,7 +111,7 @@ impl Renderer {
 
             spans.sort_by_key(|s| s.start);
 
-                                    let mut lines = Vec::new();
+            let mut lines = Vec::new();
             let mut cur_line_w = 0.0;
             let mut cur_line: Vec<(char, [f32; 4])> = Vec::new();
             let mut last_space_idx = None;
@@ -166,7 +178,8 @@ impl Renderer {
             let source_str = diag.source.as_deref().unwrap_or("LSP");
             let code_str = diag.code.as_deref().unwrap_or("");
 
-            let prefix_w = self.measure_mono_width("(", 1.0) + self.measure_mono_width(source_str, 1.0);
+            let prefix_w =
+                self.measure_mono_width("(", 1.0) + self.measure_mono_width(source_str, 1.0);
             let suffix_w = if !code_str.is_empty() {
                 self.measure_mono_width(" ", 1.0)
                     + self.measure_mono_width(code_str, 1.0)
@@ -179,33 +192,44 @@ impl Renderer {
             let mut max_line_w = 0.0;
             for line in &lines {
                 let w: f32 = line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
-                if w > max_line_w { max_line_w = w; }
+                if w > max_line_w {
+                    max_line_w = w;
+                }
             }
 
-            let last_line_w = lines.last().map(|l| l.iter().map(|&(ch, _)| self.char_advance(ch)).sum::<f32>()).unwrap_or(0.0);
+            let last_line_w = lines
+                .last()
+                .map(|l| l.iter().map(|&(ch, _)| self.char_advance(ch)).sum::<f32>())
+                .unwrap_or(0.0);
             let mut line_count = lines.len();
             let source_on_new_line = last_line_w + source_full_w + 10.0 * s > max_text_w;
 
             if source_on_new_line {
                 line_count += 1;
-                if source_full_w > max_line_w { max_line_w = source_full_w; }
+                if source_full_w > max_line_w {
+                    max_line_w = source_full_w;
+                }
             } else {
                 let combined = last_line_w + 8.0 * s + source_full_w;
-                if combined > max_line_w { max_line_w = combined; }
+                if combined > max_line_w {
+                    max_line_w = combined;
+                }
             }
 
             let item_w = max_line_w + pad * 2.0 + icon_sz + 16.0 * s;
-            if item_w > global_max_w { global_max_w = item_w; }
+            if item_w > global_max_w {
+                global_max_w = item_w;
+            }
             total_h += line_count as f32 * line_h;
 
-                        parsed_diags.push((lines, source_on_new_line, last_line_w, line_count));
+            parsed_diags.push((lines, source_on_new_line, last_line_w, line_count));
         }
 
         total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
         total_h = total_h.min(self.height - 60.0 * s);
         let box_w = global_max_w;
 
-                let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
+        let (_, first_diag_x, first_line_y_top, first_diag_y_bottom) = self.hovered_diags_cache[0];
         let mut bx = first_diag_x;
 
         crate::app::mouse::HOVER_STATE.with(|s| {
@@ -220,8 +244,13 @@ impl Renderer {
         if bx < 20.0 * s {
             bx = 20.0 * s;
         }
-        let mut by = first_line_y_top - total_h - 8.0 * s;
-        if by < 0.0 {
+        let prefer_below = first_line_y_top - (self.height * 0.45) - 8.0 * s < 0.0;
+        let mut by = if prefer_below {
+            first_diag_y_bottom + 8.0 * s
+        } else {
+            first_line_y_top - total_h - 8.0 * s
+        };
+        if !prefer_below && by < 0.0 {
             by = first_diag_y_bottom + 8.0 * s;
         }
 
@@ -276,12 +305,12 @@ impl Renderer {
                 crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 1.0],
             };
 
-                        let source_str = diag.source.as_deref().unwrap_or("LSP");
+            let source_str = diag.source.as_deref().unwrap_or("LSP");
             let code_str = diag.code.as_deref().unwrap_or("");
 
             let (lines, source_on_new_line, last_line_w, line_count) = &parsed_diags[i];
 
-                        let mut text_y = current_y + line_h * 0.75;
+            let mut text_y = current_y + line_h * 0.75;
             let mut draw_x = (bx + pad).round();
 
             for line in lines {
@@ -332,7 +361,13 @@ impl Renderer {
             draw_x += self.measure_mono_width(source_str, 1.0);
 
             if !code_str.is_empty() {
-                self.draw_string_mono_scaled(" ", draw_x, text_y.round(), [0.55, 0.55, 0.6, 1.0], 1.0);
+                self.draw_string_mono_scaled(
+                    " ",
+                    draw_x,
+                    text_y.round(),
+                    [0.55, 0.55, 0.6, 1.0],
+                    1.0,
+                );
                 draw_x += self.measure_mono_width(" ", 1.0);
 
                 let sfx_w = self.measure_mono_width(code_str, 1.0);

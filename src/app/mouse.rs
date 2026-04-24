@@ -17,6 +17,7 @@ pub struct HoverPopup {
 
 pub struct HoverState {
     pub request_id: Option<i32>,
+    pub definition_request_id: Option<i32>,
     pub popup: Option<HoverPopup>,
     pub timer: f32,
     pub byte_offset: Option<usize>,
@@ -34,6 +35,7 @@ impl Default for HoverState {
     fn default() -> Self {
         Self {
             request_id: None,
+            definition_request_id: None,
             popup: None,
             timer: 0.0,
             byte_offset: None,
@@ -58,15 +60,17 @@ pub fn clear_hover_popup() -> bool {
         let mut state = state.borrow_mut();
         let had_popup = state.popup.is_some()
             || state.request_id.is_some()
+            || state.definition_request_id.is_some()
             || state.byte_offset.is_some()
             || state.rect.is_some();
         state.request_id = None;
+        state.definition_request_id = None;
         state.popup = None;
         state.timer = 0.0;
         state.byte_offset = None;
         state.rect = None;
         state.max_scroll = 0.0;
-                state.selection_anchor = None;
+        state.selection_anchor = None;
         state.selection_cursor = None;
         state.selecting = false;
         state.diag_selection_anchor = None;
@@ -103,12 +107,18 @@ fn hover_popup_byte_at(
     let mut last_space_idx = None;
     let mut raw_line_no = 0usize;
 
-        let push_line = |lines: &mut Vec<_>, cur_line: Vec<(char, usize)>, kind: crate::lsp::HoverLineKindPublic| {
+    let push_line = |lines: &mut Vec<_>,
+                     cur_line: Vec<(char, usize)>,
+                     kind: crate::lsp::HoverLineKindPublic| {
         lines.push((cur_line, kind));
     };
 
     for (offset, c) in popup.text.char_indices() {
-        let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+        let kind = popup
+            .line_kinds
+            .get(raw_line_no)
+            .copied()
+            .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
         let scale_mul = match kind {
             crate::lsp::HoverLineKindPublic::Header1 => 1.3,
             crate::lsp::HoverLineKindPublic::Header2 => 1.15,
@@ -132,7 +142,10 @@ fn hover_popup_byte_at(
                 }
                 push_line(&mut lines, std::mem::take(&mut cur_line), kind);
                 cur_line = remainder;
-                cur_line_w = cur_line.iter().map(|&(ch, _)| renderer.char_advance(ch) * scale_mul).sum();
+                cur_line_w = cur_line
+                    .iter()
+                    .map(|&(ch, _)| renderer.char_advance(ch) * scale_mul)
+                    .sum();
             } else {
                 push_line(&mut lines, std::mem::take(&mut cur_line), kind);
                 cur_line_w = 0.0;
@@ -148,7 +161,11 @@ fn hover_popup_byte_at(
         }
     }
     if !cur_line.is_empty() {
-        let kind = popup.line_kinds.get(raw_line_no).copied().unwrap_or(crate::lsp::HoverLineKindPublic::Text);
+        let kind = popup
+            .line_kinds
+            .get(raw_line_no)
+            .copied()
+            .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
         push_line(&mut lines, cur_line, kind);
     }
 
@@ -167,7 +184,7 @@ fn hover_popup_byte_at(
     let mut current_top = by + pad - popup.scroll.current;
     let mut found_line_idx = lines.len().saturating_sub(1);
 
-        for (i, (_line, kind)) in lines.iter().enumerate() {
+    for (i, (_line, kind)) in lines.iter().enumerate() {
         let scale_mul = match kind {
             crate::lsp::HoverLineKindPublic::Header1 => 1.15,
             crate::lsp::HoverLineKindPublic::Header2 => 1.05,
@@ -197,7 +214,7 @@ fn hover_popup_byte_at(
                 }
             }
         }
-                for next_idx in (found_line_idx + 1)..lines.len() {
+        for next_idx in (found_line_idx + 1)..lines.len() {
             if let Some(&(_next_ch, next_off)) = lines[next_idx].0.first() {
                 return next_off;
             }
@@ -206,7 +223,11 @@ fn hover_popup_byte_at(
     }
 
     let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
-    let start_x = if is_code { bx + pad + 8.0 * s } else { bx + pad };
+    let start_x = if is_code {
+        bx + pad + 8.0 * s
+    } else {
+        bx + pad
+    };
     let target_x = (x - start_x).max(0.0);
     let mut draw_x = 0.0;
 
@@ -698,7 +719,7 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+        if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             let mut in_hover_popup = false;
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
             let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
@@ -1015,7 +1036,7 @@ impl App {
                     }
                 }
 
-                                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
                     let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
                         && HOVER_STATE.with(|hover_state| {
                             if let Some((x, y, w, h)) = hover_state.borrow().rect {
@@ -1025,16 +1046,22 @@ impl App {
                             }
                         });
                     let in_diag_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
-                        && self.renderer.as_ref().unwrap().last_diag_popup_rect.map_or(false, |(x, y, w, h)| {
-                            mx >= x && mx <= x + w && my >= y && my <= y + h
-                        });
+                        && self
+                            .renderer
+                            .as_ref()
+                            .unwrap()
+                            .last_diag_popup_rect
+                            .map_or(false, |(x, y, w, h)| {
+                                mx >= x && mx <= x + w && my >= y && my <= y + h
+                            });
 
                     if in_hover_popup_body || in_diag_popup_body {
                         if button == winit::event::MouseButton::Left {
                             if in_hover_popup_body {
                                 HOVER_STATE.with(|hover_state| {
                                     let mut hs = hover_state.borrow_mut();
-                                    if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
+                                    if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref())
+                                    {
                                         let byte = hover_popup_byte_at(
                                             self.renderer.as_mut().unwrap(),
                                             popup,
@@ -1054,7 +1081,10 @@ impl App {
                             } else {
                                 HOVER_STATE.with(|hover_state| {
                                     let mut hs = hover_state.borrow_mut();
-                                    let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(mx, my);
+                                    let byte =
+                                        crate::render_view::diag_popup_ui::diag_popup_byte_at(
+                                            mx, my,
+                                        );
                                     if state == ElementState::Pressed {
                                         hs.diag_selection_anchor = Some(byte);
                                         hs.diag_selection_cursor = Some(byte);
@@ -1517,7 +1547,7 @@ impl App {
             for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
                 scroll.is_dragging = false;
             }
-                        crate::app::mouse::HOVER_STATE.with(|s| {
+            crate::app::mouse::HOVER_STATE.with(|s| {
                 let mut state = s.borrow_mut();
                 if let Some(popup) = &mut state.popup {
                     popup.scroll.is_dragging = false;
@@ -1606,7 +1636,7 @@ impl App {
             return;
         }
 
-                let mut popup_selecting = false;
+        let mut popup_selecting = false;
         HOVER_STATE.with(|hover_state| {
             let mut hs = hover_state.borrow_mut();
             if hs.selecting {
@@ -1622,7 +1652,10 @@ impl App {
                     popup_selecting = true;
                 }
             } else if hs.diag_selecting {
-                let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(position.x as f32, position.y as f32);
+                let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(
+                    position.x as f32,
+                    position.y as f32,
+                );
                 hs.diag_selection_cursor = Some(byte);
                 popup_selecting = true;
             }
@@ -1777,7 +1810,7 @@ impl App {
             }
         }
 
-                let s = self.renderer.as_ref().unwrap().scale_factor;
+        let s = self.renderer.as_ref().unwrap().scale_factor;
         let mut in_hover_popup = false;
 
         let type_rect = HOVER_STATE.with(|state| state.borrow().rect);
@@ -1792,7 +1825,7 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-            let pad = 40.0 * s;
+            let pad = 4.0 * s;
             if position.x as f32 >= union_rect.0 - pad
                 && position.x as f32 <= union_rect.0 + union_rect.2 + pad
                 && position.y as f32 >= union_rect.1 - pad
@@ -1834,7 +1867,7 @@ impl App {
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
 
-                        HOVER_STATE.with(|state| {
+            HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 if is_text_area && is_hover_target_byte(&self.editor, byte_offset) {
                     let mut same_word = false;

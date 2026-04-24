@@ -61,10 +61,12 @@ pub fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
     let mut i = 0usize;
     while i < line.len() {
         let rest = &line[i..];
-        let role_prefix =[":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`"]
-            .iter()
-            .find(|p| rest.starts_with(**p))
-            .copied();
+        let role_prefix = [
+            ":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`",
+        ]
+        .iter()
+        .find(|p| rest.starts_with(**p))
+        .copied();
         if let Some(prefix) = role_prefix {
             i += prefix.len();
             if let Some(end_rel) = line[i..].find('`') {
@@ -101,7 +103,7 @@ pub fn flatten_rst_roles_and_code(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i+1] == '\n' {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\n' {
             i += 2;
             while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' {
                 i += 1;
@@ -109,7 +111,7 @@ pub fn flatten_rst_roles_and_code(text: &str) -> String {
             continue;
         }
         if chars[i] == '`' {
-            if i + 1 < chars.len() && chars[i+1] == '`' {
+            if i + 1 < chars.len() && chars[i + 1] == '`' {
                 in_code = !in_code;
                 out.push('`');
                 out.push('`');
@@ -176,6 +178,28 @@ fn split_inline_python_after_colon(line: &str) -> Option<(String, String)> {
     Some((head.to_string(), tail.to_string()))
 }
 
+fn normalize_coroutine_signature_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+        return line.to_string();
+    }
+    let Some(arrow) = trimmed.rfind("->") else {
+        return line.to_string();
+    };
+    let ret = trimmed[arrow + 2..].trim();
+    let is_async_ret =
+        ret.contains("CoroutineType") || ret.contains("Coroutine") || ret.contains("Awaitable");
+    if !is_async_ret {
+        return line.to_string();
+    }
+    let leading = line.len() - trimmed.len();
+    let mut out = String::with_capacity(line.len() + 6);
+    out.push_str(&line[..leading]);
+    out.push_str("async ");
+    out.push_str(trimmed);
+    out
+}
+
 pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut kinds = Vec::new();
@@ -183,7 +207,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
     let mut parameters_header_added = false;
     let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', ""));
     let lines: Vec<&str> = flat_msg.lines().collect();
-        let mut i = 0usize;
+    let mut i = 0usize;
     let mut in_fence = false;
     let mut in_fence_is_code = false;
 
@@ -191,7 +215,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         let line = lines[i];
         let trimmed = line.trim();
 
-                if trimmed.starts_with("```") {
+        if trimmed.starts_with("```") {
             if in_fence {
                 while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
                     out.pop();
@@ -203,7 +227,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                 }
                 in_fence = false;
             } else {
-                                in_fence = true;
+                in_fence = true;
                 let lang = trimmed.strip_prefix("```").unwrap_or("").trim();
                 in_fence_is_code = lang.is_empty() || lang == "python" || lang == "py";
             }
@@ -223,7 +247,8 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             continue;
         }
 
-        if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python") {
+        if trimmed.starts_with(".. code-block:: python") || trimmed.starts_with(".. code:: python")
+        {
             if !out.ends_with("\n\n") && !out.is_empty() {
                 out.push('\n');
                 kinds.push(HoverLineKind::Text);
@@ -285,7 +310,9 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             }
 
             i += 1;
-            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            if i < lines.len() && lines[i].trim().is_empty() {
+                i += 1;
+            }
             while i < lines.len() {
                 let code_line = lines[i];
                 if code_line.trim().is_empty() {
@@ -342,7 +369,8 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             let trimmed_rest = stripped.trim();
             if !trimmed_rest.is_empty() {
                 let _line_start = out.len();
-                let (roles_line, mut role_ranges) = normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
+                let (roles_line, mut role_ranges) =
+                    normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
                 let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
                 out.push_str(normalized_line.trim_end());
                 out.push('\n');
@@ -363,7 +391,8 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             let trimmed_rest = stripped.trim();
             if !trimmed_rest.is_empty() {
                 let _line_start = out.len();
-                let (roles_line, mut role_ranges) = normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
+                let (roles_line, mut role_ranges) =
+                    normalize_rst_roles(&trimmed_rest.replace("\\*", "*"));
                 let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
                 out.push_str(normalized_line.trim_end());
                 out.push('\n');
@@ -392,7 +421,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             out.push('\n');
             kinds.push(HoverLineKind::Text);
 
-                        if !desc.is_empty() {
+            if !desc.is_empty() {
                 let (roles_line, mut role_ranges) = normalize_rst_roles(&desc);
                 let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
                 out.push_str("    ");
@@ -421,8 +450,10 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             continue;
         }
 
+        let normalized_src_line = normalize_coroutine_signature_line(line);
         let line_start = out.len();
-        let (roles_line, mut role_ranges) = normalize_rst_roles(&line.replace("\\*", "*"));
+        let (roles_line, mut role_ranges) =
+            normalize_rst_roles(&normalized_src_line.replace("\\*", "*"));
         let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
         let trimmed_norm = normalized_line.trim_end();
         if let Some(s) = trimmed_norm.strip_prefix("## ") {
@@ -472,46 +503,48 @@ pub fn push_python_ts_spans(
     global_start: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
 ) {
-    let mut best_spans: HashMap<(usize, usize), (u8,[f32; 4])> = HashMap::new();
+    let mut best_spans: HashMap<(usize, usize), (u8, [f32; 4])> = HashMap::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
-    TS_DIAG_QUERY.with(|q_cell| {
-    TS_DIAG_CURSOR.with(|c_cell| {
-        let mut parser = p_cell.borrow_mut();
-        let query_opt = q_cell.borrow();
-        let mut cursor = c_cell.borrow_mut();
+        TS_DIAG_QUERY.with(|q_cell| {
+            TS_DIAG_CURSOR.with(|c_cell| {
+                let mut parser = p_cell.borrow_mut();
+                let query_opt = q_cell.borrow();
+                let mut cursor = c_cell.borrow_mut();
 
-        if let Some(query) = query_opt.as_ref() {
-            if let Some(tree) = parser.parse(code, None) {
-                let mut matches = cursor.matches(query, tree.root_node(), code.as_bytes());
-                while let Some(m) = matches.next() {
-                    for cap in m.captures {
-                        let name = query.capture_names()[cap.index as usize];
-                        let Some(color) = ts_capture_color(name) else {
-                            continue;
-                        };
-                        let prio = match name {
-                            "py_function" | "function" | "py_builtin_or_func" => 10,
-                            "keyword" | "keyword.control" | "operator" => 8,
-                            "string" | "number" => 8,
-                            "type" | "class_name" => 8,
-                            "parameter" => 5,
-                            "property" | "variable" | "py_assign" => 1,
-                            _ => 0,
-                        };
-                        let key = (
-                            global_start + cap.node.start_byte(),
-                            global_start + cap.node.end_byte(),
-                        );
-                        let entry = best_spans.entry(key).or_insert((prio, color));
-                        if prio >= entry.0 {
-                            *entry = (prio, color);
+                if let Some(query) = query_opt.as_ref() {
+                    if let Some(tree) = parser.parse(code, None) {
+                        let mut matches = cursor.matches(query, tree.root_node(), code.as_bytes());
+                        while let Some(m) = matches.next() {
+                            for cap in m.captures {
+                                let name = query.capture_names()[cap.index as usize];
+                                let Some(color) = ts_capture_color(name) else {
+                                    continue;
+                                };
+                                let prio = match name {
+                                    "py_function" | "function" | "py_builtin_or_func" => 10,
+                                    "keyword" | "keyword.control" | "operator" => 8,
+                                    "string" | "number" => 8,
+                                    "type" | "class_name" => 8,
+                                    "parameter" => 5,
+                                    "property" | "variable" | "py_assign" => 1,
+                                    _ => 0,
+                                };
+                                let key = (
+                                    global_start + cap.node.start_byte(),
+                                    global_start + cap.node.end_byte(),
+                                );
+                                let entry = best_spans.entry(key).or_insert((prio, color));
+                                if prio >= entry.0 {
+                                    *entry = (prio, color);
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-    })})});
+            })
+        })
+    });
 
     for ((start, end), (_, color)) in best_spans {
         spans.push(crate::highlighter::ColorSpan { start, end, color });
@@ -526,9 +559,9 @@ pub fn highlight_python_hover_doc(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    let text_light =[0.86, 0.87, 0.90, 1.0];
-    let ty =[0.545, 0.913, 0.992, 1.0];
-    let param =[0.973, 0.584, 0.502, 1.0];
+    let text_light = [0.86, 0.87, 0.90, 1.0];
+    let ty = [0.545, 0.913, 0.992, 1.0];
+    let param = [0.973, 0.584, 0.502, 1.0];
 
     let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
@@ -568,7 +601,10 @@ pub fn highlight_python_hover_doc(
                 break;
             }
         }
-        let def_shift = lines[start_line].find("def ").unwrap_or(0);
+        let def_shift = lines[start_line]
+            .find("async def ")
+            .or_else(|| lines[start_line].find("def "))
+            .unwrap_or(0);
         let start = line_starts[start_line] + def_shift;
         let end = if end_line + 1 < line_starts.len() {
             line_starts[end_line + 1] - 1
@@ -614,9 +650,15 @@ pub fn highlight_python_hover_doc(
         let line_end = line_start + line.len();
         let trimmed = line.trim_start();
         let is_blank = trimmed.is_empty();
-        let kind = line_kinds.get(line_no).copied().unwrap_or(HoverLineKind::Text);
+        let kind = line_kinds
+            .get(line_no)
+            .copied()
+            .unwrap_or(HoverLineKind::Text);
 
-        if kind == HoverLineKind::Separator || kind == HoverLineKind::Header1 || kind == HoverLineKind::Header2 {
+        if kind == HoverLineKind::Separator
+            || kind == HoverLineKind::Header1
+            || kind == HoverLineKind::Header2
+        {
             saw_separator = true;
         }
 
@@ -634,7 +676,9 @@ pub fn highlight_python_hover_doc(
                 let is_indented = line.starts_with(' ') || line.starts_with('\t');
                 if !lhs.is_empty()
                     && !is_indented
-                    && lhs.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*')
+                    && lhs
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '*')
                     && saw_separator
                 {
                     let lhs_start = line_start + line.find(lhs).unwrap_or(0);
@@ -646,12 +690,14 @@ pub fn highlight_python_hover_doc(
                     });
                     let rhs = line[colon_pos + 1..].trim_start();
                     if !rhs.is_empty() {
-                        let rhs_start = line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
-                        let rhs_end = rhs_start + rhs
-                            .chars()
-                            .take_while(|c| !c.is_whitespace())
-                            .map(|c| c.len_utf8())
-                            .sum::<usize>();
+                        let rhs_start =
+                            line_start + colon_pos + 1 + (line[colon_pos + 1..].len() - rhs.len());
+                        let rhs_end = rhs_start
+                            + rhs
+                                .chars()
+                                .take_while(|c| !c.is_whitespace())
+                                .map(|c| c.len_utf8())
+                                .sum::<usize>();
                         if rhs_end > rhs_start {
                             spans.push(crate::highlighter::ColorSpan {
                                 start: rhs_start,
@@ -671,13 +717,16 @@ pub fn highlight_python_hover_doc(
         }
     }
 
-    let public_kinds = line_kinds.into_iter().map(|k| match k {
-        HoverLineKind::Text => HoverLineKindPublic::Text,
-        HoverLineKind::Code => HoverLineKindPublic::Code,
-        HoverLineKind::Separator => HoverLineKindPublic::Separator,
-        HoverLineKind::Header1 => HoverLineKindPublic::Header1,
-        HoverLineKind::Header2 => HoverLineKindPublic::Header2,
-    }).collect();
+    let public_kinds = line_kinds
+        .into_iter()
+        .map(|k| match k {
+            HoverLineKind::Text => HoverLineKindPublic::Text,
+            HoverLineKind::Code => HoverLineKindPublic::Code,
+            HoverLineKind::Separator => HoverLineKindPublic::Separator,
+            HoverLineKind::Header1 => HoverLineKindPublic::Header1,
+            HoverLineKind::Header2 => HoverLineKindPublic::Header2,
+        })
+        .collect();
 
     (msg, spans, public_kinds, inline_code_ranges)
 }
