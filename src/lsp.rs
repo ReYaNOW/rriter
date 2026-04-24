@@ -154,7 +154,9 @@ pub fn highlight_hover_text(
                             }
                         }
                     }
+                    add_param_name_spans_for_signature(line, offset, &mut spans);
                     add_self_param_span_for_signature(line, offset, &mut spans);
+                    add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
                 }
                 offset += line.len() + 1;
             }
@@ -222,7 +224,7 @@ fn sanitize_hover_type_expr(mut s: &str) -> String {
 
 fn normalize_bound_method_signature(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
-    let (is_async, body) = if let Some(rest) = trimmed.strip_prefix("bound async method ") {
+    let (prefix_async, body) = if let Some(rest) = trimmed.strip_prefix("bound async method ") {
         (true, rest)
     } else if let Some(rest) = trimmed.strip_prefix("bound method ") {
         (false, rest)
@@ -265,6 +267,10 @@ fn normalize_bound_method_signature(line: &str) -> Option<String> {
     } else {
         "Any".to_string()
     };
+    let is_async = prefix_async
+        || ret_ty.contains("Coroutine")
+        || ret_ty.contains("CoroutineType")
+        || ret_ty.contains("Awaitable");
     let def_kw = if is_async { "async def" } else { "def" };
     Some(format!("{def_kw} {method}({}) -> {ret_ty}", params.join(", ")))
 }
@@ -363,6 +369,66 @@ fn add_self_param_span_for_signature(
     }
 }
 
+fn add_param_name_spans_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    let (Some(open), Some(close)) = (line.find('('), line.rfind(')')) else {
+        return;
+    };
+    if close <= open {
+        return;
+    }
+    let params_slice = &line[open + 1..close];
+    let mut local = 0usize;
+    for raw in params_slice.split(',') {
+        let p = raw.trim();
+        if p.is_empty() || p == "/" || p == "*" {
+            local += raw.len() + 1;
+            continue;
+        }
+        let name = p.split(':').next().unwrap_or("").trim();
+        if name.is_empty() || name == "self" {
+            local += raw.len() + 1;
+            continue;
+        }
+        if let Some(name_pos_rel) = raw.find(name) {
+            let start = line_offset + open + 1 + local + name_pos_rel;
+            spans.push(crate::highlighter::ColorSpan {
+                start,
+                end: start + name.len(),
+                color: [0.973, 0.584, 0.502, 1.0],
+            });
+        }
+        local += raw.len() + 1;
+    }
+}
+
+fn add_type_bracket_neutral_spans_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    for (idx, ch) in line.char_indices() {
+        if ch == '[' || ch == ']' {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_offset + idx,
+                end: line_offset + idx + ch.len_utf8(),
+                color: [0.972, 0.972, 0.949, 1.0],
+            });
+        }
+    }
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
@@ -439,6 +505,7 @@ Return a shallow copy of the dict.";
         let first_line = text.lines().next().unwrap_or("");
         let def_start = first_line.find("def").unwrap_or(0);
         let self_start = first_line.find("self").unwrap_or(0);
+        let bracket_start = first_line.find('[').unwrap_or(0);
         assert!(
             spans.iter().any(|s|
                 s.start <= def_start && s.end >= def_start + 3 && s.color == [1.0, 0.474, 0.776, 1.0]
@@ -450,6 +517,12 @@ Return a shallow copy of the dict.";
                 s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
             ),
             "`self` should be highlighted in violet",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= bracket_start && s.end >= bracket_start + 1 && s.color == [0.972, 0.972, 0.949, 1.0]
+            ),
+            "type brackets should be white",
         );
         let first_line_len = text.lines().next().unwrap_or("").len();
         let prose_offset = first_line_len + 1;
@@ -503,6 +576,13 @@ Append object to the end of the list.";
     }
 
     #[test]
+    fn coroutine_return_bound_method_becomes_async_def() {
+        let raw = "bound method LokiBatcher.shutdown() -> CoroutineType[Any, Any, None]";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("async def shutdown(self) -> CoroutineType[Any, Any, None]"));
+    }
+
+    #[test]
     fn long_bound_method_signature_is_normalized_and_highlighted() {
         let raw = "bound method list[<class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements].append(object: <class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements, /) -> None";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
@@ -511,11 +591,18 @@ Append object to the end of the list.";
         assert!(!spans.is_empty(), "normalized signature should get syntax spans");
         let first_line = text.lines().next().unwrap_or("");
         let self_start = first_line.find("self").unwrap_or(0);
+        let object_start = first_line.find("object").unwrap_or(0);
         assert!(
             spans.iter().any(|s|
                 s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
             ),
             "`self` should stay violet in long normalized signatures",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= object_start && s.end >= object_start + 6 && s.color == [0.973, 0.584, 0.502, 1.0]
+            ),
+            "argument names should be orange",
         );
     }
 }
