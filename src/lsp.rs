@@ -222,7 +222,7 @@ fn looks_like_python_hover(msg: &str) -> bool {
     let Some(first_non_empty) = non_empty.next() else {
         return false;
     };
-            if first_non_empty.starts_with("def ")
+    if first_non_empty.starts_with("def ")
         || first_non_empty.starts_with("async def ")
         || first_non_empty.starts_with("class ")
         || first_non_empty.starts_with("## ")
@@ -675,7 +675,7 @@ fn normalize_hover_text(msg: &str) -> String {
             out.push('\n');
             continue;
         }
-                if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
+        if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
             if let Some(module_path) = module_path {
                 out.push_str("[[MODULE]] ");
                 out.push_str(&module_path);
@@ -775,16 +775,22 @@ enum PendingRequestKind {
 mod tests {
     use super::{highlight_hover_text, HoverLineKindPublic};
 
-        #[test]
+    #[test]
     fn variable_header_highlights_name_pink() {
         let raw = "## Variable handlers of main\nhandlers: list[Router]";
         let (text, spans, kinds, _inline) = highlight_hover_text(raw);
         let handlers_idx = text.find("handlers").unwrap();
         assert!(
-            spans.iter().any(|s| s.start == handlers_idx && s.end == handlers_idx + 8 && s.color == [1.0, 0.474, 0.776, 1.0]),
+            spans.iter().any(|s| s.start == handlers_idx
+                && s.end == handlers_idx + 8
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
             "Header variable name should be pink"
         );
-                assert_eq!(kinds[2], HoverLineKindPublic::Code, "Assignment line should become code");
+        assert_eq!(
+            kinds[2],
+            HoverLineKindPublic::Code,
+            "Assignment line should become code"
+        );
     }
 
     #[test]
@@ -965,11 +971,14 @@ Append object to the end of the list.";
         );
     }
 
-        #[test]
+    #[test]
     fn qualified_class_object_repr_prepends_module_path() {
         let raw = "<class 'car_wash.utils.middlewares.CoreMiddleware'>";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware");
+        assert_eq!(
+            text,
+            "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware"
+        );
 
         let class_line_offset = text.find("class ").unwrap_or(0);
         assert!(
@@ -980,11 +989,14 @@ Append object to the end of the list.";
         );
     }
 
-        #[test]
+    #[test]
     fn backticked_qualified_class_repr_prepends_module_path() {
         let raw = "`<class 'car_wash.utils.middlewares.CoreMiddleware'>`";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware");
+        assert_eq!(
+            text,
+            "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware"
+        );
     }
 
     #[test]
@@ -1053,7 +1065,7 @@ client = AsyncFirebaseClient(\n\
         );
     }
 
-        #[test]
+    #[test]
     fn module_object_repr_is_normalized_to_module_header() {
         let raw = "<module 'car_wash.domains.policies.controller'>";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
@@ -1114,54 +1126,48 @@ Special type indicating an unconstrained type.";
         );
     }
 
-            #[test]
+    #[test]
     fn header_with_inline_code_preserves_correct_spans_without_byte_shift_panic() {
         let raw = "## ``client`` in FcmSenderService";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
         assert!(text.contains("client"));
     }
 
-                #[test]
+    #[test]
     fn class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args() {
         let raw = "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\n\
 client = AsyncFirebaseClient(\n\
     request_timeout=RequestTimeout(timeout=50)\n\
     )";
         let (text, spans, kinds, _inline) = highlight_hover_text(raw);
-        assert!(text.contains("car_wash.core.fcm.service\nClass attribute client of FcmSenderService"));
+        assert!(
+            text.contains("car_wash.core.fcm.service\nClass attribute client of FcmSenderService")
+        );
         assert!(text.contains("\n---\n"));
         assert!(kinds.iter().any(|k| *k == HoverLineKindPublic::Separator));
 
         let client_offset = text.find("Class attribute ").unwrap() + 16;
-        assert!(spans.iter().any(|s| 
-            s.start == client_offset && 
-            s.end == client_offset + 6 && 
-            s.color ==[1.0, 0.474, 0.776, 1.0]
-        ));
+        assert!(spans.iter().any(|s| s.start == client_offset
+            && s.end == client_offset + 6
+            && s.color == [1.0, 0.474, 0.776, 1.0]));
 
         let fcm_offset = text.find("FcmSenderService").unwrap();
-        assert!(spans.iter().any(|s| 
-            s.start == fcm_offset && 
-            s.end == fcm_offset + "FcmSenderService".len() && 
-            s.color ==[0.545, 0.913, 0.992, 1.0]
-        ));
+        assert!(spans.iter().any(|s| s.start == fcm_offset
+            && s.end == fcm_offset + "FcmSenderService".len()
+            && s.color == [0.545, 0.913, 0.992, 1.0]));
 
         let req_timeout_offset = text.find("request_timeout").unwrap();
-        assert!(spans.iter().any(|s| 
-            s.start == req_timeout_offset && 
-            s.end == req_timeout_offset + "request_timeout".len() && 
-            s.color ==[0.973, 0.584, 0.502, 1.0]
-        ));
+        assert!(spans.iter().any(|s| s.start == req_timeout_offset
+            && s.end == req_timeout_offset + "request_timeout".len()
+            && s.color == [0.973, 0.584, 0.502, 1.0]));
 
-                let timeout_offset = text.find("(timeout=").unwrap() + 1;
-        assert!(spans.iter().any(|s| 
-            s.start == timeout_offset && 
-            s.end == timeout_offset + "timeout".len() && 
-            s.color ==[0.973, 0.584, 0.502, 1.0]
-        ));
+        let timeout_offset = text.find("(timeout=").unwrap() + 1;
+        assert!(spans.iter().any(|s| s.start == timeout_offset
+            && s.end == timeout_offset + "timeout".len()
+            && s.color == [0.973, 0.584, 0.502, 1.0]));
     }
 
-        #[test]
+    #[test]
     fn class_signature_is_highlighted() {
         let raw = "class ValueError(...)\n\
         ---\n\
@@ -1172,9 +1178,213 @@ client = AsyncFirebaseClient(\n\
         assert!(
             spans.iter().any(|s| s.start <= class_kw
                 && s.end >= class_kw + 5
-                && (s.color ==[0.545, 0.913, 0.992, 1.0] || s.color ==[1.0, 0.474, 0.776, 1.0])),
+                && (s.color == [0.545, 0.913, 0.992, 1.0] || s.color == [1.0, 0.474, 0.776, 1.0])),
             "`class` keyword should be highlighted in signatures",
         );
+    }
+
+    #[test]
+    fn litestar_giant_class_hover_signature_and_args_doc_are_parsed() {
+        let raw = r#"class Litestar(
+    route_handlers: Sequence[type[Controller] | HTTPRouteHandler | WebsocketRouteHandler | ... omitted 3 union elements] | None = None,
+    *,
+    after_exception: Sequence[(ExceptionT, HTTPScope | WebSocketScope, /) -> None | Awaitable[None]] | None = None,
+    after_request: (((HTTPScope | WebSocketScope, (...) -> Awaitable[HTTPRequestEvent | HTTPDisconnectEvent | WebSocketConnectEvent | WebSocketReceiveEvent | WebSocketDisconnectEvent], (HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, /) -> Awaitable[None], /) -> Awaitable[None], /) -> ((HTTPScope | WebSocketScope, (...) -> Awaitable[HTTPRequestEvent | HTTPDisconnectEvent | WebSocketConnectEvent | WebSocketReceiveEvent | WebSocketDisconnectEvent], (HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, /) -> Awaitable[None], /) -> Awaitable[None]) | Awaitable[(HTTPScope | WebSocketScope, (...) -> Awaitable[HTTPRequestEvent | HTTPDisconnectEvent | WebSocketConnectEvent | WebSocketReceiveEvent | WebSocketDisconnectEvent], (HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, /) -> Awaitable[None], /) -> Awaitable[None]]) | ((Response[Unknown], /) -> Response[Unknown] | Awaitable[Response[Unknown]]) | None = None,
+    after_response: ((Request[Unknown, Unknown, Unknown], /) -> None | Awaitable[None]) | None = None,
+    allowed_hosts: Sequence[str] | AllowedHostsConfig | None = None,
+    before_request: ((Request[Unknown, Unknown, Unknown], /) -> Any | Awaitable[Any]) | None = None,
+    before_send: Sequence[(HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, HTTPScope | WebSocketScope, /) -> None | Awaitable[None]] | None = None,
+    cache_control: CacheControlHeader | None = None,
+    compression_config: CompressionConfig | None = None,
+    cors_config: CORSConfig | None = None,
+    csrf_config: CSRFConfig | None = None,
+    dto: type[AbstractDTO[Unknown]] | None | _EmptyEnum = ...,
+    debug: bool | None = None,
+    dependencies: Mapping[str, Provide | ((...) -> Any)] | None = None,
+    etag: ETag | None = None,
+    event_emitter_backend: type[BaseEventEmitterBackend] = ...,
+    exception_handlers: MutableMapping[int | type[Exception], (Request[Unknown, Unknown, Unknown], ExceptionT, /) -> Response[Unknown]] | None = None,
+    guards: Sequence[(ASGIConnection[Unknown, Unknown, Unknown, Unknown], BaseRouteHandler, /) -> None | Awaitable[None]] | None = None,
+    include_in_schema: bool | _EmptyEnum = ...,
+    listeners: Sequence[EventListener] | None = None,
+    logging_config: BaseLoggingConfig | _EmptyEnum | None = ...,
+    middleware: Sequence[((...) -> ((HTTPScope | WebSocketScope, (...) -> Awaitable[HTTPRequestEvent | HTTPDisconnectEvent | WebSocketConnectEvent | WebSocketReceiveEvent | WebSocketDisconnectEvent], (HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, /) -> Awaitable[None], /) -> Awaitable[None])) | DefineMiddleware | Iterator[tuple[(HTTPScope | WebSocketScope, (...) -> Awaitable[HTTPRequestEvent | HTTPDisconnectEvent | WebSocketConnectEvent | WebSocketReceiveEvent | WebSocketDisconnectEvent], (HTTPResponseStartEvent | HTTPResponseBodyEvent | HTTPServerPushEvent | ... omitted 6 union elements, /) -> Awaitable[None], /) -> Awaitable[None], dict[str, Any]]] | type[@Todo]] | None = None,
+    multipart_form_part_limit: int = 1000,
+    on_app_init: Sequence[(AppConfig, /) -> AppConfig] | None = None,
+    on_shutdown: Sequence[((Litestar, /) -> Any | Awaitable[Any]) | (() -> Any | Awaitable[Any])] | None = None,
+    on_startup: Sequence[((Litestar, /) -> Any | Awaitable[Any]) | (() -> Any | Awaitable[Any])] | None = None,
+    openapi_config: OpenAPIConfig | None = ...,
+    opt: Mapping[str, Any] | None = None,
+    parameters: Mapping[str, ParameterKwarg] | None = None,
+    path: str | None = None,
+    plugins: Sequence[CLIPluginProtocol | InitPluginProtocol | OpenAPISchemaPluginProtocol | ... omitted 3 union elements] | None = None,
+    request_class: type[Request[Unknown, Unknown, Unknown]] | None = None,
+    request_max_body_size: int | None = 10000000,
+    response_cache_config: ResponseCacheConfig | None = None,
+    response_class: type[Response[Unknown]] | None = None,
+    response_cookies: Sequence[Cookie] | Mapping[str, str] | None = None,
+    response_headers: Sequence[ResponseHeader] | Mapping[str, str] | None = None,
+    return_dto: type[AbstractDTO[Unknown]] | None | _EmptyEnum = ...,
+    security: Sequence[dict[str, list[str]]] | None = None,
+    signature_namespace: Mapping[str, Any] | None = None,
+    signature_types: Sequence[Any] | None = None,
+    state: State | None = None,
+    static_files_config: Sequence[StaticFilesConfig] | None = None,
+    stores: StoreRegistry | dict[str, Store] | None = None,
+    tags: Sequence[str] | None = None,
+    template_config: TemplateConfig[EngineType] | None = None,
+    type_decoders: Sequence[tuple[(Any, /) -> bool, (Any, Any, /) -> Any]] | None = None,
+    type_encoders: Mapping[Any, (Any, /) -> Any] | None = None,
+    websocket_class: type[WebSocket[Unknown, Unknown, Unknown]] | None = None,
+    lifespan: Sequence[((Litestar, /) -> AbstractAsyncContextManager[Unknown, bool | None]) | AbstractAsyncContextManager[Unknown, bool | None]] | None = None,
+    pdb_on_exception: bool | None = None,
+    debugger_module: PDBProtocol = ...,
+    experimental_features: Iterable[ExperimentalFeatures] | None = None
+)
+---------------------------------------------
+Initialize a ``Litestar`` application.
+
+Args:
+    after_exception: A sequence of :class:`exception hook handlers <.types.AfterExceptionHookHandler>`. This
+        hook is called after an exception occurs. In difference to exception handlers, it is not meant to
+        return a response - only to process the exception (e.g. log it, send it to Sentry etc.).
+    after_request: A sync or async function executed after the route handler function returned and the response
+        object has been resolved. Receives the response object.
+    after_response: A sync or async function called after the response has been awaited. It receives the
+        :class:`Request <.connection.Request>` object and should not return any values.
+    allowed_hosts: A sequence of allowed hosts, or an
+        :class:`AllowedHostsConfig <.config.allowed_hosts.AllowedHostsConfig>` instance. Enables the builtin
+        allowed hosts middleware.
+    before_request: A sync or async function called immediately before calling the route handler. Receives the
+        :class:`Request <.connection.Request>` instance and any non-``None`` return value is used for the
+        response, bypassing the route handler.
+    before_send: A sequence of :class:`before send hook handlers <.types.BeforeMessageSendHookHandler>`. Called
+        when the ASGI send function is called.
+    cache_control: A ``cache-control`` header of type
+        :class:`CacheControlHeader <litestar.datastructures.CacheControlHeader>` to add to route handlers of
+        this app. Can be overridden by route handlers.
+    compression_config: Configures compression behaviour of the application, this enabled a builtin or user
+        defined Compression middleware.
+    cors_config: If set, configures CORS handling of the application.
+    csrf_config: If set, configures :class:`CSRFMiddleware <.middleware.csrf.CSRFMiddleware>`.
+    debug: If ``True``, app errors rendered as HTML with a stack trace.
+    dependencies: A string keyed mapping of dependency :class:`Providers <.di.Provide>`.
+    dto: :class:`AbstractDTO <.dto.base_dto.AbstractDTO>` to use for (de)serializing and
+        validation of request data.
+    etag: An ``etag`` header of type :class:`ETag <.datastructures.ETag>` to add to route handlers of this app.
+        Can be overridden by route handlers.
+    event_emitter_backend: A subclass of
+        :class:`BaseEventEmitterBackend <.events.emitter.BaseEventEmitterBackend>`.
+    exception_handlers: A mapping of status codes and/or exception types to handler functions.
+    guards: A sequence of :class:`Guard <.types.Guard>` callables.
+    include_in_schema: A boolean flag dictating whether  the route handler should be documented in the OpenAPI schema.
+    lifespan: A list of callables returning async context managers, wrapping the lifespan of the ASGI application
+    listeners: A sequence of :class:`EventListener <.events.listener.EventListener>`.
+    logging_config: A subclass of :class:`BaseLoggingConfig <.logging.config.BaseLoggingConfig>`.
+    middleware: A sequence of :class:`Middleware <.types.Middleware>`.
+    multipart_form_part_limit: The maximal number of allowed parts in a multipart/formdata request. This limit
+        is intended to protect from DoS attacks.
+    on_app_init: A sequence of :class:`OnAppInitHandler <.types.OnAppInitHandler>` instances. Handlers receive
+        an instance of :class:`AppConfig <.config.app.AppConfig>` that will have been initially populated with
+        the parameters passed to :class:`Litestar <litestar.app.Litestar>`, and must return an instance of same.
+        If more than one handler is registered they are called in the order they are provided.
+    on_shutdown: A sequence of :class:`LifespanHook <.types.LifespanHook>` called during application
+        shutdown.
+    on_startup: A sequence of :class:`LifespanHook <litestar.types.LifespanHook>` called during
+        application startup.
+    openapi_config: Defaults to :attr:`DEFAULT_OPENAPI_CONFIG`
+    opt: A string keyed mapping of arbitrary values that can be accessed in :class:`Guards <.types.Guard>` or
+        wherever you have access to :class:`Request <litestar.connection.request.Request>` or
+        :class:`ASGI Scope <.types.Scope>`.
+    parameters: A mapping of :class:`Parameter <.params.Parameter>` definitions available to all application
+        paths.
+    path: A path fragment that is prefixed to all route handlers, controllers and routers associated
+        with the application instance.
+
+        .. versionadded:: 2.8.0
+    pdb_on_exception: Drop into the PDB when an exception occurs.
+    debugger_module: A `pdb`-like debugger module that supports the `post_mortem()` protocol.
+        This module will be used when `pdb_on_exception` is set to True.
+    plugins: Sequence of plugins.
+    request_class: An optional subclass of :class:`Request <.connection.Request>` to use for http connections.
+    request_max_body_size: Maximum allowed size of the request body in bytes. If this size is exceeded, a
+        '413 - Request Entity Too Large' error response is returned.
+    response_class: A custom subclass of :class:`Response <.response.Response>` to be used as the app's default
+        response.
+    response_cookies: A sequence of :class:`Cookie <.datastructures.Cookie>`.
+    response_headers: A string keyed mapping of :class:`ResponseHeader <.datastructures.ResponseHeader>`
+    response_cache_config: Configures caching behavior of the application.
+    return_dto: :class:`AbstractDTO <.dto.base_dto.AbstractDTO>` to use for serializing
+        outbound response data.
+    route_handlers: A sequence of route handlers, which can include instances of
+        :class:`Router <.router.Router>`, subclasses of :class:`Controller <.controller.Controller>` or any
+        callable decorated by the route handler decorators.
+    security: A sequence of dicts that will be added to the schema of all route handlers in the application.
+        See
+        :data:`SecurityRequirement <.openapi.spec.SecurityRequirement>` for details.
+    signature_namespace: A mapping of names to types for use in forward reference resolution during signature modelling.
+    signature_types: A sequence of types for use in forward reference resolution during signature modelling.
+        These types will be added to the signature namespace using their ``__name__`` attribute.
+    state: An optional :class:`State <.datastructures.State>` for application state.
+    static_files_config: A sequence of :class:`StaticFilesConfig <.static_files.StaticFilesConfig>`
+    stores: Central registry of :class:`Store <.stores.base.Store>` that will be available throughout the
+        application. If this is a dictionary to it will be passed to a
+        :class:`StoreRegistry <.stores.registry.StoreRegistry>`. If it is a
+        :class:`StoreRegistry <.stores.registry.StoreRegistry>`, this instance will be used directly.
+    tags: A sequence of string tags that will be appended to the schema of all route handlers under the
+        application.
+    template_config: An instance of :class:`TemplateConfig <.template.TemplateConfig>`
+    type_decoders: A sequence of tuples, each composed of a predicate testing for type identity and a msgspec
+        hook for deserialization.
+    type_encoders: A mapping of types to callables that transform them into types supported for serialization.
+    websocket_class: An optional subclass of :class:`WebSocket <.connection.WebSocket>` to use for websocket
+        connections.
+    experimental_features: An iterable of experimental features to enable"#;
+
+        let (text, spans, kinds, _inline) = highlight_hover_text(raw);
+
+        assert!(text.starts_with("class Litestar("));
+        assert!(
+            text.contains("experimental_features: Iterable[ExperimentalFeatures] | None = None\n)")
+        );
+        assert!(text.contains("Initialize a Litestar application."));
+        assert!(text.contains("Args:"));
+        assert!(kinds
+            .iter()
+            .any(|kind| *kind == HoverLineKindPublic::Separator));
+
+        let class_idx = text.find("class").unwrap();
+        assert!(spans.iter().any(|s| {
+            s.start == class_idx
+                && s.end == class_idx + "class".len()
+                && s.color == [1.0, 0.474, 0.776, 1.0]
+        }));
+
+        let litestar_idx = text.find("Litestar").unwrap();
+        assert!(spans.iter().any(|s| {
+            s.start == litestar_idx
+                && s.end == litestar_idx + "Litestar".len()
+                && s.color == [0.545, 0.913, 0.992, 1.0]
+        }));
+
+        let args_idx = text.find("Args:").unwrap();
+        for name in [
+            "after_exception",
+            "after_request",
+            "allowed_hosts",
+            "pdb_on_exception",
+            "experimental_features",
+        ] {
+            let idx = args_idx + text[args_idx..].find(name).unwrap();
+            assert!(
+                spans.iter().any(|s| {
+                    s.start == idx
+                        && s.end == idx + name.len()
+                        && s.color == [0.973, 0.584, 0.502, 1.0]
+                }),
+                "doc argument `{name}` should be highlighted orange"
+            );
+        }
     }
 
     #[test]

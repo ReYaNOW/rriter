@@ -12,7 +12,26 @@ pub struct HoverPopup {
     pub inline_code_ranges: Vec<(usize, usize)>,
     pub byte_offset: usize,
     pub anchor_x: f32,
+    pub anchor_y: f32,
     pub scroll: crate::scroll::ScrollState,
+    pub layout_cache: Option<HoverLayoutCache>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HoverVisualLine {
+    pub glyphs: Vec<(char, [f32; 4], usize)>,
+    pub kind: crate::lsp::HoverLineKindPublic,
+}
+
+#[derive(Debug, Clone)]
+pub struct HoverLayoutCache {
+    pub scale_factor: f32,
+    pub max_text_w: f32,
+    pub span_count: usize,
+    pub text_len: usize,
+    pub lines: Vec<HoverVisualLine>,
+    pub max_line_w: f32,
+    pub total_text_h: f32,
 }
 
 pub struct HoverState {
@@ -50,6 +69,95 @@ impl Default for HoverState {
             diag_selection_cursor: None,
             diag_selecting: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_in_hover_popup_or_bridge, normalize_hover_byte};
+
+    #[test]
+    fn hover_byte_includes_identifier_edges_next_to_whitespace() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("    handlers\n");
+        let text = editor.get_full_text();
+        let handlers = text.find("handlers").unwrap();
+        let after_handlers = handlers + "handlers".len();
+
+        assert_eq!(normalize_hover_byte(&editor, handlers), Some(handlers));
+        assert_eq!(
+            normalize_hover_byte(&editor, after_handlers),
+            Some(after_handlers - 1)
+        );
+        assert_eq!(normalize_hover_byte(&editor, handlers - 1), Some(handlers));
+    }
+
+    #[test]
+    fn hover_byte_ignores_python_keywords_so_diagnostics_can_show() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("    else:\n        raise ValueError()\n");
+        let text = editor.get_full_text();
+        let else_offset = text.find("else").unwrap();
+
+        assert_eq!(normalize_hover_byte(&editor, else_offset), None);
+        assert_eq!(normalize_hover_byte(&editor, else_offset + 2), None);
+    }
+
+    #[test]
+    fn hover_bridge_reaches_full_source_line_when_popup_is_above() {
+        let popup_rect = (220.0, 100.0, 500.0, 180.0);
+        let line_top_y = 288.0;
+        let line_bottom_y = 316.0;
+
+        assert!(is_in_hover_popup_or_bridge(
+            420.0,
+            305.0,
+            popup_rect,
+            460.0,
+            305.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_bridge_handles_popup_shifted_away_from_anchor() {
+        let popup_rect = (20.0, 100.0, 520.0, 180.0);
+        let line_top_y = 288.0;
+        let line_bottom_y = 316.0;
+
+        assert!(is_in_hover_popup_or_bridge(
+            80.0,
+            286.0,
+            popup_rect,
+            760.0,
+            305.0,
+            line_top_y,
+            line_bottom_y,
+            800.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_bridge_keeps_popup_when_moving_up_from_token_anchor() {
+        let popup_rect = (96.0, 80.0, 760.0, 210.0);
+        let line_top_y = 340.0;
+        let line_bottom_y = 368.0;
+
+        assert!(is_in_hover_popup_or_bridge(
+            620.0,
+            318.0,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
     }
 }
 
@@ -93,24 +201,72 @@ fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> b
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || b >= 0x80
 }
 
+fn is_python_hover_keyword(token: &str) -> bool {
+    matches!(
+        token,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
+}
+
+fn hover_token_text(editor: &crate::editor::Editor, byte_offset: usize) -> Option<String> {
+    let (start, end) = hover_token_bounds(editor, byte_offset);
+    let text = editor.get_full_text();
+    text.get(start..end + 1).map(|s| s.to_string())
+}
+
 fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> Option<usize> {
-    if is_hover_target_byte(editor, byte_offset) {
-        return Some(byte_offset);
-    }
-    if byte_offset >= editor.len() {
+    let normalized = if is_hover_target_byte(editor, byte_offset) {
+        Some(byte_offset)
+    } else if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {
+        Some(byte_offset - 1)
+    } else if byte_offset + 1 < editor.len() && is_hover_target_byte(editor, byte_offset + 1) {
+        Some(byte_offset + 1)
+    } else {
+        None
+    }?;
+
+    if hover_token_text(editor, normalized)
+        .as_deref()
+        .is_some_and(is_python_hover_keyword)
+    {
         return None;
     }
-    let cur = editor.byte_at(byte_offset);
-    if cur.is_ascii_whitespace() {
-        return None;
-    }
-    if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {
-        return Some(byte_offset - 1);
-    }
-    if byte_offset + 1 < editor.len() && is_hover_target_byte(editor, byte_offset + 1) {
-        return Some(byte_offset + 1);
-    }
-    None
+
+    Some(normalized)
 }
 
 fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (usize, usize) {
@@ -125,6 +281,45 @@ fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (us
     }
 
     (start, end)
+}
+
+fn is_in_hover_popup_or_bridge(
+    px: f32,
+    py: f32,
+    popup_rect: (f32, f32, f32, f32),
+    anchor_x: f32,
+    anchor_y: f32,
+    line_top_y: f32,
+    line_bottom_y: f32,
+    viewport_w: f32,
+    scale: f32,
+) -> bool {
+    let (rx, ry, rw, rh) = popup_rect;
+    if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+        return true;
+    }
+
+    let bridge_pad = 48.0 * scale;
+    let bridge_w = 720.0 * scale;
+    let centered_left = (anchor_x - bridge_w * 0.5).clamp(0.0, (viewport_w - bridge_w).max(0.0));
+    let centered_right = centered_left + bridge_w;
+    let bridge_left = centered_left.min(rx) - bridge_pad;
+    let bridge_right = centered_right.max(rx + rw) + bridge_pad;
+
+    if px < bridge_left || px > bridge_right {
+        return false;
+    }
+
+    let source_top = line_top_y.min(anchor_y - bridge_pad * 0.5);
+    let source_bottom = line_bottom_y.max(anchor_y + bridge_pad * 0.5);
+
+    if ry >= source_bottom {
+        py >= source_top - bridge_pad && py <= ry + bridge_pad
+    } else if ry + rh <= source_top {
+        py >= ry + rh - bridge_pad && py <= source_bottom + bridge_pad
+    } else {
+        py >= ry - bridge_pad && py <= ry + rh + bridge_pad
+    }
 }
 
 fn hover_popup_byte_at(
@@ -261,10 +456,15 @@ fn hover_popup_byte_at(
         return 0;
     }
 
-        let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
+    let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
     let is_module_header = *found_kind == crate::lsp::HoverLineKindPublic::Text
         && found_line.len() >= 11
-        && found_line.iter().take(11).map(|&(c, _)| c).collect::<String>() == "[[MODULE]] ";
+        && found_line
+            .iter()
+            .take(11)
+            .map(|&(c, _)| c)
+            .collect::<String>()
+            == "[[MODULE]] ";
     let is_header = matches!(
         *found_kind,
         crate::lsp::HoverLineKindPublic::Header1 | crate::lsp::HoverLineKindPublic::Header2
@@ -783,7 +983,7 @@ impl App {
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
             let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
 
-                        if type_rect.is_some() || diag_rect.is_some() {
+            if type_rect.is_some() || diag_rect.is_some() {
                 let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
                 if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
                     let x_min = r1.0.min(r2.0);
@@ -792,7 +992,7 @@ impl App {
                     let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                     union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
                 }
-                                let pad = 24.0 * self.renderer.as_ref().unwrap().scale_factor;
+                let pad = 24.0 * self.renderer.as_ref().unwrap().scale_factor;
                 if mx >= union_rect.0 - pad
                     && mx <= union_rect.0 + union_rect.2 + pad
                     && my >= union_rect.1 - pad
@@ -1876,15 +2076,15 @@ impl App {
             let state = state.borrow();
             (
                 state.rect,
-                state
-                    .popup
-                    .as_ref()
-                    .map(|popup| (popup.anchor_x, popup.byte_offset)),
+        state
+            .popup
+            .as_ref()
+            .map(|popup| (popup.anchor_x, popup.anchor_y, popup.byte_offset)),
             )
         });
         let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
 
-                if type_rect.is_some() || diag_rect.is_some() {
+        if type_rect.is_some() || diag_rect.is_some() {
             let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
             if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
                 let x_min = r1.0.min(r2.0);
@@ -1893,7 +2093,7 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-                        let pad = 24.0 * s;
+            let pad = 24.0 * s;
             if position.x as f32 >= union_rect.0 - pad
                 && position.x as f32 <= union_rect.0 + union_rect.2 + pad
                 && position.y as f32 >= union_rect.1 - pad
@@ -1904,7 +2104,7 @@ impl App {
         }
 
         if !in_hover_popup {
-            if let (Some((rx, ry, rw, rh)), Some((anchor_x, popup_byte_offset))) =
+            if let (Some((rx, ry, rw, rh)), Some((anchor_x, anchor_y, popup_byte_offset))) =
                 (type_rect, popup_meta)
             {
                 let phys_line = self
@@ -1927,37 +2127,22 @@ impl App {
                         } else {
                             38.0 * s
                         });
-                                                                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
-
-                                                                let bridge_w = 300.0 * s;
-                                                                let mut bridge_x = anchor_x - bridge_w * 0.5;
-                if bridge_x < 0.0 {
-                    bridge_x = 0.0;
-                }
-                let max_bridge_x = (self.renderer.as_ref().unwrap().width - bridge_w).max(0.0);
-                if bridge_x > max_bridge_x {
-                    bridge_x = max_bridge_x;
-                }
+                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
 
                 let px = position.x as f32;
                 let py = position.y as f32;
-                let bridge_hit_x = px >= bridge_x && px <= bridge_x + bridge_w;
-                if bridge_hit_x {
-                    if ry > line_bottom_y {
-                        let y_min = line_bottom_y.min(ry);
-                        let y_max = line_bottom_y.max(ry);
-                        if py >= y_min && py <= y_max {
-                            in_hover_popup = true;
-                        }
-                    } else if ry + rh < line_top_y {
-                        let y_min = (ry + rh).min(line_top_y);
-                        let y_max = (ry + rh).max(line_top_y);
-                        if py >= y_min && py <= y_max {
-                            in_hover_popup = true;
-                        }
-                    } else if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                        in_hover_popup = true;
-                    }
+                if is_in_hover_popup_or_bridge(
+                    px,
+                    py,
+                    (rx, ry, rw, rh),
+                    anchor_x,
+                    anchor_y,
+                    line_top_y,
+                    line_bottom_y,
+                    self.renderer.as_ref().unwrap().width,
+                    s,
+                ) {
+                    in_hover_popup = true;
                 }
             }
         }

@@ -898,39 +898,21 @@ impl Renderer {
         self.flush();
     }
 
-    pub fn draw_hover_popup(
+    fn build_hover_popup_layout(
         &mut self,
         popup: &crate::app::mouse::HoverPopup,
-        selection: Option<(usize, usize)>,
-        editor: &crate::editor::Editor,
-        ui_registry: &mut crate::ui_system::UiRegistry,
-        mx: f32,
-        my: f32,
-        render_scroll_y: f32,
-        wants_pointer: &mut bool,
-    ) -> (f32, f32, f32, f32, f32) {
+        max_text_w: f32,
+        line_h: f32,
+    ) -> crate::app::mouse::HoverLayoutCache {
         let s = self.scale_factor;
-        let pad = 12.0 * s;
-        let line_h = 22.0 * s;
-        let max_text_w = (self.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
-
-                let mut lines: Vec<(
-            Vec<(char,[f32; 4], usize)>,
-            crate::lsp::HoverLineKindPublic,
-        )> = Vec::new();
+        let mut lines: Vec<crate::app::mouse::HoverVisualLine> = Vec::new();
         let mut cur_line_w = 0.0;
         let mut cur_line: Vec<(char, [f32; 4], usize)> = Vec::new();
         let mut last_space_idx = None;
         let mut raw_line_no = 0usize;
-
-        let push_line = |lines: &mut Vec<_>,
-                         cur_line: Vec<(char, [f32; 4], usize)>,
-                         kind: crate::lsp::HoverLineKindPublic| {
-            lines.push((cur_line, kind));
-        };
-
         let mut leading_spaces = 0;
         let mut counting_leading = true;
+        let mut span_idx = 0usize;
 
         for (offset, c) in popup.text.char_indices() {
             let kind = popup
@@ -945,7 +927,10 @@ impl Renderer {
             };
 
             if c == '\n' {
-                push_line(&mut lines, std::mem::take(&mut cur_line), kind);
+                lines.push(crate::app::mouse::HoverVisualLine {
+                    glyphs: std::mem::take(&mut cur_line),
+                    kind,
+                });
                 cur_line_w = 0.0;
                 last_space_idx = None;
                 raw_line_no += 1;
@@ -973,30 +958,39 @@ impl Renderer {
                     let hanging_spaces = (leading_spaces + 4).min(20);
                     let mut new_remainder = Vec::with_capacity(hanging_spaces + remainder.len());
                     for _ in 0..hanging_spaces {
-                        new_remainder.push((' ',[0.0, 0.0, 0.0, 0.0], offset));
+                        new_remainder.push((' ', [0.0, 0.0, 0.0, 0.0], offset));
                     }
                     new_remainder.extend(remainder);
                     remainder = new_remainder;
 
-                    push_line(&mut lines, std::mem::take(&mut cur_line), kind);
+                    lines.push(crate::app::mouse::HoverVisualLine {
+                        glyphs: std::mem::take(&mut cur_line),
+                        kind,
+                    });
                     cur_line = remainder;
                     cur_line_w = cur_line
                         .iter()
                         .map(|&(ch, _, _)| self.char_advance(ch) * scale_mul)
                         .sum();
                 } else {
-                    push_line(&mut lines, std::mem::take(&mut cur_line), kind);
+                    lines.push(crate::app::mouse::HoverVisualLine {
+                        glyphs: std::mem::take(&mut cur_line),
+                        kind,
+                    });
                     cur_line_w = 0.0;
                 }
                 last_space_idx = None;
             }
 
-            let mut color =[0.972, 0.972, 0.949, 1.0];
-            for span in &popup.spans {
-                if offset >= span.start && offset < span.end {
-                    color = span.color;
-                }
+            while span_idx < popup.spans.len() && offset >= popup.spans[span_idx].end {
+                span_idx += 1;
             }
+            let color = popup
+                .spans
+                .get(span_idx)
+                .filter(|span| offset >= span.start && offset < span.end)
+                .map(|span| span.color)
+                .unwrap_or([0.972, 0.972, 0.949, 1.0]);
 
             cur_line.push((c, color, offset));
             cur_line_w += adv;
@@ -1011,51 +1005,94 @@ impl Renderer {
                 .get(raw_line_no)
                 .copied()
                 .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
-            push_line(&mut lines, cur_line, kind);
+            lines.push(crate::app::mouse::HoverVisualLine {
+                glyphs: cur_line,
+                kind,
+            });
         }
 
-        while let Some((line, _)) = lines.last() {
-            if line.is_empty() {
+        while let Some(line) = lines.last() {
+            if line.glyphs.is_empty() {
                 lines.pop();
             } else {
                 break;
             }
         }
 
-        let module_prefix_chars: Vec<char> = "[[MODULE]] ".chars().collect();
-        let mut max_line_w = 0.0;
-        let mut total_text_h = 0.0;
-        for (line, kind) in &lines {
-            let scale_mul = match kind {
+        let mut max_line_w: f32 = 0.0;
+        let mut total_text_h: f32 = 0.0;
+        for line in &lines {
+            let scale_mul = match line.kind {
                 crate::lsp::HoverLineKindPublic::Header1 => 1.15,
                 crate::lsp::HoverLineKindPublic::Header2 => 1.05,
                 _ => 1.0,
             };
-            if *kind == crate::lsp::HoverLineKindPublic::Header1
-                || *kind == crate::lsp::HoverLineKindPublic::Header2
-            {
+            let w = if matches!(
+                line.kind,
+                crate::lsp::HoverLineKindPublic::Header1 | crate::lsp::HoverLineKindPublic::Header2
+            ) {
                 let mut s_buf = String::new();
-                for &(c, _, _) in line {
+                for &(c, _, _) in &line.glyphs {
                     s_buf.push(c);
                 }
-                let w = self.measure_ui_width(&s_buf, scale_mul);
-                if w > max_line_w {
-                    max_line_w = w;
-                }
+                self.measure_ui_width(&s_buf, scale_mul)
             } else {
-                let mut w: f32 = line.iter().map(|&(ch, _, _)| self.char_advance(ch)).sum();
-                if *kind == crate::lsp::HoverLineKindPublic::Code {
+                let mut w: f32 = line
+                    .glyphs
+                    .iter()
+                    .map(|&(ch, _, _)| self.char_advance(ch))
+                    .sum();
+                if line.kind == crate::lsp::HoverLineKindPublic::Code {
                     w += 16.0 * s;
                 }
-                if w > max_line_w {
-                    max_line_w = w;
-                }
-            }
-                        total_text_h += line_h * scale_mul;
+                w
+            };
+            max_line_w = max_line_w.max(w);
+            total_text_h += line_h * scale_mul;
         }
 
-        let box_w = max_line_w + pad * 2.0;
-        let max_visible_h = (self.height * 0.45).min(total_text_h + pad * 2.0);
+        crate::app::mouse::HoverLayoutCache {
+            scale_factor: self.scale_factor,
+            max_text_w,
+            span_count: popup.spans.len(),
+            text_len: popup.text.len(),
+            lines,
+            max_line_w,
+            total_text_h,
+        }
+    }
+
+    pub fn draw_hover_popup(
+        &mut self,
+        popup: &mut crate::app::mouse::HoverPopup,
+        selection: Option<(usize, usize)>,
+        editor: &crate::editor::Editor,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        render_scroll_y: f32,
+        wants_pointer: &mut bool,
+    ) -> (f32, f32, f32, f32, f32) {
+        let s = self.scale_factor;
+        let pad = 12.0 * s;
+        let line_h = 22.0 * s;
+        let max_text_w = (self.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
+
+        let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
+            cache.scale_factor == self.scale_factor
+                && cache.max_text_w == max_text_w
+                && cache.span_count == popup.spans.len()
+                && cache.text_len == popup.text.len()
+        });
+        if !cache_valid {
+            popup.layout_cache = Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
+        }
+        let layout = popup.layout_cache.as_ref().unwrap();
+        let lines = &layout.lines;
+        let module_prefix_chars: Vec<char> = "[[MODULE]] ".chars().collect();
+
+        let box_w = layout.max_line_w + pad * 2.0;
+        let max_visible_h = (self.height * 0.45).min(layout.total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
         let mut bx = popup.anchor_x;
@@ -1118,7 +1155,7 @@ impl Renderer {
             ui_registry.reset_cursor_state();
         }
 
-        let max_scroll = (total_text_h + pad * 2.0 - box_h).max(0.0);
+        let max_scroll = (layout.total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
 
         self.push_rounded_rect(
@@ -1159,7 +1196,9 @@ impl Renderer {
         let selected = selection.filter(|(a, b)| a != b);
         let mut idx = 0usize;
         while idx < lines.len() {
-            let (line, line_kind) = &lines[idx];
+            let visual_line = &lines[idx];
+            let line = &visual_line.glyphs;
+            let line_kind = visual_line.kind;
             let scale_mul = match line_kind {
                 crate::lsp::HoverLineKindPublic::Header1 => 1.15,
                 crate::lsp::HoverLineKindPublic::Header2 => 1.05,
@@ -1188,10 +1227,10 @@ impl Renderer {
                     continue;
                 }
 
-                if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                if line_kind == crate::lsp::HoverLineKindPublic::Code {
                     let mut run_len = 1usize;
                     while idx + run_len < lines.len()
-                        && lines[idx + run_len].1 == crate::lsp::HoverLineKindPublic::Code
+                        && lines[idx + run_len].kind == crate::lsp::HoverLineKindPublic::Code
                     {
                         run_len += 1;
                     }
@@ -1205,14 +1244,14 @@ impl Renderer {
                     );
                 }
 
-                let is_module_header = *line_kind == crate::lsp::HoverLineKindPublic::Text
+                let is_module_header = line_kind == crate::lsp::HoverLineKindPublic::Text
                     && line.len() >= module_prefix_chars.len()
                     && line
                         .iter()
                         .zip(module_prefix_chars.iter())
                         .all(|((ch, _, _), marker)| ch == marker);
                 let mut glyph_start = 0usize;
-                let start_x = if *line_kind == crate::lsp::HoverLineKindPublic::Code {
+                let start_x = if line_kind == crate::lsp::HoverLineKindPublic::Code {
                     (bx + pad + 8.0 * s).round()
                 } else if is_module_header {
                     let icon_size = 18.0 * s;
@@ -1226,12 +1265,12 @@ impl Renderer {
                 };
                 let mut draw_x = start_x;
                 let is_header = matches!(
-                    *line_kind,
+                    line_kind,
                     crate::lsp::HoverLineKindPublic::Header1
                         | crate::lsp::HoverLineKindPublic::Header2
                 );
 
-                                if is_header {
+                if is_header {
                     for &(c, color, offset) in line.iter().skip(glyph_start) {
                         let mut adv = 0.0;
                         if let Some(g) = self.get_ui_glyph(c) {
@@ -1329,7 +1368,7 @@ impl Renderer {
 
         if max_scroll > 0.0 {
             let track_h = box_h - 16.0 * s;
-            let thumb_h = (box_h / (total_text_h + pad * 2.0) * track_h).max(20.0 * s);
+            let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);
             let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
 
             self.push_rounded_rect(

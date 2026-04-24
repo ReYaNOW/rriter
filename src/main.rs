@@ -38,7 +38,7 @@ impl Default for Config {
             window_height: 800.0,
             maximized: false,
             ide_workspaces: Vec::new(),
-                        ide_ignore_patterns: Vec::new(),
+            ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
         }
     }
@@ -219,7 +219,7 @@ pub fn save_config(config: &Config) {
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join("|");
-        let ignore_str = config.ide_ignore_patterns.join("|");
+    let ignore_str = config.ide_ignore_patterns.join("|");
     let content = format!(
             "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\",\n  \"enable_telemetry\": {}\n}}\n",
             config.window_width, config.window_height, config.maximized, paths_str, ignore_str, config.enable_telemetry
@@ -275,25 +275,25 @@ fn load_config() -> Config {
                         }
                     }
                 }
-                            if line.contains("\"ide_ignore_patterns\"") {
-                                if let Some(val) = line.split("\": \"").nth(1) {
-                                    let pats = val.trim().trim_matches(',').trim_matches('"');
-                                    if !pats.is_empty() {
-                                        config.ide_ignore_patterns =
-                                            pats.split('|').map(|s| s.to_string()).collect();
-                                    }
-                                }
-                            }
-                                                                                    if line.contains("\"enable_telemetry\"") {
-                                if let Some(val) = line.split(':').nth(1) {
-                                    if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
-                                        config.enable_telemetry = v;
-                                    }
-                                }
-                            }
+                if line.contains("\"ide_ignore_patterns\"") {
+                    if let Some(val) = line.split("\": \"").nth(1) {
+                        let pats = val.trim().trim_matches(',').trim_matches('"');
+                        if !pats.is_empty() {
+                            config.ide_ignore_patterns =
+                                pats.split('|').map(|s| s.to_string()).collect();
                         }
                     }
-                } else {
+                }
+                if line.contains("\"enable_telemetry\"") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
+                            config.enable_telemetry = v;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
         // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
         config.ide_ignore_patterns = crate::app::file_tree::DEFAULT_IGNORE_PATTERNS
             .iter()
@@ -340,9 +340,9 @@ fn load_dracula() -> Theme {
         minimap_cursor: sel_color,
         modified_unsaved: [1.0, 0.474, 0.776, 1.0],
         modified_saved: [0.313, 0.980, 0.482, 1.0],
-                diag_warn:[0.945, 0.980, 0.549, 1.0],
-        diag_error:[1.0, 0.333, 0.333, 1.0],
-        unused:[0.48, 0.48, 0.48, 0.6],
+        diag_warn: [0.945, 0.980, 0.549, 1.0],
+        diag_error: [1.0, 0.333, 0.333, 1.0],
+        unused: [0.48, 0.48, 0.48, 0.6],
     }
 }
 
@@ -451,10 +451,10 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     faq_editor.cursor = 0;
     faq_editor.selection_anchor = None;
 
-        let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
 
-        let config = load_config();
+    let config = load_config();
     if config.enable_telemetry {
         crate::render_view::TELEMETRY_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
     }

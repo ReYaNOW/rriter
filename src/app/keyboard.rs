@@ -925,7 +925,11 @@ impl App {
                     ) {
                         let start = a.min(b);
                         let end = a.max(b);
-                        if start < end && end <= popup.text.len() && popup.text.is_char_boundary(start) && popup.text.is_char_boundary(end) {
+                        if start < end
+                            && end <= popup.text.len()
+                            && popup.text.is_char_boundary(start)
+                            && popup.text.is_char_boundary(end)
+                        {
                             let _ = self.clipboard.set_text(&popup.text[start..end]);
                             state.selection_anchor = None;
                             state.selection_cursor = None;
@@ -937,15 +941,15 @@ impl App {
                 if let Some(r) = self.renderer.as_ref() {
                     if !copied {
                         if let Some((rx, ry, rw, rh)) = r.last_diag_popup_rect {
-                        let mx = r.last_mouse_x;
-                        let my = r.last_mouse_y;
-                        if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
-                            if !r.last_diag_popup_text.is_empty() {
-                                let _ = self.clipboard.set_text(&r.last_diag_popup_text);
-                                copied = true;
+                            let mx = r.last_mouse_x;
+                            let my = r.last_mouse_y;
+                            if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                                if !r.last_diag_popup_text.is_empty() {
+                                    let _ = self.clipboard.set_text(&r.last_diag_popup_text);
+                                    copied = true;
+                                }
                             }
                         }
-                    }
                     }
                 }
                 if !copied {

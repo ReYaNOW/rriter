@@ -20,7 +20,7 @@ impl Renderer {
             0.0
         };
 
-                let minimap_w = self.minimap_width;
+        let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
         let total_lines_f32 = total_lines as f32;
 
@@ -31,7 +31,7 @@ impl Renderer {
             ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
         let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
 
-                let current_visible_top_line = render_scroll_y / self.line_height;
+        let current_visible_top_line = render_scroll_y / self.line_height;
         let viewport_y = tab_bar_h
             + (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
         let visible_lines = editor_height / self.line_height;
@@ -69,14 +69,15 @@ impl Renderer {
         let view_top = current_minimap_scroll;
         let view_bottom = current_minimap_scroll + editor_height;
 
-                let (first, second) = editor.text_parts();
+        let (first, second) = editor.text_parts();
         let first_bytes = first.as_bytes();
         let second_bytes = second.as_bytes();
         let first_len = first.len();
 
         while phys_line < editor.line_offsets.len() {
             let start_byte = editor.line_offsets[phys_line];
-            let is_folded = editor.folded_lines.contains(&phys_line)&& editor.foldable_lines.contains_key(&phys_line);
+            let is_folded = editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line);
 
             if current_y > view_bottom {
                 break;
@@ -89,7 +90,7 @@ impl Renderer {
                     editor.len()
                 };
 
-                                if is_folded {
+                if is_folded {
                     end_byte -= 1;
                 }
 
@@ -103,11 +104,10 @@ impl Renderer {
                 let mut cur_byte_abs = start_byte;
                 let mut cur_char_idx = 0;
 
-                let mut span_idx_mini =
-                    match spans.binary_search_by_key(&start_byte, |s| s.start) {
-                        Ok(idx) => idx,
-                        Err(idx) => idx.saturating_sub(1),
-                    };
+                let mut span_idx_mini = match spans.binary_search_by_key(&start_byte, |s| s.start) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx.saturating_sub(1),
+                };
 
                 while cur_byte_abs < end_byte {
                     // Find current span and color
@@ -168,7 +168,7 @@ impl Renderer {
                             break;
                         }
 
-                                                let quad_width =
+                        let quad_width =
                             (chars_in_mask as f32 * minimap_char_width).min(minimap_max_x - x1);
 
                         let is_empty = masks[0] == 0 && masks[1] == 0 && masks[2] == 0;
@@ -181,23 +181,39 @@ impl Renderer {
                                 f32::from_bits(masks[2]),
                             ];
 
-                            let uv_x_end = (quad_width / minimap_char_width).min(chars_in_mask as f32);
+                            let uv_x_end =
+                                (quad_width / minimap_char_width).min(chars_in_mask as f32);
 
                             let v1 = Vertex {
-                                pos: [x1, y1], uv: [0.0, 0.0], color, mode: 7.0, sdf_params,
+                                pos: [x1, y1],
+                                uv: [0.0, 0.0],
+                                color,
+                                mode: 7.0,
+                                sdf_params,
                             };
                             let v2 = Vertex {
-                                pos: [x2, y1], uv: [uv_x_end, 0.0], color, mode: 7.0, sdf_params,
+                                pos: [x2, y1],
+                                uv: [uv_x_end, 0.0],
+                                color,
+                                mode: 7.0,
+                                sdf_params,
                             };
                             let v3 = Vertex {
-                                pos: [x2, y2], uv: [uv_x_end, 0.0], color, mode: 7.0, sdf_params,
+                                pos: [x2, y2],
+                                uv: [uv_x_end, 0.0],
+                                color,
+                                mode: 7.0,
+                                sdf_params,
                             };
                             let v4 = Vertex {
-                                pos: [x1, y2], uv: [0.0, 0.0], color, mode: 7.0, sdf_params,
+                                pos: [x1, y2],
+                                uv: [0.0, 0.0],
+                                color,
+                                mode: 7.0,
+                                sdf_params,
                             };
 
-                            self.vertices
-                                .extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+                            self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
                             if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
                                 self.flush();
                             }

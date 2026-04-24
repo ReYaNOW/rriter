@@ -6,7 +6,7 @@ use crate::ui_system::UiId;
 
 impl App {
     /// Обрабатывает клик по UI элементу
-        pub fn handle_ui_click(&mut self, id: UiId) {
+    pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
             UiId::HoverPopupScroll => {}
             UiId::TerminalBody => {
@@ -213,7 +213,7 @@ impl App {
             UiId::SettingsIdeAddWorkspace => {
                 self.trigger_folder_picker();
             }
-                        UiId::SettingsIdeRemoveWorkspace(idx) => {
+            UiId::SettingsIdeRemoveWorkspace(idx) => {
                 if idx < self.ide_workspaces.len() {
                     self.ide_workspaces.remove(idx);
                     let config = crate::Config {
@@ -226,7 +226,8 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();
@@ -241,7 +242,7 @@ impl App {
                     .to_string();
                 if !pattern.is_empty() && !self.ide_ignore_patterns.contains(&pattern) {
                     self.ide_ignore_patterns.push(pattern);
-                                        // Очищаем редактор
+                    // Очищаем редактор
                     let old_version = self.settings_ignore_editor.version;
                     self.settings_ignore_editor = Editor::new(128);
                     self.settings_ignore_editor.version = old_version + 1;
@@ -257,14 +258,15 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-                        UiId::SettingsIdeRemoveIgnore(idx) => {
+            UiId::SettingsIdeRemoveIgnore(idx) => {
                 if idx < self.ide_ignore_patterns.len() {
                     self.ide_ignore_patterns.remove(idx);
                     let config = crate::Config {
@@ -277,7 +279,8 @@ impl App {
                             .unwrap_or(false),
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed),
                     };
                     crate::save_config(&config);
                     self.refresh_file_tree();
@@ -522,7 +525,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                                    UiId::EditorScrollbarY => {
+            UiId::EditorScrollbarY => {
                 if let Some(r) = self.renderer.as_mut() {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
@@ -530,14 +533,21 @@ impl App {
                     self.last_click_pos = (mx, my);
 
                     let s = r.scale_factor;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     let editor_height = wh - tab_bar_h;
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {
-                        let total_content_height = (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
-                        let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height).max(20.0 * s);
+                        let total_content_height =
+                            (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
+                        let thumb_h = (editor_height / total_content_height.max(editor_height)
+                            * editor_height)
+                            .max(20.0 * s);
                         let track_h = editor_height;
 
                         let scroll_ratio = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
@@ -548,10 +558,13 @@ impl App {
                             self.last_click_time = std::time::Instant::now();
                         } else {
                             self.scroll_y.drag_offset = thumb_h / 2.0;
-                            let new_ratio = (my - tab_bar_h - self.scroll_y.drag_offset) / (track_h - thumb_h).max(0.0001);
-                            self.scroll_y.target = (new_ratio * max_scroll).clamp(0.0, max_scroll).round();
+                            let new_ratio = (my - tab_bar_h - self.scroll_y.drag_offset)
+                                / (track_h - thumb_h).max(0.0001);
+                            self.scroll_y.target =
+                                (new_ratio * max_scroll).clamp(0.0, max_scroll).round();
                             self.scroll_y.anim_speed = 15.0;
-                            self.last_click_time = std::time::Instant::now() - std::time::Duration::from_millis(200);
+                            self.last_click_time =
+                                std::time::Instant::now() - std::time::Duration::from_millis(200);
                         }
                     } else {
                         self.last_click_time = std::time::Instant::now();
@@ -559,25 +572,32 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-                        UiId::EditorMinimap => {
+            UiId::EditorMinimap => {
                 self.scroll_y.is_dragging = true;
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     self.last_click_pos = (mx, my);
-                    self.last_click_time = std::time::Instant::now() - std::time::Duration::from_millis(200);
+                    self.last_click_time =
+                        std::time::Instant::now() - std::time::Duration::from_millis(200);
 
                     let s = r.scale_factor;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode { 0.0 } else { 38.0 * s };
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     let editor_height = wh - tab_bar_h;
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
-                                        if max_scroll > 0.0 {
+                    if max_scroll > 0.0 {
                         let total_lines_f32 = self.editor.line_offsets.len() as f32;
                         let visible_minimap_lines = total_lines_f32.min(900.0);
-                        let minimap_line_h = (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
-                        let max_minimap_scroll = ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
+                        let minimap_line_h =
+                            (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
+                        let max_minimap_scroll =
+                            ((total_lines_f32 + 2.0) * minimap_line_h - editor_height).max(0.0);
 
                         let scroll_ratio_y = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
                         let current_minimap_scroll = scroll_ratio_y * max_minimap_scroll;

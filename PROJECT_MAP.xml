@@ -4,34 +4,34 @@
     <fn name="save_state_and_exit" line="18" />
     <fn name="module_path_from_definition_path" line="43" ret="Option&lt;String&gt;" calls="self: sanitize_module_path_parts" />
     <fn name="sanitize_module_path_parts" line="47" ret="Option&lt;String&gt;" />
-    <fn name="prepend_hover_module_path" line="103" calls="app::file_tree: pre_rasterize_icon; editor: insert_str" />
-    <fn name="source_line" line="132" ret="Option&lt;&amp;'a str&gt;" />
-    <fn name="source_signature_for_hover" line="142" ret="Option&lt;String&gt;" calls="self: def_name, format_attribute_assignment_line, source_attribute_hover_for_symbol, source_line, symbol_at_offset, wrap_signature_after_first_param; editor: get_full_text; lsp: wrap_signature_after_first_param; ui_system: contains" />
-    <fn name="format_attribute_assignment_line" line="149" ret="String" calls="ui_system: contains" />
-    <fn name="source_attribute_hover_for_symbol" line="189" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line, source_line" />
-    <fn name="def_name" line="328" ret="Option&lt;&amp;str&gt;" />
-    <fn name="source_attribute_hover_from_definition_file" line="427" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line; ui_system: contains" />
-    <fn name="format_attribute_assignment_line" line="433" ret="String" calls="ui_system: contains" />
-    <fn name="is_ident_byte" line="603" ret="bool" />
-    <fn name="symbol_at_offset" line="607" ret="Option&lt;String&gt;" calls="self: is_ident_byte; editor: byte_at, get_full_text" />
-    <fn name="wrap_signature_after_first_param" line="633" ret="String" calls="ui_system: contains" />
-    <fn name="wraps_asynccontextmanager_signature_after_first_param" line="674" calls="self: wrap_signature_after_first_param; lsp: wrap_signature_after_first_param" />
-    <fn name="asynccontextmanager_source_signature_is_split_into_lines" line="684" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" line="701" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="attribute_hover_uses_source_attribute_line" line="718" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="simple_type_hover_triggers_source_replacement" line="735" calls="self: should_replace_hover_with_source_signature" />
-    <fn name="symbol_at_offset_reads_identifier_from_nearby_position" line="742" calls="self: symbol_at_offset; editor: get_full_text, insert_str" />
-    <fn name="strict_source_lookup_does_not_fallback_to_nearby_def" line="756" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="definition_file_attribute_hover_includes_fq_class_name" line="770" calls="self: source_attribute_hover_from_definition_file" />
-    <fn name="definition_file_attribute_hover_includes_lsp_type" line="794" calls="self: source_attribute_hover_from_definition_file; ui_system: contains" />
-    <fn name="module_path_from_site_packages_strips_noise_segments" line="816" calls="self: module_path_from_definition_path" />
-    <fn name="module_path_strips_trailing_init" line="828" calls="self: module_path_from_definition_path" />
-    <fn name="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" line="835" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="should_replace_hover_with_source_signature" line="859" ret="bool" calls="self: should_replace_simple_type_hover; ui_system: contains" />
-    <fn name="should_replace_simple_type_hover" line="867" ret="bool" calls="ui_system: contains" />
-    <fn name="resumed" line="882" reads="base_title, editor, theme, window_height, window_width" writes="gl_config=, gl_context=, gl_surface=, renderer=, window=" calls="app::terminal: new; editor: is_dirty, new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="window_event" line="965" reads="active_tab, autocomplete_active, autocomplete_anim_progress, autocomplete_hovered_idx, autocomplete_options, autocomplete_scroll, autocomplete_selected_idx, base_title, current_sticky_lines, dialog_gl_surface, dialog_window, editor, faq_editor, file_path, gl_context, gl_surface, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, last_blink_state, lsp, lsp_actions_menu, pending_action, pending_key_log, recent_files, renderer, scroll_x, scroll_y, search_anim_y, search_case_sensitive, search_current_idx, search_editor, search_focused, search_results, settings_anim_progress, settings_ide_scroll, settings_ignore_editor, settings_ignore_focused, settings_ignore_scroll_x, settings_scroll, settings_tab, should_maximize, show_fps, show_search, show_settings, show_welcome, sticky_anim_is_adding, sticky_anim_progress, tab_scroll, tabs, theme, window" writes="autocomplete_rect=, current_cursor=, is_focused=, is_ready=, last_resize_time=, modifiers=, target_sticky_lines=, tried_maximize=, ui_registry.clear()" calls="self: close_current_file, close_dialog, handle_main_cursor_moved, handle_main_keyboard_input, handle_main_mouse_input, handle_main_mouse_wheel, save_current_file, show_action_dialog, trigger_file_picker; app: any_bottom_open, is_open; self: save_state_and_exit; app::terminal: resize; editor: is_dirty; lsp: get_diagnostics; render_view: draw; render_view::core_text: get_cursor_xy, get_max_scroll; render_view::lsp_ui: draw_lsp_actions_menu; render_view::settings_ui: draw_settings; render_view::ui: draw_autocomplete, draw_dialog_window; renderer: resize; ui_system: contains, id, mark_overlay_start, wants_text; widgets: get_dialog_buttons, is_hovered" />
-    <fn name="about_to_wait" line="1579" reads="autocomplete_active, autocomplete_scroll, editor, file_tree_notify_rx, highlighter, ide_ignore_patterns, ide_panel, is_dragging, is_focused, is_highlighted_once, is_ide_mode, last_action, lsp, lsp_actions_menu, renderer, scroll_x, scroll_y, search_anim_y, settings_ide_scroll, settings_scroll, settings_tab, show_search, show_settings, show_welcome, tab_scroll, target_sticky_lines, window, window_height, window_width" writes="autocomplete_anim_progress=, base_title=, current_sticky_lines=, file_extension=, file_path=, ide_workspaces.push(), last_blink_state=, last_frame=, last_resize_time=, open_file_rx=, open_folder_rx=, pending_fix_all_id=, run_ide_on_startup=, save_file_rx=, settings_anim_progress=, settings_y=, sticky_anim_is_adding=, sticky_anim_progress=" calls="self: add_recent_file, apply_highlight_results, apply_workspace_edit, check_external_changes, enter_ide_mode, open_file_in_tab, poll_file_tree, refresh_file_tree, save_current_file, start_file_watcher, update_autocomplete; app: is_open; self: module_path_from_definition_path, prepend_hover_module_path, should_replace_hover_with_source_signature, should_replace_simple_type_hover, source_attribute_hover_from_definition_file, source_signature_for_hover, symbol_at_offset; editor: get_full_text, insert_str, is_dirty, rebuild_line_offsets, set_cursor_at_pos; highlighter: poll, reset; lsp: highlight_hover_text, offset_to_lsp_pos, poll, request_definition, request_hover, servers_info; render_view::core_text: get_max_scroll; scroll: clamp_current, clamp_target, update; ui_system: contains" />
+    <fn name="prepend_hover_module_path" line="105" calls="app::file_tree: pre_rasterize_icon; editor: insert_str" />
+    <fn name="source_line" line="134" ret="Option&lt;&amp;'a str&gt;" />
+    <fn name="source_signature_for_hover" line="144" ret="Option&lt;String&gt;" calls="self: def_name, format_attribute_assignment_line, source_attribute_hover_for_symbol, source_line, symbol_at_offset, wrap_signature_after_first_param; editor: get_full_text; lsp: wrap_signature_after_first_param; ui_system: contains" />
+    <fn name="format_attribute_assignment_line" line="151" ret="String" calls="ui_system: contains" />
+    <fn name="source_attribute_hover_for_symbol" line="191" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line, source_line" />
+    <fn name="def_name" line="350" ret="Option&lt;&amp;str&gt;" />
+    <fn name="source_attribute_hover_from_definition_file" line="454" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line; ui_system: contains" />
+    <fn name="format_attribute_assignment_line" line="460" ret="String" calls="ui_system: contains" />
+    <fn name="is_ident_byte" line="647" ret="bool" />
+    <fn name="symbol_at_offset" line="651" ret="Option&lt;String&gt;" calls="self: is_ident_byte; editor: byte_at, get_full_text" />
+    <fn name="wrap_signature_after_first_param" line="677" ret="String" calls="ui_system: contains" />
+    <fn name="wraps_asynccontextmanager_signature_after_first_param" line="718" calls="self: wrap_signature_after_first_param; lsp: wrap_signature_after_first_param" />
+    <fn name="asynccontextmanager_source_signature_is_split_into_lines" line="728" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
+    <fn name="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" line="745" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
+    <fn name="attribute_hover_uses_source_attribute_line" line="763" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
+    <fn name="simple_type_hover_triggers_source_replacement" line="780" calls="self: should_replace_hover_with_source_signature" />
+    <fn name="symbol_at_offset_reads_identifier_from_nearby_position" line="787" calls="self: symbol_at_offset; editor: get_full_text, insert_str" />
+    <fn name="strict_source_lookup_does_not_fallback_to_nearby_def" line="801" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
+    <fn name="definition_file_attribute_hover_includes_fq_class_name" line="815" calls="self: source_attribute_hover_from_definition_file" />
+    <fn name="definition_file_attribute_hover_includes_lsp_type" line="839" calls="self: source_attribute_hover_from_definition_file; ui_system: contains" />
+    <fn name="module_path_from_site_packages_strips_noise_segments" line="861" calls="self: module_path_from_definition_path" />
+    <fn name="module_path_strips_trailing_init" line="873" calls="self: module_path_from_definition_path" />
+    <fn name="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" line="880" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
+    <fn name="should_replace_hover_with_source_signature" line="919" ret="bool" calls="self: should_replace_simple_type_hover; ui_system: contains" />
+    <fn name="should_replace_simple_type_hover" line="927" ret="bool" calls="ui_system: contains" />
+    <fn name="resumed" line="950" reads="base_title, editor, theme, window_height, window_width" writes="gl_config=, gl_context=, gl_surface=, renderer=, window=" calls="app::terminal: new; editor: is_dirty, new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
+    <fn name="window_event" line="1033" reads="active_tab, autocomplete_active, autocomplete_anim_progress, autocomplete_hovered_idx, autocomplete_options, autocomplete_scroll, autocomplete_selected_idx, base_title, current_sticky_lines, dialog_gl_surface, dialog_window, editor, faq_editor, file_path, gl_context, gl_surface, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, last_blink_state, lsp, lsp_actions_menu, pending_action, pending_key_log, recent_files, renderer, scroll_x, scroll_y, search_anim_y, search_case_sensitive, search_current_idx, search_editor, search_focused, search_results, settings_anim_progress, settings_ide_scroll, settings_ignore_editor, settings_ignore_focused, settings_ignore_scroll_x, settings_scroll, settings_tab, should_maximize, show_fps, show_search, show_settings, show_welcome, sticky_anim_is_adding, sticky_anim_progress, tab_scroll, tabs, theme, window" writes="autocomplete_rect=, current_cursor=, is_focused=, is_ready=, last_resize_time=, modifiers=, target_sticky_lines=, tried_maximize=, ui_registry.clear()" calls="self: close_current_file, close_dialog, handle_main_cursor_moved, handle_main_keyboard_input, handle_main_mouse_input, handle_main_mouse_wheel, save_current_file, show_action_dialog, trigger_file_picker; app: any_bottom_open, is_open; self: save_state_and_exit; app::terminal: resize; editor: is_dirty; lsp: get_diagnostics; render_view: draw; render_view::core_text: get_cursor_xy, get_max_scroll; render_view::lsp_ui: draw_lsp_actions_menu; render_view::settings_ui: draw_settings; render_view::ui: draw_autocomplete, draw_dialog_window; renderer: resize; ui_system: contains, id, mark_overlay_start, wants_text; widgets: get_dialog_buttons, is_hovered" />
+    <fn name="about_to_wait" line="1647" reads="autocomplete_active, autocomplete_scroll, editor, file_tree_notify_rx, highlighter, ide_ignore_patterns, ide_panel, is_dragging, is_focused, is_highlighted_once, is_ide_mode, last_action, lsp, lsp_actions_menu, renderer, scroll_x, scroll_y, search_anim_y, settings_ide_scroll, settings_scroll, settings_tab, show_search, show_settings, show_welcome, tab_scroll, target_sticky_lines, window, window_height, window_width" writes="autocomplete_anim_progress=, base_title=, current_sticky_lines=, file_extension=, file_path=, ide_workspaces.push(), last_blink_state=, last_frame=, last_resize_time=, open_file_rx=, open_folder_rx=, pending_fix_all_id=, run_ide_on_startup=, save_file_rx=, settings_anim_progress=, settings_y=, sticky_anim_is_adding=, sticky_anim_progress=" calls="self: add_recent_file, apply_highlight_results, apply_workspace_edit, check_external_changes, enter_ide_mode, open_file_in_tab, poll_file_tree, refresh_file_tree, save_current_file, start_file_watcher, update_autocomplete; app: is_open; self: module_path_from_definition_path, prepend_hover_module_path, should_replace_hover_with_source_signature, should_replace_simple_type_hover, source_attribute_hover_from_definition_file, source_signature_for_hover, symbol_at_offset; editor: get_full_text, insert_str, is_dirty, rebuild_line_offsets, set_cursor_at_pos; highlighter: poll, reset; lsp: highlight_hover_text, offset_to_lsp_pos, poll, request_definition, request_hover, servers_info; render_view::core_text: get_max_scroll; scroll: clamp_current, clamp_target, update; ui_system: contains" />
   </mod>
   <mod path="src/app/file_icons.rs" name="app::file_icons">
     <type name="FallbackMatcher">{ set: RegexSet, keys: Vec&lt;&amp;'static str&gt; }</type>
@@ -58,7 +58,7 @@
     <fn name="handle_terminal_search_keyboard_input" line="245" pub="true" reads="clipboard, ide_panel, modifiers, window" writes="last_action=" calls="self: jump_to_terminal_search_result, update_terminal_search; editor: backspace, delete_forward, delete_selection, get_selection, insert_str, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all" />
     <fn name="handle_search_keyboard_input" line="376" pub="true" reads="clipboard, modifiers, search_editor, window" writes="last_action=, search_current_idx=, search_focused=, search_results.clear(), show_search=" calls="self: jump_to_search_result, update_search; editor: backspace, delete_forward, delete_selection, get_selection, insert_str, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all" />
     <fn name="handle_editor_keyboard_input" line="503" pub="true" reads="autocomplete_options, clipboard, file_extension, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, lsp, modifiers, renderer, scroll_x, scroll_y, search_editor, window, window_height, window_width" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, base_title=, editor=, file_path=, is_dragging=, is_highlighted_once=, last_action=, last_sent_version=, lsp_actions_menu=, pending_key_log=, search_current_idx=, search_focused=, search_results.clear(), show_search=, show_settings=, show_welcome=, tabs.clear()" calls="self: apply_autocomplete, apply_selected_lsp_action, close_current_file, close_tab_at, ensure_autocomplete_visible, jump_to_search_result, open_lsp_actions_menu, save_current_file, save_tabs_state, show_action_dialog, sync_active_tab, trigger_file_picker, update_autocomplete, update_search; editor: backspace, delete_forward, delete_selection, delete_word_backward, delete_word_forward, get_auto_indent, get_full_text, get_selection, insert_str, is_char_boundary, is_dirty, move_down, move_end, move_end_of_file, move_home, move_left, move_page_down, move_page_up, move_right, move_start_of_file, move_up, move_word_left, move_word_right, redo, select_all, set_original_text, undo; highlighter: apply_edits, poll, reset, shift_delete, shift_insert; lsp: notify_change, notify_close, poll; render_view::core_text: get_cursor_xy, get_max_scroll; scroll: clamp_current, clamp_target, scroll_by, stop_anim" />
-    <fn name="handle_main_keyboard_input" line="1254" pub="true" reads="clipboard, dialog_window, ide_panel, ide_workspaces, is_ide_mode, modifiers, search_focused, settings_ignore_editor, settings_tab, show_search, window, window_height, window_width" writes="ide_ignore_patterns.push(), last_action=, settings_ignore_focused=, show_fps=, show_settings=" calls="self: close_dialog, handle_editor_keyboard_input, handle_search_keyboard_input, handle_terminal_keyboard_input, handle_terminal_search_keyboard_input, refresh_file_tree; app: is_open; app::mouse: clear_hover_popup; editor: backspace, delete_forward, delete_selection, delete_word_backward, delete_word_forward, get_full_text, get_selection, insert_str, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all; ui_system: contains" />
+    <fn name="handle_main_keyboard_input" line="1258" pub="true" reads="clipboard, dialog_window, ide_panel, ide_workspaces, is_ide_mode, modifiers, search_focused, settings_ignore_editor, settings_tab, show_search, window, window_height, window_width" writes="ide_ignore_patterns.push(), last_action=, settings_ignore_focused=, show_fps=, show_settings=" calls="self: close_dialog, handle_editor_keyboard_input, handle_search_keyboard_input, handle_terminal_keyboard_input, handle_terminal_search_keyboard_input, refresh_file_tree; app: is_open; app::mouse: clear_hover_popup; editor: backspace, delete_forward, delete_selection, delete_word_backward, delete_word_forward, get_full_text, get_selection, insert_str, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all; ui_system: contains" />
   </mod>
   <mod path="src/app/lsp_actions.rs" name="app::lsp_actions">
     <fn name="lsp_panel_bounds" line="5" pub="true" ret="Option&lt;(f32, f32, f32, f32)&gt;" reads="ide_panel, renderer, window" calls="app: any_bottom_open" />
@@ -68,20 +68,30 @@
     <fn name="open_lsp_actions_menu" line="98" pub="true" reads="editor, file_extension, file_path, is_ide_mode, lsp, renderer, scroll_y, show_welcome, window" writes="lsp_actions_menu=" calls="editor: get_full_text; lsp: diagnostics_for_line, offset_to_lsp_pos, request_code_actions; render_view::core_text: get_cursor_xy" />
     <fn name="apply_selected_lsp_action" line="188" pub="true" reads="file_extension, file_path, lsp, lsp_actions_menu, window" writes="pending_fix_all_id=" calls="self: apply_workspace_edit, insert_noqa_comment; lsp: request_fix_all, request_organize_imports" />
     <fn name="insert_noqa_comment" line="230" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, window" calls="editor: byte_at, get_full_text, is_dirty, replace_range; highlighter: apply_edits, shift_delete, shift_insert; lsp: notify_change; ui_system: contains" />
-    <fn name="apply_workspace_edit" line="321" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, window" calls="editor: get_full_text, is_dirty, replace_range; highlighter: apply_edits, shift_delete, shift_insert; lsp: lsp_pos_to_offset, notify_change" />
+    <fn name="apply_workspace_edit" line="322" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, window" calls="editor: get_full_text, is_dirty, replace_range; highlighter: apply_edits, shift_delete, shift_insert; lsp: lsp_pos_to_offset, notify_change" />
   </mod>
   <mod path="src/app/mouse.rs" name="app::mouse">
-    <type name="HoverPopup">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, scroll: crate::scroll::ScrollState }</type>
+    <type name="HoverLayoutCache">{ scale_factor: f32, max_text_w: f32, span_count: usize, text_len: usize, lines: Vec&lt;HoverVisualLine&gt;, max_line_w: f32, total_text_h: f32 }</type>
+    <type name="HoverPopup">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, anchor_y: f32, scroll: crate::scroll::ScrollState, layout_cache: Option&lt;HoverLayoutCache&gt; }</type>
     <type name="HoverState">{ request_id: Option&lt;i32&gt;, definition_request_id: Option&lt;i32&gt;, popup: Option&lt;HoverPopup&gt;, pending_popup: Option&lt;HoverPopup&gt;, timer: f32, byte_offset: Option&lt;usize&gt;, rect: Option&lt;(f32, f32, f32, f32)&gt;, max_scroll: f32, selection_anchor: Option&lt;usize&gt;, selection_cursor: Option&lt;usize&gt;, selecting: bool, diag_selection_anchor: Option&lt;usize&gt;, diag_selection_cursor: Option&lt;usize&gt;, diag_selecting: bool }</type>
-    <fn name="default" line="36" ret="Self" />
-    <fn name="clear_hover_popup" line="62" pub="true" ret="bool" />
-    <fn name="is_hover_target_byte" line="88" ret="bool" calls="editor: byte_at" />
-    <fn name="normalize_hover_byte" line="96" ret="Option&lt;usize&gt;" calls="self: is_hover_target_byte; editor: byte_at" />
-    <fn name="hover_token_bounds" line="116" ret="(usize, usize)" calls="self: is_hover_target_byte" />
-    <fn name="hover_popup_byte_at" line="130" ret="usize" calls="renderer: char_advance, get_ui_glyph" />
-    <fn name="handle_main_mouse_wheel" line="306" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: clear_hover_popup; render_view::core_text: flush, get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
-    <fn name="handle_main_mouse_input" line="773" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, base_title, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, tab_scroll, ui_registry, window" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=, tabs.insert(), tabs.remove()" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree, save_tabs_state, sync_active_tab; app: any_bottom_open, is_open, toggle; self: clear_hover_popup, hover_popup_byte_at; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: flush, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph, measure_ui_width; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
-    <fn name="handle_main_cursor_moved" line="1690" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: hover_popup_byte_at, hover_token_bounds, normalize_hover_byte; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_byte_at_xy, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph; ui_system: contains" />
+    <type name="HoverVisualLine">{ glyphs: Vec&lt;(char, [f32; 4], usize)&gt;, kind: crate::lsp::HoverLineKindPublic }</type>
+    <fn name="default" line="55" ret="Self" />
+    <fn name="hover_byte_includes_identifier_edges_next_to_whitespace" line="80" calls="self: normalize_hover_byte; editor: get_full_text, insert_str" />
+    <fn name="hover_byte_ignores_python_keywords_so_diagnostics_can_show" line="96" calls="self: normalize_hover_byte; editor: get_full_text, insert_str" />
+    <fn name="hover_bridge_reaches_full_source_line_when_popup_is_above" line="107" calls="self: is_in_hover_popup_or_bridge" />
+    <fn name="hover_bridge_handles_popup_shifted_away_from_anchor" line="126" calls="self: is_in_hover_popup_or_bridge" />
+    <fn name="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" line="145" calls="self: is_in_hover_popup_or_bridge" />
+    <fn name="clear_hover_popup" line="170" pub="true" ret="bool" />
+    <fn name="is_hover_target_byte" line="196" ret="bool" calls="editor: byte_at" />
+    <fn name="is_python_hover_keyword" line="204" ret="bool" />
+    <fn name="hover_token_text" line="245" ret="Option&lt;String&gt;" calls="self: hover_token_bounds; editor: get_full_text" />
+    <fn name="normalize_hover_byte" line="251" ret="Option&lt;usize&gt;" calls="self: hover_token_text, is_hover_target_byte" />
+    <fn name="hover_token_bounds" line="272" ret="(usize, usize)" calls="self: is_hover_target_byte" />
+    <fn name="is_in_hover_popup_or_bridge" line="286" ret="bool" />
+    <fn name="hover_popup_byte_at" line="325" ret="usize" calls="renderer: char_advance, get_ui_glyph" />
+    <fn name="handle_main_mouse_wheel" line="506" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: clear_hover_popup; render_view::core_text: flush, get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
+    <fn name="handle_main_mouse_input" line="973" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, base_title, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, tab_scroll, ui_registry, window" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=, tabs.insert(), tabs.remove()" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree, save_tabs_state, sync_active_tab; app: any_bottom_open, is_open, toggle; self: clear_hover_popup, hover_popup_byte_at; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: flush, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph, measure_ui_width; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
+    <fn name="handle_main_cursor_moved" line="1890" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: hover_popup_byte_at, hover_token_bounds, is_in_hover_popup_or_bridge, normalize_hover_byte; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_byte_at_xy, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph; ui_system: contains" />
   </mod>
   <mod path="src/app/terminal.rs" name="app::terminal">
     <type name="Cell">{ c: char, fg: u8, bg: u8 }</type>
@@ -131,35 +141,35 @@
     <fn name="is_open" line="250" pub="true" ret="bool" reads="slots" />
     <fn name="fuzzy_match" line="260" ret="Option&lt;Vec&lt;usize&gt;&gt;" />
     <fn name="enter_ide_mode" line="408" pub="true" reads="editor, file_extension, highlighter, ide_workspaces, window" writes="active_tab=, base_title=, file_path=, ide_panel=, is_ide_mode=, lsp=, show_welcome=, tabs.push()" calls="self: apply_highlight_results, open_file_in_tab_bg, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab; self: is_open; app::file_icons: file_icon_key; editor: get_full_text, is_dirty; highlighter: wait_for_first_result; lsp: notify_open" />
-    <fn name="save_tabs_state" line="515" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
-    <fn name="sync_active_tab" line="524" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
-    <fn name="switch_to_tab" line="571" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; highlighter: reset; lsp: notify_open" />
-    <fn name="open_new_tab" line="626" pub="true" reads="highlighter, is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab; highlighter: reset" />
-    <fn name="close_tab_at" line="717" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
-    <fn name="open_file_in_tab" line="751" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_bg" line="755" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_internal" line="759" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file_internal, open_new_tab, switch_to_tab; editor: is_dirty" />
-    <fn name="ensure_cursor_visible" line="795" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
-    <fn name="get_current_word_prefix" line="834" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
-    <fn name="update_autocomplete" line="854" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
-    <fn name="ensure_autocomplete_visible" line="933" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
-    <fn name="apply_autocomplete" line="963" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
-    <fn name="update_terminal_search" line="997" pub="true" reads="ide_panel" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_terminal_search_result" line="1042" pub="true" reads="ide_panel, renderer" />
-    <fn name="update_search" line="1078" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_search_result" line="1134" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
-    <fn name="update_window_title" line="1160" pub="true" />
-    <fn name="show_action_dialog" line="1169" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="app::terminal: new; editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="close_dialog" line="1211" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
-    <fn name="close_current_file" line="1219" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
-    <fn name="trigger_file_picker" line="1265" pub="true" writes="open_file_rx=" />
-    <fn name="trigger_folder_picker" line="1274" pub="true" writes="open_folder_rx=" />
-    <fn name="trigger_save_as_picker" line="1285" pub="true" writes="save_file_rx=" />
-    <fn name="save_current_file" line="1297" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; app::terminal: spawn; editor: get_full_text, mark_saved" />
-    <fn name="add_recent_file" line="1336" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
-    <fn name="apply_highlight_results" line="1345" pub="true" reads="editor, file_extension, highlighter" writes="is_highlighted_once=" />
-    <fn name="load_file_internal" line="1380" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
-    <fn name="check_external_changes" line="1466" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
+    <fn name="save_tabs_state" line="513" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
+    <fn name="sync_active_tab" line="522" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
+    <fn name="switch_to_tab" line="569" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; highlighter: reset; lsp: notify_open" />
+    <fn name="open_new_tab" line="624" pub="true" reads="highlighter, is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab; highlighter: reset" />
+    <fn name="close_tab_at" line="715" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
+    <fn name="open_file_in_tab" line="749" pub="true" calls="self: open_file_in_tab_internal" />
+    <fn name="open_file_in_tab_bg" line="753" pub="true" calls="self: open_file_in_tab_internal" />
+    <fn name="open_file_in_tab_internal" line="757" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file_internal, open_new_tab, switch_to_tab; editor: is_dirty" />
+    <fn name="ensure_cursor_visible" line="793" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
+    <fn name="get_current_word_prefix" line="832" pub="true" ret="String" reads="editor" calls="editor: byte_at" />
+    <fn name="update_autocomplete" line="852" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
+    <fn name="ensure_autocomplete_visible" line="931" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
+    <fn name="apply_autocomplete" line="961" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter: shift_delete, shift_insert" />
+    <fn name="update_terminal_search" line="995" pub="true" reads="ide_panel" calls="editor: get_full_text; lsp: start" />
+    <fn name="jump_to_terminal_search_result" line="1040" pub="true" reads="ide_panel, renderer" />
+    <fn name="update_search" line="1076" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
+    <fn name="jump_to_search_result" line="1132" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
+    <fn name="update_window_title" line="1158" pub="true" />
+    <fn name="show_action_dialog" line="1167" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="app::terminal: new; editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
+    <fn name="close_dialog" line="1209" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
+    <fn name="close_current_file" line="1217" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter: reset; lsp: notify_close" />
+    <fn name="trigger_file_picker" line="1263" pub="true" writes="open_file_rx=" />
+    <fn name="trigger_folder_picker" line="1272" pub="true" writes="open_folder_rx=" />
+    <fn name="trigger_save_as_picker" line="1283" pub="true" writes="save_file_rx=" />
+    <fn name="save_current_file" line="1295" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; app::terminal: spawn; editor: get_full_text, mark_saved" />
+    <fn name="add_recent_file" line="1334" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
+    <fn name="apply_highlight_results" line="1343" pub="true" reads="editor, file_extension, highlighter" writes="is_highlighted_once=" />
+    <fn name="load_file_internal" line="1378" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter: reset, wait_for_first_result; lsp: notify_open" />
+    <fn name="check_external_changes" line="1464" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
   </mod>
   <mod path="src/editor.rs" name="editor">
     <type name="EditOp">{ Insert { offset: usize, text: String }</type>
@@ -256,11 +266,11 @@
     <fn name="split_inline_python_after_colon" line="167" ret="Option&lt;(String, String)&gt;" calls="ui_system: contains" />
     <fn name="normalize_coroutine_signature_line" line="187" ret="String" calls="ui_system: contains" />
     <fn name="normalize_python_hover_doc" line="209" pub="true" ret="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" calls="self: flatten_rst_roles_and_code, normalize_coroutine_signature_line, normalize_inline_rst_code, normalize_rst_roles, parse_param_line, split_inline_python_after_colon" />
-    <fn name="ts_capture_color" line="583" pub="true" ret="Option&lt;[f32; 4]&gt;" />
-    <fn name="push_python_ts_spans" line="599" pub="true" calls="self: ts_capture_color" />
-    <fn name="highlight_python_hover_doc" line="652" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="self: color_keyword_args_orange, force_color_on_ranges, normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
-    <fn name="force_color_on_ranges" line="955" />
-    <fn name="color_keyword_args_orange" line="997" />
+    <fn name="ts_capture_color" line="604" pub="true" ret="Option&lt;[f32; 4]&gt;" />
+    <fn name="push_python_ts_spans" line="620" pub="true" calls="self: ts_capture_color" />
+    <fn name="highlight_python_hover_doc" line="673" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="editor: replace_range; self: color_keyword_args_orange, force_color_on_ranges, normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
+    <fn name="force_color_on_ranges" line="1006" />
+    <fn name="color_keyword_args_orange" line="1048" />
   </mod>
   <mod path="src/lsp.rs" name="lsp">
     <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
@@ -303,88 +313,89 @@
     <fn name="wrap_signature_after_first_param" line="723" ret="String" calls="ui_system: contains" />
     <fn name="normalize_asynccontextmanager_signature_line" line="747" ret="Option&lt;String&gt;" calls="app::events: wrap_signature_after_first_param; self: wrap_signature_after_first_param" />
     <fn name="variable_header_highlights_name_pink" line="779" calls="self: highlight_hover_text" />
-    <fn name="uses_python_hover_pipeline_for_builtin_signatures" line="791" calls="self: highlight_hover_text" />
-    <fn name="plain_bound_method_prose_stays_uncolored" line="811" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="inline_for_fragment_becomes_separate_code_line" line="848" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="rich_rst_docstring_path_is_preserved" line="858" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="bound_method_signature_line_is_highlighted_but_prose_stays_plain" line="877" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="coroutine_return_bound_method_becomes_async_def" line="897" calls="self: highlight_hover_text" />
-    <fn name="coroutine_return_signature_becomes_async_def" line="904" calls="self: highlight_hover_text" />
-    <fn name="long_bound_method_signature_is_normalized_and_highlighted" line="920" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_object_repr_is_normalized_and_highlighted" line="947" calls="self: highlight_hover_text" />
-    <fn name="qualified_class_object_repr_prepends_module_path" line="969" calls="self: highlight_hover_text" />
-    <fn name="backticked_qualified_class_repr_prepends_module_path" line="984" calls="self: highlight_hover_text" />
-    <fn name="generic_type_line_gets_cyan_types_and_white_brackets" line="991" calls="self: highlight_hover_text" />
-    <fn name="literal_type_line_is_highlighted" line="1022" calls="self: highlight_hover_text" />
-    <fn name="assignment_line_is_highlighted_in_hover_text" line="1044" calls="self: highlight_hover_text" />
-    <fn name="module_object_repr_is_normalized_to_module_header" line="1057" calls="self: highlight_hover_text" />
-    <fn name="site_packages_and_init_are_removed_from_module_and_class_repr" line="1064" calls="self: highlight_hover_text" />
-    <fn name="builtin_dict_class_hover_is_normalized_without_angle_brackets" line="1075" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="builtin_str_heading_line_is_highlighted_as_type" line="1088" calls="self: highlight_hover_text" />
-    <fn name="builtin_any_heading_line_is_highlighted_as_type" line="1103" calls="self: highlight_hover_text" />
-    <fn name="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" line="1118" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" line="1125" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_signature_is_highlighted" line="1165" calls="self: highlight_hover_text" />
-    <fn name="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" line="1181" calls="self: highlight_hover_text" />
-    <fn name="highlight_diagnostic_message" line="1227" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" />
-    <fn name="offset_to_lsp_pos" line="1454" pub="true" ret="(u32, u32)" />
-    <fn name="json_escape" line="1474" ret="String" />
-    <fn name="path_to_uri" line="1493" ret="String" />
-    <fn name="uri_to_path" line="1507" ret="PathBuf" />
-    <fn name="make_initialize" line="1518" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
-    <fn name="make_initialized" line="1549" ret="Vec&lt;u8&gt;" />
-    <fn name="make_did_open" line="1553" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_change_full" line="1564" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_close" line="1574" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_code_action" line="1582" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_hover" line="1609" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_definition" line="1616" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_shutdown" line="1623" ret="Vec&lt;u8&gt;" />
-    <fn name="make_exit" line="1627" ret="Vec&lt;u8&gt;" />
-    <fn name="write_frame" line="1633" ret="bool" calls="render_view::core_text: flush" />
-    <fn name="parse_diagnostic_value" line="1645" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
-    <fn name="parse_text_edit_value" line="1752" ret="Option&lt;TextChange&gt;" />
-    <fn name="parse_workspace_edit_value" line="1777" ret="WorkspaceEdit" calls="self: uri_to_path" />
-    <fn name="parse_hover_value" line="1813" ret="Option&lt;String&gt;" />
-    <fn name="parse_definition_path" line="1841" ret="Option&lt;PathBuf&gt;" calls="self: uri_to_path" />
-    <fn name="parse_code_action_value" line="1858" ret="Option&lt;CodeAction&gt;" />
-    <fn name="dispatch_frame" line="1893" calls="self: parse_definition_path, parse_diagnostic_value, parse_hover_value, parse_workspace_edit_value, uri_to_path" />
-    <fn name="spawn_server" line="2088" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
-    <fn name="send_and_log" line="2219" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
-    <fn name="run_supervisor" line="2253" calls="self: make_code_action, make_definition, make_did_change_full, make_did_close, make_did_open, make_exit, make_hover, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
-    <fn name="start" line="2478" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
-    <fn name="notify_open" line="2499" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
-    <fn name="restart" line="2543" pub="true" reads="cmd_tx" />
-    <fn name="notify_change" line="2549" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_hover" line="2559" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
-    <fn name="request_definition" line="2566" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
-    <fn name="notify_close" line="2574" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_code_actions" line="2582" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
-    <fn name="poll" line="2612" pub="true" reads="event_rx" />
-    <fn name="shutdown" line="2621" pub="true" reads="cmd_tx" />
-    <fn name="encode_diagnostics_json" line="2628" ret="String" calls="self: json_escape" />
-    <fn name="new" line="2684" pub="true" ret="Self" />
-    <fn name="ensure_python" line="2705" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
-    <fn name="restart_python" line="2717" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
-    <fn name="disable_python" line="2735" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
-    <fn name="enable_python" line="2754" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
-    <fn name="servers_info" line="2777" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
-    <fn name="process_for_ext" line="2803" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
-    <fn name="notify_open" line="2814" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="notify_change" line="2837" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="request_hover" line="2858" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="request_definition" line="2879" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="notify_close" line="2901" pub="true" reads="python, ty_process, workspaces" />
-    <fn name="request_code_actions" line="2920" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
-    <fn name="poll" line="2952" pub="true" ret="Vec&lt;LspEvent&gt;" reads="instant_diagnostics, merged_instant_diagnostics, python, server_logs, suppress_diagnostics, ty_instant_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, last_change=, python_status=, ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="3084" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
-    <fn name="get_instant_diagnostics_with_version" line="3098" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
-    <fn name="diagnostics_for_line" line="3113" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="3121" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="request_organize_imports" line="3145" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="shutdown" line="3170" pub="true" reads="python, ty_process" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="3185" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="3211" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
+    <fn name="uses_python_hover_pipeline_for_builtin_signatures" line="797" calls="self: highlight_hover_text" />
+    <fn name="plain_bound_method_prose_stays_uncolored" line="817" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="inline_for_fragment_becomes_separate_code_line" line="854" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="rich_rst_docstring_path_is_preserved" line="864" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="bound_method_signature_line_is_highlighted_but_prose_stays_plain" line="883" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="coroutine_return_bound_method_becomes_async_def" line="903" calls="self: highlight_hover_text" />
+    <fn name="coroutine_return_signature_becomes_async_def" line="910" calls="self: highlight_hover_text" />
+    <fn name="long_bound_method_signature_is_normalized_and_highlighted" line="926" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="class_object_repr_is_normalized_and_highlighted" line="953" calls="self: highlight_hover_text" />
+    <fn name="qualified_class_object_repr_prepends_module_path" line="975" calls="self: highlight_hover_text" />
+    <fn name="backticked_qualified_class_repr_prepends_module_path" line="993" calls="self: highlight_hover_text" />
+    <fn name="generic_type_line_gets_cyan_types_and_white_brackets" line="1003" calls="self: highlight_hover_text" />
+    <fn name="literal_type_line_is_highlighted" line="1034" calls="self: highlight_hover_text" />
+    <fn name="assignment_line_is_highlighted_in_hover_text" line="1056" calls="self: highlight_hover_text" />
+    <fn name="module_object_repr_is_normalized_to_module_header" line="1069" calls="self: highlight_hover_text" />
+    <fn name="site_packages_and_init_are_removed_from_module_and_class_repr" line="1076" calls="self: highlight_hover_text" />
+    <fn name="builtin_dict_class_hover_is_normalized_without_angle_brackets" line="1087" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="builtin_str_heading_line_is_highlighted_as_type" line="1100" calls="self: highlight_hover_text" />
+    <fn name="builtin_any_heading_line_is_highlighted_as_type" line="1115" calls="self: highlight_hover_text" />
+    <fn name="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" line="1130" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" line="1137" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="class_signature_is_highlighted" line="1171" calls="self: highlight_hover_text" />
+    <fn name="litestar_giant_class_hover_signature_and_args_doc_are_parsed" line="1187" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" line="1391" calls="self: highlight_hover_text" />
+    <fn name="highlight_diagnostic_message" line="1437" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" />
+    <fn name="offset_to_lsp_pos" line="1664" pub="true" ret="(u32, u32)" />
+    <fn name="json_escape" line="1684" ret="String" />
+    <fn name="path_to_uri" line="1703" ret="String" />
+    <fn name="uri_to_path" line="1717" ret="PathBuf" />
+    <fn name="make_initialize" line="1728" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
+    <fn name="make_initialized" line="1759" ret="Vec&lt;u8&gt;" />
+    <fn name="make_did_open" line="1763" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_change_full" line="1774" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_close" line="1784" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_code_action" line="1792" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_hover" line="1819" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_definition" line="1826" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_shutdown" line="1833" ret="Vec&lt;u8&gt;" />
+    <fn name="make_exit" line="1837" ret="Vec&lt;u8&gt;" />
+    <fn name="write_frame" line="1843" ret="bool" calls="render_view::core_text: flush" />
+    <fn name="parse_diagnostic_value" line="1855" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
+    <fn name="parse_text_edit_value" line="1962" ret="Option&lt;TextChange&gt;" />
+    <fn name="parse_workspace_edit_value" line="1987" ret="WorkspaceEdit" calls="self: uri_to_path" />
+    <fn name="parse_hover_value" line="2023" ret="Option&lt;String&gt;" />
+    <fn name="parse_definition_path" line="2051" ret="Option&lt;PathBuf&gt;" calls="self: uri_to_path" />
+    <fn name="parse_code_action_value" line="2068" ret="Option&lt;CodeAction&gt;" />
+    <fn name="dispatch_frame" line="2103" calls="self: parse_definition_path, parse_diagnostic_value, parse_hover_value, parse_workspace_edit_value, uri_to_path" />
+    <fn name="spawn_server" line="2298" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
+    <fn name="send_and_log" line="2429" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
+    <fn name="run_supervisor" line="2463" calls="self: make_code_action, make_definition, make_did_change_full, make_did_close, make_did_open, make_exit, make_hover, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
+    <fn name="start" line="2688" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
+    <fn name="notify_open" line="2709" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
+    <fn name="restart" line="2753" pub="true" reads="cmd_tx" />
+    <fn name="notify_change" line="2759" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_hover" line="2769" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
+    <fn name="request_definition" line="2776" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
+    <fn name="notify_close" line="2784" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_code_actions" line="2792" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
+    <fn name="poll" line="2822" pub="true" reads="event_rx" />
+    <fn name="shutdown" line="2831" pub="true" reads="cmd_tx" />
+    <fn name="encode_diagnostics_json" line="2838" ret="String" calls="self: json_escape" />
+    <fn name="new" line="2894" pub="true" ret="Self" />
+    <fn name="ensure_python" line="2915" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
+    <fn name="restart_python" line="2927" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
+    <fn name="disable_python" line="2945" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
+    <fn name="enable_python" line="2964" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
+    <fn name="servers_info" line="2987" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
+    <fn name="process_for_ext" line="3013" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
+    <fn name="notify_open" line="3024" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="notify_change" line="3047" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="request_hover" line="3068" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
+    <fn name="request_definition" line="3089" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
+    <fn name="notify_close" line="3111" pub="true" reads="python, ty_process, workspaces" />
+    <fn name="request_code_actions" line="3130" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
+    <fn name="poll" line="3162" pub="true" ret="Vec&lt;LspEvent&gt;" reads="instant_diagnostics, merged_instant_diagnostics, python, server_logs, suppress_diagnostics, ty_instant_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, last_change=, python_status=, ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
+    <fn name="get_diagnostics" line="3294" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
+    <fn name="get_instant_diagnostics_with_version" line="3308" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
+    <fn name="diagnostics_for_line" line="3323" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
+    <fn name="request_fix_all" line="3331" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="request_organize_imports" line="3355" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="shutdown" line="3380" pub="true" reads="python, ty_process" writes="python_disabled=" />
+    <fn name="lsp_pos_to_offset" line="3395" pub="true" ret="usize" />
+    <fn name="format_and_highlight_json" line="3421" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
   </mod>
   <mod path="src/main.rs" name="main">
     <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }</type>
@@ -411,7 +422,7 @@
   </mod>
   <mod path="src/render_view/core_text.rs" name="render_view::core_text">
     <fn name="update_cache" line="6" pub="true" reads="height, left_padding, line_height, scale_factor, width" writes="last_editor_version=, last_height=, last_scroll_x=, last_scroll_y=, last_width=, visual_lines.clear(), visual_lines.push()" calls="self: char_advance, measure_ui_width; editor: byte_at, text_parts; ui_system: contains" />
-    <fn name="get_cursor_xy" line="212" pub="true" ret="(f32, f32)" reads="baseline_offset, last_scroll_x, left_padding, line_height, scale_factor" calls="self: char_advance, measure_ui_width, measure_width; editor: byte_at, text_parts; ui_system: contains" />
+    <fn name="get_cursor_xy" line="213" pub="true" ret="(f32, f32)" reads="baseline_offset, last_scroll_x, left_padding, line_height, scale_factor" calls="self: char_advance, measure_ui_width, measure_width; editor: byte_at, text_parts; ui_system: contains" />
     <fn name="get_byte_at_xy" line="350" pub="true" ret="usize" reads="last_scroll_x, left_padding, line_height" calls="self: char_advance; editor: byte_at, text_parts; ui_system: contains" />
     <fn name="measure_width" line="449" pub="true" ret="f32" calls="self: char_advance" />
     <fn name="get_max_scroll" line="475" pub="true" ret="f32" reads="line_height" calls="editor: get_visible_lines_count" />
@@ -462,8 +473,9 @@
     <fn name="draw_welcome" line="481" pub="true" ret="bool" reads="height, icon_logo, last_mouse_x, last_mouse_y, program, scale_factor, texture, vao, width" writes="gl.clear()" calls="self: draw_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect, push_vertical_gradient; ui_system: register_button, register_rect, wants_pointer; widgets: get_welcome_buttons" />
     <fn name="draw_diagnostics_ruler" line="725" pub="true" reads="minimap_width, phys_to_visual, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
     <fn name="draw_empty_ide" line="790" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
-    <fn name="draw_hover_popup" line="901" pub="true" ret="(f32, f32, f32, f32, f32)" reads="gl, height, last_diag_popup_rect, line_height, phys_to_visual, scale_factor, theme, width" calls="self: char_advance, draw_file_icon, draw_string_mono_scaled, flush, get_ui_glyph, measure_ui_width, push_quad, push_rect, push_rounded_rect; ui_system: hovered, register_blocker, register_rect, reset_cursor_state" />
-    <fn name="draw_problems_panel" line="1361" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
+    <fn name="build_hover_popup_layout" line="901" ret="crate::app::mouse::HoverLayoutCache" reads="scale_factor" calls="self: char_advance, measure_ui_width" />
+    <fn name="draw_hover_popup" line="1065" pub="true" ret="(f32, f32, f32, f32, f32)" reads="gl, height, last_diag_popup_rect, line_height, phys_to_visual, scale_factor, theme, width" calls="self: build_hover_popup_layout, char_advance, draw_file_icon, draw_string_mono_scaled, flush, get_ui_glyph, push_quad, push_rect, push_rounded_rect; ui_system: hovered, register_blocker, register_rect, reset_cursor_state" />
+    <fn name="draw_problems_panel" line="1400" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
   </mod>
   <mod path="src/render_view.rs" name="render_view">
     <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>

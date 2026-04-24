@@ -354,7 +354,7 @@ impl Editor {
             next_non_blank[i] = curr_next;
         }
 
-                for i in 0..num_lines {
+        for i in 0..num_lines {
             let (raw_d, is_blank) = raw_depths[i];
             let clamped_d = raw_d.min(255) as u8;
             if !is_blank {
@@ -1280,7 +1280,7 @@ impl Editor {
         for i in start..end {
             res.push(self.byte_at(i));
         }
-                Some(String::from_utf8_lossy(&res).into_owned())
+        Some(String::from_utf8_lossy(&res).into_owned())
     }
 
     pub fn get_visible_lines_count(&self) -> usize {

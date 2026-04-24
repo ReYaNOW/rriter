@@ -78,7 +78,9 @@ impl Renderer {
                             }
                         }
 
-                                                if self.left_padding + whitespace_px_width + text_px_width > scroll_x + self.width + 2000.0 {
+                        if self.left_padding + whitespace_px_width + text_px_width
+                            > scroll_x + self.width + 2000.0
+                        {
                             out_of_bounds = true;
                             break;
                         }
@@ -134,7 +136,7 @@ impl Renderer {
                             while p > end_line_start {
                                 p -= 1;
                                 let b = editor.byte_at(p);
-                                                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
                                     p += 1;
                                     break;
                                 }
@@ -152,10 +154,9 @@ impl Renderer {
                                 suffix_len += 1;
                             }
 
-                            if let Some(pos_in_rev) =
-                                suffix_bytes_rev[..suffix_len]
-                                    .iter()
-                                    .position(|&x| x == expected_close)
+                            if let Some(pos_in_rev) = suffix_bytes_rev[..suffix_len]
+                                .iter()
+                                .position(|&x| x == expected_close)
                             {
                                 for i in (0..=pos_in_rev).rev() {
                                     let b = suffix_bytes_rev[i];
@@ -293,7 +294,7 @@ impl Renderer {
                             while p > end_line_start {
                                 p -= 1;
                                 let b = editor.byte_at(p);
-                                                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
                                     p += 1;
                                     break;
                                 }
@@ -311,10 +312,9 @@ impl Renderer {
                                 suffix_len += 1;
                             }
 
-                            if let Some(pos_in_rev) =
-                                suffix_bytes_rev[..suffix_len]
-                                    .iter()
-                                    .position(|&x| x == expected_close)
+                            if let Some(pos_in_rev) = suffix_bytes_rev[..suffix_len]
+                                .iter()
+                                .position(|&x| x == expected_close)
                             {
                                 for i in (0..=pos_in_rev).rev() {
                                     let b = suffix_bytes_rev[i];
@@ -469,7 +469,7 @@ impl Renderer {
                 }
             }
         }
-                w
+        w
     }
 
     pub fn get_max_scroll(&mut self, editor: &Editor, window_height: f32) -> f32 {

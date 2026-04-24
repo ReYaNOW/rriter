@@ -13,8 +13,8 @@ use crate::editor::Editor;
 use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
 use std::cell::RefCell;
-use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -85,97 +85,105 @@ impl Renderer {
         is_ide_mode: bool,
         ide_panel: &crate::app::IdePanelState,
         show_settings: bool,
-                lsp: Option<&crate::lsp::LspManager>,
-                ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         _syntax_errors: &[(usize, usize)],
     ) -> (bool, Vec<(usize, usize)>) {
-            let frame_start_time = Instant::now();
-            let was_typing = self.last_editor_version_for_typing != editor.version;
-                        let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1 || (self.last_scroll_x - scroll_x).abs() > 0.1;
+        let frame_start_time = Instant::now();
+        let was_typing = self.last_editor_version_for_typing != editor.version;
+        let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1
+            || (self.last_scroll_x - scroll_x).abs() > 0.1;
 
-                        let cursor_phys_line = editor
-                .line_offsets
-                .partition_point(|&o| o <= editor.cursor)
-                .saturating_sub(1);
+        let cursor_phys_line = editor
+            .line_offsets
+            .partition_point(|&o| o <= editor.cursor)
+            .saturating_sub(1);
 
-                        let (diag_version, instant_raw) = if let Some(l) = lsp {
-                if let Some(p) = editor_path {
-                    l.get_instant_diagnostics_with_version(p)
-                } else {
-                    (0, &[] as &[crate::lsp::Diagnostic])
-                }
+        let (diag_version, instant_raw) = if let Some(l) = lsp {
+            if let Some(p) = editor_path {
+                l.get_instant_diagnostics_with_version(p)
             } else {
                 (0, &[] as &[crate::lsp::Diagnostic])
-            };
+            }
+        } else {
+            (0, &[] as &[crate::lsp::Diagnostic])
+        };
 
-                                                                let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
-                                let line = line as usize;
-                                if line >= editor.line_offsets.len() {
-                                    return editor.len();
-                                }
-                    let start = editor.line_offsets[line];
-                let end = editor.line_offsets.get(line + 1).copied().unwrap_or(editor.len());
-                let mut current_utf16 = 0;
-                let mut current_byte = start;
-                let (first, second) = editor.text_parts();
-                let first_len = first.len();
+        let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
+            let line = line as usize;
+            if line >= editor.line_offsets.len() {
+                return editor.len();
+            }
+            let start = editor.line_offsets[line];
+            let end = editor
+                .line_offsets
+                .get(line + 1)
+                .copied()
+                .unwrap_or(editor.len());
+            let mut current_utf16 = 0;
+            let mut current_byte = start;
+            let (first, second) = editor.text_parts();
+            let first_len = first.len();
 
-                while current_byte < end {
-                    if current_utf16 >= utf16_col {
-                        break;
-                    }
-                    let ch = if current_byte < first_len {
-                        first[current_byte..].chars().next().unwrap_or('\0')
-                    } else {
-                        second[current_byte - first_len..].chars().next().unwrap_or('\0')
-                    };
-                    current_utf16 += ch.len_utf16() as u32;
-                    current_byte += ch.len_utf8();
+            while current_byte < end {
+                if current_utf16 >= utf16_col {
+                    break;
                 }
-                current_byte
-            };
+                let ch = if current_byte < first_len {
+                    first[current_byte..].chars().next().unwrap_or('\0')
+                } else {
+                    second[current_byte - first_len..]
+                        .chars()
+                        .next()
+                        .unwrap_or('\0')
+                };
+                current_utf16 += ch.len_utf16() as u32;
+                current_byte += ch.len_utf8();
+            }
+            current_byte
+        };
 
-            let mut lsp_diagnostics_filtered = Vec::new();
-            let mut unused_spans = Vec::new();
-            for d in instant_raw {
-                let diag_line = d.start_line as usize;
-                let mut suppress = false;
+        let mut lsp_diagnostics_filtered = Vec::new();
+        let mut unused_spans = Vec::new();
+        for d in instant_raw {
+            let diag_line = d.start_line as usize;
+            let mut suppress = false;
 
-                                                                if diag_line == cursor_phys_line {
-                    if (diag_version as u64) < editor.version {
-                        suppress = true;
-                    }
-
-                    let code = d.code.as_deref().unwrap_or("");
-                    if code == "W291" || code == "W293" {
-                        suppress = true;
-                    }
+            if diag_line == cursor_phys_line {
+                if (diag_version as u64) < editor.version {
+                    suppress = true;
                 }
 
-                if !suppress {
-                    lsp_diagnostics_filtered.push(d.clone());
-                    if d.tags.contains(&1) || d.tags.contains(&2) {
-                        let start = get_byte_offset(d.start_line, d.start_col);
-                        let end = get_byte_offset(d.end_line, d.end_col);
-                        if start < end {
-                            unused_spans.push((start, end));
-                        }
+                let code = d.code.as_deref().unwrap_or("");
+                if code == "W291" || code == "W293" {
+                    suppress = true;
+                }
+            }
+
+            if !suppress {
+                lsp_diagnostics_filtered.push(d.clone());
+                if d.tags.contains(&1) || d.tags.contains(&2) {
+                    let start = get_byte_offset(d.start_line, d.start_col);
+                    let end = get_byte_offset(d.end_line, d.end_col);
+                    if start < end {
+                        unused_spans.push((start, end));
                     }
                 }
             }
-            unused_spans.sort_unstable_by_key(|&(s, _)| s);
-            let lsp_diagnostics = &lsp_diagnostics_filtered;
+        }
+        unused_spans.sort_unstable_by_key(|&(s, _)| s);
+        let lsp_diagnostics = &lsp_diagnostics_filtered;
 
-            let delayed_diagnostics = if let Some(l) = lsp {
-                if let Some(p) = editor_path {
-                    l.get_diagnostics(p)
-                } else {
-                    &[]
-                }
+        let delayed_diagnostics = if let Some(l) = lsp {
+            if let Some(p) = editor_path {
+                l.get_diagnostics(p)
             } else {
                 &[]
-            };
+            }
+        } else {
+            &[]
+        };
 
         if show_welcome && !is_ide_mode {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
@@ -1193,7 +1201,7 @@ impl Renderer {
                 Err(idx) => idx.saturating_sub(1),
             };
 
-                        let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
+            let mut search_idx = search_results.partition_point(|&(_, e)| e <= start_byte);
             let mut identical_idx = self
                 .identical_words_cache
                 .partition_point(|&(_, e)| e <= start_byte);
@@ -1242,7 +1250,7 @@ impl Renderer {
                     {
                         search_idx += 1;
                     }
-                                        while identical_idx < self.identical_words_cache.len()
+                    while identical_idx < self.identical_words_cache.len()
                         && self.identical_words_cache[identical_idx].1 <= current_offset
                     {
                         identical_idx += 1;
@@ -1273,7 +1281,7 @@ impl Renderer {
                         }
                     }
 
-                                        let is_identical = identical_idx < self.identical_words_cache.len()
+                    let is_identical = identical_idx < self.identical_words_cache.len()
                         && current_offset >= self.identical_words_cache[identical_idx].0;
 
                     let is_unused = unused_idx < unused_spans.len()
@@ -1334,16 +1342,17 @@ impl Renderer {
                         if x - render_scroll_x + adv > 0.0 {
                             if let Some(g) = self.get_glyph(c) {
                                 let mut current_color = self.theme.fg;
-                                                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
+                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
                                 {
                                     current_color = spans[span_idx].color;
                                 }
 
-                                                                if is_unused {
+                                if is_unused {
                                     current_color = self.theme.unused;
                                 }
 
-                                self.push_quad(x - render_scroll_x + g.offset_x,
+                                self.push_quad(
+                                    x - render_scroll_x + g.offset_x,
                                     y - g.offset_y,
                                     g.width,
                                     g.height,
@@ -1523,7 +1532,7 @@ impl Renderer {
 
         self.flush();
 
-                self.hovered_diags_cache.clear();
+        self.hovered_diags_cache.clear();
         let mut mouse_in_popup = false;
 
         let type_rect = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().rect);
@@ -1540,8 +1549,11 @@ impl Renderer {
             }
 
             let pad = 40.0 * self.scale_factor;
-            if mx >= union_rect.0 - pad && mx <= union_rect.0 + union_rect.2 + pad 
-               && my >= union_rect.1 - pad && my <= union_rect.1 + union_rect.3 + pad {
+            if mx >= union_rect.0 - pad
+                && mx <= union_rect.0 + union_rect.2 + pad
+                && my >= union_rect.1 - pad
+                && my <= union_rect.1 + union_rect.3 + pad
+            {
                 mouse_in_popup = true;
             }
         }
@@ -1606,7 +1618,7 @@ impl Renderer {
                 if !start_found {
                     x_start_px = cur_x;
                 }
-                                if !end_found {
+                if !end_found {
                     x_end_px = if diag.end_line == diag.start_line {
                         cur_x
                     } else {
@@ -1823,7 +1835,7 @@ impl Renderer {
             );
         }
 
-                // --- 8.5. Линейка диагностики на скроллбаре ---
+        // --- 8.5. Линейка диагностики на скроллбаре ---
         if !is_resizing && is_ide_mode && !dialog_window_open {
             self.draw_diagnostics_ruler(editor, delayed_diagnostics, self.height);
         }
@@ -2147,20 +2159,21 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-                self.last_hovered_diags.clear();
+        self.last_hovered_diags.clear();
         self.last_hovered_diags
             .extend(self.hovered_diags_cache.iter().map(|h| h.0));
         let first_idx = self.last_hovered_diags.first().copied();
 
-        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) = crate::app::mouse::HOVER_STATE.with(|s| {
-            let state = s.borrow();
-            (
-                state.popup.is_some(),
-                state.request_id.is_some() || state.definition_request_id.is_some(),
-                state.timer,
-                state.byte_offset.is_some(),
-            )
-        });
+        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) =
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                let state = s.borrow();
+                (
+                    state.popup.is_some(),
+                    state.request_id.is_some() || state.definition_request_id.is_some(),
+                    state.timer,
+                    state.byte_offset.is_some(),
+                )
+            });
 
         let type_in_progress = has_byte_offset
             && !has_type_popup
@@ -2202,11 +2215,11 @@ impl Renderer {
         crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
             if show_type {
-                if let Some(popup) = state.popup.as_ref() {
-                    let selection = match (state.selection_anchor, state.selection_cursor) {
-                        (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
-                        _ => None,
-                    };
+                let selection = match (state.selection_anchor, state.selection_cursor) {
+                    (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+                    _ => None,
+                };
+                if let Some(popup) = state.popup.as_mut() {
                     let (bx, by, bw, bh, ms) = self.draw_hover_popup(
                         popup,
                         selection,
@@ -2247,9 +2260,9 @@ impl Renderer {
                 my,
             );
         }
-                if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
+        if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
             let panel_y = self.height - panel_bottom_h;
-                        ui_registry.register_blocker(
+            ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,
                 48.0 * s,
                 panel_y - 8.0 * s,
@@ -2276,14 +2289,32 @@ impl Renderer {
                 }
 
                 if t.last_print.elapsed().as_secs() >= 10 {
-                    let r_avg = if t.render_count > 0 { (t.render_time / t.render_count as f32) * 1000.0 } else { 0.0 };
-                    let s_avg = if t.scroll_count > 0 { (t.scroll_time / t.scroll_count as f32) * 1000.0 } else { 0.0 };
-                    let ty_avg = if t.type_count > 0 { (t.type_time / t.type_count as f32) * 1000.0 } else { 0.0 };
-                    println!("📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms", r_avg, s_avg, ty_avg);
+                    let r_avg = if t.render_count > 0 {
+                        (t.render_time / t.render_count as f32) * 1000.0
+                    } else {
+                        0.0
+                    };
+                    let s_avg = if t.scroll_count > 0 {
+                        (t.scroll_time / t.scroll_count as f32) * 1000.0
+                    } else {
+                        0.0
+                    };
+                    let ty_avg = if t.type_count > 0 {
+                        (t.type_time / t.type_count as f32) * 1000.0
+                    } else {
+                        0.0
+                    };
+                    println!(
+                        "📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms",
+                        r_avg, s_avg, ty_avg
+                    );
 
-                    t.render_time = 0.0; t.render_count = 0;
-                    t.scroll_time = 0.0; t.scroll_count = 0;
-                    t.type_time = 0.0; t.type_count = 0;
+                    t.render_time = 0.0;
+                    t.render_count = 0;
+                    t.scroll_time = 0.0;
+                    t.scroll_count = 0;
+                    t.type_time = 0.0;
+                    t.type_count = 0;
                     t.last_print = Instant::now();
                 }
             });
