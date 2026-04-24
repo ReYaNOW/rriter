@@ -69,7 +69,7 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
         return;
     }
 
-    let prefix = format!("{header}\n---\n\n");
+    let prefix = format!("{header}\n---\n");
     let shift = prefix.len();
 
     popup.text.insert_str(0, &prefix);
@@ -83,10 +83,9 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
         *end += shift;
     }
 
-    let mut new_line_kinds = Vec::with_capacity(popup.line_kinds.len() + 3);
+    let mut new_line_kinds = Vec::with_capacity(popup.line_kinds.len() + 2);
     new_line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
     new_line_kinds.push(crate::lsp::HoverLineKindPublic::Separator);
-    new_line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
     new_line_kinds.extend(popup.line_kinds.iter().copied());
     popup.line_kinds = new_line_kinds;
 }
@@ -868,6 +867,7 @@ impl ApplicationHandler for App {
                                         line,
                                         col,
                                     );
+                                    state.pending_module_path = None;
                                     if state.request_id.is_some() {
                                         hover_poll_pending = true;
                                     }
@@ -1297,6 +1297,15 @@ impl ApplicationHandler for App {
                                             .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                     });
+                                    if let Some(module_path) = state.pending_module_path.clone() {
+                                        if let Some(popup) = &mut state.popup {
+                                            if popup.text.starts_with("class ")
+                                                && !popup.text.starts_with("📁 ")
+                                            {
+                                                prepend_hover_module_path(popup, &module_path);
+                                            }
+                                        }
+                                    }
                                     state.selection_anchor = None;
                                     state.selection_cursor = None;
                                     state.selecting = false;
@@ -1317,6 +1326,7 @@ impl ApplicationHandler for App {
                                 if let Some(module_path) =
                                     module_path_from_definition_path(&path, &self.ide_workspaces)
                                 {
+                                    state.pending_module_path = Some(module_path.clone());
                                     if let Some(popup) = &mut state.popup {
                                         if popup.text.starts_with("class ")
                                             && !popup.text.starts_with("📁 ")
