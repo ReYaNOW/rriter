@@ -116,7 +116,8 @@ pub fn highlight_hover_text(
 
                 if let Some(query) = query_opt.as_ref() {
                     let mut offset = 0usize;
-                    for line in clean_msg.lines() {
+                    let lines: Vec<&str> = clean_msg.lines().collect();
+                    for (line_idx, line) in lines.iter().enumerate() {
                         if add_bound_method_signature_spans(line, offset, &mut spans) {
                             offset += line.len() + 1;
                             continue;
@@ -165,6 +166,11 @@ pub fn highlight_hover_text(
                             add_self_param_span_for_signature(line, offset, &mut spans);
                             add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
                         } else if looks_like_type_expr_line(line) {
+                            add_type_expr_spans_for_line(line, offset, &mut spans);
+                        } else if looks_like_simple_type_name_line(
+                            line,
+                            lines.get(line_idx + 1).copied(),
+                        ) {
                             add_type_expr_spans_for_line(line, offset, &mut spans);
                         }
                         add_class_keyword_spans_for_signature(line, offset, &mut spans);
@@ -232,6 +238,27 @@ fn looks_like_type_expr_line(line: &str) -> bool {
     }
     t.chars()
         .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' '))
+}
+
+fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool {
+    let t = line.trim();
+    if t.is_empty() || t.contains(' ') {
+        return false;
+    }
+    if !t
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
+    {
+        return false;
+    }
+    if !t
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    {
+        return false;
+    }
+    matches!(next_line.map(str::trim), Some("---"))
 }
 
 fn sanitize_hover_type_expr(mut s: &str) -> String {
@@ -895,6 +922,36 @@ dict() -> new empty dictionary";
         assert!(
             spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]),
             "keyword highlight should exist for normalized class heading",
+        );
+    }
+
+    #[test]
+    fn builtin_str_heading_line_is_highlighted_as_type() {
+        let raw = "str\n\
+---------------------------------------------\n\
+str(object='') -> str";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let str_start = text.find("str").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= str_start
+                && s.end >= str_start + 3
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "standalone builtin type heading must be cyan",
+        );
+    }
+
+    #[test]
+    fn builtin_any_heading_line_is_highlighted_as_type() {
+        let raw = "Any\n\
+---------------------------------------------\n\
+Special type indicating an unconstrained type.";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let any_start = text.find("Any").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= any_start
+                && s.end >= any_start + 3
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "standalone typing.Any heading must be cyan",
         );
     }
 }

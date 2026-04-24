@@ -114,6 +114,88 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
     popup.line_kinds = new_line_kinds;
 }
 
+fn source_line<'a>(text: &'a str, line_offsets: &[usize], line_idx: usize) -> Option<&'a str> {
+    let start = *line_offsets.get(line_idx)?;
+    let end = line_offsets
+        .get(line_idx + 1)
+        .copied()
+        .map(|v| v.saturating_sub(1))
+        .unwrap_or(text.len());
+    text.get(start..end)
+}
+
+fn source_signature_for_hover(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+) -> Option<String> {
+    let text = editor.get_full_text();
+    let line_idx = editor
+        .line_offsets
+        .partition_point(|&o| o <= byte_offset)
+        .saturating_sub(1);
+
+    let mut def_line_idx = None;
+    for up in 0..=10usize {
+        let idx = line_idx.saturating_sub(up);
+        let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
+        if line.starts_with("async def ") || line.starts_with("def ") {
+            def_line_idx = Some(idx);
+            break;
+        }
+    }
+    let def_line_idx = def_line_idx?;
+
+    let mut decorators = Vec::new();
+    let mut deco_idx = def_line_idx;
+    while deco_idx > 0 {
+        let prev_idx = deco_idx - 1;
+        let prev_line = source_line(&text, &editor.line_offsets, prev_idx)?.trim();
+        if prev_line.starts_with('@') {
+            decorators.push(prev_line.to_string());
+            deco_idx = prev_idx;
+            continue;
+        }
+        break;
+    }
+    decorators.reverse();
+
+    let mut sig_lines = Vec::new();
+    for idx in def_line_idx..(def_line_idx + 16).min(editor.line_offsets.len()) {
+        let line = source_line(&text, &editor.line_offsets, idx)?
+            .trim_end()
+            .to_string();
+        if line.is_empty() {
+            break;
+        }
+        sig_lines.push(line.clone());
+        if line.contains(':') {
+            break;
+        }
+    }
+    if sig_lines.is_empty() {
+        return None;
+    }
+    let mut signature = sig_lines.join("\n");
+    if signature.contains("_AsyncGeneratorContextManager[None, None]") {
+        signature = signature.replace(
+            "_AsyncGeneratorContextManager[None, None]",
+            "AsyncGenerator[None, Any]",
+        );
+    }
+    if decorators.len() == 1 && decorators[0].trim() == "@asynccontextmanager" {
+        signature = format!("@asynccontextmanager {}", signature.trim_start());
+    } else if !decorators.is_empty() {
+        signature = format!("{}\n{}", decorators.join("\n"), signature);
+    }
+    Some(signature)
+}
+
+fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
+    let trimmed = clean_msg.trim_start();
+    (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
+        && clean_msg.contains("_AsyncGeneratorContextManager")
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -1308,6 +1390,18 @@ impl ApplicationHandler for App {
                                 if let Some(bo) = state.byte_offset {
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         crate::lsp::highlight_hover_text(&t);
+                                    let (clean_msg, spans, line_kinds, inline_code_ranges) =
+                                        if should_replace_hover_with_source_signature(&clean_msg) {
+                                            if let Some(sig) =
+                                                source_signature_for_hover(&self.editor, bo)
+                                            {
+                                                crate::lsp::highlight_hover_text(&sig)
+                                            } else {
+                                                (clean_msg, spans, line_kinds, inline_code_ranges)
+                                            }
+                                        } else {
+                                            (clean_msg, spans, line_kinds, inline_code_ranges)
+                                        };
                                     let popup = crate::app::mouse::HoverPopup {
                                         text: clean_msg,
                                         spans,
