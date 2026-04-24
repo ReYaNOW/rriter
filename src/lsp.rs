@@ -1105,22 +1105,29 @@ Special type indicating an unconstrained type.";
         assert!(text.contains("client"));
     }
 
-    #[test]
+                #[test]
     fn class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args() {
         let raw = "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\n\
 client = AsyncFirebaseClient(\n\
     request_timeout=RequestTimeout(timeout=50)\n\
     )";
         let (text, spans, kinds, _inline) = highlight_hover_text(raw);
-        assert!(text.contains("Class attribute client of car_wash.core.fcm.service.FcmSenderService"));
+        assert!(text.contains("car_wash.core.fcm.service\nClass attribute client of FcmSenderService"));
         assert!(text.contains("\n---\n"));
         assert!(kinds.iter().any(|k| *k == HoverLineKindPublic::Separator));
 
-        let client_offset = "Class attribute ".len();
+        let client_offset = text.find("Class attribute ").unwrap() + 16;
         assert!(spans.iter().any(|s| 
             s.start == client_offset && 
             s.end == client_offset + 6 && 
             s.color ==[1.0, 0.474, 0.776, 1.0]
+        ));
+
+        let fcm_offset = text.find("FcmSenderService").unwrap();
+        assert!(spans.iter().any(|s| 
+            s.start == fcm_offset && 
+            s.end == fcm_offset + "FcmSenderService".len() && 
+            s.color ==[0.545, 0.913, 0.992, 1.0]
         ));
 
         let req_timeout_offset = text.find("request_timeout").unwrap();

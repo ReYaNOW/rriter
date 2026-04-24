@@ -205,7 +205,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
     let mut kinds = Vec::new();
     let mut inline_code_ranges = Vec::new();
     let mut parameters_header_added = false;
-    let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', "").replace('\u{a0}', " "));
+        let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', "").replace('\u{a0}', " ").replace('\u{200b}', ""));
     let lines: Vec<&str> = flat_msg.lines().collect();
     let mut i = 0usize;
     let mut in_fence = false;
@@ -457,23 +457,58 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
         let trimmed_norm = normalized_line.trim_end();
 
-        let mut shift = 0;
+                let mut shift = 0;
         let mut replaced_entirely = false;
+        let mut extra_module_line = None;
+        let mut is_header2 = false;
+        let mut is_header1 = false;
 
-        if let Some(s) = trimmed_norm.strip_prefix("## ") {
+        let mut s = trimmed_norm;
+        if let Some(rem) = trimmed_norm.strip_prefix("## ") {
             shift = 3;
-            let mut header_text = s.to_string();
-            if s.starts_with("Атрибут класса ") {
-                let prefix_len = "Атрибут класса ".len();
-                if let Some(v_idx) = s.rfind(" в ") {
-                    if v_idx > prefix_len {
-                        let name = &s[prefix_len..v_idx];
-                        let path = &s[v_idx + " в ".len()..];
-                        header_text = format!("Class attribute {} of {}", name, path);
-                        replaced_entirely = true;
+            s = rem;
+            is_header2 = true;
+        } else if let Some(rem) = trimmed_norm.strip_prefix("# ") {
+            shift = 2;
+            s = rem;
+            is_header1 = true;
+        }
+
+        let mut header_text = s.to_string();
+        let is_ru = s.starts_with("Атрибут класса ");
+        let is_en = s.starts_with("Class attribute ");
+
+        if is_ru || is_en {
+            let prefix_len = if is_ru { "Атрибут класса ".len() } else { "Class attribute ".len() };
+            let separator = if is_ru { " в " } else { " of " };
+
+            if let Some(v_idx) = s.rfind(separator) {
+                if v_idx > prefix_len {
+                    let clean_name = s[prefix_len..v_idx].trim_matches('`').trim();
+                    let clean_path = s[v_idx + separator.len()..].trim_matches('`').trim();
+
+                                        if let Some(dot_idx) = clean_path.rfind('.') {
+                        let module = &clean_path[..dot_idx];
+                        let cls = &clean_path[dot_idx + 1..];
+                        extra_module_line = Some(module.to_string());
+                        header_text = format!("Class attribute {} of {}", clean_name, cls);
+                    } else {
+                        header_text = format!("Class attribute {} of {}", clean_name, clean_path);
                     }
+                    replaced_entirely = true;
+                    is_header2 = true;
+                    is_header1 = false;
                 }
             }
+        }
+
+        if let Some(mod_line) = extra_module_line {
+            out.push_str(&mod_line);
+            out.push('\n');
+            kinds.push(HoverLineKind::Text);
+        }
+
+        if is_header2 {
             out.push_str(&header_text);
             out.push('\n');
             kinds.push(HoverLineKind::Header2);
@@ -481,13 +516,12 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                 out.push_str("---\n");
                 kinds.push(HoverLineKind::Separator);
             }
-        } else if let Some(s) = trimmed_norm.strip_prefix("# ") {
-            shift = 2;
-            out.push_str(s);
+        } else if is_header1 {
+            out.push_str(&header_text);
             out.push('\n');
             kinds.push(HoverLineKind::Header1);
         } else {
-            out.push_str(trimmed_norm);
+            out.push_str(&header_text);
             out.push('\n');
             kinds.push(HoverLineKind::Text);
         }
@@ -788,12 +822,17 @@ pub fn highlight_python_hover_doc(
             });
         }
 
-        if kind == HoverLineKind::Header2 && line.starts_with("Class attribute ") {
+                if kind == HoverLineKind::Header2 && line.starts_with("Class attribute ") {
             if let Some(of_idx) = line.find(" of ") {
                 spans.push(crate::highlighter::ColorSpan {
                     start: line_start + 16,
                     end: line_start + of_idx,
                     color: crate::highlighter::DRACULA_PINK,
+                });
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_start + of_idx + 4,
+                    end: line_end,
+                    color: ty,
                 });
             }
         }
