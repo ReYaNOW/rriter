@@ -18,7 +18,6 @@ pub struct HoverPopup {
 pub struct HoverState {
     pub request_id: Option<i32>,
     pub definition_request_id: Option<i32>,
-    pub pending_module_path: Option<String>,
     pub popup: Option<HoverPopup>,
     pub timer: f32,
     pub byte_offset: Option<usize>,
@@ -37,7 +36,6 @@ impl Default for HoverState {
         Self {
             request_id: None,
             definition_request_id: None,
-            pending_module_path: None,
             popup: None,
             timer: 0.0,
             byte_offset: None,
@@ -63,12 +61,10 @@ pub fn clear_hover_popup() -> bool {
         let had_popup = state.popup.is_some()
             || state.request_id.is_some()
             || state.definition_request_id.is_some()
-            || state.pending_module_path.is_some()
             || state.byte_offset.is_some()
             || state.rect.is_some();
         state.request_id = None;
         state.definition_request_id = None;
-        state.pending_module_path = None;
         state.popup = None;
         state.timer = 0.0;
         state.byte_offset = None;

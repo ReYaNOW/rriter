@@ -682,6 +682,15 @@ Append object to the end of the list.";
     }
 
     #[test]
+    fn coroutine_return_signature_becomes_async_def() {
+        let raw = "def add_default_users_and_roles_session() -> CoroutineType[Any, Any, Unknown]";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with(
+            "async def add_default_users_and_roles_session() -> CoroutineType[Any, Any, Unknown]"
+        ));
+    }
+
+    #[test]
     fn long_bound_method_signature_is_normalized_and_highlighted() {
         let raw = "bound method list[<class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements].append(object: <class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements, /) -> None";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);

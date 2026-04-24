@@ -861,13 +861,6 @@ impl ApplicationHandler for App {
                                     );
                                     state.request_id =
                                         lsp.request_hover(&path, &self.file_extension, line, col);
-                                    state.definition_request_id = lsp.request_definition(
-                                        &path,
-                                        &self.file_extension,
-                                        line,
-                                        col,
-                                    );
-                                    state.pending_module_path = None;
                                     if state.request_id.is_some() {
                                         hover_poll_pending = true;
                                     }
@@ -1297,14 +1290,21 @@ impl ApplicationHandler for App {
                                             .unwrap_or(0.0),
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                     });
-                                    if let Some(module_path) = state.pending_module_path.clone() {
-                                        if let Some(popup) = &mut state.popup {
-                                            if popup.text.starts_with("class ")
-                                                && !popup.text.starts_with("📁 ")
-                                            {
-                                                prepend_hover_module_path(popup, &module_path);
-                                            }
-                                        }
+                                    if let Some(path) = self.file_path.clone() {
+                                        let (line, col) = crate::lsp::offset_to_lsp_pos(
+                                            &self.editor.get_full_text(),
+                                            bo,
+                                            &self.editor.line_offsets,
+                                        );
+                                        state.definition_request_id =
+                                            self.lsp.as_mut().and_then(|lsp| {
+                                                lsp.request_definition(
+                                                    &path,
+                                                    &self.file_extension,
+                                                    line,
+                                                    col,
+                                                )
+                                            });
                                     }
                                     state.selection_anchor = None;
                                     state.selection_cursor = None;
@@ -1326,7 +1326,6 @@ impl ApplicationHandler for App {
                                 if let Some(module_path) =
                                     module_path_from_definition_path(&path, &self.ide_workspaces)
                                 {
-                                    state.pending_module_path = Some(module_path.clone());
                                     if let Some(popup) = &mut state.popup {
                                         if popup.text.starts_with("class ")
                                             && !popup.text.starts_with("📁 ")
