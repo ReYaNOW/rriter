@@ -44,6 +44,22 @@ fn module_path_from_definition_path(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
 ) -> Option<String> {
+    fn sanitize_module_path_parts<'a>(parts: impl IntoIterator<Item = &'a str>) -> Option<String> {
+        let mut out: Vec<&str> = parts
+            .into_iter()
+            .map(str::trim)
+            .filter(|p| !p.is_empty() && *p != "__init__" && *p != "/")
+            .collect();
+        if let Some(site_idx) = out.iter().position(|p| *p == "site-packages") {
+            out = out.into_iter().skip(site_idx + 1).collect();
+        }
+        if out.is_empty() {
+            None
+        } else {
+            Some(out.join("."))
+        }
+    }
+
     let path_str = path.to_string_lossy();
     if let Some(std_idx) = path_str.rfind("/lib/python") {
         let stdlib_rel = &path_str[std_idx + "/lib/python".len()..];
@@ -56,7 +72,7 @@ fn module_path_from_definition_path(
             .or_else(|| after_version.strip_suffix(".py"))
             .unwrap_or(after_version);
         if !trimmed.is_empty() && trimmed != "__init__" {
-            return Some(trimmed.trim_start_matches('/').replace('/', "."));
+            return sanitize_module_path_parts(trimmed.trim_start_matches('/').split('/'));
         }
     }
     let rel = workspaces
@@ -65,20 +81,7 @@ fn module_path_from_definition_path(
         .unwrap_or(path);
     let mut no_ext = rel.to_path_buf();
     no_ext.set_extension("");
-    let mut parts: Vec<String> = no_ext
-        .iter()
-        .filter_map(|c| c.to_str())
-        .filter(|p| !p.is_empty() && *p != "__init__" && *p != "/")
-        .map(|p| p.to_string())
-        .collect();
-    if let Some(site_idx) = parts.iter().position(|p| p == "site-packages") {
-        parts = parts.into_iter().skip(site_idx + 1).collect();
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("."))
-    }
+    sanitize_module_path_parts(no_ext.iter().filter_map(|c| c.to_str()).collect::<Vec<_>>())
 }
 
 const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
@@ -227,7 +230,10 @@ fn wrap_signature_after_first_param(
 
 #[cfg(test)]
 mod tests {
-    use super::{source_signature_for_hover, wrap_signature_after_first_param};
+    use super::{
+        module_path_from_definition_path, source_signature_for_hover,
+        wrap_signature_after_first_param,
+    };
 
     #[test]
     fn wraps_asynccontextmanager_signature_after_first_param() {
@@ -255,6 +261,25 @@ mod tests {
             signature,
             "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
         );
+    }
+
+    #[test]
+    fn module_path_from_site_packages_strips_noise_segments() {
+        let path = std::path::Path::new(
+            "/usr/lib/python3.12/site-packages/litestar/exceptions/http_exceptions.py",
+        );
+        let module = module_path_from_definition_path(path, &[]);
+        assert_eq!(
+            module.as_deref(),
+            Some("litestar.exceptions.http_exceptions")
+        );
+    }
+
+    #[test]
+    fn module_path_strips_trailing_init() {
+        let path = std::path::Path::new("/usr/lib/python3.12/site-packages/msgspec/__init__.py");
+        let module = module_path_from_definition_path(path, &[]);
+        assert_eq!(module.as_deref(), Some("msgspec"));
     }
 }
 
