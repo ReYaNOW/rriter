@@ -270,6 +270,57 @@ fn source_signature_for_hover(
     Some(signature)
 }
 
+fn source_attribute_hover_from_definition_file(
+    path: &std::path::Path,
+    symbol: &str,
+    module_path: &str,
+) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = text.lines().collect();
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim_start();
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        let mut matched = false;
+        if let Some(rest) = trimmed.strip_prefix(symbol) {
+            matched = rest.starts_with(':') || rest.starts_with(" =");
+        }
+        if !matched {
+            continue;
+        }
+        let mut class_name = None;
+        for up in (0..idx).rev() {
+            let class_line = lines[up].trim_start();
+            if let Some(rest) = class_line.strip_prefix("class ") {
+                class_name = rest
+                    .split(|c: char| c == '(' || c == ':' || c.is_whitespace())
+                    .next()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                break;
+            }
+        }
+        let fq_owner = if let Some(class_name) = class_name {
+            if module_path.is_empty() {
+                class_name
+            } else {
+                format!("{module_path}.{class_name}")
+            }
+        } else {
+            module_path.to_string()
+        };
+        if fq_owner.is_empty() {
+            return None;
+        }
+        return Some(format!(
+            "Class attribute {symbol} of {fq_owner}\n{}",
+            trimmed.trim_end()
+        ));
+    }
+    None
+}
+
 fn is_ident_byte(b: u8) -> bool {
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
 }
@@ -336,7 +387,8 @@ fn wrap_signature_after_first_param(
 mod tests {
     use super::{
         module_path_from_definition_path, should_replace_hover_with_source_signature,
-        source_signature_for_hover, symbol_at_offset, wrap_signature_after_first_param,
+        source_attribute_hover_from_definition_file, source_signature_for_hover, symbol_at_offset,
+        wrap_signature_after_first_param,
     };
 
     #[test]
@@ -436,6 +488,29 @@ mod tests {
             .expect("expected client token");
         let sig = source_signature_for_hover(&editor, client_offset, false);
         assert!(sig.is_none(), "strict mode must not return unrelated def");
+    }
+
+    #[test]
+    fn definition_file_attribute_hover_includes_fq_class_name() {
+        let mut tmp = std::env::temp_dir();
+        tmp.push(format!(
+            "rriter_attr_hover_{}_{}.py",
+            std::process::id(),
+            1usize
+        ));
+        let src = "class FcmSenderService:\n    client: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))\n";
+        std::fs::write(&tmp, src).expect("expected temp file write");
+        let hover = source_attribute_hover_from_definition_file(
+            &tmp,
+            "client",
+            "car_wash.core.fcm.service",
+        )
+        .expect("expected attribute hover text");
+        assert_eq!(
+            hover,
+            "Class attribute client of car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))"
+        );
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
@@ -1764,6 +1839,28 @@ impl ApplicationHandler for App {
                                     module_path_from_definition_path(&path, &self.ide_workspaces)
                                 {
                                     if let Some(popup) = &mut popup {
+                                        if should_replace_simple_type_hover(&popup.text) {
+                                            if let Some(symbol) =
+                                                symbol_at_offset(&self.editor, popup.byte_offset)
+                                            {
+                                                if let Some(attr_hover) =
+                                                    source_attribute_hover_from_definition_file(
+                                                        &path,
+                                                        &symbol,
+                                                        &module_path,
+                                                    )
+                                                {
+                                                    let (clean, spans, kinds, inline) =
+                                                        crate::lsp::highlight_hover_text(
+                                                            &attr_hover,
+                                                        );
+                                                    popup.text = clean;
+                                                    popup.spans = spans;
+                                                    popup.line_kinds = kinds;
+                                                    popup.inline_code_ranges = inline;
+                                                }
+                                            }
+                                        }
                                         if popup.text.starts_with("class ")
                                             && !popup.text.starts_with(&module_path)
                                             && !popup.text.starts_with(HOVER_MODULE_PREFIX)
