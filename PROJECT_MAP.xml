@@ -254,10 +254,11 @@
     <fn name="split_inline_python_after_colon" line="161" ret="Option&lt;(String, String)&gt;" calls="ui_system: contains" />
     <fn name="normalize_coroutine_signature_line" line="181" ret="String" calls="ui_system: contains" />
     <fn name="normalize_python_hover_doc" line="203" pub="true" ret="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" calls="self: flatten_rst_roles_and_code, normalize_coroutine_signature_line, normalize_inline_rst_code, normalize_rst_roles, parse_param_line, split_inline_python_after_colon" />
-    <fn name="ts_capture_color" line="485" pub="true" ret="Option&lt;[f32; 4]&gt;" />
-    <fn name="push_python_ts_spans" line="501" pub="true" calls="self: ts_capture_color" />
-    <fn name="highlight_python_hover_doc" line="554" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="self: force_color_on_ranges, normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
-    <fn name="force_color_on_ranges" line="786" />
+    <fn name="ts_capture_color" line="524" pub="true" ret="Option&lt;[f32; 4]&gt;" />
+    <fn name="push_python_ts_spans" line="540" pub="true" calls="self: ts_capture_color" />
+    <fn name="highlight_python_hover_doc" line="593" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="self: color_keyword_args_orange, force_color_on_ranges, normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
+    <fn name="force_color_on_ranges" line="864" />
+    <fn name="color_keyword_args_orange" line="906" />
   </mod>
   <mod path="src/lsp.rs" name="lsp">
     <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
@@ -282,102 +283,104 @@
     <fn name="highlight_hover_text" line="93" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="languages::python: highlight_python_hover_doc; self: add_bound_method_signature_spans, add_class_keyword_spans_for_signature, add_param_name_spans_for_signature, add_self_param_span_for_signature, add_type_bracket_neutral_spans_for_signature, add_type_expr_spans_for_line, looks_like_python_code_line, looks_like_python_hover, looks_like_simple_type_name_line, looks_like_type_expr_line, normalize_hover_text, preprocess_hover_text; ui_system: contains" />
     <fn name="preprocess_hover_text" line="201" ret="String" calls="self: normalize_asynccontextmanager_signature_line" />
     <fn name="looks_like_python_hover" line="214" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_python_code_line" line="241" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_type_expr_line" line="267" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_simple_type_name_line" line="287" ret="bool" calls="ui_system: contains" />
-    <fn name="sanitize_hover_type_expr" line="308" ret="String" />
-    <fn name="sanitize_module_path" line="326" ret="String" />
-    <fn name="normalize_class_object_repr" line="338" ret="Option&lt;(Option&lt;String&gt;, String)&gt;" calls="self: sanitize_module_path" />
-    <fn name="normalize_module_object_repr" line="363" ret="Option&lt;String&gt;" calls="self: sanitize_module_path" />
-    <fn name="normalize_bound_method_signature" line="379" ret="Option&lt;String&gt;" calls="self: sanitize_hover_type_expr; ui_system: contains" />
-    <fn name="add_bound_method_signature_spans" line="435" ret="bool" calls="ui_system: contains" />
-    <fn name="add_self_param_span_for_signature" line="505" />
-    <fn name="add_param_name_spans_for_signature" line="529" />
-    <fn name="add_class_keyword_spans_for_signature" line="569" />
-    <fn name="add_type_bracket_neutral_spans_for_signature" line="604" />
-    <fn name="add_type_expr_spans_for_line" line="624" />
-    <fn name="normalize_hover_text" line="664" ret="String" calls="self: normalize_asynccontextmanager_signature_line, normalize_bound_method_signature, normalize_class_object_repr, normalize_module_object_repr" />
-    <fn name="wrap_signature_after_first_param" line="717" ret="String" calls="ui_system: contains" />
-    <fn name="normalize_asynccontextmanager_signature_line" line="741" ret="Option&lt;String&gt;" calls="app::events: wrap_signature_after_first_param; self: wrap_signature_after_first_param" />
-    <fn name="uses_python_hover_pipeline_for_builtin_signatures" line="773" calls="self: highlight_hover_text" />
-    <fn name="plain_bound_method_prose_stays_uncolored" line="793" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="inline_for_fragment_becomes_separate_code_line" line="830" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="rich_rst_docstring_path_is_preserved" line="840" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="bound_method_signature_line_is_highlighted_but_prose_stays_plain" line="859" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="coroutine_return_bound_method_becomes_async_def" line="879" calls="self: highlight_hover_text" />
-    <fn name="coroutine_return_signature_becomes_async_def" line="886" calls="self: highlight_hover_text" />
-    <fn name="long_bound_method_signature_is_normalized_and_highlighted" line="902" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_object_repr_is_normalized_and_highlighted" line="929" calls="self: highlight_hover_text" />
-    <fn name="qualified_class_object_repr_prepends_module_path" line="951" calls="self: highlight_hover_text" />
-    <fn name="backticked_qualified_class_repr_prepends_module_path" line="966" calls="self: highlight_hover_text" />
-    <fn name="generic_type_line_gets_cyan_types_and_white_brackets" line="973" calls="self: highlight_hover_text" />
-    <fn name="literal_type_line_is_highlighted" line="1004" calls="self: highlight_hover_text" />
-    <fn name="assignment_line_is_highlighted_in_hover_text" line="1026" calls="self: highlight_hover_text" />
-    <fn name="module_object_repr_is_normalized_to_module_header" line="1039" calls="self: highlight_hover_text" />
-    <fn name="site_packages_and_init_are_removed_from_module_and_class_repr" line="1046" calls="self: highlight_hover_text" />
-    <fn name="builtin_dict_class_hover_is_normalized_without_angle_brackets" line="1057" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="builtin_str_heading_line_is_highlighted_as_type" line="1070" calls="self: highlight_hover_text" />
-    <fn name="builtin_any_heading_line_is_highlighted_as_type" line="1085" calls="self: highlight_hover_text" />
-    <fn name="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" line="1100" calls="self: highlight_hover_text" />
-    <fn name="highlight_diagnostic_message" line="1146" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" />
-    <fn name="offset_to_lsp_pos" line="1373" pub="true" ret="(u32, u32)" />
-    <fn name="json_escape" line="1393" ret="String" />
-    <fn name="path_to_uri" line="1412" ret="String" />
-    <fn name="uri_to_path" line="1426" ret="PathBuf" />
-    <fn name="make_initialize" line="1437" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
-    <fn name="make_initialized" line="1468" ret="Vec&lt;u8&gt;" />
-    <fn name="make_did_open" line="1472" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_change_full" line="1483" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_close" line="1493" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_code_action" line="1501" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_hover" line="1528" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_definition" line="1535" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_shutdown" line="1542" ret="Vec&lt;u8&gt;" />
-    <fn name="make_exit" line="1546" ret="Vec&lt;u8&gt;" />
-    <fn name="write_frame" line="1552" ret="bool" calls="render_view::core_text: flush" />
-    <fn name="parse_diagnostic_value" line="1564" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
-    <fn name="parse_text_edit_value" line="1671" ret="Option&lt;TextChange&gt;" />
-    <fn name="parse_workspace_edit_value" line="1696" ret="WorkspaceEdit" calls="self: uri_to_path" />
-    <fn name="parse_hover_value" line="1732" ret="Option&lt;String&gt;" />
-    <fn name="parse_definition_path" line="1760" ret="Option&lt;PathBuf&gt;" calls="self: uri_to_path" />
-    <fn name="parse_code_action_value" line="1777" ret="Option&lt;CodeAction&gt;" />
-    <fn name="dispatch_frame" line="1812" calls="self: parse_definition_path, parse_diagnostic_value, parse_hover_value, parse_workspace_edit_value, uri_to_path" />
-    <fn name="spawn_server" line="2007" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
-    <fn name="send_and_log" line="2138" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
-    <fn name="run_supervisor" line="2172" calls="self: make_code_action, make_definition, make_did_change_full, make_did_close, make_did_open, make_exit, make_hover, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
-    <fn name="start" line="2397" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
-    <fn name="notify_open" line="2418" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
-    <fn name="restart" line="2462" pub="true" reads="cmd_tx" />
-    <fn name="notify_change" line="2468" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_hover" line="2478" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
-    <fn name="request_definition" line="2485" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
-    <fn name="notify_close" line="2493" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
-    <fn name="request_code_actions" line="2501" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
-    <fn name="poll" line="2531" pub="true" reads="event_rx" />
-    <fn name="shutdown" line="2540" pub="true" reads="cmd_tx" />
-    <fn name="encode_diagnostics_json" line="2547" ret="String" calls="self: json_escape" />
-    <fn name="new" line="2603" pub="true" ret="Self" />
-    <fn name="ensure_python" line="2624" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
-    <fn name="restart_python" line="2636" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
-    <fn name="disable_python" line="2654" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
-    <fn name="enable_python" line="2673" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
-    <fn name="servers_info" line="2696" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
-    <fn name="process_for_ext" line="2722" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
-    <fn name="notify_open" line="2733" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="notify_change" line="2756" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="request_hover" line="2777" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="request_definition" line="2798" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="notify_close" line="2820" pub="true" reads="python, ty_process, workspaces" />
-    <fn name="request_code_actions" line="2839" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
-    <fn name="poll" line="2871" pub="true" ret="Vec&lt;LspEvent&gt;" reads="instant_diagnostics, merged_instant_diagnostics, python, server_logs, suppress_diagnostics, ty_instant_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, last_change=, python_status=, ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="3003" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
-    <fn name="get_instant_diagnostics_with_version" line="3017" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
-    <fn name="diagnostics_for_line" line="3032" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="3040" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="request_organize_imports" line="3064" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
-    <fn name="shutdown" line="3089" pub="true" reads="python, ty_process" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="3104" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="3130" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
+    <fn name="looks_like_python_code_line" line="243" ret="bool" calls="ui_system: contains" />
+    <fn name="looks_like_type_expr_line" line="269" ret="bool" calls="ui_system: contains" />
+    <fn name="looks_like_simple_type_name_line" line="289" ret="bool" calls="ui_system: contains" />
+    <fn name="sanitize_hover_type_expr" line="310" ret="String" />
+    <fn name="sanitize_module_path" line="328" ret="String" />
+    <fn name="normalize_class_object_repr" line="340" ret="Option&lt;(Option&lt;String&gt;, String)&gt;" calls="self: sanitize_module_path" />
+    <fn name="normalize_module_object_repr" line="365" ret="Option&lt;String&gt;" calls="self: sanitize_module_path" />
+    <fn name="normalize_bound_method_signature" line="381" ret="Option&lt;String&gt;" calls="self: sanitize_hover_type_expr; ui_system: contains" />
+    <fn name="add_bound_method_signature_spans" line="437" ret="bool" calls="ui_system: contains" />
+    <fn name="add_self_param_span_for_signature" line="507" />
+    <fn name="add_param_name_spans_for_signature" line="531" />
+    <fn name="add_class_keyword_spans_for_signature" line="571" />
+    <fn name="add_type_bracket_neutral_spans_for_signature" line="606" />
+    <fn name="add_type_expr_spans_for_line" line="626" />
+    <fn name="normalize_hover_text" line="666" ret="String" calls="self: normalize_asynccontextmanager_signature_line, normalize_bound_method_signature, normalize_class_object_repr, normalize_module_object_repr" />
+    <fn name="wrap_signature_after_first_param" line="719" ret="String" calls="ui_system: contains" />
+    <fn name="normalize_asynccontextmanager_signature_line" line="743" ret="Option&lt;String&gt;" calls="app::events: wrap_signature_after_first_param; self: wrap_signature_after_first_param" />
+    <fn name="uses_python_hover_pipeline_for_builtin_signatures" line="775" calls="self: highlight_hover_text" />
+    <fn name="plain_bound_method_prose_stays_uncolored" line="795" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="inline_for_fragment_becomes_separate_code_line" line="832" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="rich_rst_docstring_path_is_preserved" line="842" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="bound_method_signature_line_is_highlighted_but_prose_stays_plain" line="861" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="coroutine_return_bound_method_becomes_async_def" line="881" calls="self: highlight_hover_text" />
+    <fn name="coroutine_return_signature_becomes_async_def" line="888" calls="self: highlight_hover_text" />
+    <fn name="long_bound_method_signature_is_normalized_and_highlighted" line="904" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="class_object_repr_is_normalized_and_highlighted" line="931" calls="self: highlight_hover_text" />
+    <fn name="qualified_class_object_repr_prepends_module_path" line="953" calls="self: highlight_hover_text" />
+    <fn name="backticked_qualified_class_repr_prepends_module_path" line="968" calls="self: highlight_hover_text" />
+    <fn name="generic_type_line_gets_cyan_types_and_white_brackets" line="975" calls="self: highlight_hover_text" />
+    <fn name="literal_type_line_is_highlighted" line="1006" calls="self: highlight_hover_text" />
+    <fn name="assignment_line_is_highlighted_in_hover_text" line="1028" calls="self: highlight_hover_text" />
+    <fn name="module_object_repr_is_normalized_to_module_header" line="1041" calls="self: highlight_hover_text" />
+    <fn name="site_packages_and_init_are_removed_from_module_and_class_repr" line="1048" calls="self: highlight_hover_text" />
+    <fn name="builtin_dict_class_hover_is_normalized_without_angle_brackets" line="1059" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="builtin_str_heading_line_is_highlighted_as_type" line="1072" calls="self: highlight_hover_text" />
+    <fn name="builtin_any_heading_line_is_highlighted_as_type" line="1087" calls="self: highlight_hover_text" />
+    <fn name="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" line="1102" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" line="1109" calls="self: highlight_hover_text; ui_system: contains" />
+    <fn name="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" line="1142" calls="self: highlight_hover_text" />
+    <fn name="highlight_diagnostic_message" line="1188" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" />
+    <fn name="offset_to_lsp_pos" line="1415" pub="true" ret="(u32, u32)" />
+    <fn name="json_escape" line="1435" ret="String" />
+    <fn name="path_to_uri" line="1454" ret="String" />
+    <fn name="uri_to_path" line="1468" ret="PathBuf" />
+    <fn name="make_initialize" line="1479" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
+    <fn name="make_initialized" line="1510" ret="Vec&lt;u8&gt;" />
+    <fn name="make_did_open" line="1514" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_change_full" line="1525" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_did_close" line="1535" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_code_action" line="1543" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_hover" line="1570" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_definition" line="1577" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
+    <fn name="make_shutdown" line="1584" ret="Vec&lt;u8&gt;" />
+    <fn name="make_exit" line="1588" ret="Vec&lt;u8&gt;" />
+    <fn name="write_frame" line="1594" ret="bool" calls="render_view::core_text: flush" />
+    <fn name="parse_diagnostic_value" line="1606" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
+    <fn name="parse_text_edit_value" line="1713" ret="Option&lt;TextChange&gt;" />
+    <fn name="parse_workspace_edit_value" line="1738" ret="WorkspaceEdit" calls="self: uri_to_path" />
+    <fn name="parse_hover_value" line="1774" ret="Option&lt;String&gt;" />
+    <fn name="parse_definition_path" line="1802" ret="Option&lt;PathBuf&gt;" calls="self: uri_to_path" />
+    <fn name="parse_code_action_value" line="1819" ret="Option&lt;CodeAction&gt;" />
+    <fn name="dispatch_frame" line="1854" calls="self: parse_definition_path, parse_diagnostic_value, parse_hover_value, parse_workspace_edit_value, uri_to_path" />
+    <fn name="spawn_server" line="2049" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; self: dispatch_frame, write_frame" />
+    <fn name="send_and_log" line="2180" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
+    <fn name="run_supervisor" line="2214" calls="self: make_code_action, make_definition, make_did_change_full, make_did_close, make_did_open, make_exit, make_hover, make_initialize, make_initialized, make_shutdown, next_id, send_and_log, spawn_server" />
+    <fn name="start" line="2439" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
+    <fn name="notify_open" line="2460" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="self: path_to_uri" />
+    <fn name="restart" line="2504" pub="true" reads="cmd_tx" />
+    <fn name="notify_change" line="2510" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_hover" line="2520" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
+    <fn name="request_definition" line="2527" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id, path_to_uri" />
+    <fn name="notify_close" line="2535" pub="true" reads="cmd_tx" writes="current_uri=" calls="self: path_to_uri" />
+    <fn name="request_code_actions" line="2543" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id, path_to_uri" />
+    <fn name="poll" line="2573" pub="true" reads="event_rx" />
+    <fn name="shutdown" line="2582" pub="true" reads="cmd_tx" />
+    <fn name="encode_diagnostics_json" line="2589" ret="String" calls="self: json_escape" />
+    <fn name="new" line="2645" pub="true" ret="Self" />
+    <fn name="ensure_python" line="2666" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
+    <fn name="restart_python" line="2678" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
+    <fn name="disable_python" line="2696" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
+    <fn name="enable_python" line="2715" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
+    <fn name="servers_info" line="2738" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
+    <fn name="process_for_ext" line="2764" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
+    <fn name="notify_open" line="2775" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="notify_change" line="2798" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
+    <fn name="request_hover" line="2819" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
+    <fn name="request_definition" line="2840" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
+    <fn name="notify_close" line="2862" pub="true" reads="python, ty_process, workspaces" />
+    <fn name="request_code_actions" line="2881" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
+    <fn name="poll" line="2913" pub="true" ret="Vec&lt;LspEvent&gt;" reads="instant_diagnostics, merged_instant_diagnostics, python, server_logs, suppress_diagnostics, ty_instant_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, last_change=, python_status=, ty_status=" calls="editor: is_char_boundary; self: format_and_highlight_json" />
+    <fn name="get_diagnostics" line="3045" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
+    <fn name="get_instant_diagnostics_with_version" line="3059" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
+    <fn name="diagnostics_for_line" line="3074" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
+    <fn name="request_fix_all" line="3082" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="request_organize_imports" line="3106" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id, path_to_uri" />
+    <fn name="shutdown" line="3131" pub="true" reads="python, ty_process" writes="python_disabled=" />
+    <fn name="lsp_pos_to_offset" line="3146" pub="true" ret="usize" />
+    <fn name="format_and_highlight_json" line="3172" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
   </mod>
   <mod path="src/main.rs" name="main">
     <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }</type>

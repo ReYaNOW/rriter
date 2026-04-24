@@ -205,7 +205,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
     let mut kinds = Vec::new();
     let mut inline_code_ranges = Vec::new();
     let mut parameters_header_added = false;
-    let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', ""));
+    let flat_msg = flatten_rst_roles_and_code(&msg.replace('\r', "").replace('\u{a0}', " "));
     let lines: Vec<&str> = flat_msg.lines().collect();
     let mut i = 0usize;
     let mut in_fence = false;
@@ -450,17 +450,39 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             continue;
         }
 
-        let normalized_src_line = normalize_coroutine_signature_line(line);
+                let normalized_src_line = normalize_coroutine_signature_line(line);
         let line_start = out.len();
         let (roles_line, mut role_ranges) =
             normalize_rst_roles(&normalized_src_line.replace("\\*", "*"));
         let (normalized_line, mut ranges) = normalize_inline_rst_code(&roles_line);
         let trimmed_norm = normalized_line.trim_end();
+
+        let mut shift = 0;
+        let mut replaced_entirely = false;
+
         if let Some(s) = trimmed_norm.strip_prefix("## ") {
-            out.push_str(s);
+            shift = 3;
+            let mut header_text = s.to_string();
+            if s.starts_with("Атрибут класса ") {
+                let prefix_len = "Атрибут класса ".len();
+                if let Some(v_idx) = s.rfind(" в ") {
+                    if v_idx > prefix_len {
+                        let name = &s[prefix_len..v_idx];
+                        let path = &s[v_idx + " в ".len()..];
+                        header_text = format!("Class attribute {} of {}", name, path);
+                        replaced_entirely = true;
+                    }
+                }
+            }
+            out.push_str(&header_text);
             out.push('\n');
             kinds.push(HoverLineKind::Header2);
+            if replaced_entirely {
+                out.push_str("---\n");
+                kinds.push(HoverLineKind::Separator);
+            }
         } else if let Some(s) = trimmed_norm.strip_prefix("# ") {
+            shift = 2;
             out.push_str(s);
             out.push('\n');
             kinds.push(HoverLineKind::Header1);
@@ -469,9 +491,26 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             out.push('\n');
             kinds.push(HoverLineKind::Text);
         }
+
+        if replaced_entirely {
+            ranges.clear();
+            role_ranges.clear();
+        } else if shift > 0 {
+            for r in &mut ranges {
+                r.0 = r.0.saturating_sub(shift);
+                r.1 = r.1.saturating_sub(shift);
+            }
+            for r in &mut role_ranges {
+                r.0 = r.0.saturating_sub(shift);
+                r.1 = r.1.saturating_sub(shift);
+            }
+        }
+
         ranges.append(&mut role_ranges);
         for (start, end) in ranges {
-            inline_code_ranges.push((line_start + start, line_start + end));
+            if start < end {
+                inline_code_ranges.push((line_start + start, line_start + end));
+            }
         }
         i += 1;
     }
@@ -564,7 +603,7 @@ pub fn highlight_python_hover_doc(
     let neutral = crate::highlighter::DRACULA_FG;
     let param = crate::highlighter::DRACULA_ORANGE;
 
-    let (msg, line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
+        let (msg, mut line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
     let mut line_starts = Vec::with_capacity(lines.len());
     let mut at = 0usize;
@@ -650,12 +689,13 @@ pub fn highlight_python_hover_doc(
         } else {
             msg.len()
         };
-        if start < end && end <= msg.len() {
+                if start < end && end <= msg.len() {
             let mut sig_code = msg[start..end].to_string();
             if !sig_code.trim_end().ends_with(':') {
                 sig_code.push(':');
             }
             push_python_ts_spans(&sig_code, start, &mut spans);
+            color_keyword_args_orange(&sig_code, start, &mut spans);
         }
 
         let mut signature_brackets = Vec::new();
@@ -667,8 +707,32 @@ pub fn highlight_python_hover_doc(
                 }
             }
         }
-        if !signature_brackets.is_empty() {
+                if !signature_brackets.is_empty() {
             force_color_on_ranges(&mut spans, &signature_brackets, neutral);
+        }
+    }
+
+    let mut assignment_start = None;
+    let mut saw_sep_for_assignment = false;
+    for (idx, kind) in line_kinds.iter().enumerate() {
+        if *kind == HoverLineKind::Separator {
+            saw_sep_for_assignment = true;
+            continue;
+        }
+        if saw_sep_for_assignment && *kind == HoverLineKind::Text && !lines[idx].trim().is_empty() {
+            let trimmed = lines[idx].trim();
+            let is_assignment = trimmed.contains('=') 
+                && trimmed.chars().next().map_or(false, |c| c.is_ascii_alphabetic() || c == '_');
+            if is_assignment {
+                assignment_start = Some(idx);
+            }
+            break;
+        }
+    }
+
+    if let Some(start_idx) = assignment_start {
+        for k in line_kinds.iter_mut().skip(start_idx) {
+            *k = HoverLineKind::Code;
         }
     }
 
@@ -682,13 +746,15 @@ pub fn highlight_python_hover_doc(
             }
             let block_end_line = i.saturating_sub(1);
             let start = line_starts[block_start];
-            let end = if block_end_line + 1 < line_starts.len() {
+                        let end = if block_end_line + 1 < line_starts.len() {
                 line_starts[block_end_line + 1] - 1
             } else {
                 msg.len()
             };
             if start < end && end <= msg.len() {
-                push_python_ts_spans(&msg[start..end], start, &mut spans);
+                let code_chunk = &msg[start..end];
+                push_python_ts_spans(code_chunk, start, &mut spans);
+                color_keyword_args_orange(code_chunk, start, &mut spans);
             }
             continue;
         }
@@ -714,12 +780,22 @@ pub fn highlight_python_hover_doc(
             saw_separator = true;
         }
 
-        if saw_separator && kind == HoverLineKind::Text && !is_blank {
+                if saw_separator && kind == HoverLineKind::Text && !is_blank {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
                 color: text_light,
             });
+        }
+
+        if kind == HoverLineKind::Header2 && line.starts_with("Class attribute ") {
+            if let Some(of_idx) = line.find(" of ") {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_start + 16,
+                    end: line_start + of_idx,
+                    color: crate::highlighter::DRACULA_PINK,
+                });
+            }
         }
 
         if kind == HoverLineKind::Text {
@@ -763,9 +839,11 @@ pub fn highlight_python_hover_doc(
         }
     }
 
-    for &(start, end) in &inline_code_ranges {
+        for &(start, end) in &inline_code_ranges {
         if end > start && end <= msg.len() {
-            push_python_ts_spans(&msg[start..end], start, &mut spans);
+            let code_chunk = &msg[start..end];
+            push_python_ts_spans(code_chunk, start, &mut spans);
+            color_keyword_args_orange(code_chunk, start, &mut spans);
         }
     }
 
@@ -822,5 +900,57 @@ fn force_color_on_ranges(
             .iter()
             .map(|&(start, end)| crate::highlighter::ColorSpan { start, end, color }),
     );
-    *spans = out;
+        *spans = out;
+}
+
+fn color_keyword_args_orange(code: &str, global_start: usize, spans: &mut Vec<crate::highlighter::ColorSpan>) {
+    let mut paren_depth = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut i = 0;
+    let chars: Vec<char> = code.chars().collect();
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            if c == '\\' { i += 1; }
+            else if c == string_char { in_string = false; }
+        } else {
+            if c == '"' || c == '\'' {
+                in_string = true;
+                string_char = c;
+            } else if c == '(' {
+                paren_depth += 1;
+            } else if c == ')' {
+                paren_depth -= 1;
+            } else if c == '=' && paren_depth > 0 {
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    i += 1;
+                } else if i > 0 && (chars[i-1] == '=' || chars[i-1] == '!' || chars[i-1] == '<' || chars[i-1] == '>') {
+                    // Do nothing
+                } else {
+                    let mut id_end = i;
+                    while id_end > 0 && chars[id_end - 1].is_whitespace() {
+                        id_end -= 1;
+                    }
+                    let mut id_start = id_end;
+                    while id_start > 0 && (chars[id_start - 1].is_alphanumeric() || chars[id_start - 1] == '_') {
+                        id_start -= 1;
+                    }
+                                        if id_start < id_end && !chars[id_start].is_ascii_digit() {
+                        let byte_start = chars[..id_start].iter().map(|c| c.len_utf8()).sum::<usize>();
+                        let byte_end = chars[..id_end].iter().map(|c| c.len_utf8()).sum::<usize>();
+                        let span_start = global_start + byte_start;
+                        let span_end = global_start + byte_end;
+                        spans.retain(|s| !(s.start < span_end && s.end > span_start));
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: span_start,
+                            end: span_end,
+                            color: crate::highlighter::DRACULA_ORANGE,
+                        });
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
 }

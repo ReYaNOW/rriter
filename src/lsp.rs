@@ -219,9 +219,11 @@ fn looks_like_python_hover(msg: &str) -> bool {
     let Some(first_non_empty) = non_empty.next() else {
         return false;
     };
-    if first_non_empty.starts_with("def ")
+        if first_non_empty.starts_with("def ")
         || first_non_empty.starts_with("async def ")
         || first_non_empty.starts_with("class ")
+        || first_non_empty.starts_with("## Атрибут класса")
+        || first_non_empty.starts_with("## Class attribute")
     {
         return true;
     }
@@ -1094,6 +1096,46 @@ Special type indicating an unconstrained type.";
                 && s.color == [0.545, 0.913, 0.992, 1.0]),
             "standalone typing.Any heading must be cyan",
         );
+    }
+
+            #[test]
+    fn header_with_inline_code_preserves_correct_spans_without_byte_shift_panic() {
+        let raw = "## ``client`` in FcmSenderService";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("client"));
+    }
+
+    #[test]
+    fn class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args() {
+        let raw = "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\n\
+client = AsyncFirebaseClient(\n\
+    request_timeout=RequestTimeout(timeout=50)\n\
+    )";
+        let (text, spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("Class attribute client of car_wash.core.fcm.service.FcmSenderService"));
+        assert!(text.contains("\n---\n"));
+        assert!(kinds.iter().any(|k| *k == HoverLineKindPublic::Separator));
+
+        let client_offset = "Class attribute ".len();
+        assert!(spans.iter().any(|s| 
+            s.start == client_offset && 
+            s.end == client_offset + 6 && 
+            s.color ==[1.0, 0.474, 0.776, 1.0]
+        ));
+
+        let req_timeout_offset = text.find("request_timeout").unwrap();
+        assert!(spans.iter().any(|s| 
+            s.start == req_timeout_offset && 
+            s.end == req_timeout_offset + "request_timeout".len() && 
+            s.color ==[0.973, 0.584, 0.502, 1.0]
+        ));
+
+                let timeout_offset = text.find("(timeout=").unwrap() + 1;
+        assert!(spans.iter().any(|s| 
+            s.start == timeout_offset && 
+            s.end == timeout_offset + "timeout".len() && 
+            s.color ==[0.973, 0.584, 0.502, 1.0]
+        ));
     }
 
     #[test]
