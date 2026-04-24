@@ -658,6 +658,10 @@ impl App {
         self.scroll_y.anim_speed = 7.0;
         self.scroll_x.anim_speed = 7.0;
 
+        // При скролле основного редактора hover-popup с типом должен скрываться,
+        // так же как исчезает popup с диагностикой.
+        clear_hover_popup();
+
         if shift {
             self.scroll_x.scroll_by(dy); // Shift конвертирует вертикальный скролл в горизонтальный
         } else {
