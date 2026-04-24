@@ -1845,7 +1845,16 @@ impl App {
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let mut in_hover_popup = false;
 
-        let type_rect = HOVER_STATE.with(|state| state.borrow().rect);
+        let (type_rect, popup_meta) = HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            (
+                state.rect,
+                state
+                    .popup
+                    .as_ref()
+                    .map(|popup| (popup.anchor_x, popup.byte_offset)),
+            )
+        });
         let diag_rect = self.renderer.as_ref().unwrap().last_diag_popup_rect;
 
         if type_rect.is_some() || diag_rect.is_some() {
@@ -1857,13 +1866,72 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-            let pad = 16.0 * s;
+            let pad = 4.0 * s;
             if position.x as f32 >= union_rect.0 - pad
                 && position.x as f32 <= union_rect.0 + union_rect.2 + pad
                 && position.y as f32 >= union_rect.1 - pad
                 && position.y as f32 <= union_rect.1 + union_rect.3 + pad
             {
                 in_hover_popup = true;
+            }
+        }
+
+        if !in_hover_popup {
+            if let (Some((rx, ry, rw, rh)), Some((anchor_x, popup_byte_offset))) =
+                (type_rect, popup_meta)
+            {
+                let phys_line = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&o| o <= popup_byte_offset)
+                    .saturating_sub(1);
+                let vis_line_idx = self
+                    .renderer
+                    .as_ref()
+                    .unwrap()
+                    .phys_to_visual
+                    .get(phys_line)
+                    .copied()
+                    .unwrap_or(0) as f32;
+                let line_top_y = (vis_line_idx * self.renderer.as_ref().unwrap().line_height)
+                    - (self.scroll_y.current.round()
+                        - if self.show_welcome || !self.is_ide_mode {
+                            0.0
+                        } else {
+                            38.0 * s
+                        });
+                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
+
+                let bridge_w = 36.0 * s;
+                let mut bridge_x = anchor_x - bridge_w * 0.5;
+                if bridge_x < 0.0 {
+                    bridge_x = 0.0;
+                }
+                let max_bridge_x = (self.renderer.as_ref().unwrap().width - bridge_w).max(0.0);
+                if bridge_x > max_bridge_x {
+                    bridge_x = max_bridge_x;
+                }
+
+                let px = position.x as f32;
+                let py = position.y as f32;
+                let bridge_hit_x = px >= bridge_x && px <= bridge_x + bridge_w;
+                if bridge_hit_x {
+                    if ry > line_bottom_y {
+                        let y_min = line_bottom_y.min(ry);
+                        let y_max = line_bottom_y.max(ry);
+                        if py >= y_min && py <= y_max {
+                            in_hover_popup = true;
+                        }
+                    } else if ry + rh < line_top_y {
+                        let y_min = (ry + rh).min(line_top_y);
+                        let y_max = (ry + rh).max(line_top_y);
+                        if py >= y_min && py <= y_max {
+                            in_hover_popup = true;
+                        }
+                    } else if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+                        in_hover_popup = true;
+                    }
+                }
             }
         }
 
