@@ -97,6 +97,13 @@ fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> O
     if is_hover_target_byte(editor, byte_offset) {
         return Some(byte_offset);
     }
+    if byte_offset >= editor.len() {
+        return None;
+    }
+    let cur = editor.byte_at(byte_offset);
+    if cur.is_ascii_whitespace() {
+        return None;
+    }
     if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {
         return Some(byte_offset - 1);
     }
@@ -130,7 +137,7 @@ fn hover_popup_byte_at(
     let s = renderer.scale_factor;
     let pad = 12.0 * s;
     let line_h = 22.0 * s;
-    let max_text_w = (renderer.width - 80.0 * s).min(750.0 * s).max(300.0 * s);
+    let max_text_w = (renderer.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
     let (bx, by, _bw, _bh) = rect;
 
     let mut lines: Vec<(Vec<(char, usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
@@ -152,8 +159,8 @@ fn hover_popup_byte_at(
             .copied()
             .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
         let scale_mul = match kind {
-            crate::lsp::HoverLineKindPublic::Header1 => 1.3,
-            crate::lsp::HoverLineKindPublic::Header2 => 1.15,
+            crate::lsp::HoverLineKindPublic::Header1 => 1.15,
+            crate::lsp::HoverLineKindPublic::Header2 => 1.05,
             _ => 1.0,
         };
 

@@ -54,7 +54,7 @@ pub enum HighlighterMessage {
 
 pub struct Highlighter {
     tx: Sender<HighlighterMessage>,
-        pub rx: Receiver<(
+    pub rx: Receiver<(
         u64,
         Vec<ColorSpan>,
         Vec<CompletionItem>,
@@ -68,15 +68,15 @@ pub struct Highlighter {
     pub current_version: u64,
 }
 
-const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
-const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
-const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
-const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
-const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
-const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
-const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
-const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
-const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
+pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
+pub(crate) const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
+pub(crate) const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
+pub(crate) const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
+pub(crate) const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
+pub(crate) const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
+pub(crate) const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
+pub(crate) const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
+pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
 
 const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 
@@ -183,7 +183,7 @@ fn resolve_color(
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
-                let (tx_out, rx_out) = mpsc::channel::<(
+        let (tx_out, rx_out) = mpsc::channel::<(
             u64,
             Vec<ColorSpan>,
             Vec<CompletionItem>,
@@ -198,7 +198,8 @@ impl Highlighter {
             let mut byte_colors_buf = Vec::new();
             let mut last_full_spans: Vec<ColorSpan> = Vec::new();
 
-            let mut replica_text = String::new();            let mut current_tree: Option<tree_sitter::Tree> = None;
+            let mut replica_text = String::new();
+            let mut current_tree: Option<tree_sitter::Tree> = None;
             let mut current_ext = String::new();
 
             while let Ok(msg) = rx_in.recv() {
@@ -243,7 +244,7 @@ impl Highlighter {
                                                 span.end += len;
                                             }
                                         }
-                                        
+
                                         let start_byte = offset;
                                         let old_end_byte = offset;
                                         let new_end_byte = offset + text.len();
@@ -418,7 +419,9 @@ impl Highlighter {
                                         tree_sitter::Query::new(&lang, fold_query_str)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                        if let (Some(sb), Some(eb)) =
+                                            (final_edit_start_byte, final_edit_end_byte)
+                                        {
                                             // Expand bounds to ensure we capture whole nodes/statements
                                             let exp_sb = sb.saturating_sub(1000);
                                             let exp_eb = (eb + 1000).min(text.len());
@@ -662,7 +665,9 @@ impl Highlighter {
                                 if let Some(q_str) = get_params_query(lang_name) {
                                     if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                        if let (Some(sb), Some(eb)) =
+                                            (final_edit_start_byte, final_edit_end_byte)
+                                        {
                                             // Expand bounds to ensure we capture whole nodes/statements
                                             let exp_sb = sb.saturating_sub(1000);
                                             let exp_eb = (eb + 1000).min(text.len());
@@ -749,7 +754,9 @@ impl Highlighter {
 
                                     if let Some(query) = query_cache.get(&cache_key) {
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                        if let (Some(sb), Some(eb)) =
+                                            (final_edit_start_byte, final_edit_end_byte)
+                                        {
                                             // Expand bounds to ensure we capture whole nodes/statements
                                             let exp_sb = sb.saturating_sub(1000);
                                             let exp_eb = (eb + 1000).min(text.len());
@@ -800,7 +807,9 @@ impl Highlighter {
                                         tree_sitter::Query::new(&lang, inj_query_str)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
+                                        if let (Some(sb), Some(eb)) =
+                                            (final_edit_start_byte, final_edit_end_byte)
+                                        {
                                             // Expand bounds to ensure we capture whole nodes/statements
                                             let exp_sb = sb.saturating_sub(1000);
                                             let exp_eb = (eb + 1000).min(text.len());
@@ -891,10 +900,16 @@ impl Highlighter {
                                                         ) {
                                                             let mut cursor =
                                                                 tree_sitter::QueryCursor::new();
-                                                            if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
-                                                                let exp_sb = sb.saturating_sub(1000);
-                                                                let exp_eb = (eb + 1000).min(text.len());
-                                                                cursor.set_byte_range(exp_sb..exp_eb);
+                                                            if let (Some(sb), Some(eb)) = (
+                                                                final_edit_start_byte,
+                                                                final_edit_end_byte,
+                                                            ) {
+                                                                let exp_sb =
+                                                                    sb.saturating_sub(1000);
+                                                                let exp_eb =
+                                                                    (eb + 1000).min(text.len());
+                                                                cursor
+                                                                    .set_byte_range(exp_sb..exp_eb);
                                                             }
                                                             let mut matches = cursor.matches(
                                                                 &query,
@@ -950,9 +965,9 @@ impl Highlighter {
                     }
                 }
 
-                                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
+                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
-                                let mut merged_spans = last_full_spans.clone();
+                let mut merged_spans = last_full_spans.clone();
                 if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
                     let exp_sb = sb.saturating_sub(1000);
                     let exp_eb = (eb + 1000).min(text.len());
@@ -962,7 +977,7 @@ impl Highlighter {
                 }
                 merged_spans.extend(spans);
 
-                                let flat_spans = flatten_spans(
+                let flat_spans = flatten_spans(
                     merged_spans,
                     text.len(),
                     text,
@@ -1171,7 +1186,7 @@ impl Highlighter {
                         scope_end,
                     })
                     .collect();
-                                completions.sort_by(|a, b| a.word.cmp(&b.word));
+                completions.sort_by(|a, b| a.word.cmp(&b.word));
 
                 let _ = tx_out.send((
                     final_version,
@@ -1185,7 +1200,7 @@ impl Highlighter {
         Self {
             tx: tx_in,
             rx: rx_out,
-                        spans: vec![],
+            spans: vec![],
             completions: vec![],
             foldable_ranges: vec![],
             syntax_errors: vec![],
@@ -1216,7 +1231,7 @@ impl Highlighter {
         }
     }
 
-        pub fn poll(&mut self, current_editor_version: u64) -> bool {
+    pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
         while let Ok((ver, spans, completions, foldable_ranges, syntax_errors)) = self.rx.try_recv()
         {
@@ -1245,7 +1260,7 @@ impl Highlighter {
                 return false;
             }
             let remaining = deadline - now;
-                        match self.rx.recv_timeout(remaining) {
+            match self.rx.recv_timeout(remaining) {
                 Ok((ver, spans, completions, foldable_ranges, syntax_errors)) => {
                     if ver >= self.current_version {
                         self.current_version = ver;
@@ -1277,21 +1292,26 @@ impl Highlighter {
             }
         }
 
-                    if let Some(t) = text_opt {
-                match t.trim() {
-                    "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
-                    | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
-                    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                        predicted_color = DRACULA_PURPLE
-                    }
-                    "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
-                                        "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def" | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl" | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield" | "try" | "except" | "finally" | "raise" | "with" => predicted_color = DRACULA_PINK,
-                    "True" | "False" | "None" | "true" | "false" | "null" => predicted_color = DRACULA_PINK,
-                    "int" | "float" | "str" | "bool" | "String" => predicted_color = DRACULA_CYAN,
-                    "self" | "cls" => predicted_color = DRACULA_PURPLE,
-                    _ => {}
+        if let Some(t) = text_opt {
+            match t.trim() {
+                "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
+                | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
+                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                    predicted_color = DRACULA_PURPLE
                 }
+                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
+                "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def"
+                | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl"
+                | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield"
+                | "try" | "except" | "finally" | "raise" | "with" => predicted_color = DRACULA_PINK,
+                "True" | "False" | "None" | "true" | "false" | "null" => {
+                    predicted_color = DRACULA_PINK
+                }
+                "int" | "float" | "str" | "bool" | "String" => predicted_color = DRACULA_CYAN,
+                "self" | "cls" => predicted_color = DRACULA_PURPLE,
+                _ => {}
             }
+        }
 
         let mut new_spans = Vec::new();
         for span in &mut self.spans {
@@ -1326,7 +1346,7 @@ impl Highlighter {
             self.spans.extend(new_spans);
             self.spans.sort_by_key(|s| s.start);
             let mut merged = Vec::new();
-                        if !self.spans.is_empty() {
+            if !self.spans.is_empty() {
                 let mut current = self.spans[0].clone();
                 for i in 1..self.spans.len() {
                     let next = &self.spans[i];
@@ -1399,10 +1419,7 @@ fn flatten_spans(
     apply_rainbow_brackets: bool,
     is_log_or_huge: bool,
 ) -> Vec<ColorSpan> {
-    if spans.is_empty()
-        && error_ranges.is_empty()
-        && (is_log_or_huge || !apply_rainbow_brackets)
-    {
+    if spans.is_empty() && error_ranges.is_empty() && (is_log_or_huge || !apply_rainbow_brackets) {
         return vec![ColorSpan {
             start: 0,
             end: len,

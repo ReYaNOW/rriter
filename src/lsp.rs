@@ -243,6 +243,11 @@ fn looks_like_python_code_line(line: &str) -> bool {
     if t.is_empty() {
         return false;
     }
+    let assignment_like = t.contains('=')
+        && !t.starts_with("## ")
+        && t.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
     (t.starts_with("def ")
         || t.starts_with("class ")
         || t.starts_with("async def ")
@@ -254,7 +259,8 @@ fn looks_like_python_code_line(line: &str) -> bool {
         || t.starts_with("return ")
         || t.starts_with("await ")
         || t.starts_with("import ")
-        || t.starts_with("from "))
+        || t.starts_with("from ")
+        || assignment_like)
         && (t.contains('(') || t.contains(':') || t.contains('='))
 }
 
@@ -269,8 +275,13 @@ fn looks_like_type_expr_line(line: &str) -> bool {
     if t.contains("->") || t.contains('(') || t.contains(')') || t.contains(':') {
         return false;
     }
-    t.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' '))
+    t.chars().all(|c| {
+        c.is_alphanumeric()
+            || matches!(
+                c,
+                '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' ' | '"' | '\''
+            )
+    })
 }
 
 fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool {
@@ -312,6 +323,18 @@ fn sanitize_hover_type_expr(mut s: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn sanitize_module_path(path: &str) -> String {
+    let mut parts: Vec<&str> = path
+        .split('.')
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "__init__")
+        .collect();
+    if let Some(site_idx) = parts.iter().position(|p| *p == "site-packages") {
+        parts = parts.into_iter().skip(site_idx + 1).collect();
+    }
+    parts.join(".")
+}
+
 fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     let trimmed = line.trim();
     let unquoted = trimmed.trim_matches('`').trim();
@@ -327,10 +350,10 @@ fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     }
 
     if let Some(dot) = type_name.rfind('.') {
-        let module_path = type_name[..dot].trim();
+        let module_path = sanitize_module_path(type_name[..dot].trim());
         let class_name = type_name[dot + 1..].trim();
         if !module_path.is_empty() && !class_name.is_empty() {
-            return Some((Some(module_path.to_string()), class_name.to_string()));
+            return Some((Some(module_path), class_name.to_string()));
         }
     }
 
@@ -346,11 +369,11 @@ fn normalize_module_object_repr(line: &str) -> Option<String> {
     if !unquoted[..start].trim().is_empty() || !rest[end + 2..].trim().is_empty() {
         return None;
     }
-    let module_path = rest[..end].trim();
+    let module_path = sanitize_module_path(rest[..end].trim());
     if module_path.is_empty() {
         return None;
     }
-    Some(module_path.to_string())
+    Some(module_path)
 }
 
 fn normalize_bound_method_signature(line: &str) -> Option<String> {
@@ -659,7 +682,6 @@ fn normalize_hover_text(msg: &str) -> String {
             continue;
         }
         if let Some(module_path) = normalize_module_object_repr(trimmed) {
-            out.push_str("[[MODULE]] ");
             out.push_str(&module_path);
             out.push('\n');
             continue;
@@ -979,10 +1001,56 @@ Append object to the end of the list.";
     }
 
     #[test]
+    fn literal_type_line_is_highlighted() {
+        let raw = "Literal[\"513\"]";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "Literal[\"513\"]");
+        let literal_start = text.find("Literal").unwrap_or(0);
+        let l_bracket = text.find('[').unwrap_or(0);
+        let r_bracket = text.rfind(']').unwrap_or(0);
+        let cyan = [0.545, 0.913, 0.992, 1.0];
+        let white = [0.972, 0.972, 0.949, 1.0];
+
+        assert!(spans.iter().any(|s| s.start <= literal_start
+            && s.end >= literal_start + "Literal".len()
+            && s.color == cyan));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+    }
+
+    #[test]
+    fn assignment_line_is_highlighted_in_hover_text() {
+        let raw = "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\n\
+client = AsyncFirebaseClient(\n\
+    request_timeout=RequestTimeout(timeout=50)\n\
+    )";
+        let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(
+            spans.iter().any(|s| s.color != [0.972, 0.972, 0.949, 1.0]),
+            "assignment hover should not stay fully white",
+        );
+    }
+
+    #[test]
     fn module_object_repr_is_normalized_to_module_header() {
         let raw = "<module 'car_wash.domains.policies.controller'>";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "[[MODULE]] car_wash.domains.policies.controller");
+        assert_eq!(text, "car_wash.domains.policies.controller");
+    }
+
+    #[test]
+    fn site_packages_and_init_are_removed_from_module_and_class_repr() {
+        let module_raw = "<module 'site-packages.msgspec.__init__'>";
+        let (module_text, _spans, _kinds, _inline) = highlight_hover_text(module_raw);
+        assert_eq!(module_text, "msgspec");
+
+        let class_raw = "<class 'site-packages.msgspec.__init__.UnsetType'>";
+        let (class_text, _spans, _kinds, _inline) = highlight_hover_text(class_raw);
+        assert_eq!(class_text, "msgspec\nclass UnsetType");
     }
 
     #[test]
@@ -1043,6 +1111,34 @@ Special type indicating an unconstrained type.";
                 && s.end >= litestar + "Litestar".len()
                 && s.color == [0.545, 0.913, 0.992, 1.0]),
             "type names in signature should be cyan",
+        );
+        let decorator_at = text.find('@').unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= decorator_at
+                && s.end >= decorator_at + 1
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
+            "decorator @ should be pink",
+        );
+        let decorator_name = text.find("asynccontextmanager").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= decorator_name
+                && s.end >= decorator_name + "asynccontextmanager".len()
+                && s.color == [0.313, 0.980, 0.482, 1.0]),
+            "decorator name should be green",
+        );
+        let l_bracket = text.find('[').unwrap_or(0);
+        let r_bracket = text.rfind(']').unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= l_bracket
+                && s.end >= l_bracket + 1
+                && s.color == [0.972, 0.972, 0.949, 1.0]),
+            "left bracket in return type should be neutral white",
+        );
+        assert!(
+            spans.iter().any(|s| s.start <= r_bracket
+                && s.end >= r_bracket + 1
+                && s.color == [0.972, 0.972, 0.949, 1.0]),
+            "right bracket in return type should be neutral white",
         );
     }
 }
