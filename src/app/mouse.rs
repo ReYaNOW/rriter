@@ -141,7 +141,7 @@ mod tests {
         ));
     }
 
-    #[test]
+            #[test]
     fn hover_bridge_keeps_popup_when_moving_up_from_token_anchor() {
         let popup_rect = (96.0, 80.0, 760.0, 210.0);
         let line_top_y = 340.0;
@@ -150,6 +150,25 @@ mod tests {
         assert!(is_in_hover_popup_or_bridge(
             620.0,
             318.0,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_bridge_does_not_capture_next_line_when_popup_is_above() {
+        let popup_rect = (96.0, 80.0, 760.0, 210.0);
+        let line_top_y = 340.0;
+        let line_bottom_y = 368.0;
+
+        assert!(!is_in_hover_popup_or_bridge(
+            620.0,
+            394.0,
             popup_rect,
             620.0,
             354.0,
@@ -303,6 +322,17 @@ pub fn is_in_hover_popup_or_bridge(
         return true;
     }
 
+    let bridge_radius = 48.0 * scale;
+    let bridge_margin = 4.0 * scale;
+
+    if ry + rh <= line_top_y {
+        if py > line_bottom_y + bridge_margin {
+            return false;
+        }
+    } else if ry >= line_bottom_y && py < line_top_y - bridge_margin {
+        return false;
+    }
+
     let target_x = anchor_x.clamp(rx, rx + rw);
     let target_y = anchor_y.clamp(ry, ry + rh);
 
@@ -321,15 +351,20 @@ pub fn is_in_hover_popup_or_bridge(
     let proj_y = anchor_y + t * dy;
 
     let dist_sq = (px - proj_x) * (px - proj_x) + (py - proj_y) * (py - proj_y);
-    let bridge_radius = 48.0 * scale;
 
     if dist_sq <= bridge_radius * bridge_radius {
         return true;
     }
 
     let on_line_x = (px - anchor_x).abs() < bridge_radius;
-    let on_line_y = py >= line_top_y - bridge_radius * 0.5 && py <= line_bottom_y + bridge_radius * 0.5;
-    
+    let on_line_y = if ry + rh <= line_top_y {
+        py >= ry + rh - bridge_radius * 0.5 && py <= line_bottom_y + bridge_margin
+    } else if ry >= line_bottom_y {
+        py >= line_top_y - bridge_margin && py <= ry + bridge_radius * 0.5
+    } else {
+        py >= line_top_y - bridge_radius * 0.5 && py <= line_bottom_y + bridge_radius * 0.5
+    };
+
     on_line_x && on_line_y
 }
 

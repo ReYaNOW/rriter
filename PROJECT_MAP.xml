@@ -81,17 +81,18 @@
     <fn name="hover_bridge_reaches_full_source_line_when_popup_is_above" line="107" calls="self: is_in_hover_popup_or_bridge" />
     <fn name="hover_bridge_handles_popup_shifted_away_from_anchor" line="126" calls="self: is_in_hover_popup_or_bridge" />
     <fn name="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" line="145" calls="self: is_in_hover_popup_or_bridge" />
-    <fn name="clear_hover_popup" line="170" pub="true" ret="bool" />
-    <fn name="is_hover_target_byte" line="200" ret="bool" calls="editor: byte_at" />
-    <fn name="is_python_hover_keyword" line="208" ret="bool" />
-    <fn name="hover_token_text" line="249" ret="Option&lt;String&gt;" calls="self: hover_token_bounds; editor: get_full_text" />
-    <fn name="normalize_hover_byte" line="255" ret="Option&lt;usize&gt;" calls="self: hover_token_text, is_hover_target_byte" />
-    <fn name="hover_token_bounds" line="276" ret="(usize, usize)" calls="self: is_hover_target_byte" />
-    <fn name="is_in_hover_popup_or_bridge" line="290" pub="true" ret="bool" />
-    <fn name="hover_popup_byte_at" line="336" ret="usize" calls="renderer: char_advance, get_ui_glyph" />
-    <fn name="handle_main_mouse_wheel" line="517" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: clear_hover_popup; render_view::core_text: flush, get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
-    <fn name="handle_main_mouse_input" line="984" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, base_title, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, tab_scroll, ui_registry, window" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=, tabs.insert(), tabs.remove()" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree, save_tabs_state, sync_active_tab; app: any_bottom_open, is_open, toggle; self: clear_hover_popup, hover_popup_byte_at; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: flush, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph, measure_ui_width; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
-    <fn name="handle_main_cursor_moved" line="1901" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: hover_popup_byte_at, hover_token_bounds, is_in_hover_popup_or_bridge, normalize_hover_byte; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_byte_at_xy, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph; ui_system: contains" />
+    <fn name="hover_bridge_does_not_capture_next_line_when_popup_is_above" line="164" calls="self: is_in_hover_popup_or_bridge" />
+    <fn name="clear_hover_popup" line="189" pub="true" ret="bool" />
+    <fn name="is_hover_target_byte" line="219" ret="bool" calls="editor: byte_at" />
+    <fn name="is_python_hover_keyword" line="227" ret="bool" />
+    <fn name="hover_token_text" line="268" ret="Option&lt;String&gt;" calls="self: hover_token_bounds; editor: get_full_text" />
+    <fn name="normalize_hover_byte" line="274" ret="Option&lt;usize&gt;" calls="self: hover_token_text, is_hover_target_byte" />
+    <fn name="hover_token_bounds" line="295" ret="(usize, usize)" calls="self: is_hover_target_byte" />
+    <fn name="is_in_hover_popup_or_bridge" line="309" pub="true" ret="bool" />
+    <fn name="hover_popup_byte_at" line="371" ret="usize" calls="renderer: char_advance, get_ui_glyph" />
+    <fn name="handle_main_mouse_wheel" line="552" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: clear_hover_popup; render_view::core_text: flush, get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
+    <fn name="handle_main_mouse_input" line="1019" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, base_title, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, tab_scroll, ui_registry, window" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=, tabs.insert(), tabs.remove()" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree, save_tabs_state, sync_active_tab; app: any_bottom_open, is_open, toggle; self: clear_hover_popup, hover_popup_byte_at; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: flush, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph, measure_ui_width; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
+    <fn name="handle_main_cursor_moved" line="1936" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; self: hover_popup_byte_at, hover_token_bounds, is_in_hover_popup_or_bridge, normalize_hover_byte; editor: get_full_text, set_cursor_at_pos, text_parts; render_view::core_text: get_byte_at_xy, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph; ui_system: contains" />
   </mod>
   <mod path="src/app/terminal.rs" name="app::terminal">
     <type name="Cell">{ c: char, fg: u8, bg: u8 }</type>
@@ -424,16 +425,16 @@
     <fn name="update_cache" line="6" pub="true" reads="height, left_padding, line_height, scale_factor, width" writes="last_editor_version=, last_height=, last_scroll_x=, last_scroll_y=, last_width=, visual_lines.clear(), visual_lines.push()" calls="self: char_advance, measure_ui_width; editor: byte_at, text_parts; ui_system: contains" />
     <fn name="get_cursor_xy" line="213" pub="true" ret="(f32, f32)" reads="baseline_offset, last_scroll_x, left_padding, line_height, scale_factor" calls="self: char_advance, measure_ui_width, measure_width; editor: byte_at, text_parts; ui_system: contains" />
     <fn name="get_byte_at_xy" line="350" pub="true" ret="usize" reads="last_scroll_x, left_padding, line_height" calls="self: char_advance; editor: byte_at, text_parts; ui_system: contains" />
-    <fn name="measure_width" line="449" pub="true" ret="f32" calls="self: char_advance" />
-    <fn name="get_max_scroll" line="475" pub="true" ret="f32" reads="line_height" calls="editor: get_visible_lines_count" />
-    <fn name="flush" line="482" pub="true" reads="gl, height, program, vbo, width" writes="vertices.clear()" />
-    <fn name="push_vertical_gradient" line="524" pub="true" reads="vertices" />
-    <fn name="push_horizontal_gradient" line="572" pub="true" reads="vertices" />
-    <fn name="draw_string" line="620" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="draw_string_scaled" line="636" pub="true" calls="self: get_ui_glyph, push_quad" />
-    <fn name="draw_string_mono_scaled" line="659" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="measure_mono_width" line="682" pub="true" ret="f32" calls="self: char_advance" />
-    <fn name="push_rounded_rect" line="693" pub="true" reads="vertices" />
+    <fn name="measure_width" line="450" pub="true" ret="f32" calls="self: char_advance" />
+    <fn name="get_max_scroll" line="476" pub="true" ret="f32" reads="line_height" calls="editor: get_visible_lines_count" />
+    <fn name="flush" line="483" pub="true" reads="gl, height, program, vbo, width" writes="vertices.clear()" />
+    <fn name="push_vertical_gradient" line="525" pub="true" reads="vertices" />
+    <fn name="push_horizontal_gradient" line="573" pub="true" reads="vertices" />
+    <fn name="draw_string" line="621" pub="true" calls="self: get_glyph, push_quad" />
+    <fn name="draw_string_scaled" line="637" pub="true" calls="self: get_ui_glyph, push_quad" />
+    <fn name="draw_string_mono_scaled" line="660" pub="true" calls="self: get_glyph, push_quad" />
+    <fn name="measure_mono_width" line="683" pub="true" ret="f32" calls="self: char_advance" />
+    <fn name="push_rounded_rect" line="694" pub="true" reads="vertices" />
   </mod>
   <mod path="src/render_view/diag_popup_ui.rs" name="render_view::diag_popup_ui">
     <type name="DiagChar">{ x: f32, y: f32, w: f32, h: f32, byte_offset: usize }</type>
