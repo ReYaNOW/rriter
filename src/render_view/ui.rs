@@ -1000,6 +1000,7 @@ impl Renderer {
             }
         }
 
+        let module_prefix_chars: Vec<char> = "[[MODULE]] ".chars().collect();
         let mut max_line_w = 0.0;
         let mut total_text_h = 0.0;
         for (line, kind) in &lines {
@@ -1029,6 +1030,9 @@ impl Renderer {
                 }
             }
             total_text_h += line_h * scale_mul;
+        }
+        if popup.text.starts_with("class ") && !popup.text.starts_with("[[MODULE]] ") {
+            total_text_h += line_h * 2.0;
         }
 
         let box_w = max_line_w + pad * 2.0;
@@ -1178,9 +1182,11 @@ impl Renderer {
                 }
 
                 let is_module_header = *line_kind == crate::lsp::HoverLineKindPublic::Text
-                    && line.len() >= 2
-                    && line[0].0 == '📁'
-                    && line[1].0 == ' ';
+                    && line.len() >= module_prefix_chars.len()
+                    && line
+                        .iter()
+                        .zip(module_prefix_chars.iter())
+                        .all(|((ch, _, _), marker)| ch == marker);
                 let mut glyph_start = 0usize;
                 let start_x = if *line_kind == crate::lsp::HoverLineKindPublic::Code {
                     (bx + pad + 8.0 * s).round()
@@ -1188,9 +1194,8 @@ impl Renderer {
                     let icon_size = 18.0 * s;
                     let icon_x = (bx + pad).round();
                     let icon_y = rounded_top + ((cur_line_h - icon_size) * 0.5).round();
-                    let folder_icon_key = crate::app::file_icons::folder_icon_key("folder");
-                    self.draw_file_icon(folder_icon_key, true, icon_x, icon_y, icon_size);
-                    glyph_start = 2;
+                    self.draw_file_icon("folder", true, icon_x, icon_y, icon_size);
+                    glyph_start = module_prefix_chars.len();
                     (bx + pad + icon_size + 4.0 * s).round()
                 } else {
                     (bx + pad).round()

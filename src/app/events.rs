@@ -50,12 +50,15 @@ fn module_path_from_definition_path(
         .unwrap_or(path);
     let mut no_ext = rel.to_path_buf();
     no_ext.set_extension("");
-    let parts: Vec<String> = no_ext
+    let mut parts: Vec<String> = no_ext
         .iter()
         .filter_map(|c| c.to_str())
         .filter(|p| !p.is_empty() && *p != "__init__")
         .map(|p| p.to_string())
         .collect();
+    if let Some(site_idx) = parts.iter().position(|p| p == "site-packages") {
+        parts = parts.into_iter().skip(site_idx + 1).collect();
+    }
     if parts.is_empty() {
         None
     } else {
@@ -63,8 +66,10 @@ fn module_path_from_definition_path(
     }
 }
 
+const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
+
 fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_path: &str) {
-    let header = format!("📁 {}", module_path);
+    let header = format!("{}{}", HOVER_MODULE_PREFIX, module_path);
     if popup.text.starts_with(&header) {
         return;
     }
@@ -1328,7 +1333,7 @@ impl ApplicationHandler for App {
                                 {
                                     if let Some(popup) = &mut state.popup {
                                         if popup.text.starts_with("class ")
-                                            && !popup.text.starts_with("📁 ")
+                                            && !popup.text.starts_with(HOVER_MODULE_PREFIX)
                                         {
                                             prepend_hover_module_path(popup, &module_path);
                                             if let Some(w) = self.window.as_ref() {
