@@ -97,7 +97,7 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-            if msg.contains(":param ") {
+            if msg.contains(":param ") || looks_like_python_hover(msg) {
             let (clean_msg, mut spans, line_kinds, inline_code_ranges) = crate::languages::python::highlight_python_hover_doc(msg);
             spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
             return (clean_msg, spans, line_kinds, inline_code_ranges);
@@ -113,28 +113,52 @@ pub fn highlight_hover_text(
         let mut cursor = c_cell.borrow_mut();
 
         if let Some(query) = query_opt.as_ref() {
-            if let Some(tree) = parser.parse(&clean_msg, None) {
-                let mut matches = cursor.matches(query, tree.root_node(), clean_msg.as_bytes());
-                while let Some(m) = matches.next() {
-                    for cap in m.captures {
-                        let name = query.capture_names()[cap.index as usize];
-                        let color = match name {
-                            "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
-                            "string" =>[0.945, 0.980, 0.549, 1.0],
-                            "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
-                            "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
-                            "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
-                            "number" =>[0.741, 0.576, 0.976, 1.0],
-                            "comment" =>[0.384, 0.447, 0.643, 1.0],
-                            _ => continue,
-                        };
-                        spans.push(crate::highlighter::ColorSpan {
-                            start: cap.node.start_byte(),
-                            end: cap.node.end_byte(),
-                            color,
-                        });
-                    }
+            let mut offset = 0usize;
+            for line in clean_msg.lines() {
+                if add_bound_method_signature_spans(line, offset, &mut spans) {
+                    offset += line.len() + 1;
+                    continue;
                 }
+                if looks_like_python_code_line(line) {
+                    let mut parse_line_owned = String::new();
+                    let parse_line = if (line.trim_start().starts_with("def ")
+                        || line.trim_start().starts_with("async def "))
+                        && !line.trim_end().ends_with(':')
+                    {
+                        parse_line_owned.push_str(line);
+                        parse_line_owned.push(':');
+                        parse_line_owned.as_str()
+                    } else {
+                        line
+                    };
+                    if let Some(tree) = parser.parse(parse_line, None) {
+                        let mut matches = cursor.matches(query, tree.root_node(), parse_line.as_bytes());
+                        while let Some(m) = matches.next() {
+                            for cap in m.captures {
+                                let name = query.capture_names()[cap.index as usize];
+                                let color = match name {
+                                    "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
+                                    "string" =>[0.945, 0.980, 0.549, 1.0],
+                                    "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
+                                    "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
+                                    "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
+                                    "number" =>[0.741, 0.576, 0.976, 1.0],
+                                    "comment" =>[0.384, 0.447, 0.643, 1.0],
+                                    _ => continue,
+                                };
+                                spans.push(crate::highlighter::ColorSpan {
+                                    start: offset + cap.node.start_byte(),
+                                    end: offset + cap.node.end_byte(),
+                                    color,
+                                });
+                            }
+                        }
+                    }
+                    add_param_name_spans_for_signature(line, offset, &mut spans);
+                    add_self_param_span_for_signature(line, offset, &mut spans);
+                    add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
+                }
+                offset += line.len() + 1;
             }
         }
             })})});
@@ -152,11 +176,269 @@ pub fn highlight_hover_text(
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
+fn looks_like_python_hover(msg: &str) -> bool {
+    let Some(first_non_empty) = msg.lines().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let first = first_non_empty.trim_start();
+    first.starts_with("def ") || first.starts_with("async def ") || first.starts_with("class ")
+}
+
+fn looks_like_python_code_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return false;
+    }
+    (t.starts_with("def ")
+        || t.starts_with("class ")
+        || t.starts_with("async def ")
+        || t.starts_with("for ")
+        || t.starts_with("if ")
+        || t.starts_with("while ")
+        || t.starts_with("try:")
+        || t.starts_with("except ")
+        || t.starts_with("return ")
+        || t.starts_with("await ")
+        || t.starts_with("import ")
+        || t.starts_with("from "))
+        && (t.contains('(') || t.contains(':') || t.contains('='))
+}
+
+fn sanitize_hover_type_expr(mut s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    while let Some(pos) = s.find("<class '") {
+        out.push_str(&s[..pos]);
+        let rest = &s[pos + "<class '".len()..];
+        if let Some(end) = rest.find("'>") {
+            out.push_str(&rest[..end]);
+            s = &rest[end + 2..];
+        } else {
+            out.push_str(&s[pos..]);
+            s = "";
+        }
+    }
+    out.push_str(s);
+    out = out.replace("... omitted 3 union elements", "OmittedUnionElements");
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_bound_method_signature(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let (prefix_async, body) = if let Some(rest) = trimmed.strip_prefix("bound async method ") {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix("bound method ") {
+        (false, rest)
+    } else {
+        return None;
+    };
+
+    let open = body.find('(')?;
+    let close = body.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let target = body[..open].trim();
+    let method = target.rsplit('.').next()?.trim();
+    if method.is_empty() {
+        return None;
+    }
+
+    let mut params = vec!["self".to_string()];
+    for raw in body[open + 1..close].split(',') {
+        let part = raw.trim();
+        if part.is_empty() || part == "/" || part == "*" {
+            continue;
+        }
+        if let Some(colon) = part.find(':') {
+            let name = part[..colon].trim();
+            let ty = sanitize_hover_type_expr(part[colon + 1..].trim());
+            if !name.is_empty() && !ty.is_empty() {
+                params.push(format!("{name}: {ty}"));
+            } else if !name.is_empty() {
+                params.push(name.to_string());
+            }
+        } else {
+            params.push(part.to_string());
+        }
+    }
+
+    let ret_ty = if let Some(arrow) = body.rfind("->") {
+        sanitize_hover_type_expr(body[arrow + 2..].trim())
+    } else {
+        "Any".to_string()
+    };
+    let is_async = prefix_async
+        || ret_ty.contains("Coroutine")
+        || ret_ty.contains("CoroutineType")
+        || ret_ty.contains("Awaitable");
+    let def_kw = if is_async { "async def" } else { "def" };
+    Some(format!("{def_kw} {method}({}) -> {ret_ty}", params.join(", ")))
+}
+
+fn add_bound_method_signature_spans(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) -> bool {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("bound method ") || !line.contains("->") {
+        return false;
+    }
+
+    let function_color = [0.313, 0.980, 0.482, 1.0];
+    let type_color = [0.545, 0.913, 0.992, 1.0];
+    let param_color = [0.973, 0.584, 0.502, 1.0];
+
+    if let Some(open_paren) = line.find('(') {
+        if let Some(dot_pos) = line[..open_paren].rfind('.') {
+            let name_start = dot_pos + 1;
+            if name_start < open_paren {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + name_start,
+                    end: line_offset + open_paren,
+                    color: function_color,
+                });
+            }
+        }
+    }
+
+    if let Some(arrow) = line.rfind("->") {
+        let after_arrow = arrow + 2;
+        let return_ty = line[after_arrow..].trim_start();
+        if !return_ty.is_empty() {
+            let ws = line[after_arrow..].len() - return_ty.len();
+            let ty_start = after_arrow + ws;
+            let ty_len = return_ty
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+            if ty_len > 0 {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + ty_start,
+                    end: line_offset + ty_start + ty_len,
+                    color: type_color,
+                });
+            }
+        }
+    }
+
+    if let (Some(open), Some(close)) = (line.find('('), line.rfind(')')) {
+        if close > open {
+            let args = &line[open + 1..close];
+            if let Some(colon_rel) = args.find(':') {
+                let lhs = args[..colon_rel].trim();
+                if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    if let Some(lhs_pos) = line[open + 1..close].find(lhs) {
+                        let start = open + 1 + lhs_pos;
+                        spans.push(crate::highlighter::ColorSpan {
+                            start: line_offset + start,
+                            end: line_offset + start + lhs.len(),
+                            color: param_color,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    true
+}
+
+fn add_self_param_span_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    if let Some(open) = line.find('(') {
+        let after = &line[open + 1..];
+        if let Some(rest) = after.strip_prefix("self") {
+            let next = rest.chars().next();
+            if next.is_none() || next == Some(',') || next == Some(')') || next == Some(':') {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: line_offset + open + 1,
+                    end: line_offset + open + 1 + 4,
+                    color: [0.741, 0.576, 0.976, 1.0],
+                });
+            }
+        }
+    }
+}
+
+fn add_param_name_spans_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    let (Some(open), Some(close)) = (line.find('('), line.rfind(')')) else {
+        return;
+    };
+    if close <= open {
+        return;
+    }
+    let params_slice = &line[open + 1..close];
+    let mut local = 0usize;
+    for raw in params_slice.split(',') {
+        let p = raw.trim();
+        if p.is_empty() || p == "/" || p == "*" {
+            local += raw.len() + 1;
+            continue;
+        }
+        let name = p.split(':').next().unwrap_or("").trim();
+        if name.is_empty() || name == "self" {
+            local += raw.len() + 1;
+            continue;
+        }
+        if let Some(name_pos_rel) = raw.find(name) {
+            let start = line_offset + open + 1 + local + name_pos_rel;
+            spans.push(crate::highlighter::ColorSpan {
+                start,
+                end: start + name.len(),
+                color: [0.973, 0.584, 0.502, 1.0],
+            });
+        }
+        local += raw.len() + 1;
+    }
+}
+
+fn add_type_bracket_neutral_spans_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("def ") || trimmed.starts_with("async def ")) {
+        return;
+    }
+    for (idx, ch) in line.char_indices() {
+        if ch == '[' || ch == ']' {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_offset + idx,
+                end: line_offset + idx + ch.len_utf8(),
+                color: [0.972, 0.972, 0.949, 1.0],
+            });
+        }
+    }
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
     for raw in msg.replace('\r', "").lines() {
         let trimmed = raw.trim();
+        if let Some(normalized) = normalize_bound_method_signature(trimmed) {
+            out.push_str(&normalized);
+            out.push('\n');
+            continue;
+        }
         if trimmed == "```" || trimmed == "```python" {
             in_fence = !in_fence;
             continue;
@@ -187,6 +469,142 @@ pub enum HoverLineKindPublic {
     Separator,
     Header1,
     Header2,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{highlight_hover_text, HoverLineKindPublic};
+
+    #[test]
+    fn uses_python_hover_pipeline_for_builtin_signatures() {
+        let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
+D.update([E, ]**F) -> None.  Update D from mapping/iterable E and F.\n\
+If E present and has a .keys() method, does:     for k in E.keys(): D[k] = E[k]\n\
+If E present and lacks .keys() method, does:     for (k, v) in E: D[k] = v\n\
+In either case, this is followed by: for k, v in F.items(): D[k] = v";
+
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def update("));
+        assert!(
+            kinds.iter().any(|kind| *kind == HoverLineKindPublic::Text),
+            "built-in docs must preserve prose lines",
+        );
+        assert!(
+            kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code),
+            "inline python fragments should be promoted to code lines",
+        );
+    }
+
+    #[test]
+    fn plain_bound_method_prose_stays_uncolored() {
+        let raw = "bound method dict[str, Provide].copy() -> dict[str, Provide]\n\
+Return a shallow copy of the dict.";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def copy(self"));
+        assert!(!text.contains("bound method"));
+        let first_line = text.lines().next().unwrap_or("");
+        let def_start = first_line.find("def").unwrap_or(0);
+        let self_start = first_line.find("self").unwrap_or(0);
+        let bracket_start = first_line.find('[').unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= def_start && s.end >= def_start + 3 && s.color == [1.0, 0.474, 0.776, 1.0]
+            ),
+            "`def` should be highlighted as keyword (pink)",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
+            ),
+            "`self` should be highlighted in violet",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= bracket_start && s.end >= bracket_start + 1 && s.color == [0.972, 0.972, 0.949, 1.0]
+            ),
+            "type brackets should be white",
+        );
+        let first_line_len = text.lines().next().unwrap_or("").len();
+        let prose_offset = first_line_len + 1;
+        assert!(
+            spans.iter().all(|s| s.end <= prose_offset),
+            "prose line must stay uncolored",
+        );
+    }
+
+    #[test]
+    fn inline_for_fragment_becomes_separate_code_line() {
+        let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
+In either case, this is followed by: for k, v in F.items(): D[k] = v";
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"));
+        assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code));
+    }
+
+    #[test]
+    fn rich_rst_docstring_path_is_preserved() {
+        let raw = "def create_pool() -> Unknown\n\
+Can be used either with an ``async with`` block:\n\
+\n\
+.. code-block:: python\n\
+\n\
+    async with asyncpg.create_pool(user='postgres') as pool:\n\
+        await pool.fetch('SELECT 1')\n\
+\n\
+:param str dsn:\n\
+    Connection string.";
+        let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.contains("Parameters"));
+        assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Header1));
+    }
+
+    #[test]
+    fn bound_method_signature_line_is_highlighted_but_prose_stays_plain() {
+        let raw = "bound method list[<class 'AuthController'> | Router].append(object: <class 'AuthController'> | Router, /) -> None\n\
+Append object to the end of the list.";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def append(self, object: AuthController | Router) -> None"));
+        assert!(!text.contains("bound method"));
+        assert!(!spans.is_empty(), "signature line should receive highlighting");
+
+        let first_line_len = text.lines().next().unwrap_or("").len();
+        let prose_offset = first_line_len + 1;
+        assert!(
+            spans.iter().all(|s| s.end <= prose_offset),
+            "prose description line must stay uncolored",
+        );
+    }
+
+    #[test]
+    fn coroutine_return_bound_method_becomes_async_def() {
+        let raw = "bound method LokiBatcher.shutdown() -> CoroutineType[Any, Any, None]";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("async def shutdown(self) -> CoroutineType[Any, Any, None]"));
+    }
+
+    #[test]
+    fn long_bound_method_signature_is_normalized_and_highlighted() {
+        let raw = "bound method list[<class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements].append(object: <class 'AuthController'> | Router | <class 'DiscountsController'> | ... omitted 3 union elements, /) -> None";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("def append(self, object: AuthController | Router | DiscountsController | OmittedUnionElements) -> None"));
+        assert!(!text.contains("bound method"));
+        assert!(!spans.is_empty(), "normalized signature should get syntax spans");
+        let first_line = text.lines().next().unwrap_or("");
+        let self_start = first_line.find("self").unwrap_or(0);
+        let object_start = first_line.find("object").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
+            ),
+            "`self` should stay violet in long normalized signatures",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= object_start && s.end >= object_start + 6 && s.color == [0.973, 0.584, 0.502, 1.0]
+            ),
+            "argument names should be orange",
+        );
+    }
 }
 
 pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorSpan> {
