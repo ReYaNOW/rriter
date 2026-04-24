@@ -19,6 +19,7 @@ pub struct HoverState {
     pub request_id: Option<i32>,
     pub definition_request_id: Option<i32>,
     pub popup: Option<HoverPopup>,
+    pub pending_popup: Option<HoverPopup>,
     pub timer: f32,
     pub byte_offset: Option<usize>,
     pub rect: Option<(f32, f32, f32, f32)>,
@@ -37,6 +38,7 @@ impl Default for HoverState {
             request_id: None,
             definition_request_id: None,
             popup: None,
+            pending_popup: None,
             timer: 0.0,
             byte_offset: None,
             rect: None,
@@ -55,6 +57,8 @@ thread_local! {
     pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
 }
 
+pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.2;
+
 pub fn clear_hover_popup() -> bool {
     HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -66,6 +70,7 @@ pub fn clear_hover_popup() -> bool {
         state.request_id = None;
         state.definition_request_id = None;
         state.popup = None;
+        state.pending_popup = None;
         state.timer = 0.0;
         state.byte_offset = None;
         state.rect = None;
@@ -86,6 +91,33 @@ fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> b
     }
     let b = editor.byte_at(byte_offset);
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || b >= 0x80
+}
+
+fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> Option<usize> {
+    if is_hover_target_byte(editor, byte_offset) {
+        return Some(byte_offset);
+    }
+    if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {
+        return Some(byte_offset - 1);
+    }
+    if byte_offset + 1 < editor.len() && is_hover_target_byte(editor, byte_offset + 1) {
+        return Some(byte_offset + 1);
+    }
+    None
+}
+
+fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (usize, usize) {
+    let mut start = byte_offset;
+    while start > 0 && is_hover_target_byte(editor, start - 1) {
+        start -= 1;
+    }
+
+    let mut end = byte_offset;
+    while end + 1 < editor.len() && is_hover_target_byte(editor, end + 1) {
+        end += 1;
+    }
+
+    (start, end)
 }
 
 fn hover_popup_byte_at(
@@ -1869,29 +1901,30 @@ impl App {
 
             HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
-                if is_text_area && is_hover_target_byte(&self.editor, byte_offset) {
+                if is_text_area {
+                    let normalized = normalize_hover_byte(&self.editor, byte_offset);
+                    if normalized.is_none() {
+                        state.byte_offset = None;
+                        state.timer = 0.0;
+                        state.request_id = None;
+                        state.popup = None;
+                        state.pending_popup = None;
+                        state.rect = None;
+                        return;
+                    }
+                    let byte_offset = normalized.unwrap_or(byte_offset);
                     let mut same_word = false;
                     if let Some(old_byte) = state.byte_offset {
-                        if old_byte == byte_offset {
-                            same_word = true;
-                        } else {
-                            let min_b = old_byte.min(byte_offset);
-                            let max_b = old_byte.max(byte_offset);
-                            let mut all_target = true;
-                            for b in min_b..=max_b {
-                                if !is_hover_target_byte(&self.editor, b) {
-                                    all_target = false;
-                                    break;
-                                }
-                            }
-                            same_word = all_target;
-                        }
+                        let (old_start, old_end) = hover_token_bounds(&self.editor, old_byte);
+                        let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
+                        same_word = old_start == new_start && old_end == new_end;
                     }
                     if !same_word {
                         state.byte_offset = Some(byte_offset);
                         state.timer = 0.0;
                         state.request_id = None;
                         state.popup = None;
+                        state.pending_popup = None;
                         state.rect = None;
                     }
                 } else {
@@ -1899,6 +1932,7 @@ impl App {
                     state.timer = 0.0;
                     state.request_id = None;
                     state.popup = None;
+                    state.pending_popup = None;
                     state.rect = None;
                 }
             });

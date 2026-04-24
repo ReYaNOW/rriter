@@ -2154,10 +2154,17 @@ impl Renderer {
 
         let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) = crate::app::mouse::HOVER_STATE.with(|s| {
             let state = s.borrow();
-            (state.popup.is_some(), state.request_id.is_some(), state.timer, state.byte_offset.is_some())
+            (
+                state.popup.is_some(),
+                state.request_id.is_some() || state.definition_request_id.is_some(),
+                state.timer,
+                state.byte_offset.is_some(),
+            )
         });
 
-        let type_in_progress = has_byte_offset && !has_type_popup && (hover_timer < 0.2 || is_hover_pending);
+        let type_in_progress = has_byte_offset
+            && !has_type_popup
+            && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
         let is_error_hovered = !self.hovered_diags_cache.is_empty();
 
         if first_idx != self.diag_hover_timer_idx {
