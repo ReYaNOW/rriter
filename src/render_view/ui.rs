@@ -1056,24 +1056,29 @@ impl Renderer {
         let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
         let line_top_y = (vis_line_idx * self.line_height) - render_scroll_y;
 
-        let mut by = line_top_y - box_h - 8.0 * s;
+        let prefer_below = line_top_y - (self.height * 0.45) - 8.0 * s < 0.0;
+        let mut by = if prefer_below {
+            line_top_y + self.line_height + 8.0 * s
+        } else {
+            line_top_y - box_h - 8.0 * s
+        };
 
         if let Some(diag_rect) = self.last_diag_popup_rect {
             let diag_y = diag_rect.1;
             let diag_h = diag_rect.3;
-            if diag_y > line_top_y {
-                by = line_top_y - box_h - 8.0 * s;
+            if prefer_below {
+                by = diag_y + diag_h + 6.0 * s;
             } else {
                 by = diag_y - box_h - 6.0 * s;
             }
             if by < 0.0 {
-                if diag_y < line_top_y + self.line_height * 0.5 {
+                if prefer_below || diag_y < line_top_y + self.line_height * 0.5 {
                     by = line_top_y + self.line_height + 8.0 * s;
                 } else {
                     by = diag_y + diag_h + 6.0 * s;
                 }
             }
-        } else if by < 0.0 {
+        } else if !prefer_below && by < 0.0 {
             by = line_top_y + self.line_height + 8.0 * s;
         }
 
