@@ -82,7 +82,7 @@ pub struct Diagnostic {
     pub code: Option<String>,
     /// Ссылка на документацию (из codeDescription.href)
     pub code_href: Option<String>,
-            pub message: String,
+    pub message: String,
     pub source: Option<String>,
     pub quickfixes: Vec<QuickFix>,
     pub tags: Vec<u32>,
@@ -97,83 +97,94 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-            if msg.contains(":param ") || looks_like_python_hover(msg) {
-            let (clean_msg, mut spans, line_kinds, inline_code_ranges) = crate::languages::python::highlight_python_hover_doc(msg);
-            spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
-            return (clean_msg, spans, line_kinds, inline_code_ranges);
-        }
-        let clean_msg = normalize_hover_text(msg);
+    if msg.contains(":param ") || looks_like_python_hover(msg) {
+        let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
+            crate::languages::python::highlight_python_hover_doc(msg);
+        spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+        return (clean_msg, spans, line_kinds, inline_code_ranges);
+    }
+    let clean_msg = normalize_hover_text(msg);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
-    crate::languages::python::TS_DIAG_QUERY.with(|q_cell| {
-    crate::languages::python::TS_DIAG_CURSOR.with(|c_cell| {
-        let mut parser = p_cell.borrow_mut();
-        let query_opt = q_cell.borrow();
-        let mut cursor = c_cell.borrow_mut();
+        crate::languages::python::TS_DIAG_QUERY.with(|q_cell| {
+            crate::languages::python::TS_DIAG_CURSOR.with(|c_cell| {
+                let mut parser = p_cell.borrow_mut();
+                let query_opt = q_cell.borrow();
+                let mut cursor = c_cell.borrow_mut();
 
-        if let Some(query) = query_opt.as_ref() {
-            let mut offset = 0usize;
-            for line in clean_msg.lines() {
-                if add_bound_method_signature_spans(line, offset, &mut spans) {
-                    offset += line.len() + 1;
-                    continue;
-                }
-                if looks_like_python_code_line(line) {
-                    let mut parse_line_owned = String::new();
-                    let parse_line = if (line.trim_start().starts_with("def ")
-                        || line.trim_start().starts_with("async def "))
-                        && !line.trim_end().ends_with(':')
-                    {
-                        parse_line_owned.push_str(line);
-                        parse_line_owned.push(':');
-                        parse_line_owned.as_str()
-                    } else {
-                        line
-                    };
-                    if let Some(tree) = parser.parse(parse_line, None) {
-                        let mut matches = cursor.matches(query, tree.root_node(), parse_line.as_bytes());
-                        while let Some(m) = matches.next() {
-                            for cap in m.captures {
-                                let name = query.capture_names()[cap.index as usize];
-                                let color = match name {
-                                    "property" | "variable" =>[0.972, 0.972, 0.949, 1.0],
-                                    "string" =>[0.945, 0.980, 0.549, 1.0],
-                                    "type" | "class_name" =>[0.545, 0.913, 0.992, 1.0],
-                                    "keyword.control" | "keyword" | "operator" =>[1.0, 0.474, 0.776, 1.0],
-                                    "function" | "py_function" | "py_builtin_or_func" =>[0.313, 0.980, 0.482, 1.0],
-                                    "number" =>[0.741, 0.576, 0.976, 1.0],
-                                    "comment" =>[0.384, 0.447, 0.643, 1.0],
-                                    _ => continue,
-                                };
-                                spans.push(crate::highlighter::ColorSpan {
-                                    start: offset + cap.node.start_byte(),
-                                    end: offset + cap.node.end_byte(),
-                                    color,
-                                });
-                            }
+                if let Some(query) = query_opt.as_ref() {
+                    let mut offset = 0usize;
+                    for line in clean_msg.lines() {
+                        if add_bound_method_signature_spans(line, offset, &mut spans) {
+                            offset += line.len() + 1;
+                            continue;
                         }
+                        if looks_like_python_code_line(line) {
+                            let mut parse_line_owned = String::new();
+                            let parse_line = if (line.trim_start().starts_with("def ")
+                                || line.trim_start().starts_with("async def "))
+                                && !line.trim_end().ends_with(':')
+                            {
+                                parse_line_owned.push_str(line);
+                                parse_line_owned.push(':');
+                                parse_line_owned.as_str()
+                            } else {
+                                line
+                            };
+                            if let Some(tree) = parser.parse(parse_line, None) {
+                                let mut matches =
+                                    cursor.matches(query, tree.root_node(), parse_line.as_bytes());
+                                while let Some(m) = matches.next() {
+                                    for cap in m.captures {
+                                        let name = query.capture_names()[cap.index as usize];
+                                        let color = match name {
+                                            "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
+                                            "string" => [0.945, 0.980, 0.549, 1.0],
+                                            "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
+                                            "keyword.control" | "keyword" | "operator" => {
+                                                [1.0, 0.474, 0.776, 1.0]
+                                            }
+                                            "function" | "py_function" | "py_builtin_or_func" => {
+                                                [0.313, 0.980, 0.482, 1.0]
+                                            }
+                                            "number" => [0.741, 0.576, 0.976, 1.0],
+                                            "comment" => [0.384, 0.447, 0.643, 1.0],
+                                            _ => continue,
+                                        };
+                                        spans.push(crate::highlighter::ColorSpan {
+                                            start: offset + cap.node.start_byte(),
+                                            end: offset + cap.node.end_byte(),
+                                            color,
+                                        });
+                                    }
+                                }
+                            }
+                            add_param_name_spans_for_signature(line, offset, &mut spans);
+                            add_self_param_span_for_signature(line, offset, &mut spans);
+                            add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
+                        }
+                        add_class_keyword_spans_for_signature(line, offset, &mut spans);
+                        offset += line.len() + 1;
                     }
-                    add_param_name_spans_for_signature(line, offset, &mut spans);
-                    add_self_param_span_for_signature(line, offset, &mut spans);
-                    add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
                 }
-                add_class_keyword_spans_for_signature(line, offset, &mut spans);
-                offset += line.len() + 1;
-            }
-        }
-            })})});
+            })
+        })
+    });
 
     spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
-        let line_kinds = clean_msg.split('\n').map(|line| {
-        if line.starts_with("## ") {
-            HoverLineKindPublic::Header2
-        } else if line.starts_with("# ") {
-            HoverLineKindPublic::Header1
-        } else {
-            HoverLineKindPublic::Text
-        }
-    }).collect();
+    let line_kinds = clean_msg
+        .split('\n')
+        .map(|line| {
+            if line.starts_with("## ") {
+                HoverLineKindPublic::Header2
+            } else if line.starts_with("# ") {
+                HoverLineKindPublic::Header1
+            } else {
+                HoverLineKindPublic::Text
+            }
+        })
+        .collect();
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
@@ -225,8 +236,14 @@ fn sanitize_hover_type_expr(mut s: &str) -> String {
 
 fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     let trimmed = line.trim();
-    let rest = trimmed.strip_prefix("<class '")?;
-    let type_name = rest.strip_suffix("'>")?.trim();
+    let unquoted = trimmed.trim_matches('`').trim();
+    let start = unquoted.find("<class '")?;
+    let rest = &unquoted[start + "<class '".len()..];
+    let end = rest.find("'>")?;
+    if !unquoted[..start].trim().is_empty() || !rest[end + 2..].trim().is_empty() {
+        return None;
+    }
+    let type_name = rest[..end].trim();
     if type_name.is_empty() {
         return None;
     }
@@ -292,7 +309,10 @@ fn normalize_bound_method_signature(line: &str) -> Option<String> {
         || ret_ty.contains("CoroutineType")
         || ret_ty.contains("Awaitable");
     let def_kw = if is_async { "async def" } else { "def" };
-    Some(format!("{def_kw} {method}({}) -> {ret_ty}", params.join(", ")))
+    Some(format!(
+        "{def_kw} {method}({}) -> {ret_ty}",
+        params.join(", ")
+    ))
 }
 
 fn add_bound_method_signature_spans(
@@ -455,9 +475,7 @@ fn add_class_keyword_spans_for_signature(
         return;
     }
 
-    let relative_name_start = trimmed
-        .find(class_name)
-        .unwrap_or("class ".len());
+    let relative_name_start = trimmed.find(class_name).unwrap_or("class ".len());
     let class_name_start = class_kw_start + relative_name_start;
     spans.push(crate::highlighter::ColorSpan {
         start: line_offset + class_name_start,
@@ -574,21 +592,21 @@ Return a shallow copy of the dict.";
         let self_start = first_line.find("self").unwrap_or(0);
         let bracket_start = first_line.find('[').unwrap_or(0);
         assert!(
-            spans.iter().any(|s|
-                s.start <= def_start && s.end >= def_start + 3 && s.color == [1.0, 0.474, 0.776, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= def_start
+                && s.end >= def_start + 3
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
             "`def` should be highlighted as keyword (pink)",
         );
         assert!(
-            spans.iter().any(|s|
-                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= self_start
+                && s.end >= self_start + 4
+                && s.color == [0.741, 0.576, 0.976, 1.0]),
             "`self` should be highlighted in violet",
         );
         assert!(
-            spans.iter().any(|s|
-                s.start <= bracket_start && s.end >= bracket_start + 1 && s.color == [0.972, 0.972, 0.949, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= bracket_start
+                && s.end >= bracket_start + 1
+                && s.color == [0.972, 0.972, 0.949, 1.0]),
             "type brackets should be white",
         );
         let first_line_len = text.lines().next().unwrap_or("").len();
@@ -604,7 +622,8 @@ Return a shallow copy of the dict.";
         let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
 In either case, this is followed by: for k, v in F.items(): D[k] = v";
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
-        assert!(text.contains("In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"));
+        assert!(text
+            .contains("In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"));
         assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code));
     }
 
@@ -622,7 +641,9 @@ Can be used either with an ``async with`` block:\n\
     Connection string.";
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
         assert!(text.contains("Parameters"));
-        assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Header1));
+        assert!(kinds
+            .iter()
+            .any(|kind| *kind == HoverLineKindPublic::Header1));
     }
 
     #[test]
@@ -632,7 +653,10 @@ Append object to the end of the list.";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
         assert!(text.starts_with("def append(self, object: AuthController | Router) -> None"));
         assert!(!text.contains("bound method"));
-        assert!(!spans.is_empty(), "signature line should receive highlighting");
+        assert!(
+            !spans.is_empty(),
+            "signature line should receive highlighting"
+        );
 
         let first_line_len = text.lines().next().unwrap_or("").len();
         let prose_offset = first_line_len + 1;
@@ -655,20 +679,23 @@ Append object to the end of the list.";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
         assert!(text.starts_with("def append(self, object: AuthController | Router | DiscountsController | OmittedUnionElements) -> None"));
         assert!(!text.contains("bound method"));
-        assert!(!spans.is_empty(), "normalized signature should get syntax spans");
+        assert!(
+            !spans.is_empty(),
+            "normalized signature should get syntax spans"
+        );
         let first_line = text.lines().next().unwrap_or("");
         let self_start = first_line.find("self").unwrap_or(0);
         let object_start = first_line.find("object").unwrap_or(0);
         assert!(
-            spans.iter().any(|s|
-                s.start <= self_start && s.end >= self_start + 4 && s.color == [0.741, 0.576, 0.976, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= self_start
+                && s.end >= self_start + 4
+                && s.color == [0.741, 0.576, 0.976, 1.0]),
             "`self` should stay violet in long normalized signatures",
         );
         assert!(
-            spans.iter().any(|s|
-                s.start <= object_start && s.end >= object_start + 6 && s.color == [0.973, 0.584, 0.502, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= object_start
+                && s.end >= object_start + 6
+                && s.color == [0.973, 0.584, 0.502, 1.0]),
             "argument names should be orange",
         );
     }
@@ -682,17 +709,15 @@ Append object to the end of the list.";
         let class_kw = text.find("class").unwrap_or(0);
         let class_name = text.find("CoreMiddleware").unwrap_or(0);
         assert!(
-            spans.iter().any(|s|
-                s.start <= class_kw && s.end >= class_kw + 5 && s.color == [1.0, 0.474, 0.776, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= class_kw
+                && s.end >= class_kw + 5
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
             "`class` keyword should be pink",
         );
         assert!(
-            spans.iter().any(|s|
-                s.start <= class_name
-                    && s.end >= class_name + "CoreMiddleware".len()
-                    && s.color == [0.545, 0.913, 0.992, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= class_name
+                && s.end >= class_name + "CoreMiddleware".len()
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
             "class name should be cyan",
         );
     }
@@ -705,13 +730,18 @@ Append object to the end of the list.";
 
         let class_line_offset = text.find("class ").unwrap_or(0);
         assert!(
-            spans.iter().any(|s|
-                s.start <= class_line_offset
-                    && s.end >= class_line_offset + 5
-                    && s.color == [1.0, 0.474, 0.776, 1.0]
-            ),
+            spans.iter().any(|s| s.start <= class_line_offset
+                && s.end >= class_line_offset + 5
+                && s.color == [1.0, 0.474, 0.776, 1.0]),
             "class keyword should remain highlighted on normalized second line",
         );
+    }
+
+    #[test]
+    fn backticked_qualified_class_repr_prepends_module_path() {
+        let raw = "`<class 'car_wash.utils.middlewares.CoreMiddleware'>`";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "car_wash.utils.middlewares\nclass CoreMiddleware");
     }
 }
 
@@ -744,46 +774,55 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
         }
     }
 
-            if !backtick_ranges.is_empty() {
+    if !backtick_ranges.is_empty() {
         crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
-        crate::languages::python::TS_DIAG_QUERY.with(|q_cell| {
-        crate::languages::python::TS_DIAG_CURSOR.with(|c_cell| {
-            let mut parser = p_cell.borrow_mut();
-            let query_opt = q_cell.borrow();
-            let mut cursor = c_cell.borrow_mut();
+            crate::languages::python::TS_DIAG_QUERY.with(|q_cell| {
+                crate::languages::python::TS_DIAG_CURSOR.with(|c_cell| {
+                    let mut parser = p_cell.borrow_mut();
+                    let query_opt = q_cell.borrow();
+                    let mut cursor = c_cell.borrow_mut();
 
-            if let Some(query) = query_opt.as_ref() {
-                for &(start, end) in &backtick_ranges {
-                    if start >= end { continue; }
-                    let code = &msg[start..end];
-                    if let Some(tree) = parser.parse(code, None) {
-                        let mut matches = cursor.matches(query, tree.root_node(), code.as_bytes());
-                        while let Some(m) = matches.next() {
-                            for cap in m.captures {
-                                let name = query.capture_names()[cap.index as usize];
-                                let color = match name {
-                                    "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
-                                    "string" => [0.945, 0.980, 0.549, 1.0],
-                                    "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
-                                    "keyword.control" | "keyword" | "operator" => [1.0, 0.474, 0.776, 1.0],
-                                    "function" | "py_function" | "py_builtin_or_func" => [0.313, 0.980, 0.482, 1.0],
-                                    "number" => [0.741, 0.576, 0.976, 1.0],
-                                    "comment" => [0.384, 0.447, 0.643, 1.0],
-                                    _ => [0.972, 0.972, 0.949, 1.0],
-                                };
-                                if color != [0.972, 0.972, 0.949, 1.0] {
-                                    spans.push(crate::highlighter::ColorSpan {
-                                        start: start + cap.node.start_byte(),
-                                        end: start + cap.node.end_byte(),
-                                        color,
-                                    });
+                    if let Some(query) = query_opt.as_ref() {
+                        for &(start, end) in &backtick_ranges {
+                            if start >= end {
+                                continue;
+                            }
+                            let code = &msg[start..end];
+                            if let Some(tree) = parser.parse(code, None) {
+                                let mut matches =
+                                    cursor.matches(query, tree.root_node(), code.as_bytes());
+                                while let Some(m) = matches.next() {
+                                    for cap in m.captures {
+                                        let name = query.capture_names()[cap.index as usize];
+                                        let color = match name {
+                                            "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
+                                            "string" => [0.945, 0.980, 0.549, 1.0],
+                                            "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
+                                            "keyword.control" | "keyword" | "operator" => {
+                                                [1.0, 0.474, 0.776, 1.0]
+                                            }
+                                            "function" | "py_function" | "py_builtin_or_func" => {
+                                                [0.313, 0.980, 0.482, 1.0]
+                                            }
+                                            "number" => [0.741, 0.576, 0.976, 1.0],
+                                            "comment" => [0.384, 0.447, 0.643, 1.0],
+                                            _ => [0.972, 0.972, 0.949, 1.0],
+                                        };
+                                        if color != [0.972, 0.972, 0.949, 1.0] {
+                                            spans.push(crate::highlighter::ColorSpan {
+                                                start: start + cap.node.start_byte(),
+                                                end: start + cap.node.end_byte(),
+                                                color,
+                                            });
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
-        })})});
+                })
+            })
+        });
     }
 
     spans.sort_unstable_by_key(|s| s.start);
@@ -813,7 +852,7 @@ pub enum LspEvent {
         name: &'static str,
         message: String,
     },
-        /// Диагностика для файла (ошибки/предупреждения от ruff)
+    /// Диагностика для файла (ошибки/предупреждения от ruff)
     Diagnostics {
         server_name: &'static str,
         path: PathBuf,
@@ -828,7 +867,7 @@ pub enum LspEvent {
     },
     /// Сервер готов принимать запросы
     ServerReady,
-        /// Статус сервера изменился
+    /// Статус сервера изменился
     StatusChanged {
         #[allow(dead_code)]
         name: &'static str,
@@ -907,7 +946,7 @@ enum Cmd {
         diagnostics_json: String,
         only: Option<Vec<String>>,
     },
-        Shutdown,
+    Shutdown,
     Hover {
         id: i32,
         uri: String,
@@ -997,20 +1036,21 @@ fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
             let uri = path_to_uri(&ws.to_string_lossy());
             folders.push(format!(
                 r#"{{"uri":"{}","name":"workspace_{}"}}"#,
-                json_escape(&uri), i
+                json_escape(&uri),
+                i
             ));
         }
 
         (
             format!(r#""{}""#, escaped_root),
-            format!(r#","workspaceFolders":[{}]"#, folders.join(","))
+            format!(r#","workspaceFolders":[{}]"#, folders.join(",")),
         )
     } else {
         (String::from("null"), String::new())
     };
 
     let body = format!(
-                r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
         std::process::id(),
         root_uri_json
     );
@@ -1123,7 +1163,7 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         _ => DiagSeverity::Hint,
     };
 
-        let mut message = v
+    let mut message = v
         .get("message")
         .and_then(|m| m.as_str())
         .unwrap_or("")
@@ -1157,7 +1197,7 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
 
-        let code_href = v
+    let code_href = v
         .get("codeDescription")
         .and_then(|cd| cd.get("href"))
         .and_then(|h| h.as_str())
@@ -1182,32 +1222,36 @@ fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
                         edits.push(tc);
                     }
                 }
-                                    if !edits.is_empty() {
-                        quickfixes.push(QuickFix {
-                            title: title.to_string(),
-                            edits,
-                        });
-                    }
+                if !edits.is_empty() {
+                    quickfixes.push(QuickFix {
+                        title: title.to_string(),
+                        edits,
+                    });
                 }
             }
         }
+    }
 
-                message = message.replace("\\n", "\n").replace("\\t", "    ").replace('\r', "");
+    message = message
+        .replace("\\n", "\n")
+        .replace("\\t", "    ")
+        .replace('\r', "");
 
-        Some(Diagnostic {
-            start_line: sl,
-            start_col: sc,
-            end_line: el,
-            end_col: ec,
-            severity,
-            code,
-            code_href,
-            message,
-            source,
-            quickfixes,
-            tags,
-            spans: Vec::new(),
-        })}
+    Some(Diagnostic {
+        start_line: sl,
+        start_col: sc,
+        end_line: el,
+        end_col: ec,
+        severity,
+        code,
+        code_href,
+        message,
+        source,
+        quickfixes,
+        tags,
+        spans: Vec::new(),
+    })
+}
 
 fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
     let range = v.get("range")?;
@@ -1381,7 +1425,7 @@ fn dispatch_frame(
                             }
                         }
                     }
-                                        let _ = event_tx.send(LspEvent::Diagnostics {
+                    let _ = event_tx.send(LspEvent::Diagnostics {
                         server_name,
                         path,
                         version,
@@ -1407,7 +1451,7 @@ fn dispatch_frame(
                 }
             }
         }
-                Some("initialize") => {}
+        Some("initialize") => {}
         Some("window/logMessage") | Some("window/showMessage") => {
             if let Some(params) = msg.get("params") {
                 if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
@@ -1424,7 +1468,7 @@ fn dispatch_frame(
                 let _ = out_tx.send(reply.into_bytes());
             }
         }
-                Some("workspace/configuration") => {
+        Some("workspace/configuration") => {
             if let Some(req_id) = id {
                 let mut count = 1;
                 if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
@@ -1436,21 +1480,22 @@ fn dispatch_frame(
                 let _ = out_tx.send(reply.into_bytes());
             }
         }
-                Some(m) => {
+        Some(m) => {
             if let Some(req_id) = id {
                 if m != "window/logMessage"
                     && m != "window/showMessage"
                     && m != "textDocument/publishDiagnostics"
                     && m != "workspace/applyEdit"
                 {
-                    let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#,
+                    let reply = format!(
+                        r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#,
                         req_id
                     );
                     let _ = out_tx.send(reply.into_bytes());
                 }
             }
         }
-                None => {
+        None => {
             if let Some(req_id) = id {
                 if let Some(result) = msg.get("result") {
                     if result.get("contents").is_some() {
@@ -1617,23 +1662,24 @@ fn send_and_log(
     msg: Vec<u8>,
 ) -> Result<(), mpsc::SendError<Vec<u8>>> {
     if let Ok(s) = std::str::from_utf8(&msg) {
-        let log_msg = if s.contains("\"textDocument/didOpen\"") || s.contains("\"textDocument/didChange\"") {
-            if let Some(idx) = s.find("\"text\":\"") {
-                let mut temp = String::with_capacity(s.len().min(512));
-                temp.push_str(&s[..idx + 8]);
-                temp.push_str("<TRUNCATED>\"");
-                if s.contains("didOpen") {
-                    temp.push_str("}}}}");
+        let log_msg =
+            if s.contains("\"textDocument/didOpen\"") || s.contains("\"textDocument/didChange\"") {
+                if let Some(idx) = s.find("\"text\":\"") {
+                    let mut temp = String::with_capacity(s.len().min(512));
+                    temp.push_str(&s[..idx + 8]);
+                    temp.push_str("<TRUNCATED>\"");
+                    if s.contains("didOpen") {
+                        temp.push_str("}}}}");
+                    } else {
+                        temp.push_str("}]}}");
+                    }
+                    format!("[LSP SEND] {}", temp)
                 } else {
-                    temp.push_str("}]}}");
+                    format!("[LSP SEND] {}", s)
                 }
-                format!("[LSP SEND] {}", temp)
             } else {
                 format!("[LSP SEND] {}", s)
-            }
-        } else {
-            format!("[LSP SEND] {}", s)
-        };
+            };
 
         let _ = event_tx.send(LspEvent::Log {
             name: server_name,
@@ -1660,7 +1706,11 @@ fn run_supervisor(
             status: LspServerStatus::Starting,
         });
         // ── Запускаем процесс ─────────────────────────────────────────
-        let mut proc = match spawn_server(def, workspaces.first().map(|p| p.as_path()), event_tx.clone()) {
+        let mut proc = match spawn_server(
+            def,
+            workspaces.first().map(|p| p.as_path()),
+            event_tx.clone(),
+        ) {
             Some(p) => p,
             None => {
                 let _ = event_tx.send(LspEvent::StatusChanged {
@@ -1782,7 +1832,7 @@ fn run_supervisor(
                         }
                         open_file = None;
                     }
-                                        Ok(Cmd::Hover { id, uri, line, col }) => {
+                    Ok(Cmd::Hover { id, uri, line, col }) => {
                         let msg = make_hover(id, &uri, line, col);
                         if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                             break 'inner;
@@ -1843,7 +1893,7 @@ pub struct LspProcess {
 }
 
 impl LspProcess {
-        fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
+    fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let ws = workspaces.clone();
@@ -1924,15 +1974,10 @@ impl LspProcess {
         });
     }
 
-        pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
+    pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
-        let _ = self.cmd_tx.send(Cmd::Hover {
-            id,
-            uri,
-            line,
-            col,
-        });
+        let _ = self.cmd_tx.send(Cmd::Hover { id, uri, line, col });
         id
     }
 
@@ -1975,7 +2020,7 @@ impl LspProcess {
     }
 
     /// Опрашивает входящие события (non-blocking). Вызывать раз в кадр.
-        pub fn poll(&self, events: &mut Vec<LspEvent>) {
+    pub fn poll(&self, events: &mut Vec<LspEvent>) {
         loop {
             match self.event_rx.try_recv() {
                 Ok(e) => events.push(e),
@@ -2030,7 +2075,7 @@ pub struct LspManager {
     ty_process: Option<LspProcess>,
     workspaces: Vec<PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
-            pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
+    pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
     pub merged_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
@@ -2047,12 +2092,12 @@ pub struct LspManager {
 }
 
 impl LspManager {
-            pub fn new(workspaces: Vec<PathBuf>) -> Self {
+    pub fn new(workspaces: Vec<PathBuf>) -> Self {
         LspManager {
             python: None,
             ty_process: None,
             workspaces,
-                        diagnostics: HashMap::new(),
+            diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
             merged_instant_diagnostics: HashMap::new(),
@@ -2068,7 +2113,7 @@ impl LspManager {
     }
 
     /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
-            fn ensure_python(&mut self) {
+    fn ensure_python(&mut self) {
         if self.python.is_none() && !self.python_disabled {
             self.python_status = LspServerStatus::Starting;
             self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
@@ -2098,7 +2143,7 @@ impl LspManager {
     }
 
     /// Отключить ruff (остановить и не перезапускать)
-                        pub fn disable_python(&mut self) {
+    pub fn disable_python(&mut self) {
         self.python_disabled = true;
         self.python_status = LspServerStatus::Disabled;
         self.ty_status = LspServerStatus::Disabled;
@@ -2140,7 +2185,7 @@ impl LspManager {
     }
 
     /// Информация о серверах для UI
-        pub fn servers_info(&self) -> Vec<LspServerInfo> {
+    pub fn servers_info(&self) -> Vec<LspServerInfo> {
         let logs = self
             .server_logs
             .get(RUFF_SERVER.program)
@@ -2161,7 +2206,7 @@ impl LspManager {
                 name: TY_SERVER.program,
                 status: self.ty_status.clone(),
                 logs: ty_logs,
-            }
+            },
         ]
     }
 
@@ -2177,7 +2222,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP об открытии файла
-            pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+    pub fn notify_open(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -2199,8 +2244,8 @@ impl LspManager {
         }
     }
 
-        /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
-        pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
+    /// Уведомляет LSP об изменении файла (когда sync_edits непуст)
+    pub fn notify_change(&mut self, path: &PathBuf, ext: &str, text: &str, version: i32) {
         self.suppress_diagnostics = false;
         self.last_change = Some(std::time::Instant::now());
         let abs_path = if path.is_absolute() {
@@ -2221,7 +2266,13 @@ impl LspManager {
         }
     }
 
-                pub fn request_hover(&mut self, path: &PathBuf, _ext: &str, line: u32, col: u32) -> Option<i32> {
+    pub fn request_hover(
+        &mut self,
+        path: &PathBuf,
+        _ext: &str,
+        line: u32,
+        col: u32,
+    ) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2237,7 +2288,7 @@ impl LspManager {
     }
 
     /// Уведомляет LSP о закрытии файла
-            pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
+    pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2255,7 +2306,7 @@ impl LspManager {
         }
     }
 
-        /// Запрашивает code actions для позиции/диагностики
+    /// Запрашивает code actions для позиции/диагностики
     pub fn request_code_actions(
         &mut self,
         path: &PathBuf,
@@ -2288,8 +2339,8 @@ impl LspManager {
 
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
-        pub fn poll(&mut self) -> Vec<LspEvent> {
-                let mut all = Vec::new();
+    pub fn poll(&mut self) -> Vec<LspEvent> {
+        let mut all = Vec::new();
 
         if let Some(proc) = &self.python {
             proc.poll(&mut all);
@@ -2298,20 +2349,28 @@ impl LspManager {
             proc.poll(&mut all);
         }
 
-                // Обновляем кешированные диагностики и статусы
+        // Обновляем кешированные диагностики и статусы
         for ev in &mut all {
             match ev {
-                                                                LspEvent::Diagnostics { server_name, path, version, items, .. } => {
+                LspEvent::Diagnostics {
+                    server_name,
+                    path,
+                    version,
+                    items,
+                    ..
+                } => {
                     if !self.suppress_diagnostics {
                         let v = version.unwrap_or(0);
 
-                                                if *server_name == TY_SERVER.program {
-                            self.ty_instant_diagnostics.insert(path.clone(), (v, items.clone()));
+                        if *server_name == TY_SERVER.program {
+                            self.ty_instant_diagnostics
+                                .insert(path.clone(), (v, items.clone()));
                         } else {
-                            self.instant_diagnostics.insert(path.clone(), (v, items.clone()));
+                            self.instant_diagnostics
+                                .insert(path.clone(), (v, items.clone()));
                         }
 
-                                                let mut merged = Vec::new();
+                        let mut merged = Vec::new();
                         let mut max_v = v;
                         if let Some((v1, d)) = self.instant_diagnostics.get(path.as_path()) {
                             merged.extend(d.clone());
@@ -2321,7 +2380,8 @@ impl LspManager {
                             merged.extend(d.clone());
                             max_v = max_v.max(*v2);
                         }
-                        self.merged_instant_diagnostics.insert(path.clone(), (max_v, merged));
+                        self.merged_instant_diagnostics
+                            .insert(path.clone(), (max_v, merged));
 
                         self.dirty_diagnostics = true;
                         self.last_change = None;
@@ -2355,21 +2415,29 @@ impl LspManager {
                         logs.remove(0);
                     }
                 }
-                                _ => {}
+                _ => {}
             }
         }
 
-                                                                                                if let Some(t) = self.last_change {
+        if let Some(t) = self.last_change {
             if t.elapsed().as_secs_f32() >= 3.0 {
                 if self.dirty_diagnostics {
                     let mut paths = std::collections::HashSet::new();
-                    for k in self.instant_diagnostics.keys() { paths.insert(k.as_path()); }
-                    for k in self.ty_instant_diagnostics.keys() { paths.insert(k.as_path()); }
+                    for k in self.instant_diagnostics.keys() {
+                        paths.insert(k.as_path());
+                    }
+                    for k in self.ty_instant_diagnostics.keys() {
+                        paths.insert(k.as_path());
+                    }
 
                     for path in paths {
                         let mut merged = Vec::new();
-                        if let Some((_, d)) = self.instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
-                        if let Some((_, d)) = self.ty_instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                        if let Some((_, d)) = self.instant_diagnostics.get(path) {
+                            merged.extend(d.iter().cloned());
+                        }
+                        if let Some((_, d)) = self.ty_instant_diagnostics.get(path) {
+                            merged.extend(d.iter().cloned());
+                        }
                         self.diagnostics.insert(path.to_path_buf(), merged);
                     }
                     self.dirty_diagnostics = false;
@@ -2379,13 +2447,21 @@ impl LspManager {
         } else {
             if self.dirty_diagnostics {
                 let mut paths = std::collections::HashSet::new();
-                for k in self.instant_diagnostics.keys() { paths.insert(k.as_path()); }
-                for k in self.ty_instant_diagnostics.keys() { paths.insert(k.as_path()); }
+                for k in self.instant_diagnostics.keys() {
+                    paths.insert(k.as_path());
+                }
+                for k in self.ty_instant_diagnostics.keys() {
+                    paths.insert(k.as_path());
+                }
 
                 for path in paths {
                     let mut merged = Vec::new();
-                    if let Some((_, d)) = self.instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
-                    if let Some((_, d)) = self.ty_instant_diagnostics.get(path) { merged.extend(d.iter().cloned()); }
+                    if let Some((_, d)) = self.instant_diagnostics.get(path) {
+                        merged.extend(d.iter().cloned());
+                    }
+                    if let Some((_, d)) = self.ty_instant_diagnostics.get(path) {
+                        merged.extend(d.iter().cloned());
+                    }
                     self.diagnostics.insert(path.to_path_buf(), merged);
                 }
                 self.dirty_diagnostics = false;
@@ -2395,7 +2471,7 @@ impl LspManager {
         all
     }
 
-                pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
+    pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2409,7 +2485,7 @@ impl LspManager {
             .unwrap_or(&[])
     }
 
-        pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
+    pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2419,7 +2495,7 @@ impl LspManager {
         };
         self.merged_instant_diagnostics
             .get(&abs_path)
-                        .map(|(v, d)| (*v, d.as_slice()))
+            .map(|(v, d)| (*v, d.as_slice()))
             .unwrap_or((0, &[]))
     }
 
@@ -2432,7 +2508,7 @@ impl LspManager {
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-        pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+    pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2456,7 +2532,7 @@ impl LspManager {
         Some(id)
     }
 
-        pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+    pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
         } else if let Some(ws) = self.workspaces.first() {
@@ -2480,7 +2556,7 @@ impl LspManager {
         Some(id)
     }
 
-        #[allow(dead_code)]
+    #[allow(dead_code)]
     pub fn shutdown(mut self) {
         self.python_disabled = true;
         if let Some(p) = self.python.take() {
