@@ -261,18 +261,38 @@ fn hover_popup_byte_at(
         return 0;
     }
 
-    let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
-    let start_x = if is_code {
+        let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
+    let is_module_header = *found_kind == crate::lsp::HoverLineKindPublic::Text
+        && found_line.len() >= 11
+        && found_line.iter().take(11).map(|&(c, _)| c).collect::<String>() == "[[MODULE]] ";
+    let is_header = matches!(
+        *found_kind,
+        crate::lsp::HoverLineKindPublic::Header1 | crate::lsp::HoverLineKindPublic::Header2
+    );
+
+    let mut start_x = if is_code {
         bx + pad + 8.0 * s
     } else {
         bx + pad
     };
+    let mut glyph_start = 0;
+
+    if is_module_header {
+        let icon_size = 18.0 * s;
+        start_x = bx + pad + icon_size + 4.0 * s;
+        glyph_start = 11;
+    }
+
     let target_x = (x - start_x).max(0.0);
     let mut draw_x = 0.0;
 
-    for i in 0..found_line.len() {
+    for i in glyph_start..found_line.len() {
         let (ch, off) = found_line[i];
-        let adv = renderer.char_advance(ch) * found_scale;
+        let adv = if is_header {
+            renderer.get_ui_glyph(ch).map(|g| g.advance).unwrap_or(10.0) * found_scale
+        } else {
+            renderer.char_advance(ch) * found_scale
+        };
         if target_x <= draw_x + adv * 0.5 {
             return off;
         }
@@ -1873,12 +1893,12 @@ impl App {
                 let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
                 union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
             }
-            let pad = 4.0 * s;
-            if position.x as f32 >= union_rect.0 - pad
-                && position.x as f32 <= union_rect.0 + union_rect.2 + pad
-                && position.y as f32 >= union_rect.1 - pad
-                && position.y as f32 <= union_rect.1 + union_rect.3 + pad
-            {
+                                                let pad = 12.0 * s;
+                        if position.x as f32 >= union_rect.0 - pad
+                            && position.x as f32 <= union_rect.0 + union_rect.2 + pad
+                            && position.y as f32 >= union_rect.1 - pad
+                            && position.y as f32 <= union_rect.1 + union_rect.3 + pad
+                        {
                 in_hover_popup = true;
             }
         }
@@ -1907,9 +1927,9 @@ impl App {
                         } else {
                             38.0 * s
                         });
-                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
+                                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
 
-                let bridge_w = 36.0 * s;
+                let bridge_w = 400.0 * s;
                 let mut bridge_x = anchor_x - bridge_w * 0.5;
                 if bridge_x < 0.0 {
                     bridge_x = 0.0;

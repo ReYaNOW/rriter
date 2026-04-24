@@ -1212,32 +1212,37 @@ impl Renderer {
                         | crate::lsp::HoverLineKindPublic::Header2
                 );
 
-                if is_header {
-                    let mut s_buf = String::new();
-                    let mut h_draw_x = draw_x;
-                    for &(c, _, offset) in line.iter().skip(glyph_start) {
-                        let adv = self.char_advance(c) * scale_mul;
-                        if let Some((sel_start, sel_end)) = selected {
-                            if offset >= sel_start && offset < sel_end {
-                                self.push_rect(
-                                    h_draw_x,
-                                    rounded_top,
-                                    adv,
-                                    cur_line_h.round(),
-                                    self.theme.sel,
-                                );
+                                if is_header {
+                    for &(c, color, offset) in line.iter().skip(glyph_start) {
+                        let mut adv = 0.0;
+                        if let Some(g) = self.get_ui_glyph(c) {
+                            adv = g.advance * scale_mul;
+                            if let Some((sel_start, sel_end)) = selected {
+                                if offset >= sel_start && offset < sel_end {
+                                    self.push_rect(
+                                        draw_x,
+                                        rounded_top,
+                                        adv,
+                                        cur_line_h.round(),
+                                        self.theme.sel,
+                                    );
+                                }
                             }
+                            self.push_quad(
+                                (draw_x + g.offset_x * scale_mul).round(),
+                                (text_y - g.offset_y * scale_mul).round(),
+                                g.width * scale_mul,
+                                g.height * scale_mul,
+                                g.u,
+                                g.v,
+                                g.uw,
+                                g.vh,
+                                color,
+                                g.is_emoji,
+                            );
                         }
-                        s_buf.push(c);
-                        h_draw_x += adv;
+                        draw_x += adv;
                     }
-                    self.draw_string_scaled(
-                        &s_buf,
-                        draw_x,
-                        text_y,
-                        [1.0, 1.0, 1.0, 1.0],
-                        scale_mul,
-                    );
                 } else {
                     let mut inline_run_start_x: Option<f32> = None;
                     for &(c, _, offset) in line.iter().skip(glyph_start) {

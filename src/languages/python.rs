@@ -110,8 +110,14 @@ pub fn flatten_rst_roles_and_code(text: &str) -> String {
             }
             continue;
         }
-        if chars[i] == '`' {
-            if i + 1 < chars.len() && chars[i + 1] == '`' {
+                if chars[i] == '`' {
+            if i + 2 < chars.len() && chars[i + 1] == '`' && chars[i + 2] == '`' {
+                out.push('`');
+                out.push('`');
+                out.push('`');
+                i += 3;
+                continue;
+            } else if i + 1 < chars.len() && chars[i + 1] == '`' {
                 in_code = !in_code;
                 out.push('`');
                 out.push('`');
@@ -475,34 +481,53 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         }
 
         let mut header_text = s.to_string();
-        let is_ru = s.starts_with("Атрибут класса ");
-        let is_en = s.starts_with("Class attribute ");
+                let is_ru_attr = s.starts_with("Атрибут класса ");
+                let is_en_attr = s.starts_with("Class attribute ");
+                let is_ru_var = s.starts_with("Переменная ");
+                let is_en_var = s.starts_with("Variable ");
 
-        if is_ru || is_en {
-            let prefix_len = if is_ru { "Атрибут класса ".len() } else { "Class attribute ".len() };
-            let separator = if is_ru { " в " } else { " of " };
+                let is_ru = is_ru_attr || is_ru_var;
+                let is_en = is_en_attr || is_en_var;
 
-            if let Some(v_idx) = s.rfind(separator) {
-                if v_idx > prefix_len {
-                    let clean_name = s[prefix_len..v_idx].trim_matches('`').trim();
-                    let clean_path = s[v_idx + separator.len()..].trim_matches('`').trim();
+                if is_ru || is_en {
+                    let prefix_len = if is_ru_attr { "Атрибут класса ".len() }
+                        else if is_en_attr { "Class attribute ".len() }
+                        else if is_ru_var { "Переменная ".len() }
+                        else { "Variable ".len() };
+                    let separator = if is_ru { " в " } else { " of " };
 
-                                        if let Some(dot_idx) = clean_path.rfind('.') {
-                        let module = &clean_path[..dot_idx];
-                        let cls = &clean_path[dot_idx + 1..];
-                        extra_module_line = Some(module.to_string());
-                        header_text = format!("Class attribute {} of {}", clean_name, cls);
+                    if let Some(v_idx) = s.rfind(separator) {
+                        if v_idx > prefix_len {
+                            let clean_name = s[prefix_len..v_idx].trim_matches('`').trim();
+                            let clean_path = s[v_idx + separator.len()..].trim_matches('`').trim();
+
+                            // extract module if possible
+                            if let Some(dot_idx) = clean_path.rfind('.') {
+                                let module = &clean_path[..dot_idx];
+                                let cls = &clean_path[dot_idx + 1..];
+                                extra_module_line = Some(module.to_string());
+                                let kind = if is_ru_attr || is_en_attr { "Class attribute" } else { "Variable" };
+                                header_text = format!("{} {} of {}", kind, clean_name, cls);
+                            } else {
+                                let kind = if is_ru_attr || is_en_attr { "Class attribute" } else { "Variable" };
+                                header_text = format!("{} {} of {}", kind, clean_name, clean_path);
+                            }
+                            replaced_entirely = true;
+                            is_header2 = true;
+                            is_header1 = false;
+                        }
                     } else {
-                        header_text = format!("Class attribute {} of {}", clean_name, clean_path);
+                        let clean_name = s[prefix_len..].trim_matches('`').trim();
+                        let kind = if is_ru_attr || is_en_attr { "Class attribute" } else { "Variable" };
+                        header_text = format!("{} {}", kind, clean_name);
+                        replaced_entirely = true;
+                        is_header2 = true;
+                        is_header1 = false;
                     }
-                    replaced_entirely = true;
-                    is_header2 = true;
-                    is_header1 = false;
                 }
-            }
-        }
 
-        if let Some(mod_line) = extra_module_line {
+                if let Some(mod_line) = extra_module_line {
+            out.push_str("[[MODULE]] ");
             out.push_str(&mod_line);
             out.push('\n');
             kinds.push(HoverLineKind::Text);

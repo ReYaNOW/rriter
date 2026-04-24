@@ -212,6 +212,9 @@ fn preprocess_hover_text(msg: &str) -> String {
 }
 
 fn looks_like_python_hover(msg: &str) -> bool {
+    if msg.contains("```python") || msg.contains("```py\n") {
+        return true;
+    }
     let mut non_empty = msg
         .lines()
         .map(str::trim_start)
@@ -219,11 +222,10 @@ fn looks_like_python_hover(msg: &str) -> bool {
     let Some(first_non_empty) = non_empty.next() else {
         return false;
     };
-        if first_non_empty.starts_with("def ")
+            if first_non_empty.starts_with("def ")
         || first_non_empty.starts_with("async def ")
         || first_non_empty.starts_with("class ")
-        || first_non_empty.starts_with("## Атрибут класса")
-        || first_non_empty.starts_with("## Class attribute")
+        || first_non_empty.starts_with("## ")
     {
         return true;
     }
@@ -673,8 +675,9 @@ fn normalize_hover_text(msg: &str) -> String {
             out.push('\n');
             continue;
         }
-        if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
+                if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
             if let Some(module_path) = module_path {
+                out.push_str("[[MODULE]] ");
                 out.push_str(&module_path);
                 out.push('\n');
             }
@@ -684,6 +687,7 @@ fn normalize_hover_text(msg: &str) -> String {
             continue;
         }
         if let Some(module_path) = normalize_module_object_repr(trimmed) {
+            out.push_str("[[MODULE]] ");
             out.push_str(&module_path);
             out.push('\n');
             continue;
@@ -949,11 +953,11 @@ Append object to the end of the list.";
         );
     }
 
-    #[test]
+        #[test]
     fn qualified_class_object_repr_prepends_module_path() {
         let raw = "<class 'car_wash.utils.middlewares.CoreMiddleware'>";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "car_wash.utils.middlewares\nclass CoreMiddleware");
+        assert_eq!(text, "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware");
 
         let class_line_offset = text.find("class ").unwrap_or(0);
         assert!(
@@ -964,11 +968,11 @@ Append object to the end of the list.";
         );
     }
 
-    #[test]
+        #[test]
     fn backticked_qualified_class_repr_prepends_module_path() {
         let raw = "`<class 'car_wash.utils.middlewares.CoreMiddleware'>`";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "car_wash.utils.middlewares\nclass CoreMiddleware");
+        assert_eq!(text, "[[MODULE]] car_wash.utils.middlewares\nclass CoreMiddleware");
     }
 
     #[test]
@@ -1037,22 +1041,22 @@ client = AsyncFirebaseClient(\n\
         );
     }
 
-    #[test]
+        #[test]
     fn module_object_repr_is_normalized_to_module_header() {
         let raw = "<module 'car_wash.domains.policies.controller'>";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
-        assert_eq!(text, "car_wash.domains.policies.controller");
+        assert_eq!(text, "[[MODULE]] car_wash.domains.policies.controller");
     }
 
     #[test]
     fn site_packages_and_init_are_removed_from_module_and_class_repr() {
         let module_raw = "<module 'site-packages.msgspec.__init__'>";
         let (module_text, _spans, _kinds, _inline) = highlight_hover_text(module_raw);
-        assert_eq!(module_text, "msgspec");
+        assert_eq!(module_text, "[[MODULE]] msgspec");
 
         let class_raw = "<class 'site-packages.msgspec.__init__.UnsetType'>";
         let (class_text, _spans, _kinds, _inline) = highlight_hover_text(class_raw);
-        assert_eq!(class_text, "msgspec\nclass UnsetType");
+        assert_eq!(class_text, "[[MODULE]] msgspec\nclass UnsetType");
     }
 
     #[test]

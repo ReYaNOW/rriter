@@ -96,7 +96,7 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
         return;
     }
 
-    let prefix = format!("{module_path}\n---\n");
+    let prefix = format!("{legacy_header}\n");
     let shift = prefix.len();
 
     popup.text.insert_str(0, &prefix);
@@ -110,9 +110,8 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
         *end += shift;
     }
 
-    let mut new_line_kinds = Vec::with_capacity(popup.line_kinds.len() + 2);
+    let mut new_line_kinds = Vec::with_capacity(popup.line_kinds.len() + 1);
     new_line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
-    new_line_kinds.push(crate::lsp::HoverLineKindPublic::Separator);
     new_line_kinds.extend(popup.line_kinds.iter().copied());
     popup.line_kinds = new_line_kinds;
 }
@@ -131,9 +130,27 @@ fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
     allow_nearby_fallback: bool,
+    lsp_type: Option<&str>,
+    module_path: Option<&str>,
 ) -> Option<String> {
     fn format_attribute_assignment_line(line: &str) -> String {
-        let trimmed = line.trim_end();
+        let mut lines_iter = line.lines();
+        let first = lines_iter.next().unwrap_or("");
+        let base_indent = first.len() - first.trim_start().len();
+        let mut out = vec![first.trim_start().to_string()];
+        for l in lines_iter {
+            let current_indent = l.len() - l.trim_start().len();
+            if current_indent >= base_indent {
+                out.push(l[base_indent..].to_string());
+            } else {
+                out.push(l.trim_start().to_string());
+            }
+        }
+        let joined = out.join("\n");
+        let trimmed = joined.trim_end();
+        if trimmed.contains('\n') {
+            return trimmed.to_string();
+        }
         let Some(eq_idx) = trimmed.find('=') else {
             return trimmed.to_string();
         };
@@ -153,12 +170,16 @@ fn source_signature_for_hover(
         if inner.is_empty() {
             return format!("{lhs} = {rhs}");
         }
-        format!("{lhs} = {head}\n    {inner}\n    )")
+                format!("{lhs} = {head}\n    {inner}\n    )")
     }
+
     fn source_attribute_hover_for_symbol(
         text: &str,
         line_offsets: &[usize],
         symbol: &str,
+        lsp_type: Option<&str>,
+        original_line_idx: usize,
+        module_path: Option<&str>,
     ) -> Option<String> {
         for idx in 0..line_offsets.len() {
             let line = source_line(text, line_offsets, idx)?;
@@ -173,6 +194,82 @@ fn source_signature_for_hover(
             if !matched {
                 continue;
             }
+
+            if idx == original_line_idx {
+                let ty_str = lsp_type.unwrap_or("Unknown");
+                if let Some(m) = module_path {
+                    return Some(format!("## Variable {symbol} of {m}\n{symbol}: {ty_str}"));
+                } else {
+                    return Some(format!("## Variable {symbol}\n{symbol}: {ty_str}"));
+                }
+            }
+
+            let mut paren_depth = 0;
+            let mut bracket_depth = 0;
+            let mut brace_depth = 0;
+            let mut in_string = false;
+            let mut string_char = ' ';
+            let mut statement_lines = vec![line.trim_end().to_string()];
+
+            for c in line.chars() {
+                if in_string {
+                    if c == '\\' { continue; }
+                    if c == string_char { in_string = false; }
+                } else {
+                    match c {
+                        '"' | '\'' => { in_string = true; string_char = c; },
+                        '(' => paren_depth += 1,
+                        ')' => paren_depth -= 1,
+                        '[' => bracket_depth += 1,
+                        ']' => bracket_depth -= 1,
+                        '{' => brace_depth += 1,
+                        '}' => brace_depth -= 1,
+                        _ => {}
+                    }
+                }
+            }
+
+            let mut curr_idx = idx;
+            while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0) && curr_idx + 1 < line_offsets.len() {
+                curr_idx += 1;
+                if let Some(next_line) = source_line(text, line_offsets, curr_idx) {
+                    let trim_next = next_line.trim_end();
+                    statement_lines.push(trim_next.to_string());
+                    for c in trim_next.chars() {
+                        if in_string {
+                            if c == '\\' { continue; }
+                            if c == string_char { in_string = false; }
+                        } else {
+                            match c {
+                                '"' | '\'' => { in_string = true; string_char = c; },
+                                '(' => paren_depth += 1,
+                                ')' => paren_depth -= 1,
+                                '[' => bracket_depth += 1,
+                                ']' => bracket_depth -= 1,
+                                '{' => brace_depth += 1,
+                                '}' => brace_depth -= 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+                                    let full_statement = statement_lines.join("\n");
+
+            let mut assignment = format_attribute_assignment_line(&full_statement);
+            if let Some(ty) = lsp_type {
+                if assignment.starts_with(&format!("{symbol} =")) {
+                    let replacement = format!("{symbol}: {ty} =");
+                    assignment = assignment.replacen(&format!("{symbol} ="), &replacement, 1);
+                } else if assignment.starts_with(&format!("{symbol}=")) {
+                    let replacement = format!("{symbol}: {ty} =");
+                    assignment = assignment.replacen(&format!("{symbol}="), &replacement, 1);
+                }
+            }
+
             let mut class_name = None;
             for up in (0..idx).rev() {
                 let class_line = source_line(text, line_offsets, up)?.trim_start();
@@ -185,15 +282,17 @@ fn source_signature_for_hover(
                     break;
                 }
             }
-            let header = if let Some(class_name) = class_name {
-                format!("## Атрибут класса {symbol} в {class_name}")
+
+                        if let Some(class_name) = class_name {
+                let header = format!("## Class attribute {symbol} of {class_name}");
+                return Some(format!("{header}\n{assignment}"));
             } else {
-                format!("## Атрибут {symbol}")
-            };
-            return Some(format!(
-                "{header}\n{}",
-                format_attribute_assignment_line(trimmed)
-            ));
+                if let Some(m) = module_path {
+                    return Some(format!("## Variable {symbol} of {m}\n{assignment}"));
+                } else {
+                    return Some(format!("## Variable {symbol}\n{assignment}"));
+                }
+            }
         }
         None
     }
@@ -227,10 +326,10 @@ fn source_signature_for_hover(
         }
         None
     });
-    if def_line_idx.is_none() {
+            if def_line_idx.is_none() {
         if let Some(symbol) = hovered_symbol.as_deref() {
             if let Some(attr_hover) =
-                source_attribute_hover_for_symbol(&text, &editor.line_offsets, symbol)
+                source_attribute_hover_for_symbol(&text, &editor.line_offsets, symbol, lsp_type, line_idx, module_path)
             {
                 return Some(attr_hover);
             }
@@ -302,7 +401,23 @@ fn source_attribute_hover_from_definition_file(
     module_path: &str,
 ) -> Option<String> {
     fn format_attribute_assignment_line(line: &str) -> String {
-        let trimmed = line.trim_end();
+        let mut lines_iter = line.lines();
+        let first = lines_iter.next().unwrap_or("");
+        let base_indent = first.len() - first.trim_start().len();
+        let mut out = vec![first.trim_start().to_string()];
+        for l in lines_iter {
+            let current_indent = l.len() - l.trim_start().len();
+            if current_indent >= base_indent {
+                out.push(l[base_indent..].to_string());
+            } else {
+                out.push(l.trim_start().to_string());
+            }
+        }
+        let joined = out.join("\n");
+        let trimmed = joined.trim_end();
+        if trimmed.contains('\n') {
+            return trimmed.to_string();
+        }
         let Some(eq_idx) = trimmed.find('=') else {
             return trimmed.to_string();
         };
@@ -335,9 +450,61 @@ fn source_attribute_hover_from_definition_file(
         if let Some(rest) = trimmed.strip_prefix(symbol) {
             matched = rest.starts_with(':') || rest.starts_with(" =");
         }
-        if !matched {
+                if !matched {
             continue;
         }
+
+        let mut paren_depth = 0;
+        let mut bracket_depth = 0;
+        let mut brace_depth = 0;
+        let mut in_string = false;
+        let mut string_char = ' ';
+        let mut statement_lines = vec![lines[idx].trim_end().to_string()];
+
+        for c in lines[idx].chars() {
+            if in_string {
+                if c == '\\' { continue; }
+                if c == string_char { in_string = false; }
+            } else {
+                match c {
+                    '"' | '\'' => { in_string = true; string_char = c; },
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    '[' => bracket_depth += 1,
+                    ']' => bracket_depth -= 1,
+                    '{' => brace_depth += 1,
+                    '}' => brace_depth -= 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut curr_idx = idx;
+        while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0) && curr_idx + 1 < lines.len() {
+            curr_idx += 1;
+            let trim_next = lines[curr_idx].trim_end();
+            statement_lines.push(trim_next.to_string());
+            for c in trim_next.chars() {
+                if in_string {
+                    if c == '\\' { continue; }
+                    if c == string_char { in_string = false; }
+                } else {
+                    match c {
+                        '"' | '\'' => { in_string = true; string_char = c; },
+                        '(' => paren_depth += 1,
+                        ')' => paren_depth -= 1,
+                        '[' => bracket_depth += 1,
+                        ']' => bracket_depth -= 1,
+                        '{' => brace_depth += 1,
+                        '}' => brace_depth -= 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let full_statement = statement_lines.join("\n");
+
         let mut class_name = None;
         for up in (0..idx).rev() {
             let class_line = lines[up].trim_start();
@@ -350,21 +517,27 @@ fn source_attribute_hover_from_definition_file(
                 break;
             }
         }
-        let fq_owner = if let Some(class_name) = class_name {
-            if module_path.is_empty() {
+                        let (header_prefix, fq_owner) = if let Some(class_name) = class_name {
+            let owner = if module_path.is_empty() {
                 class_name
             } else {
                 format!("{module_path}.{class_name}")
-            }
+            };
+            ("Class attribute", owner)
         } else {
-            module_path.to_string()
+            ("Variable", module_path.to_string())
         };
+
         if fq_owner.is_empty() {
-            return None;
+            return Some(format!(
+                "## {header_prefix} {symbol}\n{}",
+                format_attribute_assignment_line(&full_statement)
+            ));
         }
+
         return Some(format!(
-            "## Атрибут класса {symbol} в {fq_owner}\n{}",
-            format_attribute_assignment_line(trimmed)
+            "## {header_prefix} {symbol} of {fq_owner}\n{}",
+            format_attribute_assignment_line(&full_statement)
         ));
     }
     None
@@ -450,7 +623,7 @@ mod tests {
         );
     }
 
-    #[test]
+            #[test]
     fn asynccontextmanager_source_signature_is_split_into_lines() {
         let mut editor = crate::editor::Editor::new(256);
         editor.insert_str(
@@ -461,14 +634,13 @@ mod tests {
             .find("lifespan")
             .expect("expected test function name");
         let signature =
-            source_signature_for_hover(&editor, hover_offset, true).expect("expected signature");
-        assert_eq!(
-            signature,
+            source_signature_for_hover(&editor, hover_offset, true, None, None).expect("expected signature");
+        assert_eq!(signature,
             "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
         );
     }
 
-    #[test]
+            #[test]
     fn classmethod_asynccontextmanager_source_signature_keeps_both_decorators() {
         let mut editor = crate::editor::Editor::new(512);
         editor.insert_str(
@@ -479,14 +651,13 @@ mod tests {
             .rfind("setup")
             .expect("expected setup call");
         let signature =
-            source_signature_for_hover(&editor, hover_offset, true).expect("expected signature");
-        assert_eq!(
-            signature,
+            source_signature_for_hover(&editor, hover_offset, true, None, None).expect("expected signature");
+        assert_eq!(signature,
             "@classmethod\n@asynccontextmanager\nasync def setup(cls) -> AsyncGenerator[None, Any]"
         );
     }
 
-    #[test]
+            #[test]
     fn attribute_hover_uses_source_attribute_line() {
         let mut editor = crate::editor::Editor::new(512);
         editor.insert_str(
@@ -496,11 +667,10 @@ mod tests {
             .get_full_text()
             .rfind("client")
             .expect("expected client usage");
-        let signature = source_signature_for_hover(&editor, hover_offset, false)
+        let signature = source_signature_for_hover(&editor, hover_offset, false, None, None)
             .expect("expected attribute hover");
-        assert_eq!(
-            signature,
-            "## Атрибут класса client в FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
+        assert_eq!(signature,
+            "## Class attribute client of FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
     }
 
@@ -525,7 +695,7 @@ mod tests {
         );
     }
 
-    #[test]
+            #[test]
     fn strict_source_lookup_does_not_fallback_to_nearby_def() {
         let mut editor = crate::editor::Editor::new(256);
         editor.insert_str(
@@ -535,7 +705,7 @@ mod tests {
             .get_full_text()
             .rfind("client")
             .expect("expected client token");
-        let sig = source_signature_for_hover(&editor, client_offset, false);
+        let sig = source_signature_for_hover(&editor, client_offset, false, None, None);
         assert!(sig.is_none(), "strict mode must not return unrelated def");
     }
 
@@ -555,9 +725,9 @@ mod tests {
             "car_wash.core.fcm.service",
         )
         .expect("expected attribute hover text");
-        assert_eq!(
+                assert_eq!(
             hover,
-            "## Атрибут класса client в car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
+            "## Class attribute client of car_wash.core.fcm.service.FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
         let _ = std::fs::remove_file(&tmp);
     }
@@ -574,11 +744,35 @@ mod tests {
         );
     }
 
-    #[test]
+        #[test]
     fn module_path_strips_trailing_init() {
         let path = std::path::Path::new("/usr/lib/python3.12/site-packages/msgspec/__init__.py");
         let module = module_path_from_definition_path(path, &[]);
         assert_eq!(module.as_deref(), Some("msgspec"));
+    }
+
+        #[test]
+    fn attribute_hover_merges_lsp_type_and_ignores_when_on_declaration() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "handlers = [\n    AuthController,\n    users_router,\n]\n\nfor h in handlers:\n    pass\n",
+        );
+
+        let text = editor.get_full_text();
+
+        let decl_offset = text.find("handlers").unwrap();
+        let decl_sig = source_signature_for_hover(&editor, decl_offset, false, Some("list[Controller]"), Some("car_wash"))
+            .expect("should return specific declaration format");
+        assert_eq!(decl_sig, "## Variable handlers of car_wash\nhandlers: list[Controller]", "should show only type on declaration");
+
+        let usage_offset = text.rfind("handlers").unwrap();
+        let usage_sig = source_signature_for_hover(&editor, usage_offset, false, Some("list[Controller]"), Some("car_wash"))
+            .expect("expected signature on usage");
+
+        assert_eq!(
+            usage_sig,
+            "## Variable handlers of car_wash\nhandlers: list[Controller] = [\n    AuthController,\n    users_router,\n]"
+        );
     }
 }
 
@@ -592,16 +786,16 @@ fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
 
 fn should_replace_simple_type_hover(clean_msg: &str) -> bool {
     let trimmed = clean_msg.trim_start();
-    !trimmed.contains('\n')
-        && !trimmed.contains(' ')
-        && !trimmed.contains("::")
-        && trimmed
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && trimmed
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    if trimmed.contains('\n') || trimmed.contains("::") {
+        return false;
+    }
+    if trimmed.starts_with("def ") || trimmed.starts_with("class ") || trimmed.starts_with("async def ") || trimmed.starts_with("bound method ") {
+        return false;
+    }
+    if !trimmed.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') {
+        return false;
+    }
+    true
 }
 
 impl ApplicationHandler for App {
@@ -1809,14 +2003,18 @@ impl ApplicationHandler for App {
                                         }
                                         return;
                                     }
-                                    let is_simple_type =
+                                                                                                            let is_simple_type =
                                         should_replace_simple_type_hover(&clean_msg);
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         if should_replace_hover_with_source_signature(&clean_msg) {
+                                            let lsp_ty = if is_simple_type { Some(clean_msg.as_str()) } else { None };
+                                            let current_mod = self.file_path.as_ref().and_then(|p| module_path_from_definition_path(p, &self.ide_workspaces));
                                             if let Some(sig) = source_signature_for_hover(
                                                 &self.editor,
                                                 bo,
                                                 !is_simple_type,
+                                                lsp_ty,
+                                                current_mod.as_deref(),
                                             ) {
                                                 crate::lsp::highlight_hover_text(&sig)
                                             } else {
