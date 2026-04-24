@@ -665,6 +665,22 @@ This architecture ensures maximum throughput and minimal latency, providing a te
 
 ---
 
+## 🔌 Subsystem 7: Language Server Protocol (LSP) (`lsp.rs` & `languages/*`)
+
+RRiter features a lightweight, robust, and highly asynchronous LSP client.
+
+### Architecture
+- **Main Thread**: Sends `Cmd` messages (like `Open`, `Change`, `Hover`, `Definition`, `CodeAction`).
+- **Supervisor Thread**: Owns the Child process (e.g., `ruff server`). Restarts it automatically upon crashes.
+- **Writer/Reader Threads**: Lightweight threads for I/O directions (`stdin`/`stdout`).
+
+### Hover & Diagnostics Highlighting
+LSP responses often contain Markdown or plain text. RRiter implements a custom pipeline to highlight hover documentation and diagnostic messages without blocking the main UI.
+- `lsp.rs` parses JSON-RPC responses and dispatches them to the `LspEvent` channel.
+- `languages/python.rs` provides Python-specific parsing and syntax highlighting for hover text using Tree-sitter (e.g., coloring parameter types, normalizing signature lines).
+
+---
+
 ## 🚫 Strict Coding Rules
 
 Discipline required with this codebase.
