@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use tree_sitter::StreamingIterator;
 
 use std::thread;
@@ -556,6 +557,13 @@ pub enum HoverLineKindPublic {
     Header2,
 }
 
+#[derive(Clone, Copy)]
+enum PendingRequestKind {
+    Hover,
+    CodeAction,
+    Definition,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{highlight_hover_text, HoverLineKindPublic};
@@ -877,6 +885,10 @@ pub enum LspEvent {
         request_id: i32,
         text: Option<String>,
     },
+    DefinitionResponse {
+        request_id: i32,
+        path: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -948,6 +960,12 @@ enum Cmd {
     },
     Shutdown,
     Hover {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+    },
+    Definition {
         id: i32,
         uri: String,
         line: u32,
@@ -1120,6 +1138,13 @@ fn make_code_action(
 fn make_hover(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        id, json_escape(uri), line, col
+    ).into_bytes()
+}
+
+fn make_definition(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
         id, json_escape(uri), line, col
     ).into_bytes()
 }
@@ -1342,6 +1367,23 @@ fn parse_hover_value(v: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn parse_definition_path(v: &serde_json::Value) -> Option<PathBuf> {
+    if let Some(uri) = v.get("uri").and_then(|u| u.as_str()) {
+        return Some(uri_to_path(uri));
+    }
+    if let Some(uri) = v.get("targetUri").and_then(|u| u.as_str()) {
+        return Some(uri_to_path(uri));
+    }
+    if let Some(arr) = v.as_array() {
+        for item in arr {
+            if let Some(path) = parse_definition_path(item) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeAction> {
     let title = v
         .get("title")
@@ -1382,6 +1424,7 @@ fn dispatch_frame(
     event_tx: &Sender<LspEvent>,
     server_name: &'static str,
     out_tx: &Sender<Vec<u8>>,
+    pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) {
     let msg: serde_json::Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -1498,25 +1541,65 @@ fn dispatch_frame(
         None => {
             if let Some(req_id) = id {
                 if let Some(result) = msg.get("result") {
-                    if result.get("contents").is_some() {
-                        if let Some(hover) = parse_hover_value(result) {
-                            let _ = event_tx.send(LspEvent::HoverResponse {
+                    let pending_kind = pending_requests
+                        .lock()
+                        .ok()
+                        .and_then(|mut p| p.remove(&(req_id as i32)));
+                    match pending_kind {
+                        Some(PendingRequestKind::Hover) => {
+                            if result.get("contents").is_some() {
+                                if let Some(hover) = parse_hover_value(result) {
+                                    let _ = event_tx.send(LspEvent::HoverResponse {
+                                        request_id: req_id as i32,
+                                        text: Some(hover),
+                                    });
+                                }
+                            } else if result.is_null() {
+                                let _ = event_tx.send(LspEvent::HoverResponse {
+                                    request_id: req_id as i32,
+                                    text: None,
+                                });
+                            }
+                        }
+                        Some(PendingRequestKind::CodeAction) => {
+                            if let Some(arr) = result.as_array() {
+                                let actions: Vec<CodeAction> =
+                                    arr.iter().filter_map(parse_code_action_value).collect();
+                                let _ = event_tx.send(LspEvent::CodeActions {
+                                    request_id: req_id as i32,
+                                    actions,
+                                });
+                            }
+                        }
+                        Some(PendingRequestKind::Definition) => {
+                            let path = parse_definition_path(result);
+                            let _ = event_tx.send(LspEvent::DefinitionResponse {
                                 request_id: req_id as i32,
-                                text: Some(hover),
+                                path,
                             });
                         }
-                    } else if let Some(arr) = result.as_array() {
-                        let actions: Vec<CodeAction> =
-                            arr.iter().filter_map(parse_code_action_value).collect();
-                        let _ = event_tx.send(LspEvent::CodeActions {
-                            request_id: req_id as i32,
-                            actions,
-                        });
-                    } else if result.is_null() {
-                        let _ = event_tx.send(LspEvent::HoverResponse {
-                            request_id: req_id as i32,
-                            text: None,
-                        });
+                        None => {
+                            if result.get("contents").is_some() {
+                                if let Some(hover) = parse_hover_value(result) {
+                                    let _ = event_tx.send(LspEvent::HoverResponse {
+                                        request_id: req_id as i32,
+                                        text: Some(hover),
+                                    });
+                                }
+                            } else if let Some(arr) = result.as_array() {
+                                let actions: Vec<CodeAction> =
+                                    arr.iter().filter_map(parse_code_action_value).collect();
+                                let _ = event_tx.send(LspEvent::CodeActions {
+                                    request_id: req_id as i32,
+                                    actions,
+                                });
+                            } else if result.is_null() {
+                                let _ = event_tx.send(LspEvent::HoverResponse {
+                                    request_id: req_id as i32,
+                                    text: None,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -1535,6 +1618,7 @@ fn spawn_server(
     def: &'static LspServerDef,
     workspace: Option<&Path>,
     event_tx: Sender<LspEvent>,
+    pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) -> Option<SpawnedProcess> {
     let mut cmd = Command::new(def.program);
     if let Some(ws) = workspace {
@@ -1636,7 +1720,13 @@ fn spawn_server(
                     break;
                 }
 
-                dispatch_frame(&body, &event_tx, def.program, &reader_out_tx);
+                dispatch_frame(
+                    &body,
+                    &event_tx,
+                    def.program,
+                    &reader_out_tx,
+                    &pending_requests,
+                );
             }
         })
         .ok()?;
@@ -1699,8 +1789,13 @@ fn run_supervisor(
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
     let mut user_requested_restart = false;
+    let pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     'outer: loop {
+        if let Ok(mut pending) = pending_requests.lock() {
+            pending.clear();
+        }
         let _ = event_tx.send(LspEvent::StatusChanged {
             name: def.program,
             status: LspServerStatus::Starting,
@@ -1710,6 +1805,7 @@ fn run_supervisor(
             def,
             workspaces.first().map(|p| p.as_path()),
             event_tx.clone(),
+            pending_requests.clone(),
         ) {
             Some(p) => p,
             None => {
@@ -1833,7 +1929,19 @@ fn run_supervisor(
                         open_file = None;
                     }
                     Ok(Cmd::Hover { id, uri, line, col }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::Hover);
+                        }
                         let msg = make_hover(id, &uri, line, col);
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
+                    Ok(Cmd::Definition { id, uri, line, col }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::Definition);
+                        }
+                        let msg = make_definition(id, &uri, line, col);
                         if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                             break 'inner;
                         }
@@ -1848,6 +1956,9 @@ fn run_supervisor(
                         diagnostics_json,
                         only,
                     }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::CodeAction);
+                        }
                         let msg = make_code_action(
                             id,
                             &uri,
@@ -1978,6 +2089,13 @@ impl LspProcess {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
         let _ = self.cmd_tx.send(Cmd::Hover { id, uri, line, col });
+        id
+    }
+
+    pub fn request_definition(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = self.cmd_tx.send(Cmd::Definition { id, uri, line, col });
         id
     }
 
@@ -2282,6 +2400,27 @@ impl LspManager {
         };
         if let Some(proc) = &mut self.ty_process {
             Some(proc.request_hover(&abs_path, line, col))
+        } else {
+            None
+        }
+    }
+
+    pub fn request_definition(
+        &mut self,
+        path: &PathBuf,
+        _ext: &str,
+        line: u32,
+        col: u32,
+    ) -> Option<i32> {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        if let Some(proc) = &mut self.ty_process {
+            Some(proc.request_definition(&abs_path, line, col))
         } else {
             None
         }

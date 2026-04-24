@@ -31,12 +31,36 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
         maximized,
         ide_workspaces: app.ide_workspaces.clone(),
         ide_ignore_patterns: app.ide_ignore_patterns.clone(),
-        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+            .load(std::sync::atomic::Ordering::Relaxed),
     });
     if app.is_ide_mode {
         crate::save_panel_state(&app.ide_panel);
     }
     event_loop.exit();
+}
+
+fn module_path_from_definition_path(
+    path: &std::path::Path,
+    workspaces: &[std::path::PathBuf],
+) -> Option<String> {
+    let rel = workspaces
+        .iter()
+        .find_map(|ws| path.strip_prefix(ws).ok())
+        .unwrap_or(path);
+    let mut no_ext = rel.to_path_buf();
+    no_ext.set_extension("");
+    let parts: Vec<String> = no_ext
+        .iter()
+        .filter_map(|c| c.to_str())
+        .filter(|p| !p.is_empty() && *p != "__init__")
+        .map(|p| p.to_string())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("."))
+    }
 }
 
 impl ApplicationHandler for App {
@@ -150,7 +174,7 @@ impl ApplicationHandler for App {
 
                         if btn_save.is_hovered(mx, my) {
                             if self.save_current_file() {
-                                                                if let Some(w) = self.window.as_ref() {
+                                if let Some(w) = self.window.as_ref() {
                                     App::update_window_title(
                                         w,
                                         &self.base_title,
@@ -166,7 +190,7 @@ impl ApplicationHandler for App {
                                 } else if action == PendingAction::CloseFile {
                                     self.close_current_file();
                                 }
-                                                        }
+                            }
                         } else if btn_discard.is_hovered(mx, my) {
                             let action = self.pending_action;
                             self.close_dialog();
@@ -220,7 +244,7 @@ impl ApplicationHandler for App {
         }
 
         match event {
-                        WindowEvent::CloseRequested => {
+            WindowEvent::CloseRequested => {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
@@ -395,12 +419,12 @@ impl ApplicationHandler for App {
                     self.sticky_anim_is_adding,
                     self.is_ide_mode,
                     &self.ide_panel,
-                                            self.show_settings,
-                        self.lsp.as_ref(),
-                        &mut self.ui_registry,
-                        self.tab_scroll.current.round(),
-                        &self.highlighter.syntax_errors,
-                    );
+                    self.show_settings,
+                    self.lsp.as_ref(),
+                    &mut self.ui_registry,
+                    self.tab_scroll.current.round(),
+                    &self.highlighter.syntax_errors,
+                );
 
                 self.target_sticky_lines = target_sticky;
 
@@ -711,7 +735,7 @@ impl ApplicationHandler for App {
 
                 gl_surface.swap_buffers(gl_context).unwrap();
 
-                                if let Some(log) = self.pending_key_log.take() {
+                if let Some(log) = self.pending_key_log.take() {
                     let now = std::time::Instant::now();
                     let t_total = now.duration_since(log.t0).as_secs_f64() * 1000.0;
 
@@ -723,7 +747,9 @@ impl ApplicationHandler for App {
 
                     let render_to_swap = now.duration_since(t_render).as_secs_f64() * 1000.0;
 
-                    if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    if crate::render_view::TELEMETRY_ENABLED
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
                         println!(
                             "Key: {:?} | Total: {:.2}ms (Input->HL: {:.2}ms, HL->RenderPrep: {:.2}ms, Render+Swap: {:.2}ms)",
                             log.key, t_total, input_to_hl, hl_to_render, render_to_swap
@@ -742,7 +768,7 @@ impl ApplicationHandler for App {
             return; // Пропускаем один кадр, чтобы избежать гонок состояний
         }
 
-                let now = Instant::now();
+        let now = Instant::now();
         let raw_dt = (now - self.last_frame).as_secs_f32();
         let dt = raw_dt.min(0.016);
         self.last_frame = now;
@@ -782,11 +808,11 @@ impl ApplicationHandler for App {
             needs_redraw = true;
         }
 
-                if self.autocomplete_active && self.autocomplete_scroll.update(dt) {
+        if self.autocomplete_active && self.autocomplete_scroll.update(dt) {
             needs_redraw = true;
         }
 
-                crate::app::mouse::HOVER_STATE.with(|state| {
+        crate::app::mouse::HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(popup) = &mut state.popup {
                 if popup.scroll.update(dt) {
@@ -796,7 +822,7 @@ impl ApplicationHandler for App {
             if let Some(byte_offset) = state.byte_offset {
                 if state.popup.is_none() && state.request_id.is_none() {
                     state.timer += raw_dt;
-                                        if state.timer >= 0.2 {
+                    if state.timer >= 0.2 {
                         state.timer = 0.0;
                         if self.is_ide_mode {
                             if let Some(lsp) = &mut self.lsp {
@@ -808,18 +834,23 @@ impl ApplicationHandler for App {
                                     );
                                     state.request_id =
                                         lsp.request_hover(&path, &self.file_extension, line, col);
+                                    state.definition_request_id = lsp.request_definition(
+                                        &path,
+                                        &self.file_extension,
+                                        line,
+                                        col,
+                                    );
                                     if state.request_id.is_some() {
                                         hover_poll_pending = true;
                                     }
                                 }
                             }
                         }
-                                        } else {
-                        hover_wake_at = Some(
-                            now + std::time::Duration::from_secs_f32(0.2 - state.timer),
-                        );
+                    } else {
+                        hover_wake_at =
+                            Some(now + std::time::Duration::from_secs_f32(0.2 - state.timer));
                     }
-                } else if state.request_id.is_some() {
+                } else if state.request_id.is_some() || state.definition_request_id.is_some() {
                     hover_poll_pending = true;
                 }
             }
@@ -1069,7 +1100,7 @@ impl ApplicationHandler for App {
                     self.ide_workspaces.push(path.clone());
                     self.ide_panel.file_tree_expanded.insert(path.clone());
                     self.refresh_file_tree();
-                                        self.start_file_watcher();
+                    self.start_file_watcher();
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {
@@ -1085,7 +1116,8 @@ impl ApplicationHandler for App {
                         maximized,
                         ide_workspaces: self.ide_workspaces.clone(),
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed),
                     });
                 }
             }
@@ -1205,12 +1237,14 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
-                                crate::lsp::LspEvent::ServerReady => {}
+                crate::lsp::LspEvent::ServerReady => {}
                 crate::lsp::LspEvent::StatusChanged { .. } => {}
                 crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
-                                                                                                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
+                crate::lsp::LspEvent::HoverResponse { request_id, text } => {
                     if let Some(ref t) = text {
-                        if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                        if crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
                             println!("--- HOVER TEXT ---\n{}\n------------------", t);
                         }
                     }
@@ -1240,6 +1274,38 @@ impl ApplicationHandler for App {
                                     state.selecting = false;
                                     if let Some(w) = self.window.as_ref() {
                                         w.request_redraw();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                crate::lsp::LspEvent::DefinitionResponse { request_id, path } => {
+                    crate::app::mouse::HOVER_STATE.with(|state| {
+                        let mut state = state.borrow_mut();
+                        if state.definition_request_id == Some(request_id) {
+                            state.definition_request_id = None;
+                            if let Some(path) = path {
+                                if let Some(module_path) =
+                                    module_path_from_definition_path(&path, &self.ide_workspaces)
+                                {
+                                    if let Some(popup) = &mut state.popup {
+                                        if popup.text.starts_with("class ")
+                                            && !popup
+                                                .text
+                                                .starts_with(&(module_path.clone() + "\n"))
+                                        {
+                                            let merged = format!("{}\n{}", module_path, popup.text);
+                                            let (clean_msg, spans, line_kinds, inline_code_ranges) =
+                                                crate::lsp::highlight_hover_text(&merged);
+                                            popup.text = clean_msg;
+                                            popup.spans = spans;
+                                            popup.line_kinds = line_kinds;
+                                            popup.inline_code_ranges = inline_code_ranges;
+                                            if let Some(w) = self.window.as_ref() {
+                                                w.request_redraw();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1348,7 +1414,7 @@ impl ApplicationHandler for App {
             }
         }
 
-                let is_highlighting = !self.is_highlighted_once;
+        let is_highlighting = !self.is_highlighted_once;
         let hover_poll_wake_at = if hover_poll_pending {
             Some(now + std::time::Duration::from_millis(16))
         } else {
