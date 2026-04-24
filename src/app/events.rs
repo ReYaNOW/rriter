@@ -130,6 +130,7 @@ fn source_line<'a>(text: &'a str, line_offsets: &[usize], line_idx: usize) -> Op
 fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
+    allow_nearby_fallback: bool,
 ) -> Option<String> {
     fn source_attribute_hover_for_symbol(
         text: &str,
@@ -209,7 +210,7 @@ fn source_signature_for_hover(
             }
         }
     }
-    if def_line_idx.is_none() {
+    if allow_nearby_fallback && def_line_idx.is_none() {
         for up in 0..=24usize {
             let idx = line_idx.saturating_sub(up);
             let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
@@ -359,7 +360,7 @@ mod tests {
             .find("lifespan")
             .expect("expected test function name");
         let signature =
-            source_signature_for_hover(&editor, hover_offset).expect("expected signature");
+            source_signature_for_hover(&editor, hover_offset, true).expect("expected signature");
         assert_eq!(
             signature,
             "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
@@ -377,7 +378,7 @@ mod tests {
             .rfind("setup")
             .expect("expected setup call");
         let signature =
-            source_signature_for_hover(&editor, hover_offset).expect("expected signature");
+            source_signature_for_hover(&editor, hover_offset, true).expect("expected signature");
         assert_eq!(
             signature,
             "@classmethod\n@asynccontextmanager\nasync def setup(cls) -> AsyncGenerator[None, Any]"
@@ -394,8 +395,8 @@ mod tests {
             .get_full_text()
             .rfind("client")
             .expect("expected client usage");
-        let signature =
-            source_signature_for_hover(&editor, hover_offset).expect("expected attribute hover");
+        let signature = source_signature_for_hover(&editor, hover_offset, false)
+            .expect("expected attribute hover");
         assert_eq!(
             signature,
             "Class attribute client of FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(request_timeout=RequestTimeout(timeout=50))"
@@ -424,6 +425,20 @@ mod tests {
     }
 
     #[test]
+    fn strict_source_lookup_does_not_fallback_to_nearby_def() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str(
+            "@asynccontextmanager\nasync def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:\n    yield\n\nawait FcmSenderService.client._http_client.aclose()\n",
+        );
+        let client_offset = editor
+            .get_full_text()
+            .rfind("client")
+            .expect("expected client token");
+        let sig = source_signature_for_hover(&editor, client_offset, false);
+        assert!(sig.is_none(), "strict mode must not return unrelated def");
+    }
+
+    #[test]
     fn module_path_from_site_packages_strips_noise_segments() {
         let path = std::path::Path::new(
             "/usr/lib/python3.12/site-packages/litestar/exceptions/http_exceptions.py",
@@ -444,8 +459,16 @@ mod tests {
 }
 
 fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
+    should_replace_simple_type_hover(clean_msg) || {
+        let trimmed = clean_msg.trim_start();
+        (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
+            && clean_msg.contains("_AsyncGeneratorContextManager")
+    }
+}
+
+fn should_replace_simple_type_hover(clean_msg: &str) -> bool {
     let trimmed = clean_msg.trim_start();
-    let simple_type = !trimmed.contains('\n')
+    !trimmed.contains('\n')
         && !trimmed.contains(' ')
         && !trimmed.contains("::")
         && trimmed
@@ -454,10 +477,7 @@ fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && trimmed
             .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '.');
-    (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
-        && clean_msg.contains("_AsyncGeneratorContextManager")
-        || simple_type
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
 }
 
 impl ApplicationHandler for App {
@@ -1665,11 +1685,15 @@ impl ApplicationHandler for App {
                                         }
                                         return;
                                     }
+                                    let is_simple_type =
+                                        should_replace_simple_type_hover(&clean_msg);
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         if should_replace_hover_with_source_signature(&clean_msg) {
-                                            if let Some(sig) =
-                                                source_signature_for_hover(&self.editor, bo)
-                                            {
+                                            if let Some(sig) = source_signature_for_hover(
+                                                &self.editor,
+                                                bo,
+                                                !is_simple_type,
+                                            ) {
                                                 crate::lsp::highlight_hover_text(&sig)
                                             } else {
                                                 (clean_msg, spans, line_kinds, inline_code_ranges)
