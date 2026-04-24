@@ -183,11 +183,79 @@ fn source_signature_for_hover(
         );
     }
     if decorators.len() == 1 && decorators[0].trim() == "@asynccontextmanager" {
-        signature = format!("@asynccontextmanager {}", signature.trim_start());
+        let mut def_signature = signature.trim_start().to_string();
+        def_signature = def_signature.trim_end_matches(':').to_string();
+        def_signature = wrap_signature_after_first_param(&def_signature, "", "async def ");
+        signature = format!("@asynccontextmanager\n{}", def_signature.trim_start());
     } else if !decorators.is_empty() {
         signature = format!("{}\n{}", decorators.join("\n"), signature);
     }
     Some(signature)
+}
+
+fn wrap_signature_after_first_param(
+    signature: &str,
+    line_prefix: &str,
+    def_prefix: &str,
+) -> String {
+    if !signature.starts_with(line_prefix) {
+        return signature.to_string();
+    }
+    let def_part = &signature[line_prefix.len()..];
+    if !def_part.starts_with(def_prefix) || def_part.contains('\n') {
+        return signature.to_string();
+    }
+    let Some(open_rel) = def_part.find('(') else {
+        return signature.to_string();
+    };
+    let Some(close_rel) = def_part.rfind(')') else {
+        return signature.to_string();
+    };
+    if close_rel <= open_rel {
+        return signature.to_string();
+    }
+    let params = &def_part[open_rel + 1..close_rel];
+    let Some(first_comma_rel) = params.find(',') else {
+        return signature.to_string();
+    };
+    let comma_abs = line_prefix.len() + open_rel + 1 + first_comma_rel;
+    let head = &signature[..=comma_abs];
+    let tail = signature[comma_abs + 1..].trim_start();
+    let indent = " ".repeat(open_rel + 1);
+    format!("{head}\n{indent}{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{source_signature_for_hover, wrap_signature_after_first_param};
+
+    #[test]
+    fn wraps_asynccontextmanager_signature_after_first_param() {
+        let raw = "async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]";
+        let wrapped = wrap_signature_after_first_param(raw, "", "async def ");
+        assert_eq!(
+            wrapped,
+            "async def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+    }
+
+    #[test]
+    fn asynccontextmanager_source_signature_is_split_into_lines() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str(
+            "@asynccontextmanager\nasync def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:\n    yield\n",
+        );
+        let hover_offset = editor
+            .get_full_text()
+            .find("lifespan")
+            .expect("expected test function name");
+        let signature =
+            source_signature_for_hover(&editor, hover_offset).expect("expected signature");
+        assert_eq!(
+            signature,
+            "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+    }
 }
 
 fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {

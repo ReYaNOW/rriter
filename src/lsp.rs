@@ -98,13 +98,14 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    if msg.contains(":param ") || looks_like_python_hover(msg) {
+    let preprocessed = preprocess_hover_text(msg);
+    if preprocessed.contains(":param ") || looks_like_python_hover(&preprocessed) {
         let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
-            crate::languages::python::highlight_python_hover_doc(msg);
+            crate::languages::python::highlight_python_hover_doc(&preprocessed);
         spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
-    let clean_msg = normalize_hover_text(msg);
+    let clean_msg = normalize_hover_text(&preprocessed);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
@@ -197,12 +198,44 @@ pub fn highlight_hover_text(
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
+fn preprocess_hover_text(msg: &str) -> String {
+    let mut out = String::new();
+    for line in msg.replace('\r', "").lines() {
+        if let Some(normalized) = normalize_asynccontextmanager_signature_line(line.trim()) {
+            out.push_str(&normalized);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
 fn looks_like_python_hover(msg: &str) -> bool {
-    let Some(first_non_empty) = msg.lines().find(|line| !line.trim().is_empty()) else {
+    let mut non_empty = msg
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.is_empty());
+    let Some(first_non_empty) = non_empty.next() else {
         return false;
     };
-    let first = first_non_empty.trim_start();
-    first.starts_with("def ") || first.starts_with("async def ") || first.starts_with("class ")
+    if first_non_empty.starts_with("def ")
+        || first_non_empty.starts_with("async def ")
+        || first_non_empty.starts_with("class ")
+    {
+        return true;
+    }
+    if first_non_empty.starts_with('@')
+        && (first_non_empty.contains(" def ") || first_non_empty.contains(" async def "))
+    {
+        return true;
+    }
+    if first_non_empty.starts_with('@') {
+        if let Some(next_non_empty) = non_empty.next() {
+            return next_non_empty.starts_with("def ") || next_non_empty.starts_with("async def ");
+        }
+    }
+    false
 }
 
 fn looks_like_python_code_line(line: &str) -> bool {
@@ -631,6 +664,11 @@ fn normalize_hover_text(msg: &str) -> String {
             out.push('\n');
             continue;
         }
+        if let Some(normalized) = normalize_asynccontextmanager_signature_line(trimmed) {
+            out.push_str(&normalized);
+            out.push('\n');
+            continue;
+        }
         if trimmed == "```" || trimmed == "```python" {
             in_fence = !in_fence;
             continue;
@@ -652,6 +690,41 @@ fn normalize_hover_text(msg: &str) -> String {
         out.push('\n');
     }
     out.trim_end().to_string()
+}
+
+fn wrap_signature_after_first_param(signature: &str, def_prefix: &str) -> String {
+    if !signature.starts_with(def_prefix) || signature.contains('\n') {
+        return signature.to_string();
+    }
+    let Some(open_rel) = signature.find('(') else {
+        return signature.to_string();
+    };
+    let Some(close_rel) = signature.rfind(')') else {
+        return signature.to_string();
+    };
+    if close_rel <= open_rel {
+        return signature.to_string();
+    }
+    let params = &signature[open_rel + 1..close_rel];
+    let Some(first_comma_rel) = params.find(',') else {
+        return signature.to_string();
+    };
+    let comma_abs = open_rel + 1 + first_comma_rel;
+    let head = &signature[..=comma_abs];
+    let tail = signature[comma_abs + 1..].trim_start();
+    let indent = " ".repeat(open_rel + 1);
+    format!("{head}\n{indent}{tail}")
+}
+
+fn normalize_asynccontextmanager_signature_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let def_part = trimmed.strip_prefix("@asynccontextmanager ")?;
+    if !def_part.starts_with("async def ") {
+        return None;
+    }
+    let def_part = def_part.trim_end_matches(':');
+    let wrapped = wrap_signature_after_first_param(def_part, "async def ");
+    Some(format!("@asynccontextmanager\n{wrapped}"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -952,6 +1025,24 @@ Special type indicating an unconstrained type.";
                 && s.end >= any_start + 3
                 && s.color == [0.545, 0.913, 0.992, 1.0]),
             "standalone typing.Any heading must be cyan",
+        );
+    }
+
+    #[test]
+    fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
+        let raw =
+            "@asynccontextmanager async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(
+            text,
+            "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+        let litestar = text.find("Litestar").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= litestar
+                && s.end >= litestar + "Litestar".len()
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "type names in signature should be cyan",
         );
     }
 }
