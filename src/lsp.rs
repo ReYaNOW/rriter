@@ -158,6 +158,7 @@ pub fn highlight_hover_text(
                     add_self_param_span_for_signature(line, offset, &mut spans);
                     add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
                 }
+                add_class_keyword_spans_for_signature(line, offset, &mut spans);
                 offset += line.len() + 1;
             }
         }
@@ -220,6 +221,25 @@ fn sanitize_hover_type_expr(mut s: &str) -> String {
     out.push_str(s);
     out = out.replace("... omitted 3 union elements", "OmittedUnionElements");
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix("<class '")?;
+    let type_name = rest.strip_suffix("'>")?.trim();
+    if type_name.is_empty() {
+        return None;
+    }
+
+    if let Some(dot) = type_name.rfind('.') {
+        let module_path = type_name[..dot].trim();
+        let class_name = type_name[dot + 1..].trim();
+        if !module_path.is_empty() && !class_name.is_empty() {
+            return Some((Some(module_path.to_string()), class_name.to_string()));
+        }
+    }
+
+    Some((None, type_name.to_string()))
 }
 
 fn normalize_bound_method_signature(line: &str) -> Option<String> {
@@ -409,6 +429,43 @@ fn add_param_name_spans_for_signature(
     }
 }
 
+fn add_class_keyword_spans_for_signature(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    let Some(after_class) = trimmed.strip_prefix("class ") else {
+        return;
+    };
+
+    let class_kw_start = line.len() - trimmed.len();
+    spans.push(crate::highlighter::ColorSpan {
+        start: line_offset + class_kw_start,
+        end: line_offset + class_kw_start + "class".len(),
+        color: [1.0, 0.474, 0.776, 1.0],
+    });
+
+    let class_name = after_class
+        .split(|c: char| c == '(' || c == ':' || c.is_whitespace())
+        .next()
+        .unwrap_or("")
+        .trim();
+    if class_name.is_empty() {
+        return;
+    }
+
+    let relative_name_start = trimmed
+        .find(class_name)
+        .unwrap_or("class ".len());
+    let class_name_start = class_kw_start + relative_name_start;
+    spans.push(crate::highlighter::ColorSpan {
+        start: line_offset + class_name_start,
+        end: line_offset + class_name_start + class_name.len(),
+        color: [0.545, 0.913, 0.992, 1.0],
+    });
+}
+
 fn add_type_bracket_neutral_spans_for_signature(
     line: &str,
     line_offset: usize,
@@ -436,6 +493,16 @@ fn normalize_hover_text(msg: &str) -> String {
         let trimmed = raw.trim();
         if let Some(normalized) = normalize_bound_method_signature(trimmed) {
             out.push_str(&normalized);
+            out.push('\n');
+            continue;
+        }
+        if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
+            if let Some(module_path) = module_path {
+                out.push_str(&module_path);
+                out.push('\n');
+            }
+            out.push_str("class ");
+            out.push_str(&class_name);
             out.push('\n');
             continue;
         }
@@ -603,6 +670,47 @@ Append object to the end of the list.";
                 s.start <= object_start && s.end >= object_start + 6 && s.color == [0.973, 0.584, 0.502, 1.0]
             ),
             "argument names should be orange",
+        );
+    }
+
+    #[test]
+    fn class_object_repr_is_normalized_and_highlighted() {
+        let raw = "<class 'CoreMiddleware'>";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "class CoreMiddleware");
+
+        let class_kw = text.find("class").unwrap_or(0);
+        let class_name = text.find("CoreMiddleware").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= class_kw && s.end >= class_kw + 5 && s.color == [1.0, 0.474, 0.776, 1.0]
+            ),
+            "`class` keyword should be pink",
+        );
+        assert!(
+            spans.iter().any(|s|
+                s.start <= class_name
+                    && s.end >= class_name + "CoreMiddleware".len()
+                    && s.color == [0.545, 0.913, 0.992, 1.0]
+            ),
+            "class name should be cyan",
+        );
+    }
+
+    #[test]
+    fn qualified_class_object_repr_prepends_module_path() {
+        let raw = "<class 'car_wash.utils.middlewares.CoreMiddleware'>";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "car_wash.utils.middlewares\nclass CoreMiddleware");
+
+        let class_line_offset = text.find("class ").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s|
+                s.start <= class_line_offset
+                    && s.end >= class_line_offset + 5
+                    && s.color == [1.0, 0.474, 0.776, 1.0]
+            ),
+            "class keyword should remain highlighted on normalized second line",
         );
     }
 }
