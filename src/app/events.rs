@@ -44,6 +44,21 @@ fn module_path_from_definition_path(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
 ) -> Option<String> {
+    let path_str = path.to_string_lossy();
+    if let Some(std_idx) = path_str.rfind("/lib/python") {
+        let stdlib_rel = &path_str[std_idx + "/lib/python".len()..];
+        let after_version = stdlib_rel
+            .split_once('/')
+            .map(|(_, tail)| tail)
+            .unwrap_or(stdlib_rel);
+        let trimmed = after_version
+            .strip_suffix(".pyi")
+            .or_else(|| after_version.strip_suffix(".py"))
+            .unwrap_or(after_version);
+        if !trimmed.is_empty() && trimmed != "__init__" {
+            return Some(trimmed.trim_start_matches('/').replace('/', "."));
+        }
+    }
     let rel = workspaces
         .iter()
         .find_map(|ws| path.strip_prefix(ws).ok())
@@ -53,7 +68,7 @@ fn module_path_from_definition_path(
     let mut parts: Vec<String> = no_ext
         .iter()
         .filter_map(|c| c.to_str())
-        .filter(|p| !p.is_empty() && *p != "__init__")
+        .filter(|p| !p.is_empty() && *p != "__init__" && *p != "/")
         .map(|p| p.to_string())
         .collect();
     if let Some(site_idx) = parts.iter().position(|p| p == "site-packages") {
@@ -97,6 +112,156 @@ fn prepend_hover_module_path(popup: &mut crate::app::mouse::HoverPopup, module_p
     new_line_kinds.push(crate::lsp::HoverLineKindPublic::Separator);
     new_line_kinds.extend(popup.line_kinds.iter().copied());
     popup.line_kinds = new_line_kinds;
+}
+
+fn source_line<'a>(text: &'a str, line_offsets: &[usize], line_idx: usize) -> Option<&'a str> {
+    let start = *line_offsets.get(line_idx)?;
+    let end = line_offsets
+        .get(line_idx + 1)
+        .copied()
+        .map(|v| v.saturating_sub(1))
+        .unwrap_or(text.len());
+    text.get(start..end)
+}
+
+fn source_signature_for_hover(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+) -> Option<String> {
+    let text = editor.get_full_text();
+    let line_idx = editor
+        .line_offsets
+        .partition_point(|&o| o <= byte_offset)
+        .saturating_sub(1);
+
+    let mut def_line_idx = None;
+    for up in 0..=10usize {
+        let idx = line_idx.saturating_sub(up);
+        let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
+        if line.starts_with("async def ") || line.starts_with("def ") {
+            def_line_idx = Some(idx);
+            break;
+        }
+    }
+    let def_line_idx = def_line_idx?;
+
+    let mut decorators = Vec::new();
+    let mut deco_idx = def_line_idx;
+    while deco_idx > 0 {
+        let prev_idx = deco_idx - 1;
+        let prev_line = source_line(&text, &editor.line_offsets, prev_idx)?.trim();
+        if prev_line.starts_with('@') {
+            decorators.push(prev_line.to_string());
+            deco_idx = prev_idx;
+            continue;
+        }
+        break;
+    }
+    decorators.reverse();
+
+    let mut sig_lines = Vec::new();
+    for idx in def_line_idx..(def_line_idx + 16).min(editor.line_offsets.len()) {
+        let line = source_line(&text, &editor.line_offsets, idx)?
+            .trim_end()
+            .to_string();
+        if line.is_empty() {
+            break;
+        }
+        sig_lines.push(line.clone());
+        if line.contains(':') {
+            break;
+        }
+    }
+    if sig_lines.is_empty() {
+        return None;
+    }
+    let mut signature = sig_lines.join("\n");
+    if signature.contains("_AsyncGeneratorContextManager[None, None]") {
+        signature = signature.replace(
+            "_AsyncGeneratorContextManager[None, None]",
+            "AsyncGenerator[None, Any]",
+        );
+    }
+    if decorators.len() == 1 && decorators[0].trim() == "@asynccontextmanager" {
+        let mut def_signature = signature.trim_start().to_string();
+        def_signature = def_signature.trim_end_matches(':').to_string();
+        def_signature = wrap_signature_after_first_param(&def_signature, "", "async def ");
+        signature = format!("@asynccontextmanager\n{}", def_signature.trim_start());
+    } else if !decorators.is_empty() {
+        signature = format!("{}\n{}", decorators.join("\n"), signature);
+    }
+    Some(signature)
+}
+
+fn wrap_signature_after_first_param(
+    signature: &str,
+    line_prefix: &str,
+    def_prefix: &str,
+) -> String {
+    if !signature.starts_with(line_prefix) {
+        return signature.to_string();
+    }
+    let def_part = &signature[line_prefix.len()..];
+    if !def_part.starts_with(def_prefix) || def_part.contains('\n') {
+        return signature.to_string();
+    }
+    let Some(open_rel) = def_part.find('(') else {
+        return signature.to_string();
+    };
+    let Some(close_rel) = def_part.rfind(')') else {
+        return signature.to_string();
+    };
+    if close_rel <= open_rel {
+        return signature.to_string();
+    }
+    let params = &def_part[open_rel + 1..close_rel];
+    let Some(first_comma_rel) = params.find(',') else {
+        return signature.to_string();
+    };
+    let comma_abs = line_prefix.len() + open_rel + 1 + first_comma_rel;
+    let head = &signature[..=comma_abs];
+    let tail = signature[comma_abs + 1..].trim_start();
+    let indent = " ".repeat(open_rel + 1);
+    format!("{head}\n{indent}{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{source_signature_for_hover, wrap_signature_after_first_param};
+
+    #[test]
+    fn wraps_asynccontextmanager_signature_after_first_param() {
+        let raw = "async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]";
+        let wrapped = wrap_signature_after_first_param(raw, "", "async def ");
+        assert_eq!(
+            wrapped,
+            "async def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+    }
+
+    #[test]
+    fn asynccontextmanager_source_signature_is_split_into_lines() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str(
+            "@asynccontextmanager\nasync def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:\n    yield\n",
+        );
+        let hover_offset = editor
+            .get_full_text()
+            .find("lifespan")
+            .expect("expected test function name");
+        let signature =
+            source_signature_for_hover(&editor, hover_offset).expect("expected signature");
+        assert_eq!(
+            signature,
+            "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+    }
+}
+
+fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
+    let trimmed = clean_msg.trim_start();
+    (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
+        && clean_msg.contains("_AsyncGeneratorContextManager")
 }
 
 impl ApplicationHandler for App {
@@ -1293,6 +1458,18 @@ impl ApplicationHandler for App {
                                 if let Some(bo) = state.byte_offset {
                                     let (clean_msg, spans, line_kinds, inline_code_ranges) =
                                         crate::lsp::highlight_hover_text(&t);
+                                    let (clean_msg, spans, line_kinds, inline_code_ranges) =
+                                        if should_replace_hover_with_source_signature(&clean_msg) {
+                                            if let Some(sig) =
+                                                source_signature_for_hover(&self.editor, bo)
+                                            {
+                                                crate::lsp::highlight_hover_text(&sig)
+                                            } else {
+                                                (clean_msg, spans, line_kinds, inline_code_ranges)
+                                            }
+                                        } else {
+                                            (clean_msg, spans, line_kinds, inline_code_ranges)
+                                        };
                                     let popup = crate::app::mouse::HoverPopup {
                                         text: clean_msg,
                                         spans,

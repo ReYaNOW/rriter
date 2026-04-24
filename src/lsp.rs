@@ -98,13 +98,14 @@ pub fn highlight_hover_text(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    if msg.contains(":param ") || looks_like_python_hover(msg) {
+    let preprocessed = preprocess_hover_text(msg);
+    if preprocessed.contains(":param ") || looks_like_python_hover(&preprocessed) {
         let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
-            crate::languages::python::highlight_python_hover_doc(msg);
+            crate::languages::python::highlight_python_hover_doc(&preprocessed);
         spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
-    let clean_msg = normalize_hover_text(msg);
+    let clean_msg = normalize_hover_text(&preprocessed);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
@@ -116,7 +117,8 @@ pub fn highlight_hover_text(
 
                 if let Some(query) = query_opt.as_ref() {
                     let mut offset = 0usize;
-                    for line in clean_msg.lines() {
+                    let lines: Vec<&str> = clean_msg.lines().collect();
+                    for (line_idx, line) in lines.iter().enumerate() {
                         if add_bound_method_signature_spans(line, offset, &mut spans) {
                             offset += line.len() + 1;
                             continue;
@@ -164,6 +166,13 @@ pub fn highlight_hover_text(
                             add_param_name_spans_for_signature(line, offset, &mut spans);
                             add_self_param_span_for_signature(line, offset, &mut spans);
                             add_type_bracket_neutral_spans_for_signature(line, offset, &mut spans);
+                        } else if looks_like_type_expr_line(line) {
+                            add_type_expr_spans_for_line(line, offset, &mut spans);
+                        } else if looks_like_simple_type_name_line(
+                            line,
+                            lines.get(line_idx + 1).copied(),
+                        ) {
+                            add_type_expr_spans_for_line(line, offset, &mut spans);
                         }
                         add_class_keyword_spans_for_signature(line, offset, &mut spans);
                         offset += line.len() + 1;
@@ -189,12 +198,44 @@ pub fn highlight_hover_text(
     (clean_msg, spans, line_kinds, Vec::new())
 }
 
+fn preprocess_hover_text(msg: &str) -> String {
+    let mut out = String::new();
+    for line in msg.replace('\r', "").lines() {
+        if let Some(normalized) = normalize_asynccontextmanager_signature_line(line.trim()) {
+            out.push_str(&normalized);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
 fn looks_like_python_hover(msg: &str) -> bool {
-    let Some(first_non_empty) = msg.lines().find(|line| !line.trim().is_empty()) else {
+    let mut non_empty = msg
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.is_empty());
+    let Some(first_non_empty) = non_empty.next() else {
         return false;
     };
-    let first = first_non_empty.trim_start();
-    first.starts_with("def ") || first.starts_with("async def ") || first.starts_with("class ")
+    if first_non_empty.starts_with("def ")
+        || first_non_empty.starts_with("async def ")
+        || first_non_empty.starts_with("class ")
+    {
+        return true;
+    }
+    if first_non_empty.starts_with('@')
+        && (first_non_empty.contains(" def ") || first_non_empty.contains(" async def "))
+    {
+        return true;
+    }
+    if first_non_empty.starts_with('@') {
+        if let Some(next_non_empty) = non_empty.next() {
+            return next_non_empty.starts_with("def ") || next_non_empty.starts_with("async def ");
+        }
+    }
+    false
 }
 
 fn looks_like_python_code_line(line: &str) -> bool {
@@ -215,6 +256,42 @@ fn looks_like_python_code_line(line: &str) -> bool {
         || t.starts_with("import ")
         || t.starts_with("from "))
         && (t.contains('(') || t.contains(':') || t.contains('='))
+}
+
+fn looks_like_type_expr_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() || t.starts_with('#') {
+        return false;
+    }
+    if !(t.contains('[') && t.contains(']')) {
+        return false;
+    }
+    if t.contains("->") || t.contains('(') || t.contains(')') || t.contains(':') {
+        return false;
+    }
+    t.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' '))
+}
+
+fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool {
+    let t = line.trim();
+    if t.is_empty() || t.contains(' ') {
+        return false;
+    }
+    if !t
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
+    {
+        return false;
+    }
+    if !t
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    {
+        return false;
+    }
+    matches!(next_line.map(str::trim), Some("---"))
 }
 
 fn sanitize_hover_type_expr(mut s: &str) -> String {
@@ -258,6 +335,22 @@ fn normalize_class_object_repr(line: &str) -> Option<(Option<String>, String)> {
     }
 
     Some((None, type_name.to_string()))
+}
+
+fn normalize_module_object_repr(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let unquoted = trimmed.trim_matches('`').trim();
+    let start = unquoted.find("<module '")?;
+    let rest = &unquoted[start + "<module '".len()..];
+    let end = rest.find("'>")?;
+    if !unquoted[..start].trim().is_empty() || !rest[end + 2..].trim().is_empty() {
+        return None;
+    }
+    let module_path = rest[..end].trim();
+    if module_path.is_empty() {
+        return None;
+    }
+    Some(module_path.to_string())
 }
 
 fn normalize_bound_method_signature(line: &str) -> Option<String> {
@@ -505,6 +598,46 @@ fn add_type_bracket_neutral_spans_for_signature(
     }
 }
 
+fn add_type_expr_spans_for_line(
+    line: &str,
+    line_offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let type_color = [0.545, 0.913, 0.992, 1.0];
+    let neutral_color = [0.972, 0.972, 0.949, 1.0];
+    let mut run_start: Option<usize> = None;
+    for (idx, ch) in line.char_indices() {
+        let is_type_char = ch.is_alphanumeric() || ch == '_' || ch == '.';
+        if is_type_char {
+            if run_start.is_none() {
+                run_start = Some(idx);
+            }
+            continue;
+        }
+        if let Some(start) = run_start.take() {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_offset + start,
+                end: line_offset + idx,
+                color: type_color,
+            });
+        }
+        if matches!(ch, '[' | ']') {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_offset + idx,
+                end: line_offset + idx + ch.len_utf8(),
+                color: neutral_color,
+            });
+        }
+    }
+    if let Some(start) = run_start {
+        spans.push(crate::highlighter::ColorSpan {
+            start: line_offset + start,
+            end: line_offset + line.len(),
+            color: type_color,
+        });
+    }
+}
+
 fn normalize_hover_text(msg: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
@@ -522,6 +655,17 @@ fn normalize_hover_text(msg: &str) -> String {
             }
             out.push_str("class ");
             out.push_str(&class_name);
+            out.push('\n');
+            continue;
+        }
+        if let Some(module_path) = normalize_module_object_repr(trimmed) {
+            out.push_str("[[MODULE]] ");
+            out.push_str(&module_path);
+            out.push('\n');
+            continue;
+        }
+        if let Some(normalized) = normalize_asynccontextmanager_signature_line(trimmed) {
+            out.push_str(&normalized);
             out.push('\n');
             continue;
         }
@@ -546,6 +690,41 @@ fn normalize_hover_text(msg: &str) -> String {
         out.push('\n');
     }
     out.trim_end().to_string()
+}
+
+fn wrap_signature_after_first_param(signature: &str, def_prefix: &str) -> String {
+    if !signature.starts_with(def_prefix) || signature.contains('\n') {
+        return signature.to_string();
+    }
+    let Some(open_rel) = signature.find('(') else {
+        return signature.to_string();
+    };
+    let Some(close_rel) = signature.rfind(')') else {
+        return signature.to_string();
+    };
+    if close_rel <= open_rel {
+        return signature.to_string();
+    }
+    let params = &signature[open_rel + 1..close_rel];
+    let Some(first_comma_rel) = params.find(',') else {
+        return signature.to_string();
+    };
+    let comma_abs = open_rel + 1 + first_comma_rel;
+    let head = &signature[..=comma_abs];
+    let tail = signature[comma_abs + 1..].trim_start();
+    let indent = " ".repeat(open_rel + 1);
+    format!("{head}\n{indent}{tail}")
+}
+
+fn normalize_asynccontextmanager_signature_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let def_part = trimmed.strip_prefix("@asynccontextmanager ")?;
+    if !def_part.starts_with("async def ") {
+        return None;
+    }
+    let def_part = def_part.trim_end_matches(':');
+    let wrapped = wrap_signature_after_first_param(def_part, "async def ");
+    Some(format!("@asynccontextmanager\n{wrapped}"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -766,6 +945,105 @@ Append object to the end of the list.";
         let raw = "`<class 'car_wash.utils.middlewares.CoreMiddleware'>`";
         let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
         assert_eq!(text, "car_wash.utils.middlewares\nclass CoreMiddleware");
+    }
+
+    #[test]
+    fn generic_type_line_gets_cyan_types_and_white_brackets() {
+        let raw = "dict[str, Provide]";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "dict[str, Provide]");
+
+        let dict_start = text.find("dict").unwrap_or(0);
+        let str_start = text.find("str").unwrap_or(0);
+        let provide_start = text.find("Provide").unwrap_or(0);
+        let l_bracket = text.find('[').unwrap_or(0);
+        let r_bracket = text.find(']').unwrap_or(0);
+        let cyan = [0.545, 0.913, 0.992, 1.0];
+        let white = [0.972, 0.972, 0.949, 1.0];
+
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= dict_start && s.end >= dict_start + 4 && s.color == cyan));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.color == cyan));
+        assert!(spans.iter().any(|s| s.start <= provide_start
+            && s.end >= provide_start + "Provide".len()
+            && s.color == cyan));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white));
+        assert!(spans
+            .iter()
+            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+    }
+
+    #[test]
+    fn module_object_repr_is_normalized_to_module_header() {
+        let raw = "<module 'car_wash.domains.policies.controller'>";
+        let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "[[MODULE]] car_wash.domains.policies.controller");
+    }
+
+    #[test]
+    fn builtin_dict_class_hover_is_normalized_without_angle_brackets() {
+        let raw = "<class 'dict'>\n\
+dict() -> new empty dictionary";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert!(text.starts_with("class dict"));
+        assert!(!text.contains("<class"));
+        assert!(
+            spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]),
+            "keyword highlight should exist for normalized class heading",
+        );
+    }
+
+    #[test]
+    fn builtin_str_heading_line_is_highlighted_as_type() {
+        let raw = "str\n\
+---------------------------------------------\n\
+str(object='') -> str";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let str_start = text.find("str").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= str_start
+                && s.end >= str_start + 3
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "standalone builtin type heading must be cyan",
+        );
+    }
+
+    #[test]
+    fn builtin_any_heading_line_is_highlighted_as_type() {
+        let raw = "Any\n\
+---------------------------------------------\n\
+Special type indicating an unconstrained type.";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        let any_start = text.find("Any").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= any_start
+                && s.end >= any_start + 3
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "standalone typing.Any heading must be cyan",
+        );
+    }
+
+    #[test]
+    fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
+        let raw =
+            "@asynccontextmanager async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(
+            text,
+            "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
+        );
+        let litestar = text.find("Litestar").unwrap_or(0);
+        assert!(
+            spans.iter().any(|s| s.start <= litestar
+                && s.end >= litestar + "Litestar".len()
+                && s.color == [0.545, 0.913, 0.992, 1.0]),
+            "type names in signature should be cyan",
+        );
     }
 }
 
