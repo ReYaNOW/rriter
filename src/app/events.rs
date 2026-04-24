@@ -858,7 +858,7 @@ impl ApplicationHandler for App {
             if let Some(byte_offset) = state.byte_offset {
                 if state.popup.is_none() && state.request_id.is_none() {
                     state.timer += raw_dt;
-                    if state.timer >= 0.2 {
+                    if state.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
                         state.timer = 0.0;
                         if self.is_ide_mode {
                             if let Some(lsp) = &mut self.lsp {
@@ -877,8 +877,11 @@ impl ApplicationHandler for App {
                             }
                         }
                     } else {
-                        hover_wake_at =
-                            Some(now + std::time::Duration::from_secs_f32(0.2 - state.timer));
+                        hover_wake_at = Some(
+                            now + std::time::Duration::from_secs_f32(
+                                crate::app::mouse::HOVER_REQUEST_DELAY_SEC - state.timer,
+                            ),
+                        );
                     }
                 } else if state.request_id.is_some() || state.definition_request_id.is_some() {
                     hover_poll_pending = true;

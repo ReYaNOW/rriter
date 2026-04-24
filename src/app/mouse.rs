@@ -55,6 +55,8 @@ thread_local! {
     pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
 }
 
+pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.08;
+
 pub fn clear_hover_popup() -> bool {
     HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
