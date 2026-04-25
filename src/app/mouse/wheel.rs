@@ -12,7 +12,7 @@ impl App {
             MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
-                let mut consumed_by_diag = false;
+        let mut consumed_by_diag = false;
         if let Some(renderer) = self.renderer.as_mut() {
             if let Some(rect) = renderer.last_diag_popup_rect {
                 let mx = renderer.last_mouse_x;

@@ -1,7 +1,7 @@
 use super::*;
 
 impl Renderer {
-        pub(crate) fn build_hover_popup_layout(
+    pub(crate) fn build_hover_popup_layout(
         &mut self,
         popup: &crate::app::mouse::HoverPopup,
         max_text_w: f32,
@@ -194,10 +194,10 @@ impl Renderer {
         let lines = &layout.lines;
         let module_prefix_chars: Vec<char> = "[[MODULE]] ".chars().collect();
 
-                let attached_diag = self
+        let attached_diag = self
             .last_diag_popup_rect
             .map(|(rx, ry, rw, rh, _, _, _)| (rx, ry, rw, rh));
-                let mut box_w = layout.max_line_w + pad * 2.0;
+        let mut box_w = layout.max_line_w + pad * 2.0;
         if let Some((_, _, diag_w, _)) = attached_diag {
             box_w = box_w.max(diag_w);
         }
@@ -262,7 +262,7 @@ impl Renderer {
         let max_scroll = (layout.total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
 
-                if attached_diag.is_none() {
+        if attached_diag.is_none() {
             self.push_rounded_rect(
                 bx.round() - 1.0,
                 by.round() - 1.0,

@@ -316,7 +316,7 @@ impl App {
             } else {
                 38.0 * s
             };
-                        let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+            let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
             let px = position.x as f32;
             let py = position.y as f32;
             let mut diag_hover_byte = None;
@@ -366,21 +366,22 @@ impl App {
                         let mut start_found = false;
                         let mut end_found = false;
 
-                        self.editor.utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
-                            if !start_found && utf16_before >= start_col {
-                                x_start_px = cur_x;
-                                start_found = true;
-                            }
-                            if !end_found && utf16_before >= end_col {
-                                x_end_px = cur_x;
-                                end_found = true;
-                            }
-                            cur_x += if ch == '\t' {
-                                self.renderer.as_mut().unwrap().char_advance(' ') * 4.0
-                            } else {
-                                self.renderer.as_mut().unwrap().char_advance(ch)
-                            };
-                        });
+                        self.editor
+                            .utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
+                                if !start_found && utf16_before >= start_col {
+                                    x_start_px = cur_x;
+                                    start_found = true;
+                                }
+                                if !end_found && utf16_before >= end_col {
+                                    x_end_px = cur_x;
+                                    end_found = true;
+                                }
+                                cur_x += if ch == '\t' {
+                                    self.renderer.as_mut().unwrap().char_advance(' ') * 4.0
+                                } else {
+                                    self.renderer.as_mut().unwrap().char_advance(ch)
+                                };
+                            });
 
                         if !start_found {
                             x_start_px = cur_x;
@@ -397,7 +398,7 @@ impl App {
                             continue;
                         }
 
-                                                let line_start = self.editor.line_offsets[line];
+                        let line_start = self.editor.line_offsets[line];
                         let line_end = self
                             .editor
                             .line_offsets
@@ -410,16 +411,17 @@ impl App {
                         let mut start_byte_found = false;
                         let mut end_byte_found = false;
 
-                        self.editor.utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
-                            if !start_byte_found && utf16_before >= start_col {
-                                start_byte = pos;
-                                start_byte_found = true;
-                            }
-                            if !end_byte_found && utf16_before >= end_col {
-                                end_byte = pos;
-                                end_byte_found = true;
-                            }
-                        });
+                        self.editor
+                            .utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
+                                if !start_byte_found && utf16_before >= start_col {
+                                    start_byte = pos;
+                                    start_byte_found = true;
+                                }
+                                if !end_byte_found && utf16_before >= end_col {
+                                    end_byte = pos;
+                                    end_byte_found = true;
+                                }
+                            });
 
                         if !start_byte_found {
                             start_byte = line_start;

@@ -1599,7 +1599,7 @@ impl Renderer {
             }
         }
 
-                // LSP squiggles — волнистые подчёркивания диагностик
+        // LSP squiggles — волнистые подчёркивания диагностик
         self.hovered_diags_cache.clear();
         let mut hovered_diag_type_target = None;
         if !lsp_diagnostics.is_empty() {
@@ -1634,12 +1634,12 @@ impl Renderer {
 
                 // Точный расчёт X-позиции: идём по символам строки, считая UTF-16 единицы
                 let avg_adv = self.char_advance('a');
-                                                let display_end_col = if diag.end_line == diag.start_line {
+                let display_end_col = if diag.end_line == diag.start_line {
                     diag.end_col
                 } else {
                     u32::MAX
                 };
-                                let diag_hover_range = crate::app::mouse::diagnostic_hover_byte_range_on_line(
+                let diag_hover_range = crate::app::mouse::diagnostic_hover_byte_range_on_line(
                     editor,
                     line,
                     diag.start_col,
@@ -1681,7 +1681,7 @@ impl Renderer {
                     };
                 }
 
-                                let mut hit_x_start_px = x_start_px;
+                let mut hit_x_start_px = x_start_px;
                 let mut hit_x_end_px = x_end_px;
                 let mut hit_cur_x = 0.0f32;
                 let mut hit_start_found = hit_start_byte.is_none();
@@ -1739,7 +1739,7 @@ impl Renderer {
                         if self.last_hovered_diags.contains(&idx) {
                             in_hitbox = true;
                         }
-                                        } else if mx >= hit_x_start
+                    } else if mx >= hit_x_start
                         && mx <= hit_x_start + hit_w
                         && my >= squiggle_hit_y_top
                         && my <= squiggle_hit_y_bottom
@@ -1748,7 +1748,7 @@ impl Renderer {
                     }
                 }
 
-                                                if in_hitbox {
+                if in_hitbox {
                     if hovered_diag_type_target.is_none() {
                         hovered_diag_type_target = hit_type_target;
                     }
@@ -2258,7 +2258,7 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-                        if let Some(byte_offset) = hovered_diag_type_target {
+        if let Some(byte_offset) = hovered_diag_type_target {
             crate::app::mouse::HOVER_STATE.with(|s| {
                 let mut state = s.borrow_mut();
                 if state.byte_offset != Some(byte_offset) {
@@ -2276,7 +2276,7 @@ impl Renderer {
             });
         }
 
-                let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset) =
+        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset) =
             crate::app::mouse::HOVER_STATE.with(|s| {
                 let state = s.borrow();
                 (
@@ -2284,7 +2284,11 @@ impl Renderer {
                     state.request_id.is_some() || state.definition_request_id.is_some(),
                     state.timer,
                     state.byte_offset.is_some(),
-                    state.popup.as_ref().map(|p| p.byte_offset).or(state.byte_offset),
+                    state
+                        .popup
+                        .as_ref()
+                        .map(|p| p.byte_offset)
+                        .or(state.byte_offset),
                 )
             });
 
@@ -2299,7 +2303,9 @@ impl Renderer {
                     let mut found = None;
 
                     for (idx, diag) in lsp_diagnostics.iter().enumerate() {
-                        if hover_line < diag.start_line as usize || hover_line > diag.end_line as usize {
+                        if hover_line < diag.start_line as usize
+                            || hover_line > diag.end_line as usize
+                        {
                             continue;
                         }
 
@@ -2323,13 +2329,21 @@ impl Renderer {
                             )
                         {
                             if byte_offset >= hit_start_byte && byte_offset < hit_end_byte {
-                                found = Some((idx, diag, display_start_col, display_end_col, type_target));
+                                found = Some((
+                                    idx,
+                                    diag,
+                                    display_start_col,
+                                    display_end_col,
+                                    type_target,
+                                ));
                                 break;
                             }
                         }
                     }
 
-                    if let Some((idx, diag, display_start_col, display_end_col, type_target)) = found {
+                    if let Some((idx, diag, display_start_col, display_end_col, type_target)) =
+                        found
+                    {
                         let mut v_line_opt = None;
                         for vl in &self.visual_lines {
                             if vl.physical_line == hover_line + 1 {
@@ -2348,21 +2362,24 @@ impl Renderer {
                             let mut start_found = false;
                             let mut end_found = false;
 
-                            editor.utf16_col_to_byte_advance(hover_line, |ch, utf16_before, _pos| {
-                                if !start_found && utf16_before >= display_start_col {
-                                    x_start_px = cur_x;
-                                    start_found = true;
-                                }
-                                if !end_found && utf16_before >= display_end_col {
-                                    x_end_px = cur_x;
-                                    end_found = true;
-                                }
-                                cur_x += if ch == '\t' {
-                                    self.char_advance(' ') * 4.0
-                                } else {
-                                    self.char_advance(ch)
-                                };
-                            });
+                            editor.utf16_col_to_byte_advance(
+                                hover_line,
+                                |ch, utf16_before, _pos| {
+                                    if !start_found && utf16_before >= display_start_col {
+                                        x_start_px = cur_x;
+                                        start_found = true;
+                                    }
+                                    if !end_found && utf16_before >= display_end_col {
+                                        x_end_px = cur_x;
+                                        end_found = true;
+                                    }
+                                    cur_x += if ch == '\t' {
+                                        self.char_advance(' ') * 4.0
+                                    } else {
+                                        self.char_advance(ch)
+                                    };
+                                },
+                            );
 
                             if !start_found {
                                 x_start_px = cur_x;
@@ -2402,12 +2419,12 @@ impl Renderer {
             self.diag_hover_timer += popup_dt;
         }
 
-                                        let error_timer_ready = self.diag_hover_timer >= 0.2;
+        let error_timer_ready = self.diag_hover_timer >= 0.2;
         let waiting_for_type = has_byte_offset
             && !has_type_popup
             && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
 
-                let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
+        let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
         let show_combined = diagnostic_needs_type && has_type_popup && error_timer_ready;
         let show_error = if diagnostic_needs_type {
             show_combined
@@ -2427,7 +2444,9 @@ impl Renderer {
                     let scale = self.scale_factor;
                     let pad = 12.0 * scale;
                     let line_h = 22.0 * scale;
-                    let max_text_w = (self.width - 80.0 * scale).min(820.0 * scale).max(320.0 * scale);
+                    let max_text_w = (self.width - 80.0 * scale)
+                        .min(820.0 * scale)
+                        .max(320.0 * scale);
                     let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
                         cache.scale_factor == self.scale_factor
                             && cache.max_text_w == max_text_w
@@ -2435,7 +2454,8 @@ impl Renderer {
                             && cache.text_len == popup.text.len()
                     });
                     if !cache_valid {
-                        popup.layout_cache = Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
+                        popup.layout_cache =
+                            Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
                     }
                     if let Some(layout) = popup.layout_cache.as_ref() {
                         (
@@ -2470,7 +2490,7 @@ impl Renderer {
                 my,
                 &mut wants_pointer,
             );
-                } else {
+        } else {
             self.last_diag_popup_rect = None;
             self.max_diag_popup_scroll = 0.0;
             self.diag_popup_scroll.target = 0.0;

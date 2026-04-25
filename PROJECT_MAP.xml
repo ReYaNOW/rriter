@@ -149,10 +149,10 @@
 <s i="83" m="12" k="f" n="diagnostic_hover_byte_range_on_line" l="337" v="1" r="Option&lt;(usize, usize, usize)&gt;" in_="3" out="4"/>
 <s i="84" m="12" k="f" n="diagnostic_hover_range_on_line" l="451" v="1" r="Option&lt;(u32, u32, usize)&gt;" in_="2" out="2"/>
 <s i="85" m="12" k="f" n="normalize_hover_byte" l="486" v="1" r="Option&lt;usize&gt;" in_="5" out="2"/>
-<s i="86" m="12" k="f" n="hover_token_bounds" l="507" r="(usize, usize)" in_="3" out="2"/>
-<s i="87" m="12" k="f" n="hover_anchor_for_byte" l="583" v="1" r="(f32, f32)" in_="1" out="4"/>
-<s i="88" m="12" k="f" n="is_in_hover_popup_or_bridge" l="644" v="1" r="bool" in_="7"/>
-<s i="89" m="12" k="f" n="hover_popup_byte_at" l="706" r="usize" in_="2" out="2"/>
+<s i="86" m="12" k="f" n="hover_token_bounds" l="510" r="(usize, usize)" in_="3" out="2"/>
+<s i="87" m="12" k="f" n="hover_anchor_for_byte" l="586" v="1" r="(f32, f32)" in_="1" out="4"/>
+<s i="88" m="12" k="f" n="is_in_hover_popup_or_bridge" l="647" v="1" r="bool" in_="7"/>
+<s i="89" m="12" k="f" n="hover_popup_byte_at" l="709" r="usize" in_="2" out="2"/>
 <s i="90" m="13" k="t" n="Cell" x="struct:{ c: char, fg: u8, bg: u8 }"/>
 <s i="91" m="13" k="t" n="TermGrid" x="struct:{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, +19 }"/>
 <s i="92" m="13" k="t" n="Terminal" x="struct:{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }"/>

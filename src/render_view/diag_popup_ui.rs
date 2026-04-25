@@ -55,7 +55,7 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
 }
 
 impl Renderer {
-        pub fn draw_diagnostic_popup(
+    pub fn draw_diagnostic_popup(
         &mut self,
         lsp_diagnostics: &[Diagnostic],
         ide_panel: &IdePanelState,
@@ -228,13 +228,15 @@ impl Renderer {
             parsed_diags.push((lines, source_on_new_line, last_line_w, line_count));
         }
 
-                total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
+        total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
         let total_content_h = total_h;
-        let total_h = total_content_h.min(self.height * 0.30).min(self.height - 60.0 * s);
+        let total_h = total_content_h
+            .min(self.height * 0.30)
+            .min(self.height - 60.0 * s);
         self.max_diag_popup_scroll = (total_content_h - total_h).max(0.0);
         self.diag_popup_scroll
             .clamp_target(0.0, self.max_diag_popup_scroll);
-                        let scroll_y = self.diag_popup_scroll.current;
+        let scroll_y = self.diag_popup_scroll.current;
         let mut box_w = global_max_w;
         if attached_hover_w > box_w {
             box_w = attached_hover_w;
@@ -257,8 +259,8 @@ impl Renderer {
         if bx < 20.0 * s {
             bx = 20.0 * s;
         }
-                let combined_h = total_h + combined_hover_h;
-                let by = (first_line_y_top - combined_h - 8.0 * s).max(10.0 * s);
+        let combined_h = total_h + combined_hover_h;
+        let by = (first_line_y_top - combined_h - 8.0 * s).max(10.0 * s);
 
         self.last_diag_popup_rect = Some((
             bx,
@@ -285,7 +287,7 @@ impl Renderer {
             ui_registry.reset_cursor_state();
         }
 
-                        self.push_rounded_rect(
+        self.push_rounded_rect(
             bx.round() - 1.0,
             by.round() - 1.0,
             box_w.round() + 2.0,
@@ -532,7 +534,7 @@ impl Renderer {
                 my,
             );
 
-                        current_y += total_text_h + line_h * 0.5;
+            current_y += total_text_h + line_h * 0.5;
         }
 
         self.flush();

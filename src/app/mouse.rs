@@ -13,7 +13,7 @@ pub struct HoverPopup {
     pub spans: Vec<crate::highlighter::ColorSpan>,
     pub line_kinds: Vec<crate::lsp::HoverLineKindPublic>,
     pub inline_code_ranges: Vec<(usize, usize)>,
-        pub byte_offset: usize,
+    pub byte_offset: usize,
     pub anchor_x: f32,
     pub anchor_y: f32,
     pub offset_x: Option<f32>,
@@ -79,7 +79,7 @@ impl Default for HoverState {
 
 #[cfg(test)]
 mod tests {
-            use super::{
+    use super::{
         diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
         is_in_hover_popup_or_bridge, normalize_hover_byte,
     };
@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(normalize_hover_byte(&editor, handlers - 1), Some(handlers));
     }
 
-        #[test]
+    #[test]
     fn hover_byte_ignores_python_keywords_so_diagnostics_can_show() {
         let mut editor = crate::editor::Editor::new(128);
         editor.insert_str("    else:\n        raise ValueError()\n");
@@ -122,14 +122,14 @@ mod tests {
         let f_string_col = text[..f_string_offset].encode_utf16().count() as u32;
         let f_string_end_col = f_string_col + "f'513'".encode_utf16().count() as u32;
 
-                let range =
+        let range =
             diagnostic_hover_range_on_line(&editor, 0, literal_col, literal_col + 3).unwrap();
         let byte_range =
             diagnostic_hover_byte_range_on_line(&editor, 0, literal_col, literal_col + 3).unwrap();
 
         assert_eq!(range.0, f_string_col);
         assert_eq!(range.1, f_string_end_col);
-                assert_eq!(byte_range.0, f_string_offset);
+        assert_eq!(byte_range.0, f_string_offset);
         assert_eq!(byte_range.1, f_string_offset + "f'513'".len());
         assert!(literal_offset >= byte_range.0);
         assert!(literal_offset + "513".len() <= byte_range.1);
@@ -483,7 +483,10 @@ pub(crate) fn diagnostic_hover_range_on_line(
     Some((out_start_col, out_end_col, target_byte))
 }
 
-pub(crate) fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> Option<usize> {
+pub(crate) fn normalize_hover_byte(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+) -> Option<usize> {
     let normalized = if is_hover_target_byte(editor, byte_offset) {
         Some(byte_offset)
     } else if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {
