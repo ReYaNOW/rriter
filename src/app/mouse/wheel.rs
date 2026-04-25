@@ -12,6 +12,26 @@ impl App {
             MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
             MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
         };
+                let mut consumed_by_diag = false;
+        if let Some(renderer) = self.renderer.as_mut() {
+            if let Some(rect) = renderer.last_diag_popup_rect {
+                let mx = renderer.last_mouse_x;
+                let my = renderer.last_mouse_y;
+                if mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3 {
+                    renderer.diag_popup_scroll.anim_speed = 7.0;
+                    renderer.diag_popup_scroll.scroll_by(dy);
+                    renderer
+                        .diag_popup_scroll
+                        .clamp_target(0.0, renderer.max_diag_popup_scroll);
+                    consumed_by_diag = true;
+                }
+            }
+        }
+        if consumed_by_diag {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         let mut consumed_by_hover = false;
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();

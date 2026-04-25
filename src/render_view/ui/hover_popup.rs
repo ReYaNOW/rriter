@@ -1,7 +1,7 @@
 use super::*;
 
 impl Renderer {
-    fn build_hover_popup_layout(
+        pub(crate) fn build_hover_popup_layout(
         &mut self,
         popup: &crate::app::mouse::HoverPopup,
         max_text_w: f32,
@@ -194,12 +194,18 @@ impl Renderer {
         let lines = &layout.lines;
         let module_prefix_chars: Vec<char> = "[[MODULE]] ".chars().collect();
 
-        let box_w = layout.max_line_w + pad * 2.0;
-        let max_visible_h = (self.height * 0.45).min(layout.total_text_h + pad * 2.0);
+                let attached_diag = self
+            .last_diag_popup_rect
+            .map(|(rx, ry, rw, rh, _, _, _)| (rx, ry, rw, rh));
+        let mut box_w = layout.max_line_w + pad * 2.0;
+        if let Some((_, _, diag_w, _)) = attached_diag {
+            box_w = box_w.max(diag_w);
+        }
+        let max_visible_h = (self.height * 0.35).min(layout.total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
         let mut bx = popup.anchor_x;
-        if let Some((rx, _, _, _, _, _, _)) = self.last_diag_popup_rect {
+        if let Some((rx, _, _, _)) = attached_diag {
             bx = rx;
         }
         if bx + box_w > self.width - 20.0 * s {
@@ -215,34 +221,12 @@ impl Renderer {
         let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
         let line_top_y = (vis_line_idx * self.line_height) - render_scroll_y;
 
-        let prefer_below = line_top_y - (self.height * 0.45) - 8.0 * s < 0.0;
-        let mut by = if prefer_below {
-            line_top_y + self.line_height + 8.0 * s
-        } else {
-            line_top_y - box_h - 8.0 * s
-        };
+                        let mut by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
 
-        if let Some((_, ry, _, rh, _, _, _)) = self.last_diag_popup_rect {
-            let diag_y = ry;
-            let diag_h = rh;
-            if prefer_below {
-                by = diag_y + diag_h + 6.0 * s;
-            } else {
-                by = diag_y - box_h - 6.0 * s;
-            }
-            if by < 0.0 {
-                if prefer_below || diag_y < line_top_y + self.line_height * 0.5 {
-                    by = line_top_y + self.line_height + 8.0 * s;
-                } else {
-                    by = diag_y + diag_h + 6.0 * s;
-                }
-            }
-        } else if !prefer_below && by < 0.0 {
-            by = line_top_y + self.line_height + 8.0 * s;
-        }
-
-        if by + box_h > self.height - 20.0 * s {
-            by = (self.height - box_h - 20.0 * s).max(10.0 * s);
+        if let Some((_, diag_y, _, diag_h)) = attached_diag {
+            by = diag_y + diag_h;
+        } else if by + box_h > line_top_y - 8.0 * s {
+            by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
         }
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
@@ -261,27 +245,29 @@ impl Renderer {
         let max_scroll = (layout.total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
 
-        self.push_rounded_rect(
-            bx.round() - 1.0,
-            by.round() - 1.0,
-            box_w.round() + 2.0,
-            box_h.round() + 2.0,
-            6.0 * s,
-            [0.4, 0.4, 0.45, 0.6],
-        );
-        self.push_rounded_rect(
-            bx.round(),
-            by.round(),
-            box_w.round(),
-            box_h.round(),
-            6.0 * s,
-            [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                1.0,
-            ],
-        );
+                if attached_diag.is_none() {
+            self.push_rounded_rect(
+                bx.round() - 1.0,
+                by.round() - 1.0,
+                box_w.round() + 2.0,
+                box_h.round() + 2.0,
+                6.0 * s,
+                [0.4, 0.4, 0.45, 0.6],
+            );
+            self.push_rounded_rect(
+                bx.round(),
+                by.round(),
+                box_w.round(),
+                box_h.round(),
+                6.0 * s,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            );
+        }
 
         self.flush();
         unsafe {

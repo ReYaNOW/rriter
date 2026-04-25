@@ -77,7 +77,10 @@ impl Default for HoverState {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_in_hover_popup_or_bridge, normalize_hover_byte};
+            use super::{
+        diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+        is_in_hover_popup_or_bridge, normalize_hover_byte,
+    };
 
     #[test]
     fn hover_byte_includes_identifier_edges_next_to_whitespace() {
@@ -95,7 +98,7 @@ mod tests {
         assert_eq!(normalize_hover_byte(&editor, handlers - 1), Some(handlers));
     }
 
-    #[test]
+        #[test]
     fn hover_byte_ignores_python_keywords_so_diagnostics_can_show() {
         let mut editor = crate::editor::Editor::new(128);
         editor.insert_str("    else:\n        raise ValueError()\n");
@@ -104,6 +107,39 @@ mod tests {
 
         assert_eq!(normalize_hover_byte(&editor, else_offset), None);
         assert_eq!(normalize_hover_byte(&editor, else_offset + 2), None);
+    }
+
+    #[test]
+    fn diagnostic_hover_range_expands_to_whole_f_string_literal() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("raise ValueError(f'513')\n");
+        let text = editor.get_full_text();
+        let literal_offset = text.find("513").unwrap();
+        let literal_col = text[..literal_offset].encode_utf16().count() as u32;
+        let f_string_offset = text.find("f'513'").unwrap();
+        let f_string_col = text[..f_string_offset].encode_utf16().count() as u32;
+        let f_string_end_col = f_string_col + "f'513'".encode_utf16().count() as u32;
+
+                let range =
+            diagnostic_hover_range_on_line(&editor, 0, literal_col, literal_col + 3).unwrap();
+        let byte_range =
+            diagnostic_hover_byte_range_on_line(&editor, 0, literal_col, literal_col + 3).unwrap();
+
+        assert_eq!(range.0, f_string_col);
+        assert_eq!(range.1, f_string_end_col);
+                assert_eq!(byte_range.0, f_string_offset);
+        assert_eq!(byte_range.1, f_string_offset + "f'513'".len());
+        assert!(literal_offset >= byte_range.0);
+        assert!(literal_offset + "513".len() <= byte_range.1);
+        assert_eq!(normalize_hover_byte(&editor, range.2), Some(range.2));
+    }
+
+    #[test]
+    fn diagnostic_hover_range_does_not_create_type_target_for_keyword() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("else:\n");
+
+        assert_eq!(diagnostic_hover_range_on_line(&editor, 0, 0, 4), None);
     }
 
     #[test]
@@ -296,7 +332,156 @@ fn hover_token_text(editor: &crate::editor::Editor, byte_offset: usize) -> Optio
     text.get(start..end + 1).map(|s| s.to_string())
 }
 
-fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> Option<usize> {
+pub(crate) fn diagnostic_hover_byte_range_on_line(
+    editor: &crate::editor::Editor,
+    line: usize,
+    start_col: u32,
+    end_col: u32,
+) -> Option<(usize, usize, usize)> {
+    if line >= editor.line_offsets.len() {
+        return None;
+    }
+
+    let line_start = editor.line_offsets[line];
+    let line_end = editor
+        .line_offsets
+        .get(line + 1)
+        .copied()
+        .unwrap_or(editor.len());
+
+    let mut start_byte = line_start;
+    let mut end_byte = line_end;
+    let mut start_byte_found = false;
+    let mut end_byte_found = false;
+
+    editor.utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
+        if !start_byte_found && utf16_before >= start_col {
+            start_byte = pos;
+            start_byte_found = true;
+        }
+        if !end_byte_found && utf16_before >= end_col {
+            end_byte = pos;
+            end_byte_found = true;
+        }
+    });
+
+    if !start_byte_found {
+        start_byte = line_start;
+    }
+    if !end_byte_found {
+        end_byte = line_end;
+    }
+
+    let scan_start = start_byte.min(line_end);
+    let scan_end = end_byte.max(scan_start).min(line_end);
+    let mut target_raw_byte = None;
+    let mut target_byte = None;
+
+    for byte in scan_start..scan_end {
+        if let Some(normalized) = normalize_hover_byte(editor, byte) {
+            target_raw_byte = Some(byte);
+            target_byte = Some(normalized);
+            break;
+        }
+    }
+
+    let target_raw_byte = target_raw_byte?;
+    let target_byte = target_byte?;
+
+    let mut range_start = target_byte;
+    let mut range_end = target_byte.saturating_add(1).min(line_end);
+
+    while range_start > line_start && is_hover_target_byte(editor, range_start - 1) {
+        range_start -= 1;
+    }
+    while range_end < line_end && is_hover_target_byte(editor, range_end) {
+        range_end += 1;
+    }
+
+    let mut quote_start = None;
+    let mut scan = target_raw_byte.min(line_end.saturating_sub(1));
+    loop {
+        let b = editor.byte_at(scan);
+        if b == b'\'' || b == b'"' {
+            quote_start = Some(scan);
+            break;
+        }
+        if scan == line_start {
+            break;
+        }
+        scan -= 1;
+    }
+
+    if let Some(qs) = quote_start {
+        let quote = editor.byte_at(qs);
+        let mut quote_end = None;
+        let mut qe = qs + 1;
+        while qe < line_end {
+            if editor.byte_at(qe) == quote {
+                quote_end = Some(qe);
+                break;
+            }
+            qe += 1;
+        }
+
+        if let Some(qe) = quote_end {
+            if target_raw_byte > qs && target_raw_byte < qe {
+                let mut prefix_start = qs;
+                while prefix_start > line_start {
+                    let b = editor.byte_at(prefix_start - 1);
+                    if matches!(b, b'f' | b'F' | b'r' | b'R' | b'u' | b'U' | b'b' | b'B') {
+                        prefix_start -= 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                range_start = prefix_start;
+                range_end = (qe + 1).min(line_end);
+            }
+        }
+    }
+
+    Some((range_start, range_end, target_byte))
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_hover_range_on_line(
+    editor: &crate::editor::Editor,
+    line: usize,
+    start_col: u32,
+    end_col: u32,
+) -> Option<(u32, u32, usize)> {
+    let (range_start, range_end, target_byte) =
+        diagnostic_hover_byte_range_on_line(editor, line, start_col, end_col)?;
+
+    let mut out_start_col = start_col;
+    let mut out_end_col = end_col;
+    let mut out_start_found = false;
+    let mut out_end_found = false;
+
+    editor.utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
+        if !out_start_found && pos >= range_start {
+            out_start_col = utf16_before;
+            out_start_found = true;
+        }
+        if !out_end_found && pos >= range_end {
+            out_end_col = utf16_before;
+            out_end_found = true;
+        }
+    });
+
+    if !out_start_found {
+        out_start_col = start_col;
+    }
+    if !out_end_found {
+        out_end_col = end_col.max(out_start_col + 1);
+    }
+
+    Some((out_start_col, out_end_col, target_byte))
+}
+
+pub(crate) fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> Option<usize> {
     let normalized = if is_hover_target_byte(editor, byte_offset) {
         Some(byte_offset)
     } else if byte_offset > 0 && is_hover_target_byte(editor, byte_offset - 1) {

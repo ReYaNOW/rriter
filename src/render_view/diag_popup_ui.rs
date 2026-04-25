@@ -2,6 +2,7 @@ use crate::app::IdePanelState;
 use crate::lsp::Diagnostic;
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
+use glow::HasContext;
 
 pub struct DiagChar {
     pub x: f32,
@@ -54,11 +55,13 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
 }
 
 impl Renderer {
-    pub fn draw_diagnostic_popup(
+        pub fn draw_diagnostic_popup(
         &mut self,
         lsp_diagnostics: &[Diagnostic],
         ide_panel: &IdePanelState,
         ui_registry: &mut UiRegistry,
+        attached_hover_w: f32,
+        attached_hover_h: f32,
         mx: f32,
         my: f32,
         wants_pointer: &mut bool,
@@ -225,9 +228,18 @@ impl Renderer {
             parsed_diags.push((lines, source_on_new_line, last_line_w, line_count));
         }
 
-        total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
-        total_h = total_h.min(self.height - 60.0 * s);
-        let box_w = global_max_w;
+                total_h += (self.hovered_diags_cache.len() as f32 - 1.0) * (line_h * 0.5);
+        let total_content_h = total_h;
+        let total_h = total_content_h.min(self.height * 0.30).min(self.height - 60.0 * s);
+        self.max_diag_popup_scroll = (total_content_h - total_h).max(0.0);
+        self.diag_popup_scroll
+            .clamp_target(0.0, self.max_diag_popup_scroll);
+                        let scroll_y = self.diag_popup_scroll.current;
+        let mut box_w = global_max_w;
+        if attached_hover_w > box_w {
+            box_w = attached_hover_w;
+        }
+        let combined_hover_h = attached_hover_h;
 
         let (_, first_diag_x, first_line_y_top, first_diag_y_bottom, first_diag_x_end) =
             self.hovered_diags_cache[0];
@@ -245,15 +257,8 @@ impl Renderer {
         if bx < 20.0 * s {
             bx = 20.0 * s;
         }
-        let prefer_below = first_line_y_top - (self.height * 0.45) - 8.0 * s < 0.0;
-        let mut by = if prefer_below {
-            first_diag_y_bottom + 8.0 * s
-        } else {
-            first_line_y_top - total_h - 8.0 * s
-        };
-        if !prefer_below && by < 0.0 {
-            by = first_diag_y_bottom + 8.0 * s;
-        }
+                let combined_h = total_h + combined_hover_h;
+                let by = (first_line_y_top - combined_h - 8.0 * s).max(10.0 * s);
 
         self.last_diag_popup_rect = Some((
             bx,
@@ -280,11 +285,11 @@ impl Renderer {
             ui_registry.reset_cursor_state();
         }
 
-        self.push_rounded_rect(
+                        self.push_rounded_rect(
             bx.round() - 1.0,
             by.round() - 1.0,
             box_w.round() + 2.0,
-            total_h.round() + 2.0,
+            combined_h.round() + 2.0,
             6.0 * s,
             [0.4, 0.4, 0.45, 0.6],
         );
@@ -292,7 +297,7 @@ impl Renderer {
             bx.round(),
             by.round(),
             box_w.round(),
-            total_h.round(),
+            combined_h.round(),
             6.0 * s,
             [
                 self.theme.minimap_bg[0],
@@ -302,7 +307,58 @@ impl Renderer {
             ],
         );
 
-        let mut current_y = by + pad;
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (by + total_h)).round() as i32;
+            self.gl.scissor(
+                bx.round() as i32,
+                sy,
+                box_w.round() as i32,
+                total_h.round() as i32,
+            );
+        }
+        self.push_rounded_rect(
+            bx.round(),
+            by.round(),
+            box_w.round(),
+            combined_h.round(),
+            6.0 * s,
+            [
+                (self.theme.minimap_bg[0] + 0.035).min(1.0),
+                (self.theme.minimap_bg[1] + 0.035).min(1.0),
+                (self.theme.minimap_bg[2] + 0.035).min(1.0),
+                1.0,
+            ],
+        );
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        if combined_hover_h > 0.0 {
+            self.push_rect(
+                bx.round(),
+                (by + total_h).round(),
+                box_w.round(),
+                1.0_f32.max(s.round()),
+                [1.0, 1.0, 1.0, 0.10],
+            );
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (by + total_h)).round() as i32;
+            self.gl.scissor(
+                bx.round() as i32,
+                sy,
+                box_w.round() as i32,
+                total_h.round() as i32,
+            );
+        }
+
+        let mut current_y = by + pad - scroll_y;
 
         for i in 0..self.hovered_diags_cache.len() {
             let (idx, _, _, _, _) = self.hovered_diags_cache[i];
@@ -476,7 +532,12 @@ impl Renderer {
                 my,
             );
 
-            current_y += total_text_h + line_h * 0.5;
+                        current_y += total_text_h + line_h * 0.5;
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
         }
     }
 }

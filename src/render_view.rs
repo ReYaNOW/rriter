@@ -1599,8 +1599,9 @@ impl Renderer {
             }
         }
 
-        // LSP squiggles — волнистые подчёркивания диагностик
+                // LSP squiggles — волнистые подчёркивания диагностик
         self.hovered_diags_cache.clear();
+        let mut hovered_diag_type_target = None;
         if !lsp_diagnostics.is_empty() {
             let render_scroll_x = scroll_x.round();
             for (idx, diag) in lsp_diagnostics.iter().enumerate() {
@@ -1633,6 +1634,21 @@ impl Renderer {
 
                 // Точный расчёт X-позиции: идём по символам строки, считая UTF-16 единицы
                 let avg_adv = self.char_advance('a');
+                                                let display_end_col = if diag.end_line == diag.start_line {
+                    diag.end_col
+                } else {
+                    u32::MAX
+                };
+                                let diag_hover_range = crate::app::mouse::diagnostic_hover_byte_range_on_line(
+                    editor,
+                    line,
+                    diag.start_col,
+                    display_end_col,
+                );
+                let hit_start_byte = diag_hover_range.map(|range| range.0);
+                let hit_end_byte = diag_hover_range.map(|range| range.1);
+                let hit_type_target = diag_hover_range.map(|range| range.2);
+
                 let mut x_start_px = 0.0f32;
                 let mut x_end_px = 0.0f32;
                 let mut cur_x = 0.0f32;
@@ -1643,10 +1659,7 @@ impl Renderer {
                         x_start_px = cur_x;
                         start_found = true;
                     }
-                    if diag.end_line == diag.start_line
-                        && !end_found
-                        && utf16_before >= diag.end_col
-                    {
+                    if !end_found && utf16_before >= display_end_col {
                         x_end_px = cur_x;
                         end_found = true;
                     }
@@ -1667,9 +1680,44 @@ impl Renderer {
                         cur_x.max(x_start_px + avg_adv * 4.0)
                     };
                 }
+
+                                let mut hit_x_start_px = x_start_px;
+                let mut hit_x_end_px = x_end_px;
+                let mut hit_cur_x = 0.0f32;
+                let mut hit_start_found = hit_start_byte.is_none();
+                let mut hit_end_found = hit_end_byte.is_none();
+                editor.utf16_col_to_byte_advance(line, |ch, _utf16_before, pos| {
+                    if let Some(hit_start_byte) = hit_start_byte {
+                        if !hit_start_found && pos >= hit_start_byte {
+                            hit_x_start_px = hit_cur_x;
+                            hit_start_found = true;
+                        }
+                    }
+                    if let Some(hit_end_byte) = hit_end_byte {
+                        if !hit_end_found && pos >= hit_end_byte {
+                            hit_x_end_px = hit_cur_x;
+                            hit_end_found = true;
+                        }
+                    }
+                    hit_cur_x += if ch == '\t' {
+                        self.char_advance(' ') * 4.0
+                    } else {
+                        self.char_advance(ch)
+                    };
+                });
+                if !hit_start_found {
+                    hit_x_start_px = hit_cur_x;
+                }
+                if !hit_end_found {
+                    hit_x_end_px = hit_cur_x.max(hit_x_start_px + avg_adv * 4.0);
+                }
+
                 let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
                 let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
+                let hit_x_start = self.left_padding + hit_x_start_px - render_scroll_x;
+                let hit_x_end = self.left_padding + hit_x_end_px - render_scroll_x;
+                let hit_w = (hit_x_end - hit_x_start).max(avg_adv / 2.0);
 
                 let top_y = v_line.y_offset - render_scroll_y;
 
@@ -1691,8 +1739,8 @@ impl Renderer {
                         if self.last_hovered_diags.contains(&idx) {
                             in_hitbox = true;
                         }
-                    } else if mx >= x_start
-                        && mx <= x_start + squiggle_w
+                                        } else if mx >= hit_x_start
+                        && mx <= hit_x_start + hit_w
                         && my >= squiggle_hit_y_top
                         && my <= squiggle_hit_y_bottom
                     {
@@ -1700,7 +1748,11 @@ impl Renderer {
                     }
                 }
 
-                if in_hitbox {
+                                                if in_hitbox {
+                    if hovered_diag_type_target.is_none() {
+                        hovered_diag_type_target = hit_type_target;
+                    }
+
                     self.hovered_diags_cache.push((
                         idx,
                         x_start,
@@ -2206,12 +2258,25 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        self.last_hovered_diags.clear();
-        self.last_hovered_diags
-            .extend(self.hovered_diags_cache.iter().map(|h| h.0));
-        let first_idx = self.last_hovered_diags.first().copied();
+                        if let Some(byte_offset) = hovered_diag_type_target {
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                let mut state = s.borrow_mut();
+                if state.byte_offset != Some(byte_offset) {
+                    state.byte_offset = Some(byte_offset);
+                    state.timer = 0.0;
+                    state.request_id = None;
+                    state.definition_request_id = None;
+                    state.popup = None;
+                    state.pending_popup = None;
+                    state.rect = None;
+                    state.selection_anchor = None;
+                    state.selection_cursor = None;
+                    state.selecting = false;
+                }
+            });
+        }
 
-        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset) =
+                let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset) =
             crate::app::mouse::HOVER_STATE.with(|s| {
                 let state = s.borrow();
                 (
@@ -2219,8 +2284,111 @@ impl Renderer {
                     state.request_id.is_some() || state.definition_request_id.is_some(),
                     state.timer,
                     state.byte_offset.is_some(),
+                    state.popup.as_ref().map(|p| p.byte_offset).or(state.byte_offset),
                 )
             });
+
+        if self.hovered_diags_cache.is_empty() {
+            if let Some(byte_offset) = hover_byte_offset {
+                let hover_line = editor
+                    .line_offsets
+                    .partition_point(|&o| o <= byte_offset)
+                    .saturating_sub(1);
+
+                if hover_line < editor.line_offsets.len() {
+                    let mut found = None;
+
+                    for (idx, diag) in lsp_diagnostics.iter().enumerate() {
+                        if hover_line < diag.start_line as usize || hover_line > diag.end_line as usize {
+                            continue;
+                        }
+
+                        let display_start_col = if hover_line == diag.start_line as usize {
+                            diag.start_col
+                        } else {
+                            0
+                        };
+                        let display_end_col = if hover_line == diag.end_line as usize {
+                            diag.end_col
+                        } else {
+                            u32::MAX
+                        };
+
+                        if let Some((hit_start_byte, hit_end_byte, type_target)) =
+                            crate::app::mouse::diagnostic_hover_byte_range_on_line(
+                                editor,
+                                hover_line,
+                                display_start_col,
+                                display_end_col,
+                            )
+                        {
+                            if byte_offset >= hit_start_byte && byte_offset < hit_end_byte {
+                                found = Some((idx, diag, display_start_col, display_end_col, type_target));
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some((idx, diag, display_start_col, display_end_col, type_target)) = found {
+                        let mut v_line_opt = None;
+                        for vl in &self.visual_lines {
+                            if vl.physical_line == hover_line + 1 {
+                                v_line_opt = Some(*vl);
+                                break;
+                            }
+                        }
+
+                        if let Some(v_line) = v_line_opt {
+                            let render_scroll_x = scroll_x.round();
+                            let top_y = v_line.y_offset - render_scroll_y;
+                            let avg_adv = self.char_advance('a');
+                            let mut x_start_px = 0.0f32;
+                            let mut x_end_px = 0.0f32;
+                            let mut cur_x = 0.0f32;
+                            let mut start_found = false;
+                            let mut end_found = false;
+
+                            editor.utf16_col_to_byte_advance(hover_line, |ch, utf16_before, _pos| {
+                                if !start_found && utf16_before >= display_start_col {
+                                    x_start_px = cur_x;
+                                    start_found = true;
+                                }
+                                if !end_found && utf16_before >= display_end_col {
+                                    x_end_px = cur_x;
+                                    end_found = true;
+                                }
+                                cur_x += if ch == '\t' {
+                                    self.char_advance(' ') * 4.0
+                                } else {
+                                    self.char_advance(ch)
+                                };
+                            });
+
+                            if !start_found {
+                                x_start_px = cur_x;
+                            }
+                            if !end_found {
+                                x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
+                            }
+
+                            hovered_diag_type_target = Some(type_target);
+                            self.hovered_diags_cache.push((
+                                idx,
+                                self.left_padding + x_start_px - render_scroll_x,
+                                top_y,
+                                top_y + self.line_height,
+                                self.left_padding + x_end_px - render_scroll_x,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.last_hovered_diags.clear();
+        self.last_hovered_diags
+            .extend(self.hovered_diags_cache.iter().map(|h| h.0));
+        let first_idx = self.last_hovered_diags.first().copied();
 
         let type_in_progress = has_byte_offset
             && !has_type_popup
@@ -2234,16 +2402,61 @@ impl Renderer {
             self.diag_hover_timer += popup_dt;
         }
 
-        let error_timer_ready = self.diag_hover_timer >= 0.2;
+                                        let error_timer_ready = self.diag_hover_timer >= 0.2;
+        let waiting_for_type = has_byte_offset
+            && !has_type_popup
+            && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
 
-        let mut show_error = is_error_hovered && error_timer_ready;
-        let mut show_type = has_type_popup;
+                let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
+        let show_combined = diagnostic_needs_type && has_type_popup && error_timer_ready;
+        let show_error = if diagnostic_needs_type {
+            show_combined
+        } else {
+            is_error_hovered && error_timer_ready
+        };
+        let show_type = if is_error_hovered || waiting_for_type {
+            show_combined
+        } else {
+            has_type_popup
+        };
 
-        if is_error_hovered && type_in_progress {
-            show_error = false;
-        }
-        if has_byte_offset && is_error_hovered && !error_timer_ready {
-            show_type = false;
+        let (attached_hover_w, attached_hover_h) = if show_combined {
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                let mut state = s.borrow_mut();
+                if let Some(popup) = state.popup.as_mut() {
+                    let scale = self.scale_factor;
+                    let pad = 12.0 * scale;
+                    let line_h = 22.0 * scale;
+                    let max_text_w = (self.width - 80.0 * scale).min(820.0 * scale).max(320.0 * scale);
+                    let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
+                        cache.scale_factor == self.scale_factor
+                            && cache.max_text_w == max_text_w
+                            && cache.span_count == popup.spans.len()
+                            && cache.text_len == popup.text.len()
+                    });
+                    if !cache_valid {
+                        popup.layout_cache = Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
+                    }
+                    if let Some(layout) = popup.layout_cache.as_ref() {
+                        (
+                            layout.max_line_w + pad * 2.0,
+                            (self.height * 0.35).min(layout.total_text_h + pad * 2.0),
+                        )
+                    } else {
+                        (0.0, 0.0)
+                    }
+                } else {
+                    (0.0, 0.0)
+                }
+            })
+        } else {
+            (0.0, 0.0)
+        };
+
+        if !show_type {
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                s.borrow_mut().rect = None;
+            });
         }
 
         if show_error {
@@ -2251,12 +2464,17 @@ impl Renderer {
                 &lsp_diagnostics,
                 ide_panel,
                 ui_registry,
+                attached_hover_w,
+                attached_hover_h,
                 mx,
                 my,
                 &mut wants_pointer,
             );
-        } else {
+                } else {
             self.last_diag_popup_rect = None;
+            self.max_diag_popup_scroll = 0.0;
+            self.diag_popup_scroll.target = 0.0;
+            self.diag_popup_scroll.current = 0.0;
         }
 
         crate::app::mouse::HOVER_STATE.with(|s| {
