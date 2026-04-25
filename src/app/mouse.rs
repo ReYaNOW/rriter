@@ -13,9 +13,11 @@ pub struct HoverPopup {
     pub spans: Vec<crate::highlighter::ColorSpan>,
     pub line_kinds: Vec<crate::lsp::HoverLineKindPublic>,
     pub inline_code_ranges: Vec<(usize, usize)>,
-    pub byte_offset: usize,
+        pub byte_offset: usize,
     pub anchor_x: f32,
     pub anchor_y: f32,
+    pub offset_x: Option<f32>,
+    pub offset_y: Option<f32>,
     pub scroll: crate::scroll::ScrollState,
     pub layout_cache: Option<HoverLayoutCache>,
 }

@@ -129,30 +129,30 @@
 <s i="63" m="10" k="f" n="handle_main_mouse_input" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_hovered_idx,autocomplete_options,autocomplete_rect,autocomplete_scroll,base_title,dialog_window,editor,file_extension,file_path,ide_panel,is_ide_mode,lsp,+9" wr="active_tab=,autocomplete_active=,autocomplete_selected_idx=,is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_dragging_settings_ignore=,last_action=,lsp_actions_menu=,pending_fix_all_id=,settings_ignore_focused=,show_settings=,+2" entry="1" out="18"/>
 <s i="64" m="11" k="f" n="handle_main_mouse_wheel" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_active,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,ide_workspaces,is_ide_mode,modifiers,+11" wr="lsp_actions_menu=" entry="1" out="10"/>
 <s i="65" m="12" k="t" n="HoverLayoutCache" x="struct:{ scale_factor: f32, max_text_w: f32, span_count: usize, text_len: usize, lines: Vec&lt;HoverVisualLine&gt;, max_line_w: f32, total_text_h: f32 }"/>
-<s i="66" m="12" k="t" n="HoverPopup" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, anchor_y: f32, +2 }"/>
+<s i="66" m="12" k="t" n="HoverPopup" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, anchor_y: f32, +4 }"/>
 <s i="67" m="12" k="t" n="HoverState" x="struct:{ request_id: Option&lt;i32&gt;, definition_request_id: Option&lt;i32&gt;, popup: Option&lt;HoverPopup&gt;, pending_popup: Option&lt;HoverPopup&gt;, timer: f32, byte_offset: Option&lt;usize&gt;, rect: Option&lt;(f32, f32, +9 }"/>
 <s i="68" m="12" k="t" n="HoverVisualLine" x="struct:{ glyphs: Vec&lt;(char, [f32; 4], usize)&gt;, kind: crate::lsp::HoverLineKindPublic }"/>
-<s i="69" m="12" k="f" n="default" l="58" r="Self" o="HoverState"/>
-<s i="70" m="12" k="f" n="hover_byte_includes_identifier_edges_next_to_whitespace" l="86" out="3"/>
-<s i="71" m="12" k="f" n="hover_byte_ignores_python_keywords_so_diagnostics_can_show" l="102" out="3"/>
-<s i="72" m="12" k="f" n="diagnostic_hover_range_expands_to_whole_f_string_literal" l="113" out="5"/>
-<s i="73" m="12" k="f" n="diagnostic_hover_range_does_not_create_type_target_for_keyword" l="138" out="2"/>
-<s i="74" m="12" k="f" n="hover_bridge_reaches_full_source_line_when_popup_is_above" l="146" out="1"/>
-<s i="75" m="12" k="f" n="hover_bridge_handles_popup_shifted_away_from_anchor" l="165" out="1"/>
-<s i="76" m="12" k="f" n="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" l="184" out="1"/>
-<s i="77" m="12" k="f" n="hover_bridge_does_not_capture_next_line_when_popup_is_above" l="203" out="1"/>
-<s i="78" m="12" k="f" n="hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways" l="222" out="1"/>
-<s i="79" m="12" k="f" n="clear_hover_popup" l="247" v="1" r="bool" in_="5"/>
-<s i="80" m="12" k="f" n="is_hover_target_byte" l="280" r="bool" in_="3" out="1"/>
-<s i="81" m="12" k="f" n="is_python_hover_keyword" l="288" r="bool"/>
-<s i="82" m="12" k="f" n="hover_token_text" l="329" r="Option&lt;String&gt;" in_="1" out="2"/>
-<s i="83" m="12" k="f" n="diagnostic_hover_byte_range_on_line" l="335" v="1" r="Option&lt;(usize, usize, usize)&gt;" in_="3" out="4"/>
-<s i="84" m="12" k="f" n="diagnostic_hover_range_on_line" l="449" v="1" r="Option&lt;(u32, u32, usize)&gt;" in_="2" out="2"/>
-<s i="85" m="12" k="f" n="normalize_hover_byte" l="484" v="1" r="Option&lt;usize&gt;" in_="5" out="2"/>
-<s i="86" m="12" k="f" n="hover_token_bounds" l="505" r="(usize, usize)" in_="3" out="2"/>
-<s i="87" m="12" k="f" n="hover_anchor_for_byte" l="581" v="1" r="(f32, f32)" in_="1" out="4"/>
-<s i="88" m="12" k="f" n="is_in_hover_popup_or_bridge" l="642" v="1" r="bool" in_="7"/>
-<s i="89" m="12" k="f" n="hover_popup_byte_at" l="704" r="usize" in_="2" out="2"/>
+<s i="69" m="12" k="f" n="default" l="60" r="Self" o="HoverState"/>
+<s i="70" m="12" k="f" n="hover_byte_includes_identifier_edges_next_to_whitespace" l="88" out="3"/>
+<s i="71" m="12" k="f" n="hover_byte_ignores_python_keywords_so_diagnostics_can_show" l="104" out="3"/>
+<s i="72" m="12" k="f" n="diagnostic_hover_range_expands_to_whole_f_string_literal" l="115" out="5"/>
+<s i="73" m="12" k="f" n="diagnostic_hover_range_does_not_create_type_target_for_keyword" l="140" out="2"/>
+<s i="74" m="12" k="f" n="hover_bridge_reaches_full_source_line_when_popup_is_above" l="148" out="1"/>
+<s i="75" m="12" k="f" n="hover_bridge_handles_popup_shifted_away_from_anchor" l="167" out="1"/>
+<s i="76" m="12" k="f" n="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" l="186" out="1"/>
+<s i="77" m="12" k="f" n="hover_bridge_does_not_capture_next_line_when_popup_is_above" l="205" out="1"/>
+<s i="78" m="12" k="f" n="hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways" l="224" out="1"/>
+<s i="79" m="12" k="f" n="clear_hover_popup" l="249" v="1" r="bool" in_="5"/>
+<s i="80" m="12" k="f" n="is_hover_target_byte" l="282" r="bool" in_="3" out="1"/>
+<s i="81" m="12" k="f" n="is_python_hover_keyword" l="290" r="bool"/>
+<s i="82" m="12" k="f" n="hover_token_text" l="331" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="83" m="12" k="f" n="diagnostic_hover_byte_range_on_line" l="337" v="1" r="Option&lt;(usize, usize, usize)&gt;" in_="3" out="4"/>
+<s i="84" m="12" k="f" n="diagnostic_hover_range_on_line" l="451" v="1" r="Option&lt;(u32, u32, usize)&gt;" in_="2" out="2"/>
+<s i="85" m="12" k="f" n="normalize_hover_byte" l="486" v="1" r="Option&lt;usize&gt;" in_="5" out="2"/>
+<s i="86" m="12" k="f" n="hover_token_bounds" l="507" r="(usize, usize)" in_="3" out="2"/>
+<s i="87" m="12" k="f" n="hover_anchor_for_byte" l="583" v="1" r="(f32, f32)" in_="1" out="4"/>
+<s i="88" m="12" k="f" n="is_in_hover_popup_or_bridge" l="644" v="1" r="bool" in_="7"/>
+<s i="89" m="12" k="f" n="hover_popup_byte_at" l="706" r="usize" in_="2" out="2"/>
 <s i="90" m="13" k="t" n="Cell" x="struct:{ c: char, fg: u8, bg: u8 }"/>
 <s i="91" m="13" k="t" n="TermGrid" x="struct:{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, +19 }"/>
 <s i="92" m="13" k="t" n="Terminal" x="struct:{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }"/>

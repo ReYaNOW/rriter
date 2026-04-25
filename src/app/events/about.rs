@@ -84,8 +84,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                     byte_offset,
                                     &app.editor.line_offsets,
                                 );
-                                state.request_id =
+                                                                                                                                state.request_id =
                                     lsp.request_hover(&path, &app.file_extension, line, col);
+                                println!("[HOVER DEBUG] 0.34s expired. Sent hover request. id: {:?}", state.request_id);
                                 if state.request_id.is_some() {
                                     hover_poll_pending = true;
                                 }
@@ -99,8 +100,21 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         ),
                     );
                 }
-            } else if state.request_id.is_some() || state.definition_request_id.is_some() {
+                        } else if state.request_id.is_some() || state.definition_request_id.is_some() {
                 hover_poll_pending = true;
+            }
+                                } else if state.popup.is_some() || state.pending_popup.is_some() {
+            state.timer += raw_dt;
+            if state.timer >= 0.25 {
+                println!("[HOVER DEBUG] 0.25s hide timer expired. Clearing popup.");
+                state.popup = None;
+                state.pending_popup = None;
+                state.rect = None;
+                needs_redraw = true;
+            } else {
+                hover_wake_at = Some(
+                    now + std::time::Duration::from_secs_f32((0.25 - state.timer).max(0.0)),
+                );
             }
         }
     });
@@ -483,11 +497,13 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         println!("--- HOVER TEXT ---\n{}\n------------------", t);
                     }
                 }
-                crate::app::mouse::HOVER_STATE.with(|state| {
+                                                                crate::app::mouse::HOVER_STATE.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.request_id == Some(request_id) {
+                        println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
                         state.request_id = None;
                         let Some(t) = text else {
+                            println!("[HOVER DEBUG] Text is empty. Clearing popup.");
                             state.popup = None;
                             state.pending_popup = None;
                             state.rect = None;
@@ -554,7 +570,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 (0.0, 0.0)
                             };
 
-                            let popup = crate::app::mouse::HoverPopup {
+                                                        let popup = crate::app::mouse::HoverPopup {
                                 text: clean_msg,
                                 spans,
                                 line_kinds,
@@ -562,6 +578,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 byte_offset: bo,
                                 anchor_x,
                                 anchor_y,
+                                offset_x: None,
+                                offset_y: None,
                                 scroll: crate::scroll::ScrollState::new(15.0),
                                 layout_cache: None,
                             };
@@ -585,9 +603,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             } else {
                                 state.definition_request_id = None;
                             }
-                            if state.definition_request_id.is_some() {
+                                                                                                                if state.definition_request_id.is_some() {
+                                println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
                                 state.pending_popup = Some(popup);
                             } else {
+                                println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
                                 state.popup = Some(popup);
                             }
                             state.selection_anchor = None;

@@ -197,23 +197,13 @@ impl Renderer {
                 let attached_diag = self
             .last_diag_popup_rect
             .map(|(rx, ry, rw, rh, _, _, _)| (rx, ry, rw, rh));
-        let mut box_w = layout.max_line_w + pad * 2.0;
+                let mut box_w = layout.max_line_w + pad * 2.0;
         if let Some((_, _, diag_w, _)) = attached_diag {
             box_w = box_w.max(diag_w);
         }
         let max_visible_h = (self.height * 0.35).min(layout.total_text_h + pad * 2.0);
         let box_h = max_visible_h;
 
-        let mut bx = popup.anchor_x;
-        if let Some((rx, _, _, _)) = attached_diag {
-            bx = rx;
-        }
-        if bx + box_w > self.width - 20.0 * s {
-            bx = self.width - box_w - 20.0 * s;
-        }
-        if bx < 20.0 * s {
-            bx = 20.0 * s;
-        }
         let phys_line = editor
             .line_offsets
             .partition_point(|&o| o <= popup.byte_offset)
@@ -221,12 +211,39 @@ impl Renderer {
         let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
         let line_top_y = (vis_line_idx * self.line_height) - render_scroll_y;
 
-                        let mut by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
+        let mut bx = popup.anchor_x;
+        let mut by = line_top_y;
 
-        if let Some((_, diag_y, _, diag_h)) = attached_diag {
-            by = diag_y + diag_h;
-        } else if by + box_h > line_top_y - 8.0 * s {
-            by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
+        if let Some(ox) = popup.offset_x {
+            bx += ox;
+        }
+        if let Some(oy) = popup.offset_y {
+            by += oy;
+        }
+
+        if popup.offset_x.is_none() || popup.offset_y.is_none() {
+            let orig_bx = bx;
+            let orig_by = by;
+            if let Some((rx, _, _, _)) = attached_diag {
+                bx = rx;
+            }
+            let mut target_by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
+            if let Some((_, diag_y, _, diag_h)) = attached_diag {
+                target_by = diag_y + diag_h;
+            } else if target_by + box_h > line_top_y - 8.0 * s {
+                target_by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
+            }
+            by = target_by;
+
+            if bx + box_w > self.width - 20.0 * s {
+                bx = self.width - box_w - 20.0 * s;
+            }
+            if bx < 20.0 * s {
+                bx = 20.0 * s;
+            }
+
+            popup.offset_x = Some(bx - orig_bx);
+            popup.offset_y = Some(by - orig_by);
         }
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
