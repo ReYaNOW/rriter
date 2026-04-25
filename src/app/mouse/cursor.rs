@@ -503,8 +503,7 @@ impl App {
                     }
                                                                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                     clear_diag_popup = true;
-                    let keep_visible_popup = state.popup.is_some();
-                    println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
+                    println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. clearing old popup. start 0.34s request timer.", byte_offset, state.byte_offset);
                     state.byte_offset = Some(byte_offset);
                     state.timer = 0.0;
                         state.request_id = None;
@@ -513,10 +512,8 @@ impl App {
                         state.selection_anchor = None;
                         state.selection_cursor = None;
                         state.selecting = false;
-                        if !keep_visible_popup {
-                            state.popup = None;
-                            state.rect = None;
-                        }
+                        state.popup = None;
+                        state.rect = None;
                     }
                                                                                 } else if !in_hover_popup {
                     if state.byte_offset.is_some() {

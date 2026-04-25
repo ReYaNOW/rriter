@@ -2341,7 +2341,7 @@ impl Renderer {
                         }
                     }
 
-                    if let Some((idx, diag, display_start_col, display_end_col, type_target)) =
+                    if let Some((idx, _diag, display_start_col, display_end_col, type_target)) =
                         found
                     {
                         let mut v_line_opt = None;
