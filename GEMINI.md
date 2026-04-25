@@ -278,6 +278,28 @@ Check successful build: ```make fast```
 ## 🗺 Use PROJECT_MAP.xml (MANDATORY)
 
 Project root has `PROJECT_MAP.xml`—your "map terrain." Generated automatically via `make api-map` (`gen_project_map.py` script).
+
+### PROJECT_MAP.xml usage
+
+Read `PROJECT_MAP.xml` before opening source files.
+
+Interpretation:
+- `<m i p>`: module id and canonical file path
+- `<s ... k="t">`: type symbol
+- `<s ... k="f">`: function or method symbol
+- `o`: impl owner type
+- `self`: receiver (`&self`, `&mut self`, etc.)
+- `r`: return type
+- `rd` / `wr`: compact state reads / writes, may be truncated with `+N`
+- `entry="1"`: root handler / entrypoint
+- `<e f t>`: direct call edges from caller id to callee ids
+
+Rules:
+- Use map ids and paths for navigation
+- Prefer map over asking for files
+- Ask for source file only if exact code logic is required and missing from map
+- When requesting a file, mention which map symbol or path required it
+
 ---
 
 ## 🏛 Philosophy, Principles

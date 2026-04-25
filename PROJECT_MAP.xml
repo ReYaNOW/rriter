@@ -1,583 +1,820 @@
 <?xml version="1.0" encoding="utf-8"?>
-<project_map>
-  <mod path="src/app/events/about.rs" name="app::events::about">
-    <fn name="about_to_wait" line="3" pub="true" calls="app: add_recent_file, apply_highlight_results, check_external_changes, enter_ide_mode, is_open, open_file_in_tab, save_current_file, update_autocomplete; app::events::hover: module_path_from_definition_path, prepend_hover_module_path, should_replace_hover_with_source_signature, should_replace_simple_type_hover, source_attribute_hover_from_definition_file, source_signature_for_hover, symbol_at_offset; app::file_tree: poll_file_tree, refresh_file_tree, start_file_watcher; app::lsp_actions: apply_workspace_edit; app::mouse: hover_anchor_for_byte; editor: get_full_text, insert_str, is_dirty, rebuild_line_offsets; editor_navigation: set_cursor_at_pos; highlighter_runtime: poll, reset; lsp: highlight_hover_text, offset_to_lsp_pos, poll, request_definition, request_hover, servers_info; render_view::core_text: get_max_scroll; scroll: clamp_current, clamp_target, update; ui_system: contains" />
-  </mod>
-  <mod path="src/app/events/hover.rs" name="app::events::hover">
-    <fn name="module_path_from_definition_path" line="1" pub="true" ret="Option&lt;String&gt;" calls="self: sanitize_module_path_parts" />
-    <fn name="sanitize_module_path_parts" line="5" ret="Option&lt;String&gt;" />
-    <fn name="prepend_hover_module_path" line="63" pub="true" calls="app::file_tree: pre_rasterize_icon; editor: insert_str" />
-    <fn name="source_line" line="95" pub="true" ret="Option&lt;&amp;'a str&gt;" />
-    <fn name="source_signature_for_hover" line="109" pub="true" ret="Option&lt;String&gt;" calls="self: def_name, format_attribute_assignment_line, source_attribute_hover_for_symbol, source_line, symbol_at_offset, wrap_signature_after_first_param; editor: get_full_text; lsp::hover: wrap_signature_after_first_param; ui_system: contains" />
-    <fn name="format_attribute_assignment_line" line="116" ret="String" calls="ui_system: contains" />
-    <fn name="source_attribute_hover_for_symbol" line="156" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line, source_line" />
-    <fn name="def_name" line="315" ret="Option&lt;&amp;str&gt;" />
-    <fn name="source_attribute_hover_from_definition_file" line="419" pub="true" ret="Option&lt;String&gt;" calls="self: format_attribute_assignment_line; ui_system: contains" />
-    <fn name="format_attribute_assignment_line" line="425" ret="String" calls="ui_system: contains" />
-    <fn name="is_ident_byte" line="612" pub="true" ret="bool" />
-    <fn name="symbol_at_offset" line="616" pub="true" ret="Option&lt;String&gt;" calls="self: is_ident_byte; editor: get_full_text; editor_navigation: byte_at" />
-    <fn name="wrap_signature_after_first_param" line="645" pub="true" ret="String" calls="ui_system: contains" />
-    <fn name="wraps_asynccontextmanager_signature_after_first_param" line="686" calls="self: wrap_signature_after_first_param; lsp::hover: wrap_signature_after_first_param" />
-    <fn name="asynccontextmanager_source_signature_is_split_into_lines" line="696" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" line="713" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="attribute_hover_uses_source_attribute_line" line="731" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="simple_type_hover_triggers_source_replacement" line="748" calls="self: should_replace_hover_with_source_signature" />
-    <fn name="symbol_at_offset_reads_identifier_from_nearby_position" line="755" calls="self: symbol_at_offset; editor: get_full_text, insert_str" />
-    <fn name="strict_source_lookup_does_not_fallback_to_nearby_def" line="769" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="definition_file_attribute_hover_includes_fq_class_name" line="783" calls="self: source_attribute_hover_from_definition_file" />
-    <fn name="definition_file_attribute_hover_includes_lsp_type" line="807" calls="self: source_attribute_hover_from_definition_file; ui_system: contains" />
-    <fn name="module_path_from_site_packages_strips_noise_segments" line="829" calls="self: module_path_from_definition_path" />
-    <fn name="module_path_strips_trailing_init" line="841" calls="self: module_path_from_definition_path" />
-    <fn name="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" line="848" calls="self: source_signature_for_hover; editor: get_full_text, insert_str" />
-    <fn name="should_replace_hover_with_source_signature" line="887" pub="true" ret="bool" calls="self: should_replace_simple_type_hover; ui_system: contains" />
-    <fn name="should_replace_simple_type_hover" line="895" pub="true" ret="bool" calls="ui_system: contains" />
-  </mod>
-  <mod path="src/app/events.rs" name="app::events">
-    <fn name="save_state_and_exit" line="21" />
-    <fn name="resumed" line="47" reads="base_title, editor, theme, window_height, window_width" writes="gl_config=, gl_context=, gl_surface=, renderer=, window=" calls="app::terminal: new; editor: is_dirty, new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="window_event" line="130" reads="active_tab, autocomplete_active, autocomplete_anim_progress, autocomplete_hovered_idx, autocomplete_options, autocomplete_scroll, autocomplete_selected_idx, base_title, current_sticky_lines, dialog_gl_surface, dialog_window, editor, faq_editor, file_path, gl_context, gl_surface, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, last_blink_state, lsp, lsp_actions_menu, pending_action, pending_key_log, recent_files, renderer, scroll_x, scroll_y, search_anim_y, search_case_sensitive, search_current_idx, search_editor, search_focused, search_results, settings_anim_progress, settings_ide_scroll, settings_ignore_editor, settings_ignore_focused, settings_ignore_scroll_x, settings_scroll, settings_tab, should_maximize, show_fps, show_search, show_settings, show_welcome, sticky_anim_is_adding, sticky_anim_progress, tab_scroll, tabs, theme, window" writes="autocomplete_rect=, current_cursor=, is_focused=, is_ready=, last_resize_time=, modifiers=, target_sticky_lines=, tried_maximize=, ui_registry.clear()" calls="self: close_current_file, close_dialog, handle_main_cursor_moved, handle_main_keyboard_input, handle_main_mouse_input, handle_main_mouse_wheel, save_current_file, show_action_dialog, trigger_file_picker; app: any_bottom_open, is_open; self: save_state_and_exit; app::terminal: resize; editor: is_dirty; lsp: get_diagnostics; render_view: draw; render_view::core_text: get_cursor_xy, get_max_scroll; render_view::lsp_ui: draw_lsp_actions_menu; render_view::settings_ui: draw_settings; render_view::ui: draw_autocomplete, draw_dialog_window; renderer: resize; ui_system: contains, id, mark_overlay_start, wants_text; widgets: get_dialog_buttons, is_hovered" />
-    <fn name="about_to_wait" line="744" calls="app::events::about: about_to_wait" />
-  </mod>
-  <mod path="src/app/file_icons.rs" name="app::file_icons">
-    <type name="FallbackMatcher">{ set: RegexSet, keys: Vec&lt;&amp;'static str&gt; }</type>
-    <fn name="file_icon_key" line="41" pub="true" ret="&amp;'static str" />
-    <fn name="folder_icon_key" line="82" pub="true" ret="&amp;'static str" />
-    <fn name="svg_for_key" line="96" pub="true" ret="&amp;'static [u8]" />
-  </mod>
-  <mod path="src/app/file_tree.rs" name="app::file_tree">
-    <type name="FileNode">{ path: PathBuf, name: String, depth: usize, is_dir: bool, is_expanded: bool, icon_key: &amp;'static str, is_ignored: bool }</type>
-    <fn name="matches_ignore_pattern" line="42" pub="true" ret="bool" />
-    <fn name="pre_rasterize_icon" line="94" pub="true" calls="app::file_icons: svg_for_key" />
-    <fn name="read_children" line="137" ret="(Vec&lt;(String, PathBuf)&gt;, Vec&lt;(String, PathBuf)&gt;)" />
-    <fn name="scan_dir_parallel" line="180" ret="Vec&lt;FileNode&gt;" calls="app::file_icons: file_icon_key, folder_icon_key; self: matches_ignore_pattern, read_children; ui_system: contains" />
-    <fn name="spawn_scan" line="276" pub="true" ret="mpsc::Receiver&lt;Vec&lt;FileNode&gt;&gt;" calls="self: pre_rasterize_icon, scan_dir_parallel" />
-    <fn name="spawn_watcher" line="343" pub="true" />
-    <fn name="refresh_file_tree" line="380" pub="true" reads="ide_ignore_patterns, ide_panel, ide_workspaces" writes="file_tree_rx=" calls="self: spawn_scan; ui_system: contains" />
-    <fn name="poll_file_tree" line="408" pub="true" ret="bool" reads="ide_panel" writes="file_tree_rx=" />
-    <fn name="start_file_watcher" line="424" pub="true" reads="ide_workspaces" writes="file_tree_notify_rx=" calls="self: spawn_watcher" />
-    <fn name="handle_file_tree_click" line="437" pub="true" reads="ide_panel" calls="self: open_file_in_tab, refresh_file_tree" />
-    <fn name="file_tree_node_at" line="456" pub="true" ret="Option&lt;usize&gt;" reads="dialog_window, ide_panel, is_ide_mode, renderer, show_settings" calls="app: any_top_open, is_open" />
-  </mod>
-  <mod path="src/app/keyboard/editor_keys.rs" name="app::keyboard::editor_keys">
-    <fn name="handle_editor_keyboard_input" line="4" pub="true" reads="autocomplete_options, clipboard, file_extension, highlighter, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, lsp, modifiers, renderer, scroll_x, scroll_y, search_editor, window, window_height, window_width" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, base_title=, editor=, file_path=, is_dragging=, is_highlighted_once=, last_action=, last_sent_version=, lsp_actions_menu=, pending_key_log=, search_current_idx=, search_focused=, search_results.clear(), show_search=, show_settings=, show_welcome=, tabs.clear()" calls="self: apply_autocomplete, apply_selected_lsp_action, close_current_file, close_tab_at, ensure_autocomplete_visible, jump_to_search_result, open_lsp_actions_menu, save_current_file, save_tabs_state, show_action_dialog, sync_active_tab, trigger_file_picker, update_autocomplete, update_search; editor: backspace, delete_forward, delete_selection, delete_word_backward, delete_word_forward, get_auto_indent, get_full_text, insert_str, is_dirty, redo, set_original_text, undo; editor_navigation: get_selection, is_char_boundary, move_down, move_end, move_end_of_file, move_home, move_left, move_page_down, move_page_up, move_right, move_start_of_file, move_up, move_word_left, move_word_right, select_all; highlighter_runtime: apply_edits, poll, reset, shift_delete, shift_insert; lsp: notify_change, notify_close, poll; render_view::core_text: get_cursor_xy, get_max_scroll; scroll: clamp_current, clamp_target, scroll_by, stop_anim" />
-  </mod>
-  <mod path="src/app/keyboard/main_keys.rs" name="app::keyboard::main_keys">
-    <fn name="handle_main_keyboard_input" line="4" pub="true" reads="clipboard, dialog_window, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, search_focused, settings_ignore_editor, settings_tab, show_search, window, window_height, window_width" writes="ide_ignore_patterns.push(), last_action=, settings_ignore_focused=, show_fps=, show_settings=" calls="self: close_dialog, handle_editor_keyboard_input, handle_search_keyboard_input, handle_terminal_keyboard_input, handle_terminal_search_keyboard_input, refresh_file_tree; app: is_open; app::mouse: clear_hover_popup; editor: backspace, delete_forward, delete_selection, delete_word_backward, delete_word_forward, get_full_text, insert_str; editor_navigation: get_selection, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all; ui_system: contains" />
-  </mod>
-  <mod path="src/app/keyboard.rs" name="app::keyboard">
-    <fn name="handle_terminal_keyboard_input" line="12" pub="true" reads="clipboard, ide_panel, modifiers, window" writes="last_action=" calls="self: jump_to_terminal_search_result, update_terminal_search; editor_navigation: select_all; render_view::core_text: flush" />
-    <fn name="handle_terminal_search_keyboard_input" line="247" pub="true" reads="clipboard, ide_panel, modifiers, window" writes="last_action=" calls="self: jump_to_terminal_search_result, update_terminal_search; editor: backspace, delete_forward, delete_selection, insert_str; editor_navigation: get_selection, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all" />
-    <fn name="handle_search_keyboard_input" line="378" pub="true" reads="clipboard, modifiers, search_editor, window" writes="last_action=, search_current_idx=, search_focused=, search_results.clear(), show_search=" calls="self: jump_to_search_result, update_search; editor: backspace, delete_forward, delete_selection, insert_str; editor_navigation: get_selection, move_end, move_home, move_left, move_right, move_word_left, move_word_right, select_all" />
-  </mod>
-  <mod path="src/app/lsp_actions.rs" name="app::lsp_actions">
-    <fn name="lsp_panel_bounds" line="5" pub="true" ret="Option&lt;(f32, f32, f32, f32)&gt;" reads="ide_panel, renderer, window" calls="app: any_bottom_open" />
-    <fn name="lsp_panel_total_h" line="46" pub="true" ret="f32" reads="ide_panel" calls="self: lsp_server_logs_h" />
-    <fn name="lsp_server_logs_h" line="55" pub="true" ret="f32" reads="ide_panel" calls="self: lsp_server_inner_size; ui_system: contains" />
-    <fn name="lsp_server_inner_size" line="63" pub="true" ret="(f32, f32)" reads="ide_panel" calls="ui_system: contains" />
-    <fn name="open_lsp_actions_menu" line="98" pub="true" reads="editor, file_extension, file_path, is_ide_mode, lsp, renderer, scroll_y, show_welcome, window" writes="lsp_actions_menu=" calls="editor: get_full_text; lsp: diagnostics_for_line, offset_to_lsp_pos, request_code_actions; render_view::core_text: get_cursor_xy" />
-    <fn name="apply_selected_lsp_action" line="188" pub="true" reads="file_extension, file_path, lsp, lsp_actions_menu, window" writes="pending_fix_all_id=" calls="self: apply_workspace_edit, insert_noqa_comment; lsp: request_fix_all, request_organize_imports" />
-    <fn name="insert_noqa_comment" line="230" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, window" calls="editor: get_full_text, is_dirty, replace_range; editor_navigation: byte_at; highlighter_runtime: apply_edits, shift_delete, shift_insert; lsp: notify_change; ui_system: contains" />
-    <fn name="apply_workspace_edit" line="322" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, window" calls="editor: get_full_text, is_dirty, replace_range; highlighter_runtime: apply_edits, shift_delete, shift_insert; lsp: lsp_pos_to_offset, notify_change" />
-  </mod>
-  <mod path="src/app/mouse/cursor.rs" name="app::mouse::cursor">
-    <fn name="handle_main_cursor_moved" line="4" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, ide_panel, is_dragging, is_dragging_lsp_log, is_dragging_search, is_dragging_settings_ignore, is_ide_mode, last_click_pos, last_click_time, renderer, scroll_x, scroll_y, search_editor, settings_ignore_editor, settings_ignore_scroll_x, show_settings, show_welcome, window" writes="autocomplete_hovered_idx=" calls="self: file_tree_node_at, lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; app::mouse: clear_hover_popup, hover_popup_byte_at, hover_token_bounds, is_in_hover_popup_or_bridge, normalize_hover_byte; editor: get_full_text, text_parts; editor_navigation: set_cursor_at_pos; render_view::core_text: get_byte_at_xy, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph; ui_system: contains" />
-  </mod>
-  <mod path="src/app/mouse/input.rs" name="app::mouse::input">
-    <fn name="handle_main_mouse_input" line="4" pub="true" reads="autocomplete_hovered_idx, autocomplete_options, autocomplete_rect, autocomplete_scroll, base_title, dialog_window, editor, file_extension, file_path, ide_panel, is_ide_mode, lsp, renderer, scroll_x, scroll_y, settings_ignore_editor, settings_ignore_scroll_x, show_welcome, tab_scroll, ui_registry, window" writes="active_tab=, autocomplete_active=, autocomplete_selected_idx=, is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_dragging_settings_ignore=, last_action=, lsp_actions_menu=, pending_fix_all_id=, settings_ignore_focused=, show_settings=, tabs.insert(), tabs.remove()" calls="self: apply_autocomplete, apply_workspace_edit, handle_ui_click, insert_noqa_comment, refresh_file_tree, save_tabs_state, sync_active_tab; app: any_bottom_open, is_open, toggle; app::mouse: clear_hover_popup, hover_popup_byte_at; editor: get_full_text; lsp: request_fix_all, request_organize_imports; render_view::core_text: flush, get_max_scroll; render_view::diag_popup_ui: diag_popup_byte_at; renderer: char_advance, get_ui_glyph, measure_ui_width; scroll: clamp_current, clamp_target; ui_system: find_at, find_overlay_at" />
-  </mod>
-  <mod path="src/app/mouse/wheel.rs" name="app::mouse::wheel">
-    <fn name="handle_main_mouse_wheel" line="4" pub="true" reads="autocomplete_active, autocomplete_options, autocomplete_rect, autocomplete_scroll, dialog_window, editor, faq_editor, ide_ignore_patterns, ide_panel, ide_workspaces, is_ide_mode, modifiers, renderer, scroll_x, scroll_y, settings_ide_scroll, settings_scroll, settings_tab, show_settings, show_welcome, tab_scroll, tabs, window" writes="lsp_actions_menu=" calls="self: lsp_panel_bounds, lsp_panel_total_h, lsp_server_inner_size, lsp_server_logs_h; app: any_bottom_open, is_open; app::mouse: clear_hover_popup; render_view::core_text: flush, get_max_scroll; render_view::settings_ui: get_faq_max_scroll; renderer: measure_ui_width; scroll: clamp_target, scroll_by; ui_system: contains" />
-  </mod>
-  <mod path="src/app/mouse.rs" name="app::mouse">
-    <type name="HoverLayoutCache">{ scale_factor: f32, max_text_w: f32, span_count: usize, text_len: usize, lines: Vec&lt;HoverVisualLine&gt;, max_line_w: f32, total_text_h: f32 }</type>
-    <type name="HoverPopup">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, anchor_y: f32, scroll: crate::scroll::ScrollState, layout_cache: Option&lt;HoverLayoutCache&gt; }</type>
-    <type name="HoverState">{ request_id: Option&lt;i32&gt;, definition_request_id: Option&lt;i32&gt;, popup: Option&lt;HoverPopup&gt;, pending_popup: Option&lt;HoverPopup&gt;, timer: f32, byte_offset: Option&lt;usize&gt;, rect: Option&lt;(f32, f32, f32, f32)&gt;, max_scroll: f32, selection_anchor: Option&lt;usize&gt;, selection_cursor: Option&lt;usize&gt;, selecting: bool, diag_selection_anchor: Option&lt;usize&gt;, diag_selection_cursor: Option&lt;usize&gt;, diag_selecting: bool }</type>
-    <type name="HoverVisualLine">{ glyphs: Vec&lt;(char, [f32; 4], usize)&gt;, kind: crate::lsp::HoverLineKindPublic }</type>
-    <fn name="default" line="58" ret="Self" />
-    <fn name="hover_byte_includes_identifier_edges_next_to_whitespace" line="83" calls="self: normalize_hover_byte; editor: get_full_text, insert_str" />
-    <fn name="hover_byte_ignores_python_keywords_so_diagnostics_can_show" line="99" calls="self: normalize_hover_byte; editor: get_full_text, insert_str" />
-    <fn name="hover_bridge_reaches_full_source_line_when_popup_is_above" line="110" calls="self: is_in_hover_popup_or_bridge" />
-    <fn name="hover_bridge_handles_popup_shifted_away_from_anchor" line="129" calls="self: is_in_hover_popup_or_bridge" />
-    <fn name="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" line="148" calls="self: is_in_hover_popup_or_bridge" />
-    <fn name="hover_bridge_does_not_capture_next_line_when_popup_is_above" line="167" calls="self: is_in_hover_popup_or_bridge" />
-    <fn name="clear_hover_popup" line="192" pub="true" ret="bool" />
-    <fn name="is_hover_target_byte" line="225" ret="bool" calls="editor_navigation: byte_at" />
-    <fn name="is_python_hover_keyword" line="233" ret="bool" />
-    <fn name="hover_token_text" line="274" ret="Option&lt;String&gt;" calls="self: hover_token_bounds; editor: get_full_text" />
-    <fn name="normalize_hover_byte" line="280" ret="Option&lt;usize&gt;" calls="self: hover_token_text, is_hover_target_byte" />
-    <fn name="hover_token_bounds" line="301" ret="(usize, usize)" calls="self: is_hover_target_byte; editor: get_full_text" />
-    <fn name="hover_anchor_for_byte" line="377" pub="true" ret="(f32, f32)" calls="self: hover_token_bounds; editor: get_full_text; editor_navigation: is_char_boundary; renderer: char_advance" />
-    <fn name="is_in_hover_popup_or_bridge" line="438" pub="true" ret="bool" />
-    <fn name="hover_popup_byte_at" line="500" ret="usize" calls="renderer: char_advance, get_ui_glyph" />
-  </mod>
-  <mod path="src/app/terminal.rs" name="app::terminal">
-    <type name="Cell">{ c: char, fg: u8, bg: u8 }</type>
-    <type name="TermGrid">{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, cur_x: usize, cur_y: usize, cur_fg: u8, cur_bg: u8, cur_bold: bool, dirty: bool, selection: Option&lt;(usize, usize, usize, usize)&gt;, reply_tx: Option&lt;std::sync::mpsc::Sender&lt;Vec&lt;u8&gt;&gt;&gt;, saved_cursor: Option&lt;(usize, usize)&gt;, scroll_region: (usize, usize), cursor_visible: bool, app_cursor_keys: bool, mouse_tracking: bool, pool: Vec&lt;Vec&lt;Cell&gt;&gt; }</type>
-    <type name="Terminal">{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }</type>
-    <fn name="default" line="14" ret="Self" />
-    <fn name="new" line="48" pub="true" ret="Self" />
-    <fn name="resize" line="78" pub="true" reads="alt_lines, alt_saved_cursor, is_alt, saved_cursor" writes="cols=, cur_x=, cur_y=, dirty=, lines.pop_back(), lines.push_back(), pool.push(), scroll_region=, scrollback.pop_back(), scrollback.push_back(), visible_rows=" />
-    <fn name="put_char" line="207" pub="true" reads="cols, cur_bg, cur_fg, lines, visible_rows" writes="cur_x=, cur_y=" calls="self: newline" />
-    <fn name="newline" line="227" pub="true" reads="scroll_region, visible_rows" writes="cur_y=" calls="self: scroll_region_up" />
-    <fn name="scroll_region_up" line="238" pub="true" reads="cols, is_alt, scroll_region, visible_rows" writes="dirty=, lines.insert(), pool.push(), scrollback.push_back()" calls="self: resize; renderer: resize" />
-    <fn name="scroll_region_down" line="281" pub="true" reads="cols, scroll_region" writes="dirty=, lines.insert(), lines.remove(), pool.push()" calls="self: resize; renderer: resize" />
-    <fn name="get_selection_text" line="303" pub="true" ret="String" reads="cols, lines, scrollback, selection" />
-    <fn name="print" line="357" calls="self: put_char" />
-    <fn name="execute" line="360" writes="cur_x=" calls="self: newline, put_char" />
-    <fn name="hook" line="374" />
-    <fn name="put" line="375" />
-    <fn name="unhook" line="376" />
-    <fn name="osc_dispatch" line="377" reads="reply_tx" />
-    <fn name="esc_dispatch" line="388" writes="cur_x=, cur_y=, saved_cursor=" />
-    <fn name="csi_dispatch" line="400" reads="cols, reply_tx, visible_rows" writes="alt_lines=, alt_saved_cursor=, app_cursor_keys=, cur_bg=, cur_bold=, cur_fg=, cur_x=, cur_y=, cursor_visible=, dirty=, is_alt=, lines.insert(), lines.remove(), mouse_tracking=, pool.push(), saved_cursor=, scroll_region=, scrollback.clear()" calls="self: scroll_region_down, scroll_region_up; self: resize; renderer: resize; ui_system: contains" />
-    <fn name="spawn" line="753" pub="true" ret="Self" calls="render_view::core_text: flush" />
-    <fn name="resize_pty" line="858" pub="true" reads="master_pty" calls="self: resize; renderer: resize" />
-  </mod>
-  <mod path="src/app/ui_handlers.rs" name="app::ui_handlers">
-    <fn name="handle_ui_click" line="9" pub="true" reads="clipboard, file_extension, highlighter, ide_panel, lsp, pending_action, recent_files, renderer, scroll_x, scroll_y, search_editor, window, window_height, window_width" writes="base_title=, click_count=, dialog_window=, editor=, file_path=, ide_ignore_patterns.push(), ide_ignore_patterns.remove(), ide_workspaces.remove(), is_dragging=, is_dragging_lsp_log=, is_dragging_search=, is_ide_mode=, last_click_pos=, last_click_time=, pending_fix_all_id=, search_case_sensitive=, search_current_idx=, search_focused=, search_results.clear(), settings_ignore_editor=, settings_ignore_focused=, settings_tab=, show_search=, show_welcome=" calls="self: close_tab_at, enter_ide_mode, handle_file_tree_click, jump_to_search_result, jump_to_terminal_search_result, open_file_in_tab, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab, trigger_file_picker, trigger_folder_picker, trigger_save_as_picker, update_search, update_terminal_search; app: is_open, toggle; app::mouse: clear_hover_popup; app::terminal: spawn; editor: get_full_text, is_dirty, set_original_text; editor_navigation: select_line, select_word, set_cursor_at_pos; highlighter_runtime: reset; lsp: disable_python, enable_python, get_diagnostics, lsp_pos_to_offset, request_fix_all, restart_python, servers_info; render_view::core_text: get_cursor_xy, get_max_scroll; renderer: get_ui_glyph; scroll: stop_anim; ui_system: contains" />
-  </mod>
-  <mod path="src/app.rs" name="app">
-    <type name="App">{ pending_key_log: Option&lt;KeyLog&gt;, gl_config: Option&lt;glutin::config::Config&gt;, gl_context: Option&lt;PossiblyCurrentContext&gt;, gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, settings_scroll: crate::scroll::ScrollState, tab_scroll: crate::scroll::ScrollState, renderer: Option&lt;Renderer&gt;, editor: Editor, clipboard: Clipboard, theme: Theme, base_title: String, file_path: Option&lt;PathBuf&gt;, file_extension: String, highlighter: Highlighter, last_sent_version: u64, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, last_frame: Instant, last_action: Instant, last_blink_state: bool, modifiers: ModifiersState, is_dragging: bool, is_focused: bool, current_cursor: winit::window::CursorIcon, show_fps: bool, window_width: f64, window_height: f64, last_resize_time: Option&lt;Instant&gt;, last_click_time: Instant, click_count: u8, last_click_pos: (f32, f32), pending_action: PendingAction, open_file_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, save_file_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, show_welcome: bool, recent_files: Vec&lt;PathBuf&gt;, is_ide_mode: bool, ide_workspaces: Vec&lt;PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, settings_ignore_editor: Editor, settings_ignore_focused: bool, settings_ignore_scroll_x: f32, is_dragging_settings_ignore: bool, open_folder_rx: Option&lt;std::sync::mpsc::Receiver&lt;Option&lt;PathBuf&gt;&gt;&gt;, show_search: bool, search_anim_y: f32, search_editor: Editor, search_focused: bool, search_case_sensitive: bool, search_results: Vec&lt;(usize, usize)&gt;, search_current_idx: Option&lt;usize&gt;, is_dragging_search: bool, is_dragging_lsp_log: bool, faq_editor: Editor, is_ready: bool, is_highlighted_once: bool, tried_maximize: bool, should_maximize: bool, autocomplete_active: bool, autocomplete_options: Vec&lt;(CompletionItem, Vec&lt;usize&gt;)&gt;, autocomplete_selected_idx: usize, autocomplete_anim_progress: f32, autocomplete_scroll: crate::scroll::ScrollState, autocomplete_hovered_idx: Option&lt;usize&gt;, autocomplete_rect: Option&lt;(f32, f32, f32, f32)&gt;, current_sticky_lines: Vec&lt;(usize, usize)&gt;, target_sticky_lines: Vec&lt;(usize, usize)&gt;, sticky_anim_progress: f32, sticky_anim_is_adding: bool, show_settings: bool, settings_anim_progress: f32, settings_y: f32, settings_tab: usize, settings_ide_scroll: crate::scroll::ScrollState, ide_panel: IdePanelState, file_tree_rx: Option&lt;std::sync::mpsc::Receiver&lt;Vec&lt;crate::app::file_tree::FileNode&gt;&gt;&gt;, file_tree_notify_rx: Option&lt;std::sync::mpsc::Receiver&lt;()&gt;&gt;, lsp: Option&lt;crate::lsp::LspManager&gt;, lsp_actions_menu: Option&lt;LspActionsMenu&gt;, pending_fix_all_id: Option&lt;i32&gt;, ui_registry: crate::ui_system::UiRegistry, tabs: Vec&lt;EditorTab&gt;, active_tab: usize, run_ide_on_startup: bool }</type>
-    <type name="EditorTab">{ editor: crate::editor::Editor, file_path: Option&lt;PathBuf&gt;, base_title: String, file_extension: String, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, completions: Vec&lt;crate::highlighter::CompletionItem&gt;, foldable_ranges: Vec&lt;(usize, usize, bool, bool)&gt;, syntax_errors: Vec&lt;(usize, usize)&gt;, last_sent_version: u64, search_results: Vec&lt;(usize, usize)&gt;, search_current_idx: Option&lt;usize&gt;, is_highlighted_once: bool, icon_key: &amp;'static str }</type>
-    <type name="IdePanelState">{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, explorer_scroll: crate::scroll::ScrollState, file_tree_hovered_idx: Option&lt;usize&gt;, lsp_servers: Vec&lt;crate::lsp::LspServerInfo&gt;, lsp_logs_expanded: FxHashSet&lt;String&gt;, lsp_scroll_y: crate::scroll::ScrollState, lsp_scroll_x: crate::scroll::ScrollState, lsp_log_editors: FxHashMap&lt;String, Editor&gt;, lsp_logs_scroll_y: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_scroll_x: FxHashMap&lt;String, crate::scroll::ScrollState&gt;, lsp_logs_focused: Option&lt;String&gt;, diag_copied_idx: Option&lt;usize&gt;, problems_tab: usize, flat_diags: Vec&lt;(std::path::PathBuf, usize)&gt;, problems_collapsed: FxHashSet&lt;std::path::PathBuf&gt;, problems_scroll: crate::scroll::ScrollState, terminals: Vec&lt;crate::app::terminal::Terminal&gt;, active_terminal: usize, terminal_focused: bool, is_dragging_terminal: bool, tab_drag: Option&lt;TabDragState&gt;, term_show_search: bool, term_search_editor: crate::editor::Editor, term_search_focused: bool, term_search_case_sensitive: bool, term_search_results: Vec&lt;(usize, usize, usize, usize)&gt;, term_search_current_idx: Option&lt;usize&gt; }</type>
-    <type name="KeyLog">{ key: String, t0: std::time::Instant, t_highlight: Option&lt;std::time::Instant&gt;, t_render: Option&lt;std::time::Instant&gt; }</type>
-    <type name="LspActionItem">{ CodeAction(crate::lsp::CodeAction), AddNoqa { codes: Vec&lt;String&gt; }</type>
-    <type name="LspActionsMenu">{ cursor_line: u32, items: Vec&lt;LspActionItem&gt;, selected: usize, menu_x: f32, menu_y: f32, pending_request_id: Option&lt;i32&gt; }</type>
-    <type name="PanelDragState">{ panel_id: PanelId, start_y: f32, current_y: f32, threshold_passed: bool }</type>
-    <type name="PanelGroup">{ Top, Bottom }</type>
-    <type name="PanelId">{ Explorer, Terminal, Problems, LspServers }</type>
-    <type name="PanelSlot">{ id: PanelId, group: PanelGroup, open: bool }</type>
-    <type name="PendingAction">{ Quit, OpenFile, CloseFile }</type>
-    <type name="TabDragState">{ start_idx: usize, start_x: f32, current_x: f32, threshold_passed: bool }</type>
-    <fn name="label" line="59" pub="true" ret="&amp;'static str" />
-    <fn name="icon" line="67" pub="true" ret="crate::widgets::IconType" />
-    <fn name="default" line="173" ret="Self" />
-    <fn name="any_top_open" line="235" pub="true" ret="bool" reads="slots" />
-    <fn name="any_bottom_open" line="240" pub="true" ret="bool" reads="slots" />
-    <fn name="toggle" line="245" pub="true" reads="slots" />
-    <fn name="is_open" line="250" pub="true" ret="bool" reads="slots" />
-    <fn name="fuzzy_match" line="260" ret="Option&lt;Vec&lt;usize&gt;&gt;" />
-    <fn name="enter_ide_mode" line="408" pub="true" reads="editor, file_extension, highlighter, ide_workspaces, window" writes="active_tab=, base_title=, file_path=, ide_panel=, is_ide_mode=, lsp=, show_welcome=, tabs.push()" calls="self: apply_highlight_results, open_file_in_tab_bg, open_new_tab, refresh_file_tree, start_file_watcher, switch_to_tab; self: is_open; app::file_icons: file_icon_key; editor: get_full_text, is_dirty; highlighter_runtime: wait_for_first_result; lsp: notify_open" />
-    <fn name="save_tabs_state" line="513" pub="true" reads="active_tab, is_ide_mode, tabs" calls="self: sync_active_tab" />
-    <fn name="sync_active_tab" line="522" pub="true" reads="active_tab, base_title, editor, file_extension, file_path, highlighter, is_highlighted_once, last_sent_version, scroll_x, scroll_y, search_current_idx, search_results, tabs" calls="app::file_icons: file_icon_key" />
-    <fn name="switch_to_tab" line="569" pub="true" reads="base_title, editor, file_extension, file_path, highlighter, is_ide_mode, lsp, tabs, window" writes="active_tab=, autocomplete_active=, show_welcome=" calls="self: save_tabs_state, sync_active_tab; editor: get_full_text, is_dirty; highlighter_runtime: reset; lsp: notify_open" />
-    <fn name="open_new_tab" line="624" pub="true" reads="highlighter, is_ide_mode, window" writes="active_tab=, autocomplete_active=, base_title=, editor=, file_extension=, file_path=, show_welcome=, tabs.push()" calls="self: close_current_file, save_tabs_state, sync_active_tab; highlighter_runtime: reset" />
-    <fn name="close_tab_at" line="715" pub="true" reads="base_title, editor, file_path, is_ide_mode, window" writes="active_tab=, autocomplete_active=, show_welcome=, tabs.remove()" calls="self: close_current_file, save_tabs_state, sync_active_tab; editor: is_dirty" />
-    <fn name="open_file_in_tab" line="749" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_bg" line="753" pub="true" calls="self: open_file_in_tab_internal" />
-    <fn name="open_file_in_tab_internal" line="757" pub="true" reads="active_tab, editor, file_path, is_ide_mode, tabs" calls="self: load_file_internal, open_new_tab, switch_to_tab; editor: is_dirty" />
-    <fn name="ensure_cursor_visible" line="793" pub="true" calls="render_view::core_text: get_cursor_xy, get_max_scroll" />
-    <fn name="get_current_word_prefix" line="832" pub="true" ret="String" reads="editor" calls="editor_navigation: byte_at" />
-    <fn name="update_autocomplete" line="852" pub="true" reads="autocomplete_scroll, editor, highlighter" writes="autocomplete_active=, autocomplete_anim_progress=, autocomplete_options.clear(), autocomplete_options=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; self: fuzzy_match" />
-    <fn name="ensure_autocomplete_visible" line="931" pub="true" reads="autocomplete_options, autocomplete_scroll, autocomplete_selected_idx" calls="scroll: clamp_target, set_target" />
-    <fn name="apply_autocomplete" line="961" pub="true" reads="autocomplete_options, autocomplete_scroll, base_title, editor, highlighter, window" writes="autocomplete_active=, autocomplete_selected_idx=" calls="self: get_current_word_prefix; editor: backspace, insert_str, is_dirty; highlighter_runtime: shift_delete, shift_insert" />
-    <fn name="update_terminal_search" line="995" pub="true" reads="ide_panel" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_terminal_search_result" line="1040" pub="true" reads="ide_panel, renderer" />
-    <fn name="update_search" line="1076" pub="true" reads="editor, search_case_sensitive, search_editor" writes="search_current_idx=, search_results.clear(), search_results.push()" calls="editor: get_full_text; lsp: start" />
-    <fn name="jump_to_search_result" line="1132" pub="true" reads="editor, renderer, scroll_y, search_current_idx, search_results, window" calls="render_view::core_text: get_max_scroll; scroll: clamp_target" />
-    <fn name="update_window_title" line="1158" pub="true" />
-    <fn name="show_action_dialog" line="1167" pub="true" reads="gl_config, scroll_x, scroll_y" writes="dialog_gl_surface=, dialog_window=, is_dragging=, pending_action=" calls="app::terminal: new; editor: new; highlighter: new; lsp: new; renderer: new; scroll: new; ui_system: new" />
-    <fn name="close_dialog" line="1209" pub="true" reads="window" writes="dialog_gl_surface=, dialog_window=" />
-    <fn name="close_current_file" line="1217" pub="true" reads="active_tab, file_path, highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, search_current_idx=, search_results.clear(), show_search=, show_welcome=, tabs.clear()" calls="self: close_tab_at, save_tabs_state; editor: set_original_text; highlighter_runtime: reset; lsp: notify_close" />
-    <fn name="trigger_file_picker" line="1263" pub="true" writes="open_file_rx=" />
-    <fn name="trigger_folder_picker" line="1272" pub="true" writes="open_folder_rx=" />
-    <fn name="trigger_save_as_picker" line="1283" pub="true" writes="save_file_rx=" />
-    <fn name="save_current_file" line="1295" pub="true" ret="bool" reads="editor, file_path" calls="self: save_tabs_state, trigger_save_as_picker; app::terminal: spawn; editor: get_full_text, mark_saved" />
-    <fn name="add_recent_file" line="1334" pub="true" writes="recent_files.insert(), recent_files.retain(), recent_files.truncate()" />
-    <fn name="apply_highlight_results" line="1343" pub="true" reads="editor, file_extension, highlighter" writes="is_highlighted_once=" />
-    <fn name="load_file_internal" line="1378" pub="true" reads="highlighter, is_ide_mode, lsp, scroll_x, scroll_y, window" writes="autocomplete_active=, base_title=, editor=, file_extension=, file_path=, is_highlighted_once=, last_sent_version=, recent_files.retain(), search_current_idx=, search_results.clear(), show_welcome=" calls="self: add_recent_file, apply_highlight_results, save_tabs_state; editor: clear_history, get_full_text, insert_str, set_original_text; highlighter_runtime: reset, wait_for_first_result; lsp: notify_open" />
-    <fn name="check_external_changes" line="1464" pub="true" reads="tabs, window" calls="self: sync_active_tab; editor: clear_history, get_full_text, insert_str, is_dirty, set_original_text" />
-  </mod>
-  <mod path="src/editor.rs" name="editor">
-    <type name="EditOp">{ Insert { offset: usize, text: String }</type>
-    <type name="Editor">{ data: Vec&lt;u8&gt;, gap_start: usize, gap_end: usize, cursor: usize, selection_anchor: Option&lt;usize&gt;, version: u64, line_offsets: Vec&lt;usize&gt;, longest_line_idx: usize, history: VecDeque&lt;HistoryStep&gt;, redo_stack: VecDeque&lt;HistoryStep&gt;, history_size: usize, is_working_history: bool, original_hashes: Vec&lt;u64&gt;, saved_hashes: Vec&lt;u64&gt;, line_states: Vec&lt;Option&lt;LineModState&gt;&gt;, deleted_gaps: Vec&lt;Option&lt;LineModState&gt;&gt;, is_dirty: bool, indent_cache: Vec&lt;u8&gt;, last_indent_version: u64, sync_edits: Vec&lt;SyncEdit&gt;, foldable_lines: std::collections::HashMap&lt;usize, usize&gt;, folded_lines: std::collections::HashSet&lt;usize&gt;, folded_start_bytes: std::collections::HashSet&lt;usize&gt;, foldable_ranges_bytes: Vec&lt;(usize, usize, bool)&gt; }</type>
-    <type name="HashSource">(&amp;'a [u64])</type>
-    <type name="HistoryStep">{ op: EditOp, cursor_before: usize, cursor_after: usize }</type>
-    <type name="LineModState">{ ModifiedUnsaved, ModifiedSaved }</type>
-    <type name="UndoRedoDelta">{ Insert(usize, usize, String), Delete(usize, usize), Replace(usize, usize, String, String) }</type>
-    <fn name="tokenize" line="16" ret="Self::Tokenizer" reads="0" />
-    <fn name="estimate_tokens" line="20" ret="u32" reads="0" />
-    <fn name="get_diff_info" line="25" ret="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" />
-    <fn name="is_delimiter" line="45" ret="bool" />
-    <fn name="char_class" line="52" ret="u8" />
-    <fn name="new" line="130" pub="true" ret="Self" />
-    <fn name="shift_folds_insert" line="159" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
-    <fn name="shift_folds_delete" line="182" pub="true" reads="foldable_ranges_bytes" writes="folded_start_bytes=" />
-    <fn name="rebuild_line_offsets" line="211" pub="true" reads="foldable_ranges_bytes" writes="foldable_lines.clear(), foldable_lines.insert(), folded_lines.clear(), folded_lines.insert(), folded_start_bytes.clear(), folded_start_bytes.insert(), line_offsets=, longest_line_idx=" calls="self: text_parts" />
-    <fn name="get_line_hashes" line="281" ret="Vec&lt;u64&gt;" calls="self: text_parts" />
-    <fn name="ensure_indent_cache_updated" line="304" pub="true" reads="version" writes="indent_cache.clear(), last_indent_version=" calls="self: text_parts; app::terminal: resize; renderer: resize" />
-    <fn name="get_cached_indent_levels" line="376" pub="true" ret="&amp;[u8]" reads="indent_cache" />
-    <fn name="backspace" line="380" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, gap_start, version" writes="cursor=, selection_anchor=, sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="set_original_text" line="453" pub="true" writes="original_hashes=, saved_hashes=" calls="self: get_line_hashes, update_modifications" />
-    <fn name="mark_saved" line="459" pub="true" writes="saved_hashes=" calls="self: get_line_hashes, update_modifications" />
-    <fn name="is_dirty" line="464" pub="true" ret="bool" reads="is_dirty" />
-    <fn name="get_line_modification_state" line="468" pub="true" ret="Option&lt;LineModState&gt;" reads="line_states" />
-    <fn name="update_modifications" line="472" pub="true" reads="original_hashes, saved_hashes" writes="deleted_gaps=, is_dirty=, line_states=" calls="self: get_line_hashes, rebuild_line_offsets; self: get_diff_info" />
-    <fn name="clear_history" line="543" pub="true" writes="history.clear(), history_size=, redo_stack.clear(), sync_edits.clear()" calls="self: update_modifications" />
-    <fn name="push_history" line="551" reads="history_size, is_working_history" writes="history.push_back(), redo_stack.clear()" calls="ui_system: contains" />
-    <fn name="undo" line="635" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.pop_back(), is_working_history=, redo_stack.push_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
-    <fn name="redo" line="693" pub="true" ret="Option&lt;UndoRedoDelta&gt;" reads="gap_end, version" writes="cursor=, history.push_back(), is_working_history=, redo_stack.pop_back(), selection_anchor=, sync_edits.push()" calls="self: insert_str_internal, move_gap, shift_folds_delete, shift_folds_insert, update_modifications" />
-    <fn name="text_parts" line="751" pub="true" ret="(&amp;str, &amp;str)" reads="data, gap_end, gap_start" />
-    <fn name="get_full_text" line="759" pub="true" ret="String" calls="self: text_parts" />
-    <fn name="move_gap" line="767" reads="data, gap_end, gap_start" />
-    <fn name="insert_str_internal" line="786" ret="usize" reads="cursor, gap_start" writes="data=, gap_end=, sync_edits.push()" calls="self: move_gap, shift_folds_insert" />
-    <fn name="replace_range" line="810" pub="true" ret="(usize, usize, String)" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, insert_str_internal, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="insert_str" line="857" pub="true" ret="(Option&lt;(usize, usize)&gt;, usize)" reads="cursor, version" writes="selection_anchor=" calls="self: delete_selection, insert_str_internal, push_history, update_modifications" />
-    <fn name="delete_selection" line="884" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="gap_end, sync_edits, version" writes="cursor=, selection_anchor=" calls="self: byte_at, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="delete_forward" line="922" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor, gap_end, version" writes="sync_edits.push()" calls="self: byte_at, delete_selection, is_char_boundary, len, move_gap, push_history, shift_folds_delete, update_modifications" />
-    <fn name="delete_word_backward" line="958" pub="true" ret="Option&lt;(usize, usize)&gt;" reads="cursor" writes="selection_anchor=" calls="self: byte_at, delete_selection; self: is_delimiter" />
-    <fn name="delete_word_forward" line="991" pub="true" ret="Option&lt;(usize, usize)&gt;" writes="cursor=, selection_anchor=" calls="self: byte_at, delete_selection, len; self: is_delimiter" />
-    <fn name="get_auto_indent" line="1025" pub="true" ret="String" reads="cursor" calls="self: byte_at" />
-  </mod>
-  <mod path="src/editor_navigation.rs" name="editor_navigation">
-    <fn name="select_expand" line="4" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; editor: char_class" />
-    <fn name="select_word" line="130" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len; editor: is_delimiter" />
-    <fn name="select_line" line="147" pub="true" writes="cursor=, selection_anchor=" calls="self: byte_at, len" />
-    <fn name="is_char_boundary" line="162" pub="true" ret="bool" calls="self: byte_at, len" />
-    <fn name="byte_at" line="170" pub="true" ret="u8" reads="data, gap_end, gap_start" />
-    <fn name="len" line="178" pub="true" ret="usize" reads="data, gap_end, gap_start" />
-    <fn name="utf16_col_to_byte_advance" line="186" pub="true" reads="line_offsets" calls="self: byte_at, len" />
-    <fn name="get_selection" line="223" pub="true" ret="Option&lt;String&gt;" reads="cursor, selection_anchor" calls="self: byte_at" />
-    <fn name="get_visible_lines_count" line="237" pub="true" ret="usize" reads="foldable_lines, folded_lines, line_offsets" calls="ui_system: contains" />
-    <fn name="select_all" line="257" pub="true" writes="cursor=, selection_anchor=" calls="self: len" />
-    <fn name="handle_selection" line="262" reads="cursor" writes="selection_anchor=" />
-    <fn name="snap_cursor_out_of_fold" line="271" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: len, move_end; ui_system: contains" />
-    <fn name="move_left" line="311" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, snap_cursor_out_of_fold" />
-    <fn name="move_right" line="324" pub="true" writes="cursor=" calls="self: handle_selection, is_char_boundary, len, snap_cursor_out_of_fold" />
-    <fn name="move_word_left" line="337" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, snap_cursor_out_of_fold; editor: char_class" />
-    <fn name="move_word_right" line="360" pub="true" writes="cursor=" calls="self: byte_at, handle_selection, len, snap_cursor_out_of_fold; editor: char_class" />
-    <fn name="move_home" line="383" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
-    <fn name="move_end" line="423" pub="true" reads="foldable_lines, folded_lines, line_offsets" writes="cursor=" calls="self: byte_at, handle_selection, len; ui_system: contains" />
-    <fn name="move_start_of_file" line="463" pub="true" writes="cursor=" calls="self: handle_selection" />
-    <fn name="move_end_of_file" line="468" pub="true" writes="cursor=" calls="self: handle_selection, len" />
-    <fn name="move_up" line="473" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="move_down" line="479" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="set_cursor_at_pos" line="485" pub="true" writes="cursor=, selection_anchor=" calls="render_view::core_text: get_byte_at_xy" />
-    <fn name="move_page_up" line="500" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-    <fn name="move_page_down" line="506" pub="true" writes="cursor=" calls="self: handle_selection; render_view::core_text: get_byte_at_xy, get_cursor_xy" />
-  </mod>
-  <mod path="src/highlighter.rs" name="highlighter">
-    <type name="ColorSpan">{ start: usize, end: usize, color: [f32; 4] }</type>
-    <type name="CompletionItem">{ word: String, kind: SymbolKind, scope_start: usize, scope_end: usize }</type>
-    <type name="Highlighter">{ tx: Sender&lt;HighlighterMessage&gt;, rx: Receiver&lt;( u64, Vec&lt;ColorSpan&gt;, Vec&lt;CompletionItem&gt;, Vec&lt;(usize, usize, bool, bool)&gt;, Vec&lt;(usize, usize)&gt;, )&gt;, spans: Vec&lt;ColorSpan&gt;, completions: Vec&lt;CompletionItem&gt;, foldable_ranges: Vec&lt;(usize, usize, bool, bool)&gt;, syntax_errors: Vec&lt;(usize, usize)&gt;, current_version: u64 }</type>
-    <type name="HighlighterMessage">{ Reset { version: u64, text: String, ext: String }</type>
-    <type name="Scope">{ start: usize, end: usize, params: HashSet&lt;String&gt; }</type>
-    <type name="SymbolKind">{ Variable, Function, Class, Parameter, Keyword, Unknown }</type>
-    <type name="SyncEdit">{ Insert { offset: usize, text: String }</type>
-    <fn name="get_point" line="93" ret="tree_sitter::Point" />
-    <fn name="resolve_color" line="106" ret="[f32; 4]" calls="ui_system: contains" />
-    <fn name="new" line="187" pub="true" ret="Self" calls="editor: insert_str, replace_range; editor_navigation: is_char_boundary; self: get_point, resolve_color; highlighter_runtime: flatten_spans; queries: get_folding_query, get_injection_query, get_params_query, get_ts_config; ui_system: contains" />
-  </mod>
-  <mod path="src/highlighter_runtime.rs" name="highlighter_runtime">
-    <fn name="reset" line="4" pub="true" />
-    <fn name="apply_edits" line="10" pub="true" reads="tx" />
-    <fn name="poll" line="27" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=, syntax_errors=" />
-    <fn name="wait_for_first_result" line="48" pub="true" ret="bool" reads="rx" writes="completions=, current_version=, foldable_ranges=, spans=, syntax_errors=" calls="self: poll" />
-    <fn name="shift_insert" line="77" pub="true" writes="spans.extend(), spans.push(), spans.retain(), spans=" />
-    <fn name="shift_delete" line="174" pub="true" writes="spans.retain()" />
-    <fn name="get_bracket_color" line="191" pub="true" ret="[f32; 4]" />
-    <fn name="flatten_spans" line="205" pub="true" ret="Vec&lt;ColorSpan&gt;" calls="app::terminal: resize; self: get_bracket_color; renderer: resize" />
-  </mod>
-  <mod path="src/languages/python.rs" name="languages::python">
-    <type name="HoverLineKind">{ Text, Code, Separator, Header1, Header2 }</type>
-    <fn name="normalize_inline_rst_code" line="33" pub="true" ret="(String, Vec&lt;(usize, usize)&gt;)" />
-    <fn name="normalize_rst_roles" line="58" pub="true" ret="(String, Vec&lt;(usize, usize)&gt;)" />
-    <fn name="flatten_rst_roles_and_code" line="99" pub="true" ret="String" />
-    <fn name="parse_param_line" line="147" pub="true" ret="Option&lt;(String, String, String)&gt;" />
-    <fn name="split_inline_python_after_colon" line="167" ret="Option&lt;(String, String)&gt;" calls="ui_system: contains" />
-    <fn name="normalize_coroutine_signature_line" line="187" ret="String" calls="ui_system: contains" />
-    <fn name="normalize_python_hover_doc" line="209" pub="true" ret="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" calls="self: flatten_rst_roles_and_code, normalize_coroutine_signature_line, normalize_inline_rst_code, normalize_rst_roles, parse_param_line, split_inline_python_after_colon" />
-    <fn name="ts_capture_color" line="604" pub="true" ret="Option&lt;[f32; 4]&gt;" />
-    <fn name="push_python_ts_spans" line="620" pub="true" calls="self: ts_capture_color" />
-    <fn name="highlight_python_hover_doc" line="673" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="editor: replace_range; self: color_keyword_args_orange, force_color_on_ranges, normalize_python_hover_doc, push_python_ts_spans; ui_system: contains" />
-    <fn name="force_color_on_ranges" line="1006" />
-    <fn name="color_keyword_args_orange" line="1048" />
-  </mod>
-  <mod path="src/lsp/hover.rs" name="lsp::hover">
-    <type name="HoverLineKindPublic">{ Text, Code, Separator, Header1, Header2 }</type>
-    <type name="PendingRequestKind">{ Hover, CodeAction, Definition }</type>
-    <fn name="highlight_hover_text" line="3" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" calls="languages::python: highlight_python_hover_doc; self: add_bound_method_signature_spans, add_class_keyword_spans_for_signature, add_param_name_spans_for_signature, add_self_param_span_for_signature, add_type_bracket_neutral_spans_for_signature, add_type_expr_spans_for_line, looks_like_python_code_line, looks_like_python_hover, looks_like_simple_type_name_line, looks_like_type_expr_line, normalize_hover_text, preprocess_hover_text; ui_system: contains" />
-    <fn name="preprocess_hover_text" line="111" ret="String" calls="self: normalize_asynccontextmanager_signature_line" />
-    <fn name="looks_like_python_hover" line="124" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_python_code_line" line="155" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_type_expr_line" line="181" ret="bool" calls="ui_system: contains" />
-    <fn name="looks_like_simple_type_name_line" line="201" ret="bool" calls="ui_system: contains" />
-    <fn name="sanitize_hover_type_expr" line="222" ret="String" />
-    <fn name="sanitize_module_path" line="240" ret="String" />
-    <fn name="normalize_class_object_repr" line="252" ret="Option&lt;(Option&lt;String&gt;, String)&gt;" calls="self: sanitize_module_path" />
-    <fn name="normalize_module_object_repr" line="277" ret="Option&lt;String&gt;" calls="self: sanitize_module_path" />
-    <fn name="normalize_bound_method_signature" line="293" ret="Option&lt;String&gt;" calls="self: sanitize_hover_type_expr; ui_system: contains" />
-    <fn name="add_bound_method_signature_spans" line="349" ret="bool" calls="ui_system: contains" />
-    <fn name="add_self_param_span_for_signature" line="419" />
-    <fn name="add_param_name_spans_for_signature" line="443" />
-    <fn name="add_class_keyword_spans_for_signature" line="483" />
-    <fn name="add_type_bracket_neutral_spans_for_signature" line="518" />
-    <fn name="add_type_expr_spans_for_line" line="538" />
-    <fn name="normalize_hover_text" line="578" ret="String" calls="self: normalize_asynccontextmanager_signature_line, normalize_bound_method_signature, normalize_class_object_repr, normalize_module_object_repr" />
-    <fn name="wrap_signature_after_first_param" line="633" ret="String" calls="ui_system: contains" />
-    <fn name="normalize_asynccontextmanager_signature_line" line="657" ret="Option&lt;String&gt;" calls="app::events::hover: wrap_signature_after_first_param; self: wrap_signature_after_first_param" />
-    <fn name="variable_header_highlights_name_pink" line="689" calls="self: highlight_hover_text" />
-    <fn name="uses_python_hover_pipeline_for_builtin_signatures" line="707" calls="self: highlight_hover_text" />
-    <fn name="plain_bound_method_prose_stays_uncolored" line="727" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="inline_for_fragment_becomes_separate_code_line" line="764" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="rich_rst_docstring_path_is_preserved" line="774" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="bound_method_signature_line_is_highlighted_but_prose_stays_plain" line="793" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="coroutine_return_bound_method_becomes_async_def" line="813" calls="self: highlight_hover_text" />
-    <fn name="coroutine_return_signature_becomes_async_def" line="820" calls="self: highlight_hover_text" />
-    <fn name="long_bound_method_signature_is_normalized_and_highlighted" line="836" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_object_repr_is_normalized_and_highlighted" line="863" calls="self: highlight_hover_text" />
-    <fn name="qualified_class_object_repr_prepends_module_path" line="885" calls="self: highlight_hover_text" />
-    <fn name="backticked_qualified_class_repr_prepends_module_path" line="903" calls="self: highlight_hover_text" />
-    <fn name="generic_type_line_gets_cyan_types_and_white_brackets" line="913" calls="self: highlight_hover_text" />
-    <fn name="literal_type_line_is_highlighted" line="944" calls="self: highlight_hover_text" />
-    <fn name="assignment_line_is_highlighted_in_hover_text" line="966" calls="self: highlight_hover_text" />
-    <fn name="module_object_repr_is_normalized_to_module_header" line="979" calls="self: highlight_hover_text" />
-    <fn name="site_packages_and_init_are_removed_from_module_and_class_repr" line="986" calls="self: highlight_hover_text" />
-    <fn name="builtin_dict_class_hover_is_normalized_without_angle_brackets" line="997" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="builtin_str_heading_line_is_highlighted_as_type" line="1010" calls="self: highlight_hover_text" />
-    <fn name="builtin_any_heading_line_is_highlighted_as_type" line="1025" calls="self: highlight_hover_text" />
-    <fn name="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" line="1040" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" line="1047" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="class_signature_is_highlighted" line="1081" calls="self: highlight_hover_text" />
-    <fn name="litestar_giant_class_hover_signature_and_args_doc_are_parsed" line="1097" calls="self: highlight_hover_text; ui_system: contains" />
-    <fn name="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" line="1301" calls="self: highlight_hover_text" />
-  </mod>
-  <mod path="src/lsp/protocol.rs" name="lsp::protocol">
-    <type name="Cmd">{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }</type>
-    <type name="CodeAction">{ title: String, kind: Option&lt;String&gt;, edit: Option&lt;WorkspaceEdit&gt;, code: Option&lt;String&gt; }</type>
-    <type name="LspEvent">{ Log { name: &amp;'static str, message: String }</type>
-    <type name="LspServerDef">{ pub(super) program: &amp;'static str, pub(super) args: &amp;'static [&amp;'static str], pub(super) language_id: &amp;'static str, #[allow(dead_code)] pub(super) extensions: &amp;'static [&amp;'static str] }</type>
-    <type name="TextChange">{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, new_text: String }</type>
-    <type name="WorkspaceEdit">{ changes: HashMap&lt;PathBuf, Vec&lt;TextChange&gt;&gt; }</type>
-    <fn name="highlight_diagnostic_message" line="9" pub="true" ret="Vec&lt;crate::highlighter::ColorSpan&gt;" />
-    <fn name="offset_to_lsp_pos" line="236" pub="true" ret="(u32, u32)" />
-    <fn name="json_escape" line="256" pub="true" ret="String" />
-    <fn name="path_to_uri" line="275" pub="true" ret="String" />
-    <fn name="uri_to_path" line="289" pub="true" ret="PathBuf" />
-    <fn name="make_initialize" line="300" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape, path_to_uri" />
-    <fn name="make_initialized" line="331" pub="true" ret="Vec&lt;u8&gt;" />
-    <fn name="make_did_open" line="335" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_change_full" line="346" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_did_close" line="356" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_code_action" line="364" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_hover" line="391" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_definition" line="398" pub="true" ret="Vec&lt;u8&gt;" calls="self: json_escape" />
-    <fn name="make_shutdown" line="405" pub="true" ret="Vec&lt;u8&gt;" />
-    <fn name="make_exit" line="409" pub="true" ret="Vec&lt;u8&gt;" />
-    <fn name="write_frame" line="415" pub="true" ret="bool" calls="render_view::core_text: flush" />
-    <fn name="parse_diagnostic_value" line="427" pub="true" ret="Option&lt;Diagnostic&gt;" calls="self: parse_text_edit_value; ui_system: contains" />
-    <fn name="parse_text_edit_value" line="534" pub="true" ret="Option&lt;TextChange&gt;" />
-    <fn name="parse_workspace_edit_value" line="559" pub="true" ret="WorkspaceEdit" calls="self: uri_to_path" />
-    <fn name="parse_hover_value" line="595" pub="true" ret="Option&lt;String&gt;" />
-    <fn name="parse_definition_path" line="623" pub="true" ret="Option&lt;PathBuf&gt;" calls="self: uri_to_path" />
-    <fn name="parse_code_action_value" line="640" pub="true" ret="Option&lt;CodeAction&gt;" />
-    <fn name="dispatch_frame" line="675" pub="true" calls="self: parse_definition_path, parse_diagnostic_value, parse_hover_value, parse_workspace_edit_value, uri_to_path" />
-  </mod>
-  <mod path="src/lsp.rs" name="lsp">
-    <type name="DiagSeverity">{ Error, Warning, Info, Hint }</type>
-    <type name="Diagnostic">{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, source: Option&lt;String&gt;, quickfixes: Vec&lt;QuickFix&gt;, tags: Vec&lt;u32&gt;, spans: Vec&lt;crate::highlighter::ColorSpan&gt; }</type>
-    <type name="LogEntry">{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }</type>
-    <type name="LspManager">{ python: Option&lt;LspProcess&gt;, ty_process: Option&lt;LspProcess&gt;, workspaces: Vec&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, merged_instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, ty_instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, dirty_diagnostics: bool, last_change: Option&lt;std::time::Instant&gt;, current_path: Option&lt;PathBuf&gt;, python_status: LspServerStatus, ty_status: LspServerStatus, python_disabled: bool, server_logs: HashMap&lt;&amp;'static str, Vec&lt;LogEntry&gt;&gt;, suppress_diagnostics: bool }</type>
-    <type name="LspProcess">{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt;, workspace_scanned: bool }</type>
-    <type name="LspServerInfo">{ name: &amp;'static str, status: LspServerStatus, logs: Vec&lt;LogEntry&gt; }</type>
-    <type name="LspServerStatus">{ Starting, Running, Crashed, Disabled }</type>
-    <type name="OpenFile">{ uri: String, lang: &amp;'static str, version: i32, text: String }</type>
-    <type name="QuickFix">{ title: String, edits: Vec&lt;TextChange&gt; }</type>
-    <type name="SpawnedProcess">{ child: Child, out_tx: Sender&lt;Vec&lt;u8&gt;&gt; }</type>
-    <fn name="next_id" line="41" ret="i32" />
-    <fn name="spawn_server" line="108" ret="Option&lt;SpawnedProcess&gt;" calls="app::terminal: spawn; lsp::protocol: dispatch_frame, write_frame" />
-    <fn name="send_and_log" line="239" ret="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" calls="ui_system: contains" />
-    <fn name="run_supervisor" line="273" calls="self: next_id, send_and_log, spawn_server; lsp::protocol: make_code_action, make_definition, make_did_change_full, make_did_close, make_did_open, make_exit, make_hover, make_initialize, make_initialized, make_shutdown" />
-    <fn name="start" line="498" ret="Self" calls="app::terminal: spawn; self: run_supervisor" />
-    <fn name="notify_open" line="519" pub="true" reads="cmd_tx, def" writes="current_uri=, open_file_data=, workspace_scanned=" calls="lsp::protocol: path_to_uri" />
-    <fn name="restart" line="563" pub="true" reads="cmd_tx" />
-    <fn name="notify_change" line="569" pub="true" reads="cmd_tx" writes="current_uri=" calls="lsp::protocol: path_to_uri" />
-    <fn name="request_hover" line="579" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id; lsp::protocol: path_to_uri" />
-    <fn name="request_definition" line="586" pub="true" ret="i32" reads="cmd_tx" calls="self: next_id; lsp::protocol: path_to_uri" />
-    <fn name="notify_close" line="594" pub="true" reads="cmd_tx" writes="current_uri=" calls="lsp::protocol: path_to_uri" />
-    <fn name="request_code_actions" line="602" pub="true" ret="i32" reads="cmd_tx" calls="self: encode_diagnostics_json, next_id; lsp::protocol: path_to_uri" />
-    <fn name="poll" line="632" pub="true" reads="event_rx" />
-    <fn name="shutdown" line="641" pub="true" reads="cmd_tx" />
-    <fn name="encode_diagnostics_json" line="648" ret="String" calls="lsp::protocol: json_escape" />
-    <fn name="new" line="704" pub="true" ret="Self" />
-    <fn name="ensure_python" line="725" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" />
-    <fn name="restart_python" line="737" pub="true" reads="python_disabled, workspaces" writes="python=, python_status=, ty_process=, ty_status=" calls="self: restart" />
-    <fn name="disable_python" line="755" pub="true" reads="python, ty_process" writes="diagnostics.clear(), dirty_diagnostics=, instant_diagnostics.clear(), merged_instant_diagnostics.clear(), python_disabled=, python_status=, server_logs.clear(), ty_instant_diagnostics.clear(), ty_status=" calls="self: shutdown" />
-    <fn name="enable_python" line="774" pub="true" reads="current_path, workspaces" writes="python=, python_disabled=, python_status=, ty_process=, ty_status=" calls="self: notify_open" />
-    <fn name="servers_info" line="797" pub="true" ret="Vec&lt;LspServerInfo&gt;" reads="python_status, ty_status" />
-    <fn name="process_for_ext" line="823" ret="Option&lt;&amp;mut LspProcess&gt;" reads="python" calls="self: ensure_python" />
-    <fn name="notify_open" line="834" pub="true" reads="python, ty_process, workspaces" writes="current_path=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="notify_change" line="857" pub="true" reads="python, ty_process, workspaces" writes="last_change=, suppress_diagnostics=" calls="self: ensure_python" />
-    <fn name="request_hover" line="878" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="request_definition" line="899" pub="true" ret="Option&lt;i32&gt;" reads="ty_process, workspaces" />
-    <fn name="notify_close" line="921" pub="true" reads="python, ty_process, workspaces" />
-    <fn name="request_code_actions" line="940" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext" />
-    <fn name="poll" line="972" pub="true" ret="Vec&lt;LspEvent&gt;" reads="instant_diagnostics, merged_instant_diagnostics, python, server_logs, suppress_diagnostics, ty_instant_diagnostics, ty_process" writes="diagnostics.insert(), dirty_diagnostics=, last_change=, python_status=, ty_status=" calls="editor_navigation: is_char_boundary; self: format_and_highlight_json" />
-    <fn name="get_diagnostics" line="1104" pub="true" ret="&amp;[Diagnostic]" reads="diagnostics, workspaces" />
-    <fn name="get_instant_diagnostics_with_version" line="1118" pub="true" ret="(i32, &amp;[Diagnostic])" reads="merged_instant_diagnostics, workspaces" />
-    <fn name="diagnostics_for_line" line="1133" pub="true" ret="Vec&lt;&amp;Diagnostic&gt;" calls="self: get_diagnostics" />
-    <fn name="request_fix_all" line="1141" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id; lsp::protocol: path_to_uri" />
-    <fn name="request_organize_imports" line="1165" pub="true" ret="Option&lt;i32&gt;" reads="workspaces" calls="self: process_for_ext; self: next_id; lsp::protocol: path_to_uri" />
-    <fn name="shutdown" line="1190" pub="true" reads="python, ty_process" writes="python_disabled=" />
-    <fn name="lsp_pos_to_offset" line="1205" pub="true" ret="usize" />
-    <fn name="format_and_highlight_json" line="1231" pub="true" ret="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" calls="queries: get_folding_query, get_ts_config; ui_system: contains" />
-  </mod>
-  <mod path="src/main.rs" name="main">
-    <type name="Config">{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }</type>
-    <fn name="default" line="35" ret="Self" />
-    <fn name="load_recent_files" line="47" pub="true" ret="Vec&lt;PathBuf&gt;" />
-    <fn name="save_recent_files" line="63" pub="true" />
-    <fn name="load_open_tabs" line="77" pub="true" ret="(Vec&lt;Option&lt;PathBuf&gt;&gt;, usize)" />
-    <fn name="save_open_tabs" line="104" pub="true" />
-    <fn name="save_panel_state" line="126" pub="true" />
-    <fn name="load_panel_state" line="156" pub="true" ret="crate::app::IdePanelState" />
-    <fn name="save_config" line="210" pub="true" />
-    <fn name="load_config" line="235" ret="Config" calls="self: save_config; ui_system: contains" />
-    <fn name="get_kde_color" line="308" ret="Option&lt;[f32; 4]&gt;" />
-    <fn name="load_dracula" line="330" ret="Theme" calls="self: get_kde_color" />
-    <fn name="main" line="349" calls="editor: clear_history, get_full_text, insert_str, set_original_text; highlighter_runtime: reset; self: load_config, load_dracula, load_recent_files, mallopt, save_recent_files" />
-    <fn name="mallopt" line="355" ret="i32; } mallopt(-8, 2); } let args: Vec&lt;String&gt; = env::args().collect(); let run_ide_on_startup = args.iter().any(|a| a == &quot;--ide&quot; || a == &quot;ide&quot;); let has_file_arg = args.iter().skip(1).any(|a| *a != &quot;--ide&quot; &amp;&amp; *a != &quot;ide&quot;); let mut initial_text = String::new(); let mut title = &quot;Безымянный&quot;.to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg" calls="self: save_recent_files" />
-  </mod>
-  <mod path="src/queries.rs" name="queries">
-    <fn name="get_params_query" line="3" pub="true" ret="Option&lt;&amp;'static str&gt;" />
-    <fn name="get_injection_query" line="82" pub="true" ret="Option&lt;&amp;'static str&gt;" />
-    <fn name="get_folding_query" line="131" pub="true" ret="Option&lt;&amp;'static str&gt;" />
-    <fn name="get_ts_config" line="336" pub="true" ret="Option&lt;(tree_sitter::Language, Vec&lt;&amp;'static str&gt;)&gt;" />
-    <fn name="test_all_tree_sitter_queries_are_valid" line="930" calls="self: get_folding_query, get_injection_query, get_params_query, get_ts_config" />
-  </mod>
-  <mod path="src/render_view/core_text.rs" name="render_view::core_text">
-    <fn name="update_cache" line="6" pub="true" reads="height, left_padding, line_height, scale_factor, width" writes="last_editor_version=, last_height=, last_scroll_x=, last_scroll_y=, last_width=, visual_lines.clear(), visual_lines.push()" calls="self: char_advance, measure_ui_width; editor: text_parts; editor_navigation: byte_at; ui_system: contains" />
-    <fn name="get_cursor_xy" line="213" pub="true" ret="(f32, f32)" reads="baseline_offset, last_scroll_x, left_padding, line_height, scale_factor" calls="self: char_advance, measure_ui_width, measure_width; editor: text_parts; editor_navigation: byte_at; ui_system: contains" />
-    <fn name="get_byte_at_xy" line="350" pub="true" ret="usize" reads="last_scroll_x, left_padding, line_height" calls="self: char_advance; editor: text_parts; editor_navigation: byte_at; ui_system: contains" />
-    <fn name="measure_width" line="450" pub="true" ret="f32" calls="self: char_advance" />
-    <fn name="get_max_scroll" line="476" pub="true" ret="f32" reads="line_height" calls="editor_navigation: get_visible_lines_count" />
-    <fn name="flush" line="483" pub="true" reads="gl, height, program, vbo, width" writes="vertices.clear()" />
-    <fn name="push_vertical_gradient" line="525" pub="true" reads="vertices" />
-    <fn name="push_horizontal_gradient" line="573" pub="true" reads="vertices" />
-    <fn name="draw_string" line="621" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="draw_string_scaled" line="637" pub="true" calls="self: get_ui_glyph, push_quad" />
-    <fn name="draw_string_mono_scaled" line="660" pub="true" calls="self: get_glyph, push_quad" />
-    <fn name="measure_mono_width" line="683" pub="true" ret="f32" calls="self: char_advance" />
-    <fn name="push_rounded_rect" line="694" pub="true" reads="vertices" />
-  </mod>
-  <mod path="src/render_view/diag_popup_ui.rs" name="render_view::diag_popup_ui">
-    <type name="DiagChar">{ x: f32, y: f32, w: f32, h: f32, byte_offset: usize }</type>
-    <fn name="diag_popup_byte_at" line="19" pub="true" ret="usize" />
-    <fn name="draw_diagnostic_popup" line="57" pub="true" reads="height, hovered_diags_cache, scale_factor, theme, width" writes="last_diag_href=, last_diag_popup_rect=" calls="self: char_advance, draw_atlas_icon, draw_string_mono_scaled, measure_mono_width, push_rect, push_rounded_rect; lsp: highlight_diagnostic_message; ui_system: register_blocker, register_rect, reset_cursor_state" />
-  </mod>
-  <mod path="src/render_view/lsp_ui.rs" name="render_view::lsp_ui">
-    <fn name="draw_lsp_servers_panel" line="6" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" calls="self: char_advance, draw_string_scaled, flush, get_glyph, measure_ui_width, measure_width, push_quad, push_rounded_rect; editor: text_parts; ui_system: contains, register_blocker, register_rect" />
-    <fn name="draw_lsp_actions_menu" line="785" pub="true" ret="bool" reads="height, last_mouse_x, last_mouse_y, scale_factor, theme, width" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect" />
-  </mod>
-  <mod path="src/render_view/minimap_ui.rs" name="render_view::minimap_ui">
-    <fn name="draw_minimap" line="6" pub="true" reads="line_height, minimap_width, theme, vertices, width" calls="self: flush, push_rect; editor: text_parts; ui_system: contains" />
-  </mod>
-  <mod path="src/render_view/search.rs" name="render_view::search">
-    <fn name="draw_search_panel" line="8" pub="true" ret="bool" reads="gl, height, last_mouse_x, last_mouse_y, minimap_width, scale_factor, theme, width" writes="last_search_idx=, last_search_len=, search_res_string.clear(), search_res_string=, search_scroll_x=" calls="self: draw_string_mono_scaled, flush, get_ui_glyph, push_quad, push_rect, push_rounded_rect; editor: get_full_text; ui_system: register_icon_button, register_text_input, wants_pointer" />
-  </mod>
-  <mod path="src/render_view/settings_ui.rs" name="render_view::settings_ui">
-    <fn name="get_faq_max_scroll" line="6" pub="true" ret="f32" reads="scale_factor" calls="editor: get_full_text; ui_system: contains" />
-    <fn name="draw_settings" line="31" pub="true" ret="u8" reads="gl, height, last_mouse_x, last_mouse_y, scale_factor, theme, width" calls="self: draw_atlas_icon, draw_string_scaled, flush, get_faq_max_scroll, get_ui_glyph, measure_ui_width, push_quad, push_rect, push_rounded_rect, push_rounded_rect_gradient; editor: get_full_text; ui_system: register_rect, register_text_input, reset_cursor_state, wants_pointer, wants_text; widgets: render" />
-  </mod>
-  <mod path="src/render_view/sticky.rs" name="render_view::sticky">
-    <fn name="draw_sticky_lines" line="7" pub="true" ret="Vec&lt;(usize, usize)&gt;" reads="baseline_offset, gl, height, last_mouse_x, last_mouse_y, left_padding, line_height, minimap_width, phys_to_visual, scale_factor, theme, width" writes="sticky_scroll_rects.clear(), sticky_scroll_rects.push()" calls="self: char_advance, draw_string_scaled, flush, get_glyph, measure_ui_width, push_quad, push_rect, push_vertical_gradient; editor: text_parts; ui_system: register_rect" />
-  </mod>
-  <mod path="src/render_view/tabs_ui.rs" name="render_view::tabs_ui">
-    <fn name="draw_tab_bar" line="6" pub="true" ret="Option&lt;(std::path::PathBuf, f32, f32)&gt;" reads="gl, height, hide_popups_until_mouse_move, theme" writes="max_tab_scroll_x=, tab_hover_idx=, tab_x_anim=" calls="self: draw_atlas_icon, draw_file_icon, draw_string_scaled, flush, measure_ui_width, push_horizontal_gradient, push_rect, push_rounded_rect; app::file_icons: file_icon_key; editor: is_dirty; ui_system: register_rect" />
-    <fn name="draw_tab_tooltip" line="416" pub="true" reads="theme, width" calls="self: draw_string_scaled, measure_ui_width, push_rounded_rect" />
-  </mod>
-  <mod path="src/render_view/terminal_ui.rs" name="render_view::terminal_ui">
-    <fn name="draw_terminal_panel" line="7" pub="true" reads="baseline_offset, gl, height, line_height, theme, vertices" calls="self: char_advance, draw_atlas_icon, draw_string_mono_scaled, draw_string_scaled, flush, get_ui_glyph, measure_ui_width, push_quad, push_rect, push_rounded_rect; app::terminal: resize, resize_pty; editor: get_full_text; renderer: resize; ui_system: register_blocker, register_icon_button, register_rect, register_text_input" />
-  </mod>
-  <mod path="src/render_view/ui/hover_popup.rs" name="render_view::ui::hover_popup">
-    <fn name="build_hover_popup_layout" line="4" ret="crate::app::mouse::HoverLayoutCache" reads="scale_factor" calls="self: char_advance, measure_ui_width" />
-    <fn name="draw_hover_popup" line="168" pub="true" ret="(f32, f32, f32, f32, f32)" reads="gl, height, last_diag_popup_rect, line_height, phys_to_visual, scale_factor, theme, width" calls="self: build_hover_popup_layout, char_advance, draw_file_icon, draw_string_mono_scaled, flush, get_ui_glyph, push_quad, push_rect, push_rounded_rect; ui_system: hovered, register_blocker, register_rect, reset_cursor_state" />
-  </mod>
-  <mod path="src/render_view/ui/problems_panel.rs" name="render_view::ui::problems_panel">
-    <fn name="draw_problems_panel" line="4" pub="true" reads="gl, height, last_mouse_x, last_mouse_y, theme" writes="scratch_buffer=" calls="self: draw_atlas_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect; lsp: get_diagnostics; ui_system: contains, hovered, register_rect" />
-  </mod>
-  <mod path="src/render_view/ui.rs" name="render_view::ui">
-    <fn name="draw_icon" line="7" pub="true" reads="gl, texture" calls="self: flush, push_quad" />
-    <fn name="draw_atlas_icon" line="19" pub="true" reads="gl, icons, texture" calls="self: flush, push_quad" />
-    <fn name="draw_file_icon" line="42" pub="true" reads="gl, texture" writes="file_icon_cache.insert()" calls="self: flush, push_quad; app::file_tree: pre_rasterize_icon" />
-    <fn name="draw_autocomplete" line="142" pub="true" ret="(f32, f32, f32, f32)" reads="gl, height, scale_factor, theme" calls="self: draw_string_scaled, flush, get_glyph, measure_width, push_quad, push_rounded_rect; ui_system: contains" />
-    <fn name="draw_dialog_window" line="371" pub="true" ret="bool" reads="last_mouse_x, last_mouse_y, scale_factor, theme" calls="self: draw_atlas_icon, draw_string_scaled, flush, push_rounded_rect, push_vertical_gradient; ui_system: register_button, wants_pointer; widgets: get_dialog_buttons" />
-    <fn name="draw_welcome" line="483" pub="true" ret="bool" reads="height, icon_logo, last_mouse_x, last_mouse_y, program, scale_factor, texture, vao, width" writes="gl.clear()" calls="self: draw_icon, draw_string_scaled, flush, measure_ui_width, push_rect, push_rounded_rect, push_vertical_gradient; ui_system: register_button, register_rect, wants_pointer; widgets: get_welcome_buttons" />
-    <fn name="draw_diagnostics_ruler" line="727" pub="true" reads="minimap_width, phys_to_visual, scale_factor, theme, width" calls="self: get_max_scroll, push_rect; ui_system: contains" />
-    <fn name="draw_empty_ide" line="792" pub="true" reads="height, scale_factor, theme, width" writes="empty_ide_art_idx=, was_empty_ide=" calls="self: draw_string_scaled, flush, measure_ui_width, push_rect" />
-  </mod>
-  <mod path="src/render_view.rs" name="render_view">
-    <type name="ModInterval">{ top: f32, bottom: f32, state: crate::editor::LineModState }</type>
-    <type name="Telemetry">{ render_time: f32, render_count: u32, scroll_time: f32, scroll_count: u32, type_time: f32, type_count: u32, last_print: Instant }</type>
-    <fn name="default" line="36" ret="Self" />
-    <fn name="draw" line="59" pub="true" ret="(bool, Vec&lt;(usize, usize)&gt;)" reads="baseline_offset, height, last_mouse_x, last_mouse_y, last_scroll_x, last_scroll_y, last_width, line_height, program, scale_factor, texture, theme, vao, vertices, width" writes="diag_hover_timer=, diag_hover_timer_idx=, fps=, fps_string.clear(), fps_string=, frame_count=, gl.clear(), hide_popups_until_mouse_move=, hovered_diags_cache.clear(), hovered_diags_cache.push(), identical_words_cache.clear(), identical_words_cache.push(), last_cursor_for_popups=, last_diag_popup_rect=, last_draw_instant=, last_editor_version_for_scroll_x=, last_editor_version_for_typing=, last_frame_time=, last_hovered_diags.clear(), last_known_mouse=, left_padding=, max_scroll_x=, merged_intervals_cache.clear(), merged_intervals_cache.push(), minimap_width=, mod_intervals_cache.clear(), mod_intervals_cache.push(), phys_to_visual.clear(), time_acc=, visual_lines.clear(), was_empty_ide=" calls="self: char_advance, draw_diagnostic_popup, draw_diagnostics_ruler, draw_empty_ide, draw_file_icon, draw_hover_popup, draw_lsp_servers_panel, draw_minimap, draw_problems_panel, draw_search_panel, draw_sticky_lines, draw_string, draw_string_mono_scaled, draw_string_scaled, draw_tab_bar, draw_tab_tooltip, draw_terminal_panel, draw_welcome, flush, get_glyph, measure_mono_width, measure_ui_width, measure_width, push_quad, push_rect, push_rounded_rect, push_squiggle, update_cache; app: any_bottom_open, icon, is_open, label; app::mouse: is_in_hover_popup_or_bridge; app::terminal: resize; editor: ensure_indent_cache_updated, get_cached_indent_levels, get_line_modification_state, text_parts; editor_navigation: byte_at, utf16_col_to_byte_advance; lsp: get_diagnostics, get_instant_diagnostics_with_version; renderer: resize; ui_system: contains, hovered, register_blocker, register_icon_button, register_rect, register_text_input, reset_cursor_state, wants_pointer; widgets: render" />
-  </mod>
-  <mod path="src/renderer.rs" name="renderer">
-    <type name="FontData">{ source: FontSource, index: u32 }</type>
-    <type name="FontSource">{ Static(&amp;'static [u8]), LoadedMmap(std::sync::Arc&lt;memmap2::Mmap&gt;), LoadedVec(std::sync::Arc&lt;Vec&lt;u8&gt;&gt;), Lazy( std::path::PathBuf, std::rc::Rc&lt;std::cell::RefCell&lt;Option&lt;Result&lt;std::sync::Arc&lt;memmap2::Mmap&gt;, ()&gt;&gt;&gt;&gt;, ) }</type>
-    <type name="GlyphInfo">{ u: f32, v: f32, uw: f32, vh: f32, width: f32, height: f32, offset_x: f32, offset_y: f32, advance: f32, is_emoji: f32 }</type>
-    <type name="Renderer">{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, scale_context: ScaleContext, glyphs: HashMap&lt;char, GlyphInfo&gt;, ui_glyphs: HashMap&lt;char, GlyphInfo&gt;, ascii_advances: [f32; 128], atlas_x: i32, atlas_y: i32, max_row_h: i32, font_size: f32, scale_factor: f32, theme: Theme, width: f32, height: f32, minimap_width: f32, line_height: f32, baseline_offset: f32, left_padding: f32, last_mouse_x: f32, last_mouse_y: f32, visual_lines: Vec&lt;VisualLine&gt;, last_editor_version: u64, last_height: f32, last_width: f32, last_scroll_y: f32, last_scroll_x: f32, max_scroll_x: f32, max_tab_scroll_x: f32, last_editor_version_for_scroll_x: u64, last_frame_time: Option&lt;std::time::Instant&gt;, fps: f32, frame_count: u32, time_acc: f32, search_scroll_x: f32, fps_string: String, search_res_string: String, scratch_buffer: String, last_search_idx: Option&lt;usize&gt;, last_search_len: usize, icons: std::collections::HashMap&lt;crate::widgets::IconType, glow::Texture&gt;, icon_logo: Option&lt;glow::Texture&gt;, file_icon_cache: rustc_hash::FxHashMap&lt;&amp;'static str, glow::Texture&gt;, sticky_scroll_rects: Vec&lt;(f32, f32, f32, f32, usize)&gt;, phys_to_visual: Vec&lt;usize&gt;, last_hovered_diags: Vec&lt;usize&gt;, last_diag_popup_rect: Option&lt;(f32, f32, f32, f32, f32, f32, f32)&gt;, last_diag_popup_text: String, last_diag_href: Option&lt;String&gt;, hide_popups_until_mouse_move: bool, diag_hover_timer: f32, diag_hover_timer_idx: Option&lt;usize&gt;, tab_hover_timer: f32, tab_hover_idx: Option&lt;usize&gt;, last_known_mouse: (f32, f32), last_editor_version_for_typing: u64, last_cursor_for_popups: usize, last_draw_instant: Option&lt;std::time::Instant&gt;, was_empty_ide: bool, empty_ide_art_idx: usize, hovered_diags_cache: Vec&lt;(usize, f32, f32, f32, f32)&gt;, identical_words_cache: Vec&lt;(usize, usize)&gt;, mod_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt;, merged_intervals_cache: Vec&lt;crate::render_view::ModInterval&gt;, tab_x_anim: Vec&lt;f32&gt; }</type>
-    <type name="Theme">{ bg: [f32; 4], fg: [f32; 4], sel: [f32; 4], minimap_bg: [f32; 4], line_num: [f32; 4], minimap_cursor: [f32; 4], modified_unsaved: [f32; 4], modified_saved: [f32; 4], diag_warn: [f32; 4], diag_error: [f32; 4], unused: [f32; 4] }</type>
-    <type name="Vertex">{ pos: [f32; 2], uv: [f32; 2], color: [f32; 4], mode: f32, sdf_params: [f32; 3] }</type>
-    <type name="VisualLine">{ byte_idx: usize, physical_line: usize, is_soft_wrap: bool, whitespace_px_width: f32, text_px_width: f32, y_offset: f32, is_folded: bool, fold_suffix: [char; 4], fold_suffix_len: u8 }</type>
-    <fn name="new_lazy" line="84" pub="true" ret="Self" />
-    <fn name="new_static" line="94" pub="true" ret="Self" />
-    <fn name="ensure_loaded" line="101" pub="true" writes="source=" />
-    <fn name="data_slice" line="128" pub="true" ret="&amp;[u8]" reads="source" />
-    <fn name="new" line="223" pub="true" ret="Self" calls="self: get_glyph, load_builtin_icons" />
-    <fn name="get_custom_svg_glyph" line="543" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="atlas_y, font_size, gl, texture" writes="atlas_x=, max_row_h=" />
-    <fn name="get_glyph" line="610" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, fonts, gl, texture" writes="atlas_x=, atlas_y=, glyphs.clear(), glyphs.insert(), max_row_h=, ui_glyphs.clear()" calls="self: get_custom_svg_glyph, get_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="get_ui_glyph" line="783" pub="true" ret="Option&lt;GlyphInfo&gt;" reads="font_size, gl, texture, ui_fonts" writes="atlas_x=, atlas_y=, glyphs.clear(), max_row_h=, ui_glyphs.clear(), ui_glyphs.insert()" calls="self: get_custom_svg_glyph, get_ui_glyph; self: data_slice, ensure_loaded; widgets: render" />
-    <fn name="resize" line="955" pub="true" reads="gl" writes="height=, width=" />
-    <fn name="measure_ui_width" line="965" pub="true" ret="f32" calls="self: get_ui_glyph" />
-    <fn name="char_advance" line="978" pub="true" ret="f32" reads="ascii_advances" calls="self: get_glyph" />
-    <fn name="push_quad" line="995" pub="true" reads="vertices" />
-    <fn name="load_builtin_icons" line="1047" pub="true" reads="gl, texture" writes="icons.insert()" />
-    <fn name="push_squiggle" line="1230" pub="true" reads="scale_factor, vertices" />
-    <fn name="push_rect" line="1283" pub="true" calls="self: push_quad" />
-    <fn name="push_rounded_rect_gradient" line="1287" pub="true" reads="vertices" />
-  </mod>
-  <mod path="src/scroll.rs" name="scroll">
-    <type name="ScrollState">{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }</type>
-    <fn name="new" line="12" pub="true" ret="Self" />
-    <fn name="update" line="23" pub="true" ret="bool" reads="anim_speed, target" writes="current=, velocity=" />
-    <fn name="clamp_target" line="48" pub="true" writes="target=" />
-    <fn name="clamp_current" line="52" pub="true" writes="current=" />
-    <fn name="scroll_by" line="56" pub="true" reads="target" />
-    <fn name="set_target" line="60" pub="true" writes="target=" />
-    <fn name="stop_anim" line="64" pub="true" writes="current=, target=, velocity=" />
-  </mod>
-  <mod path="src/ui_system.rs" name="ui_system">
-    <type name="UiElement">{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }</type>
-    <type name="UiId">{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), SettingsIdeAddWorkspace, SettingsIdeRemoveWorkspace(usize), SettingsIdeAddIgnore, SettingsIdeRemoveIgnore(usize), SettingsIdeIgnoreInput, LspServerRestart(usize), LspServerToggle(usize), LspServerStop(usize), LspServerLogs(usize), LspServerFixAll(usize), LspLogFoldToggle(usize, usize), SidebarSlot(crate::app::PanelId), FileTreeNode(usize), SearchClose, SearchNext, SearchPrev, SearchCaseToggle, SearchInput, EditorTab(usize), EditorTabClose(usize), EditorFoldArrow(usize), EditorFoldDots(usize), StickyLine(usize, usize), EditorScrollbarY, EditorScrollbarX, EditorTextBody, EditorMinimap, ResizeLeft, ResizeBottom, BottomPanelBody, LspLogArea(usize), LspScrollY, LspScrollX, LspLogScrollY(usize), LspLogScrollX(usize), CopyDiagnostic(usize), PopupCopyDiagnostic(usize), OpenDiagUrl(usize), PopupOpenDiagUrl(usize), ProblemJump(usize), ProblemUrl(usize), ProblemsTab(usize), ProblemFileToggle(usize), TerminalBody, TerminalScrollY, TerminalTab(usize), TerminalTabClose(usize), TerminalAdd, TerminalSearchClose, TerminalSearchNext, TerminalSearchPrev, TerminalSearchCaseToggle, TerminalSearchInput, HoverPopupScroll }</type>
-    <type name="UiRegistry">{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }</type>
-    <fn name="contains" line="131" pub="true" ret="bool" />
-    <fn name="id" line="158" pub="true" ret="UiId" />
-    <fn name="new" line="182" pub="true" ret="Self" />
-    <fn name="clear" line="193" pub="true" writes="elements.clear(), hovered=, overlay_mark=, wants_pointer=, wants_text=" />
-    <fn name="mark_overlay_start" line="203" pub="true" reads="elements" writes="overlay_mark=" />
-    <fn name="find_overlay_at" line="209" pub="true" ret="Option&lt;UiId&gt;" reads="elements, overlay_mark" calls="self: contains, id" />
-    <fn name="register_button" line="218" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_icon_button" line="246" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" calls="widgets: render" />
-    <fn name="register_text_input" line="275" pub="true" ret="bool" writes="elements.push(), hovered=, wants_text=" />
-    <fn name="register_blocker" line="298" pub="true" ret="bool" writes="elements.push()" />
-    <fn name="register_rect" line="315" pub="true" ret="bool" writes="elements.push(), hovered=, wants_pointer=" />
-    <fn name="find_at" line="337" pub="true" ret="Option&lt;UiId&gt;" reads="elements" calls="self: contains, id" />
-    <fn name="hovered" line="347" pub="true" ret="Option&lt;UiId&gt;" reads="hovered" />
-    <fn name="reset_cursor_state" line="354" pub="true" writes="wants_pointer=, wants_text=" />
-    <fn name="wants_pointer" line="360" pub="true" ret="bool" reads="wants_pointer" />
-    <fn name="wants_text" line="365" pub="true" ret="bool" reads="wants_text" />
-    <fn name="cursor_code" line="370" pub="true" ret="u8" reads="wants_pointer, wants_text" />
-  </mod>
-  <mod path="src/widgets.rs" name="widgets">
-    <type name="Button">{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }</type>
-    <type name="IconButton">{ x: f32, y: f32, size: f32, icon: Option&lt;IconType&gt;, is_active: bool, icon_size: Option&lt;f32&gt;, active_square_width: Option&lt;f32&gt;, custom_color: Option&lt;[f32; 4]&gt; }</type>
-    <type name="IconType">{ Save, Discard, Cancel, Warning, CaseMatch, Up, Down, Close, Plus, Terminal, Explorer, Problems, LspServers, Copy, Check }</type>
-    <fn name="is_hovered" line="34" pub="true" ret="bool" reads="h, w, x, y" />
-    <fn name="render" line="38" pub="true" ret="bool" reads="h, icon, icon_size, text, text_scale, w, x, y" calls="render_view::core_text: draw_string_scaled, push_rounded_rect; render_view::ui: draw_atlas_icon; renderer: measure_ui_width" />
-    <fn name="is_hovered" line="119" pub="true" ret="bool" reads="active_square_width, size, x, y" />
-    <fn name="render" line="128" pub="true" ret="bool" reads="active_square_width, custom_color, icon, icon_size, is_active, size, x, y" calls="self: is_hovered; render_view::core_text: push_rounded_rect; render_view::ui: draw_atlas_icon; renderer: push_rect" />
-    <fn name="get_welcome_buttons" line="220" pub="true" ret="(Button, Button, Button)" calls="renderer: measure_ui_width" />
-    <fn name="get_dialog_buttons" line="273" pub="true" ret="(Button, Button, Button)" calls="renderer: measure_ui_width" />
-  </mod>
-</project_map>
+<pm>
+<meta v="ai-compact-v1">
+<use>Read PROJECT_MAP.xml before source files. Prefer map over asking for files.</use>
+<legend>
+<item key="m">module entry: i=id, p=canonical file path</item>
+<item key="s">symbol entry: k=t type, k=f function/method</item>
+<item key="o">impl owner type</item>
+<item key="self">receiver kind</item>
+<item key="r">return type</item>
+<item key="rd">compact state reads; may end with +N if truncated</item>
+<item key="wr">compact state writes; may end with +N if truncated</item>
+<item key="entry">major entrypoint or event root</item>
+<item key="in_">fan-in caller count</item>
+<item key="out">fan-out callee count</item>
+<item key="e">call edge: f=caller id, t=space-separated callee ids</item>
+<item key="types">type bodies may be truncated for token savings</item>
+</legend>
+</meta>
+<mods>
+<m i="0" p="src/app/events/about.rs"/>
+<m i="1" p="src/app/events/hover.rs"/>
+<m i="2" p="src/app/events.rs"/>
+<m i="3" p="src/app/file_icons.rs"/>
+<m i="4" p="src/app/file_tree.rs"/>
+<m i="5" p="src/app/keyboard/editor_keys.rs"/>
+<m i="6" p="src/app/keyboard/main_keys.rs"/>
+<m i="7" p="src/app/keyboard.rs"/>
+<m i="8" p="src/app/lsp_actions.rs"/>
+<m i="9" p="src/app/mouse/cursor.rs"/>
+<m i="10" p="src/app/mouse/input.rs"/>
+<m i="11" p="src/app/mouse/wheel.rs"/>
+<m i="12" p="src/app/mouse.rs"/>
+<m i="13" p="src/app/terminal.rs"/>
+<m i="14" p="src/app/ui_handlers.rs"/>
+<m i="15" p="src/app.rs"/>
+<m i="16" p="src/editor.rs"/>
+<m i="17" p="src/editor_navigation.rs"/>
+<m i="18" p="src/highlighter.rs"/>
+<m i="19" p="src/highlighter_runtime.rs"/>
+<m i="21" p="src/languages/python.rs"/>
+<m i="22" p="src/lsp/hover.rs"/>
+<m i="23" p="src/lsp/protocol.rs"/>
+<m i="24" p="src/lsp.rs"/>
+<m i="25" p="src/main.rs"/>
+<m i="26" p="src/queries.rs"/>
+<m i="27" p="src/render_view/core_text.rs"/>
+<m i="28" p="src/render_view/diag_popup_ui.rs"/>
+<m i="29" p="src/render_view/lsp_ui.rs"/>
+<m i="30" p="src/render_view/minimap_ui.rs"/>
+<m i="31" p="src/render_view/search.rs"/>
+<m i="32" p="src/render_view/settings_ui.rs"/>
+<m i="33" p="src/render_view/sticky.rs"/>
+<m i="34" p="src/render_view/tabs_ui.rs"/>
+<m i="35" p="src/render_view/terminal_ui.rs"/>
+<m i="36" p="src/render_view/ui/hover_popup.rs"/>
+<m i="37" p="src/render_view/ui/problems_panel.rs"/>
+<m i="38" p="src/render_view/ui.rs"/>
+<m i="39" p="src/render_view.rs"/>
+<m i="40" p="src/renderer.rs"/>
+<m i="41" p="src/scroll.rs"/>
+<m i="42" p="src/ui_system.rs"/>
+<m i="43" p="src/widgets.rs"/>
+</mods>
+<syms>
+<s i="0" m="0" k="f" n="about_to_wait" l="3" v="1" entry="1" in_="1" out="36"/>
+<s i="1" m="1" k="f" n="module_path_from_definition_path" l="1" v="1" r="Option&lt;String&gt;" in_="3" out="1"/>
+<s i="2" m="1" k="f" n="sanitize_module_path_parts" l="5" r="Option&lt;String&gt;" in_="1"/>
+<s i="3" m="1" k="f" n="prepend_hover_module_path" l="63" v="1" in_="1" out="2"/>
+<s i="4" m="1" k="f" n="source_line" l="95" v="1" r="Option&lt;&amp;'a str&gt;" in_="2"/>
+<s i="5" m="1" k="f" n="source_signature_for_hover" l="109" v="1" r="Option&lt;String&gt;" in_="6" out="9"/>
+<s i="6" m="1" k="f" n="format_attribute_assignment_line" l="116" r="String" out="1"/>
+<s i="7" m="1" k="f" n="source_attribute_hover_for_symbol" l="156" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="8" m="1" k="f" n="def_name" l="315" r="Option&lt;&amp;str&gt;" in_="1"/>
+<s i="9" m="1" k="f" n="source_attribute_hover_from_definition_file" l="419" v="1" r="Option&lt;String&gt;" in_="3" out="2"/>
+<s i="10" m="1" k="f" n="format_attribute_assignment_line" l="425" r="String" in_="3" out="1"/>
+<s i="11" m="1" k="f" n="is_ident_byte" l="612" v="1" r="bool" in_="1"/>
+<s i="12" m="1" k="f" n="symbol_at_offset" l="616" v="1" r="Option&lt;String&gt;" in_="3" out="3"/>
+<s i="13" m="1" k="f" n="wrap_signature_after_first_param" l="645" v="1" r="String" in_="3" out="1"/>
+<s i="14" m="1" k="f" n="wraps_asynccontextmanager_signature_after_first_param" l="686" out="2"/>
+<s i="15" m="1" k="f" n="asynccontextmanager_source_signature_is_split_into_lines" l="696" out="3"/>
+<s i="16" m="1" k="f" n="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" l="713" out="3"/>
+<s i="17" m="1" k="f" n="attribute_hover_uses_source_attribute_line" l="731" out="3"/>
+<s i="18" m="1" k="f" n="simple_type_hover_triggers_source_replacement" l="748" out="1"/>
+<s i="19" m="1" k="f" n="symbol_at_offset_reads_identifier_from_nearby_position" l="755" out="3"/>
+<s i="20" m="1" k="f" n="strict_source_lookup_does_not_fallback_to_nearby_def" l="769" out="3"/>
+<s i="21" m="1" k="f" n="definition_file_attribute_hover_includes_fq_class_name" l="783" out="1"/>
+<s i="22" m="1" k="f" n="definition_file_attribute_hover_includes_lsp_type" l="807" out="2"/>
+<s i="23" m="1" k="f" n="module_path_from_site_packages_strips_noise_segments" l="829" out="1"/>
+<s i="24" m="1" k="f" n="module_path_strips_trailing_init" l="841" out="1"/>
+<s i="25" m="1" k="f" n="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" l="848" out="3"/>
+<s i="26" m="1" k="f" n="should_replace_hover_with_source_signature" l="887" v="1" r="bool" in_="2" out="2"/>
+<s i="27" m="1" k="f" n="should_replace_simple_type_hover" l="895" v="1" r="bool" in_="2" out="1"/>
+<s i="28" m="2" k="f" n="save_state_and_exit" l="21" in_="1"/>
+<s i="29" m="2" k="f" n="resumed" l="47" o="App" self="&amp;mut self" rd="base_title,editor,theme,window_height,window_width" wr="gl_config=,gl_context=,gl_surface=,renderer=,window=" entry="1" out="8"/>
+<s i="30" m="2" k="f" n="window_event" l="130" o="App" self="&amp;mut self" rd="active_tab,autocomplete_active,autocomplete_anim_progress,autocomplete_hovered_idx,autocomplete_options,autocomplete_scroll,autocomplete_selected_idx,base_title,current_sticky_lines,dialog_gl_surface,dialog_window,editor,+42" wr="autocomplete_rect=,current_cursor=,is_focused=,is_ready=,last_resize_time=,modifiers=,target_sticky_lines=,tried_maximize=,ui_registry.clear()" entry="1" out="20"/>
+<s i="31" m="2" k="f" n="about_to_wait" l="744" o="App" self="&amp;mut self" entry="1" out="1"/>
+<s i="32" m="3" k="t" n="FallbackMatcher" x="struct:{ set: RegexSet, keys: Vec&lt;&amp;'static str&gt; }"/>
+<s i="33" m="3" k="f" n="file_icon_key" l="41" v="1" r="&amp;'static str" in_="4"/>
+<s i="34" m="3" k="f" n="folder_icon_key" l="82" v="1" r="&amp;'static str" in_="1"/>
+<s i="35" m="3" k="f" n="svg_for_key" l="96" v="1" r="&amp;'static [u8]" in_="1"/>
+<s i="36" m="4" k="t" n="FileNode" x="struct:{ path: PathBuf, name: String, depth: usize, is_dir: bool, is_expanded: bool, icon_key: &amp;'static str, is_ignored: bool }"/>
+<s i="37" m="4" k="f" n="matches_ignore_pattern" l="42" v="1" r="bool" in_="1"/>
+<s i="38" m="4" k="f" n="pre_rasterize_icon" l="94" v="1" in_="3" out="1"/>
+<s i="39" m="4" k="f" n="read_children" l="137" r="(Vec&lt;(String, PathBuf)&gt;, Vec&lt;(String, PathBuf)&gt;)" in_="1"/>
+<s i="40" m="4" k="f" n="scan_dir_parallel" l="180" r="Vec&lt;FileNode&gt;" in_="1" out="5"/>
+<s i="41" m="4" k="f" n="spawn_scan" l="276" v="1" r="mpsc::Receiver&lt;Vec&lt;FileNode&gt;&gt;" in_="1" out="2"/>
+<s i="42" m="4" k="f" n="spawn_watcher" l="343" v="1" in_="1"/>
+<s i="43" m="4" k="f" n="refresh_file_tree" l="380" v="1" o="App" self="&amp;mut self" rd="ide_ignore_patterns,ide_panel,ide_workspaces" wr="file_tree_rx=" in_="2" out="2"/>
+<s i="44" m="4" k="f" n="poll_file_tree" l="408" v="1" r="bool" o="App" self="&amp;mut self" rd="ide_panel" wr="file_tree_rx=" in_="1"/>
+<s i="45" m="4" k="f" n="start_file_watcher" l="424" v="1" o="App" self="&amp;mut self" rd="ide_workspaces" wr="file_tree_notify_rx=" in_="1" out="1"/>
+<s i="46" m="4" k="f" n="handle_file_tree_click" l="437" v="1" o="App" self="&amp;mut self" rd="ide_panel" out="1"/>
+<s i="47" m="4" k="f" n="file_tree_node_at" l="456" v="1" r="Option&lt;usize&gt;" o="App" self="&amp;self" rd="dialog_window,ide_panel,is_ide_mode,renderer,show_settings" out="2"/>
+<s i="48" m="5" k="f" n="handle_editor_keyboard_input" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,clipboard,file_extension,highlighter,ide_ignore_patterns,ide_panel,ide_workspaces,is_ide_mode,lsp,modifiers,renderer,scroll_x,+5" wr="active_tab=,autocomplete_active=,autocomplete_selected_idx=,base_title=,editor=,file_path=,is_dragging=,is_highlighted_once=,last_action=,last_sent_version=,lsp_actions_menu=,pending_key_log=,+7" entry="1" out="41"/>
+<s i="49" m="6" k="f" n="handle_main_keyboard_input" l="4" v="1" o="App" self="&amp;mut self" rd="clipboard,dialog_window,ide_panel,ide_workspaces,is_ide_mode,modifiers,renderer,search_focused,settings_ignore_editor,settings_tab,show_search,window,+2" wr="ide_ignore_patterns.push(),last_action=,settings_ignore_focused=,show_fps=,show_settings=" entry="1" out="18"/>
+<s i="50" m="7" k="f" n="handle_terminal_keyboard_input" l="12" v="1" o="App" self="&amp;mut self" rd="clipboard,ide_panel,modifiers,window" wr="last_action=" out="2"/>
+<s i="51" m="7" k="f" n="handle_terminal_search_keyboard_input" l="247" v="1" o="App" self="&amp;mut self" rd="clipboard,ide_panel,modifiers,window" wr="last_action=" out="12"/>
+<s i="52" m="7" k="f" n="handle_search_keyboard_input" l="378" v="1" o="App" self="&amp;mut self" rd="clipboard,modifiers,search_editor,window" wr="last_action=,search_current_idx=,search_focused=,search_results.clear(),show_search=" out="12"/>
+<s i="53" m="8" k="f" n="lsp_panel_bounds" l="5" v="1" r="Option&lt;(f32, f32, f32, f32)&gt;" o="App" rd="ide_panel,renderer,window" out="1"/>
+<s i="54" m="8" k="f" n="lsp_panel_total_h" l="46" v="1" r="f32" o="App" rd="ide_panel" out="1"/>
+<s i="55" m="8" k="f" n="lsp_server_logs_h" l="55" v="1" r="f32" o="App" rd="ide_panel" in_="1" out="2"/>
+<s i="56" m="8" k="f" n="lsp_server_inner_size" l="63" v="1" r="(f32, f32)" o="App" rd="ide_panel" in_="1" out="1"/>
+<s i="57" m="8" k="f" n="open_lsp_actions_menu" l="98" v="1" o="App" rd="editor,file_extension,file_path,is_ide_mode,lsp,renderer,scroll_y,show_welcome,window" wr="lsp_actions_menu=" out="4"/>
+<s i="58" m="8" k="f" n="apply_selected_lsp_action" l="188" v="1" o="App" self="&amp;mut self" rd="file_extension,file_path,lsp,lsp_actions_menu,window" wr="pending_fix_all_id=" out="4"/>
+<s i="59" m="8" k="f" n="insert_noqa_comment" l="230" v="1" o="App" rd="base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window" in_="1" out="9"/>
+<s i="60" m="8" k="f" n="apply_workspace_edit" l="322" v="1" o="App" rd="base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window" in_="2" out="8"/>
+<s i="61" m="9" k="f" n="handle_main_cursor_moved" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_active,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,ide_panel,is_dragging,is_dragging_lsp_log,is_dragging_search,is_dragging_settings_ignore,is_ide_mode,+11" wr="autocomplete_hovered_idx=" entry="1" out="16"/>
+<s i="62" m="10" k="f" n="handle_main_mouse_input" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_hovered_idx,autocomplete_options,autocomplete_rect,autocomplete_scroll,base_title,dialog_window,editor,file_extension,file_path,ide_panel,is_ide_mode,lsp,+9" wr="active_tab=,autocomplete_active=,autocomplete_selected_idx=,is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_dragging_settings_ignore=,last_action=,lsp_actions_menu=,pending_fix_all_id=,settings_ignore_focused=,show_settings=,+2" entry="1" out="18"/>
+<s i="63" m="11" k="f" n="handle_main_mouse_wheel" l="4" v="1" o="App" self="&amp;mut self" rd="autocomplete_active,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,ide_workspaces,is_ide_mode,modifiers,+11" wr="lsp_actions_menu=" entry="1" out="10"/>
+<s i="64" m="12" k="t" n="HoverLayoutCache" x="struct:{ scale_factor: f32, max_text_w: f32, span_count: usize, text_len: usize, lines: Vec&lt;HoverVisualLine&gt;, max_line_w: f32, total_text_h: f32 }"/>
+<s i="65" m="12" k="t" n="HoverPopup" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, line_kinds: Vec&lt;crate::lsp::HoverLineKindPublic&gt;, inline_code_ranges: Vec&lt;(usize, usize)&gt;, byte_offset: usize, anchor_x: f32, anchor_y: f32, +2 }"/>
+<s i="66" m="12" k="t" n="HoverState" x="struct:{ request_id: Option&lt;i32&gt;, definition_request_id: Option&lt;i32&gt;, popup: Option&lt;HoverPopup&gt;, pending_popup: Option&lt;HoverPopup&gt;, timer: f32, byte_offset: Option&lt;usize&gt;, rect: Option&lt;(f32, f32, +9 }"/>
+<s i="67" m="12" k="t" n="HoverVisualLine" x="struct:{ glyphs: Vec&lt;(char, [f32; 4], usize)&gt;, kind: crate::lsp::HoverLineKindPublic }"/>
+<s i="68" m="12" k="f" n="default" l="58" r="Self" o="HoverState"/>
+<s i="69" m="12" k="f" n="hover_byte_includes_identifier_edges_next_to_whitespace" l="83" out="3"/>
+<s i="70" m="12" k="f" n="hover_byte_ignores_python_keywords_so_diagnostics_can_show" l="99" out="3"/>
+<s i="71" m="12" k="f" n="hover_bridge_reaches_full_source_line_when_popup_is_above" l="110" out="1"/>
+<s i="72" m="12" k="f" n="hover_bridge_handles_popup_shifted_away_from_anchor" l="129" out="1"/>
+<s i="73" m="12" k="f" n="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" l="148" out="1"/>
+<s i="74" m="12" k="f" n="hover_bridge_does_not_capture_next_line_when_popup_is_above" l="167" out="1"/>
+<s i="75" m="12" k="f" n="clear_hover_popup" l="192" v="1" r="bool" in_="5"/>
+<s i="76" m="12" k="f" n="is_hover_target_byte" l="225" r="bool" in_="2" out="1"/>
+<s i="77" m="12" k="f" n="is_python_hover_keyword" l="233" r="bool"/>
+<s i="78" m="12" k="f" n="hover_token_text" l="274" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="79" m="12" k="f" n="normalize_hover_byte" l="280" r="Option&lt;usize&gt;" in_="3" out="2"/>
+<s i="80" m="12" k="f" n="hover_token_bounds" l="301" r="(usize, usize)" in_="3" out="2"/>
+<s i="81" m="12" k="f" n="hover_anchor_for_byte" l="377" v="1" r="(f32, f32)" in_="1" out="4"/>
+<s i="82" m="12" k="f" n="is_in_hover_popup_or_bridge" l="438" v="1" r="bool" in_="6"/>
+<s i="83" m="12" k="f" n="hover_popup_byte_at" l="500" r="usize" in_="2" out="2"/>
+<s i="84" m="13" k="t" n="Cell" x="struct:{ c: char, fg: u8, bg: u8 }"/>
+<s i="85" m="13" k="t" n="TermGrid" x="struct:{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, +19 }"/>
+<s i="86" m="13" k="t" n="Terminal" x="struct:{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }"/>
+<s i="87" m="13" k="f" n="default" l="14" r="Self" o="Cell"/>
+<s i="88" m="13" k="f" n="new" l="48" v="1" r="Self" o="TermGrid" in_="2"/>
+<s i="89" m="13" k="f" n="resize" l="78" v="1" o="TermGrid" self="&amp;mut self" rd="alt_lines,alt_saved_cursor,is_alt,saved_cursor" wr="cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=" in_="9"/>
+<s i="90" m="13" k="f" n="put_char" l="207" v="1" o="TermGrid" self="&amp;mut self" rd="cols,cur_bg,cur_fg,lines,visible_rows" wr="cur_x=,cur_y=" in_="2" out="1"/>
+<s i="91" m="13" k="f" n="newline" l="227" v="1" o="TermGrid" self="&amp;mut self" rd="scroll_region,visible_rows" wr="cur_y=" in_="2" out="1"/>
+<s i="92" m="13" k="f" n="scroll_region_up" l="238" v="1" o="TermGrid" self="&amp;mut self" rd="cols,is_alt,scroll_region,visible_rows" wr="dirty=,lines.insert(),pool.push(),scrollback.push_back()" in_="2" out="2"/>
+<s i="93" m="13" k="f" n="scroll_region_down" l="281" v="1" o="TermGrid" self="&amp;mut self" rd="cols,scroll_region" wr="dirty=,lines.insert(),lines.remove(),pool.push()" in_="1" out="2"/>
+<s i="94" m="13" k="f" n="get_selection_text" l="303" v="1" r="String" o="TermGrid" self="&amp;self" rd="cols,lines,scrollback,selection"/>
+<s i="95" m="13" k="f" n="print" l="357" o="TermGrid" self="&amp;mut self" out="1"/>
+<s i="96" m="13" k="f" n="execute" l="360" o="TermGrid" self="&amp;mut self" wr="cur_x=" out="2"/>
+<s i="97" m="13" k="f" n="hook" l="374" o="TermGrid" self="&amp;mut self"/>
+<s i="98" m="13" k="f" n="put" l="375" o="TermGrid" self="&amp;mut self"/>
+<s i="99" m="13" k="f" n="unhook" l="376" o="TermGrid" self="&amp;mut self"/>
+<s i="100" m="13" k="f" n="osc_dispatch" l="377" o="TermGrid" self="&amp;mut self" rd="reply_tx"/>
+<s i="101" m="13" k="f" n="esc_dispatch" l="388" o="TermGrid" self="&amp;mut self" wr="cur_x=,cur_y=,saved_cursor="/>
+<s i="102" m="13" k="f" n="csi_dispatch" l="400" o="TermGrid" self="&amp;mut self" rd="cols,reply_tx,visible_rows" wr="alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6" out="5"/>
+<s i="103" m="13" k="f" n="spawn" l="753" v="1" r="Self" o="Terminal" in_="4" out="1"/>
+<s i="104" m="13" k="f" n="resize_pty" l="858" v="1" o="Terminal" self="&amp;self" rd="master_pty" in_="1" out="2"/>
+<s i="105" m="14" k="f" n="handle_ui_click" l="9" v="1" o="App" self="&amp;mut self" rd="clipboard,file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,+2" wr="base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12" out="23"/>
+<s i="106" m="15" k="t" n="App" x="struct:{ pending_key_log: Option&lt;KeyLog&gt;, gl_config: Option&lt;glutin::config::Config&gt;, gl_context: Option&lt;PossiblyCurrentContext&gt;, gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, settings_scroll: crate::scroll::ScrollState, +87 }"/>
+<s i="107" m="15" k="t" n="EditorTab" x="struct:{ editor: crate::editor::Editor, file_path: Option&lt;PathBuf&gt;, base_title: String, file_extension: String, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, completions: Vec&lt;crate::highlighter::CompletionItem&gt;, +12 }"/>
+<s i="108" m="15" k="t" n="IdePanelState" x="struct:{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, +33 }"/>
+<s i="109" m="15" k="t" n="KeyLog" x="struct:{ key: String, t0: std::time::Instant, t_highlight: Option&lt;std::time::Instant&gt;, t_render: Option&lt;std::time::Instant&gt; }"/>
+<s i="110" m="15" k="t" n="LspActionItem" x="enum:{ CodeAction(crate::lsp::CodeAction), AddNoqa { codes: Vec&lt;String&gt; }"/>
+<s i="111" m="15" k="t" n="LspActionsMenu" x="struct:{ cursor_line: u32, items: Vec&lt;LspActionItem&gt;, selected: usize, menu_x: f32, menu_y: f32, pending_request_id: Option&lt;i32&gt; }"/>
+<s i="112" m="15" k="t" n="PanelDragState" x="struct:{ panel_id: PanelId, start_y: f32, current_y: f32, threshold_passed: bool }"/>
+<s i="113" m="15" k="t" n="PanelGroup" x="enum:{ Top, Bottom }"/>
+<s i="114" m="15" k="t" n="PanelId" x="enum:{ Explorer, Terminal, Problems, LspServers }"/>
+<s i="115" m="15" k="t" n="PanelSlot" x="struct:{ id: PanelId, group: PanelGroup, open: bool }"/>
+<s i="116" m="15" k="t" n="PendingAction" x="enum:{ Quit, OpenFile, CloseFile }"/>
+<s i="117" m="15" k="t" n="TabDragState" x="struct:{ start_idx: usize, start_x: f32, current_x: f32, threshold_passed: bool }"/>
+<s i="118" m="15" k="f" n="label" l="59" v="1" r="&amp;'static str" o="PanelId" self="self" in_="1"/>
+<s i="119" m="15" k="f" n="icon" l="67" v="1" r="crate::widgets::IconType" o="PanelId" self="self" in_="1"/>
+<s i="120" m="15" k="f" n="default" l="173" r="Self" o="IdePanelState"/>
+<s i="121" m="15" k="f" n="any_top_open" l="235" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="1"/>
+<s i="122" m="15" k="f" n="any_bottom_open" l="240" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="6"/>
+<s i="123" m="15" k="f" n="toggle" l="245" v="1" o="IdePanelState" self="&amp;mut self" rd="slots" in_="2"/>
+<s i="124" m="15" k="f" n="is_open" l="250" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="10"/>
+<s i="125" m="15" k="f" n="fuzzy_match" l="260" r="Option&lt;Vec&lt;usize&gt;&gt;" in_="1"/>
+<s i="126" m="15" k="f" n="enter_ide_mode" l="408" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter,ide_workspaces,window" wr="active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()" in_="1" out="10"/>
+<s i="127" m="15" k="f" n="save_tabs_state" l="513" v="1" o="App" self="&amp;mut self" rd="active_tab,is_ide_mode,tabs" in_="6" out="1"/>
+<s i="128" m="15" k="f" n="sync_active_tab" l="522" v="1" o="App" self="&amp;mut self" rd="active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1" in_="5" out="1"/>
+<s i="129" m="15" k="f" n="switch_to_tab" l="569" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window" wr="active_tab=,autocomplete_active=,show_welcome=" in_="2" out="6"/>
+<s i="130" m="15" k="f" n="open_new_tab" l="624" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,window" wr="active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()" in_="2" out="4"/>
+<s i="131" m="15" k="f" n="close_tab_at" l="715" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_path,is_ide_mode,window" wr="active_tab=,autocomplete_active=,show_welcome=,tabs.remove()" in_="1" out="4"/>
+<s i="132" m="15" k="f" n="open_file_in_tab" l="749" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
+<s i="133" m="15" k="f" n="open_file_in_tab_bg" l="753" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
+<s i="134" m="15" k="f" n="open_file_in_tab_internal" l="757" v="1" o="App" self="&amp;mut self" rd="active_tab,editor,file_path,is_ide_mode,tabs" in_="2" out="4"/>
+<s i="135" m="15" k="f" n="ensure_cursor_visible" l="793" v="1" o="App" out="2"/>
+<s i="136" m="15" k="f" n="get_current_word_prefix" l="832" v="1" r="String" o="App" self="&amp;self" rd="editor" in_="2" out="1"/>
+<s i="137" m="15" k="f" n="update_autocomplete" l="852" v="1" o="App" self="&amp;mut self" rd="autocomplete_scroll,editor,highlighter" wr="autocomplete_active=,autocomplete_anim_progress=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=" in_="1" out="2"/>
+<s i="138" m="15" k="f" n="ensure_autocomplete_visible" l="931" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,autocomplete_selected_idx" out="2"/>
+<s i="139" m="15" k="f" n="apply_autocomplete" l="961" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,base_title,editor,highlighter,window" wr="autocomplete_active=,autocomplete_selected_idx=" out="6"/>
+<s i="140" m="15" k="f" n="update_terminal_search" l="995" v="1" o="App" self="&amp;mut self" rd="ide_panel" out="2"/>
+<s i="141" m="15" k="f" n="jump_to_terminal_search_result" l="1040" v="1" o="App" self="&amp;mut self" rd="ide_panel,renderer"/>
+<s i="142" m="15" k="f" n="update_search" l="1076" v="1" o="App" self="&amp;mut self" rd="editor,search_case_sensitive,search_editor" wr="search_current_idx=,search_results.clear(),search_results.push()" out="2"/>
+<s i="143" m="15" k="f" n="jump_to_search_result" l="1132" v="1" o="App" self="&amp;mut self" rd="editor,renderer,scroll_y,search_current_idx,search_results,window" out="2"/>
+<s i="144" m="15" k="f" n="update_window_title" l="1158" v="1" o="App"/>
+<s i="145" m="15" k="f" n="show_action_dialog" l="1167" v="1" o="App" self="&amp;mut self" rd="gl_config,scroll_x,scroll_y" wr="dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=" out="7"/>
+<s i="146" m="15" k="f" n="close_dialog" l="1209" v="1" o="App" self="&amp;mut self" rd="window" wr="dialog_gl_surface=,dialog_window="/>
+<s i="147" m="15" k="f" n="close_current_file" l="1217" v="1" o="App" self="&amp;mut self" rd="active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()" in_="2" out="5"/>
+<s i="148" m="15" k="f" n="trigger_file_picker" l="1263" v="1" o="App" self="&amp;mut self" wr="open_file_rx="/>
+<s i="149" m="15" k="f" n="trigger_folder_picker" l="1272" v="1" o="App" self="&amp;mut self" wr="open_folder_rx="/>
+<s i="150" m="15" k="f" n="trigger_save_as_picker" l="1283" v="1" o="App" self="&amp;mut self" wr="save_file_rx=" in_="1"/>
+<s i="151" m="15" k="f" n="save_current_file" l="1295" v="1" r="bool" o="App" self="&amp;mut self" rd="editor,file_path" in_="1" out="5"/>
+<s i="152" m="15" k="f" n="add_recent_file" l="1334" v="1" o="App" self="&amp;mut self" wr="recent_files.insert(),recent_files.retain(),recent_files.truncate()" in_="2"/>
+<s i="153" m="15" k="f" n="apply_highlight_results" l="1343" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter" wr="is_highlighted_once=" in_="3"/>
+<s i="154" m="15" k="f" n="load_file_internal" l="1378" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=" in_="1" out="10"/>
+<s i="155" m="15" k="f" n="check_external_changes" l="1464" v="1" o="App" self="&amp;mut self" rd="tabs,window" in_="1" out="6"/>
+<s i="156" m="16" k="t" n="EditOp" x="enum:{ Insert { offset: usize, text: String }"/>
+<s i="157" m="16" k="t" n="Editor" x="struct:{ data: Vec&lt;u8&gt;, gap_start: usize, gap_end: usize, cursor: usize, selection_anchor: Option&lt;usize&gt;, version: u64, line_offsets: Vec&lt;usize&gt;, longest_line_idx: usize, +19 }"/>
+<s i="158" m="16" k="t" n="HashSource" x="struct:(&amp;'a [u64])"/>
+<s i="159" m="16" k="t" n="HistoryStep" x="struct:{ op: EditOp, cursor_before: usize, cursor_after: usize }"/>
+<s i="160" m="16" k="t" n="LineModState" x="enum:{ ModifiedUnsaved, ModifiedSaved }"/>
+<s i="161" m="16" k="t" n="UndoRedoDelta" x="enum:{ Insert(usize, usize, String), Delete(usize, usize), Replace(usize, usize, String, +1 }"/>
+<s i="162" m="16" k="f" n="tokenize" l="16" r="Self::Tokenizer" self="&amp;self" rd="0"/>
+<s i="163" m="16" k="f" n="estimate_tokens" l="20" r="u32" self="&amp;self" rd="0"/>
+<s i="164" m="16" k="f" n="get_diff_info" l="25" r="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" in_="1"/>
+<s i="165" m="16" k="f" n="is_delimiter" l="45" r="bool" in_="3"/>
+<s i="166" m="16" k="f" n="char_class" l="52" r="u8" in_="3"/>
+<s i="167" m="16" k="f" n="new" l="130" v="1" r="Self" o="Editor" in_="2"/>
+<s i="168" m="16" k="f" n="shift_folds_insert" l="159" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="3"/>
+<s i="169" m="16" k="f" n="shift_folds_delete" l="182" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="6"/>
+<s i="170" m="16" k="f" n="rebuild_line_offsets" l="211" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=" in_="2" out="1"/>
+<s i="171" m="16" k="f" n="get_line_hashes" l="281" r="Vec&lt;u64&gt;" o="Editor" self="&amp;self" in_="3" out="1"/>
+<s i="172" m="16" k="f" n="ensure_indent_cache_updated" l="304" v="1" o="Editor" self="&amp;mut self" rd="version" wr="indent_cache.clear(),last_indent_version=" in_="1" out="3"/>
+<s i="173" m="16" k="f" n="get_cached_indent_levels" l="376" v="1" r="&amp;[u8]" o="Editor" self="&amp;self" rd="indent_cache" in_="1"/>
+<s i="174" m="16" k="f" n="backspace" l="380" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,gap_start,version" wr="cursor=,selection_anchor=,sync_edits.push()" in_="5" out="5"/>
+<s i="175" m="16" k="f" n="set_original_text" l="453" v="1" o="Editor" self="&amp;mut self" wr="original_hashes=,saved_hashes=" in_="6" out="2"/>
+<s i="176" m="16" k="f" n="mark_saved" l="459" v="1" o="Editor" self="&amp;mut self" wr="saved_hashes=" in_="1" out="2"/>
+<s i="177" m="16" k="f" n="is_dirty" l="464" v="1" r="bool" o="Editor" self="&amp;self" rd="is_dirty" in_="14"/>
+<s i="178" m="16" k="f" n="get_line_modification_state" l="468" v="1" r="Option&lt;LineModState&gt;" o="Editor" self="&amp;self" rd="line_states" in_="1"/>
+<s i="179" m="16" k="f" n="update_modifications" l="472" v="1" o="Editor" self="&amp;mut self" rd="original_hashes,saved_hashes" wr="deleted_gaps=,is_dirty=,line_states=" in_="10" out="3"/>
+<s i="180" m="16" k="f" n="clear_history" l="543" v="1" o="Editor" self="&amp;mut self" wr="history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()" in_="3" out="1"/>
+<s i="181" m="16" k="f" n="push_history" l="551" o="Editor" self="&amp;mut self" rd="history_size,is_working_history" wr="history.push_back(),redo_stack.clear()" in_="5" out="1"/>
+<s i="182" m="16" k="f" n="undo" l="635" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
+<s i="183" m="16" k="f" n="redo" l="693" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
+<s i="184" m="16" k="f" n="text_parts" l="751" v="1" r="(&amp;str, &amp;str)" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
+<s i="185" m="16" k="f" n="get_full_text" l="759" v="1" r="String" o="Editor" self="&amp;self" in_="34" out="1"/>
+<s i="186" m="16" k="f" n="move_gap" l="767" o="Editor" self="&amp;mut self" rd="data,gap_end,gap_start" in_="7"/>
+<s i="187" m="16" k="f" n="insert_str_internal" l="786" r="usize" o="Editor" self="&amp;mut self" rd="cursor,gap_start" wr="data=,gap_end=,sync_edits.push()" in_="4" out="2"/>
+<s i="188" m="16" k="f" n="replace_range" l="810" v="1" r="(usize, usize, String)" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="4" out="5"/>
+<s i="189" m="16" k="f" n="insert_str" l="857" v="1" r="(Option&lt;(usize, usize)&gt;, usize)" o="Editor" self="&amp;mut self" rd="cursor,version" wr="selection_anchor=" in_="19" out="4"/>
+<s i="190" m="16" k="f" n="delete_selection" l="884" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="9" out="4"/>
+<s i="191" m="16" k="f" n="delete_forward" l="922" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor,gap_end,version" wr="sync_edits.push()" in_="4" out="5"/>
+<s i="192" m="16" k="f" n="delete_word_backward" l="958" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="2" out="2"/>
+<s i="193" m="16" k="f" n="delete_word_forward" l="991" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="2" out="2"/>
+<s i="194" m="16" k="f" n="get_auto_indent" l="1025" v="1" r="String" o="Editor" self="&amp;self" rd="cursor" in_="1"/>
+<s i="195" m="17" k="f" n="select_expand" l="4" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" out="3"/>
+<s i="196" m="17" k="f" n="select_word" l="130" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="3"/>
+<s i="197" m="17" k="f" n="select_line" l="147" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="2"/>
+<s i="198" m="17" k="f" n="is_char_boundary" l="162" v="1" r="bool" o="Editor" in_="6" out="2"/>
+<s i="199" m="17" k="f" n="byte_at" l="170" v="1" r="u8" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="18"/>
+<s i="200" m="17" k="f" n="len" l="178" v="1" r="usize" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
+<s i="201" m="17" k="f" n="utf16_col_to_byte_advance" l="186" v="1" o="Editor" self="&amp;self" rd="line_offsets" in_="1" out="2"/>
+<s i="202" m="17" k="f" n="get_selection" l="223" v="1" r="Option&lt;String&gt;" o="Editor" self="&amp;self" rd="cursor,selection_anchor" in_="4" out="1"/>
+<s i="203" m="17" k="f" n="get_visible_lines_count" l="237" v="1" r="usize" o="Editor" self="&amp;self" rd="foldable_lines,folded_lines,line_offsets" in_="1" out="1"/>
+<s i="204" m="17" k="f" n="select_all" l="257" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="5" out="1"/>
+<s i="205" m="17" k="f" n="handle_selection" l="262" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="12"/>
+<s i="206" m="17" k="f" n="snap_cursor_out_of_fold" l="271" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="3"/>
+<s i="207" m="17" k="f" n="move_left" l="311" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="3"/>
+<s i="208" m="17" k="f" n="move_right" l="324" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
+<s i="209" m="17" k="f" n="move_word_left" l="337" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
+<s i="210" m="17" k="f" n="move_word_right" l="360" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="5"/>
+<s i="211" m="17" k="f" n="move_home" l="383" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="4"/>
+<s i="212" m="17" k="f" n="move_end" l="423" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="5" out="4"/>
+<s i="213" m="17" k="f" n="move_start_of_file" l="463" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="1"/>
+<s i="214" m="17" k="f" n="move_end_of_file" l="468" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="2"/>
+<s i="215" m="17" k="f" n="move_up" l="473" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="216" m="17" k="f" n="move_down" l="479" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="217" m="17" k="f" n="set_cursor_at_pos" l="485" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="3" out="1"/>
+<s i="218" m="17" k="f" n="move_page_up" l="500" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="219" m="17" k="f" n="move_page_down" l="506" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="220" m="18" k="t" n="ColorSpan" x="struct:{ start: usize, end: usize, color: [f32; 4] }"/>
+<s i="221" m="18" k="t" n="CompletionItem" x="struct:{ word: String, kind: SymbolKind, scope_start: usize, scope_end: usize }"/>
+<s i="222" m="18" k="t" n="Highlighter" x="struct:{ tx: Sender&lt;HighlighterMessage&gt;, rx: Receiver&lt;( u64, Vec&lt;ColorSpan&gt;, Vec&lt;CompletionItem&gt;, Vec&lt;(usize, usize, bool, bool)&gt;, +12 }"/>
+<s i="223" m="18" k="t" n="HighlighterMessage" x="enum:{ Reset { version: u64, text: String, ext: String }"/>
+<s i="224" m="18" k="t" n="Scope" x="struct:{ start: usize, end: usize, params: HashSet&lt;String&gt; }"/>
+<s i="225" m="18" k="t" n="SymbolKind" x="enum:{ Variable, Function, Class, Parameter, Keyword, Unknown }"/>
+<s i="226" m="18" k="t" n="SyncEdit" x="enum:{ Insert { offset: usize, text: String }"/>
+<s i="227" m="18" k="f" n="get_point" l="93" r="tree_sitter::Point" in_="1"/>
+<s i="228" m="18" k="f" n="resolve_color" l="106" r="[f32; 4]" in_="1" out="1"/>
+<s i="229" m="18" k="f" n="new" l="187" v="1" r="Self" o="Highlighter" in_="2" out="11"/>
+<s i="230" m="19" k="f" n="reset" l="4" v="1" o="Highlighter" self="&amp;self" in_="8"/>
+<s i="231" m="19" k="f" n="apply_edits" l="10" v="1" o="Highlighter" self="&amp;self" rd="tx" in_="3"/>
+<s i="232" m="19" k="f" n="poll" l="27" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="3"/>
+<s i="233" m="19" k="f" n="wait_for_first_result" l="48" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="2" out="1"/>
+<s i="234" m="19" k="f" n="shift_insert" l="77" v="1" o="Highlighter" self="&amp;mut self" wr="spans.extend(),spans.push(),spans.retain(),spans=" in_="4"/>
+<s i="235" m="19" k="f" n="shift_delete" l="174" v="1" o="Highlighter" self="&amp;mut self" wr="spans.retain()" in_="4"/>
+<s i="236" m="19" k="f" n="get_bracket_color" l="191" v="1" r="[f32; 4]" in_="1"/>
+<s i="237" m="19" k="f" n="flatten_spans" l="205" v="1" r="Vec&lt;ColorSpan&gt;" in_="1" out="3"/>
+<s i="238" m="21" k="t" n="HoverLineKind" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
+<s i="239" m="21" k="f" n="normalize_inline_rst_code" l="33" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1"/>
+<s i="240" m="21" k="f" n="normalize_rst_roles" l="58" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1"/>
+<s i="241" m="21" k="f" n="flatten_rst_roles_and_code" l="99" v="1" r="String" in_="1"/>
+<s i="242" m="21" k="f" n="parse_param_line" l="147" v="1" r="Option&lt;(String, String, String)&gt;" in_="1"/>
+<s i="243" m="21" k="f" n="split_inline_python_after_colon" l="167" r="Option&lt;(String, String)&gt;" in_="1" out="1"/>
+<s i="244" m="21" k="f" n="normalize_coroutine_signature_line" l="187" r="String" in_="1" out="1"/>
+<s i="245" m="21" k="f" n="normalize_python_hover_doc" l="209" v="1" r="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" in_="1" out="6"/>
+<s i="246" m="21" k="f" n="ts_capture_color" l="608" v="1" r="Option&lt;[f32; 4]&gt;" in_="1"/>
+<s i="247" m="21" k="f" n="push_python_ts_spans" l="624" v="1" in_="1" out="1"/>
+<s i="248" m="21" k="f" n="highlight_python_hover_doc" l="677" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="6"/>
+<s i="249" m="21" k="f" n="force_color_on_ranges" l="1010" in_="1"/>
+<s i="250" m="21" k="f" n="color_keyword_args_orange" l="1052" in_="1"/>
+<s i="251" m="22" k="t" n="HoverLineKindPublic" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
+<s i="252" m="22" k="t" n="PendingRequestKind" x="enum:{ Hover, CodeAction, Definition }"/>
+<s i="253" m="22" k="f" n="highlight_hover_text" l="3" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="25" out="14"/>
+<s i="254" m="22" k="f" n="preprocess_hover_text" l="111" r="String" in_="1" out="1"/>
+<s i="255" m="22" k="f" n="looks_like_python_hover" l="124" r="bool" in_="1" out="1"/>
+<s i="256" m="22" k="f" n="looks_like_python_code_line" l="155" r="bool" in_="1" out="1"/>
+<s i="257" m="22" k="f" n="looks_like_type_expr_line" l="181" r="bool" in_="1" out="1"/>
+<s i="258" m="22" k="f" n="looks_like_simple_type_name_line" l="201" r="bool" in_="1" out="1"/>
+<s i="259" m="22" k="f" n="sanitize_hover_type_expr" l="222" r="String" in_="1"/>
+<s i="260" m="22" k="f" n="sanitize_module_path" l="240" r="String" in_="2"/>
+<s i="261" m="22" k="f" n="normalize_class_object_repr" l="252" r="Option&lt;(Option&lt;String&gt;, String)&gt;" in_="1" out="1"/>
+<s i="262" m="22" k="f" n="normalize_module_object_repr" l="277" r="Option&lt;String&gt;" in_="1" out="1"/>
+<s i="263" m="22" k="f" n="normalize_bound_method_signature" l="293" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="264" m="22" k="f" n="add_bound_method_signature_spans" l="349" r="bool" in_="1" out="1"/>
+<s i="265" m="22" k="f" n="add_self_param_span_for_signature" l="419" in_="1"/>
+<s i="266" m="22" k="f" n="add_param_name_spans_for_signature" l="443" in_="1"/>
+<s i="267" m="22" k="f" n="add_class_keyword_spans_for_signature" l="483" in_="1"/>
+<s i="268" m="22" k="f" n="add_type_bracket_neutral_spans_for_signature" l="518" in_="1"/>
+<s i="269" m="22" k="f" n="add_type_expr_spans_for_line" l="538" in_="1"/>
+<s i="270" m="22" k="f" n="normalize_hover_text" l="578" r="String" in_="1" out="4"/>
+<s i="271" m="22" k="f" n="wrap_signature_after_first_param" l="633" r="String" in_="3" out="1"/>
+<s i="272" m="22" k="f" n="normalize_asynccontextmanager_signature_line" l="657" r="Option&lt;String&gt;" in_="2" out="2"/>
+<s i="273" m="22" k="f" n="variable_header_highlights_name_pink" l="689" out="1"/>
+<s i="274" m="22" k="f" n="uses_python_hover_pipeline_for_builtin_signatures" l="707" out="1"/>
+<s i="275" m="22" k="f" n="plain_bound_method_prose_stays_uncolored" l="727" out="2"/>
+<s i="276" m="22" k="f" n="inline_for_fragment_becomes_separate_code_line" l="764" out="2"/>
+<s i="277" m="22" k="f" n="rich_rst_docstring_path_is_preserved" l="774" out="2"/>
+<s i="278" m="22" k="f" n="bound_method_signature_line_is_highlighted_but_prose_stays_plain" l="793" out="2"/>
+<s i="279" m="22" k="f" n="coroutine_return_bound_method_becomes_async_def" l="813" out="1"/>
+<s i="280" m="22" k="f" n="coroutine_return_signature_becomes_async_def" l="820" out="1"/>
+<s i="281" m="22" k="f" n="long_bound_method_signature_is_normalized_and_highlighted" l="836" out="2"/>
+<s i="282" m="22" k="f" n="class_object_repr_is_normalized_and_highlighted" l="863" out="1"/>
+<s i="283" m="22" k="f" n="qualified_class_object_repr_prepends_module_path" l="885" out="1"/>
+<s i="284" m="22" k="f" n="backticked_qualified_class_repr_prepends_module_path" l="903" out="1"/>
+<s i="285" m="22" k="f" n="generic_type_line_gets_cyan_types_and_white_brackets" l="913" out="1"/>
+<s i="286" m="22" k="f" n="literal_type_line_is_highlighted" l="944" out="1"/>
+<s i="287" m="22" k="f" n="assignment_line_is_highlighted_in_hover_text" l="966" out="1"/>
+<s i="288" m="22" k="f" n="module_object_repr_is_normalized_to_module_header" l="979" out="1"/>
+<s i="289" m="22" k="f" n="site_packages_and_init_are_removed_from_module_and_class_repr" l="986" out="1"/>
+<s i="290" m="22" k="f" n="builtin_dict_class_hover_is_normalized_without_angle_brackets" l="997" out="2"/>
+<s i="291" m="22" k="f" n="builtin_str_heading_line_is_highlighted_as_type" l="1010" out="1"/>
+<s i="292" m="22" k="f" n="builtin_any_heading_line_is_highlighted_as_type" l="1025" out="1"/>
+<s i="293" m="22" k="f" n="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" l="1040" out="2"/>
+<s i="294" m="22" k="f" n="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" l="1047" out="2"/>
+<s i="295" m="22" k="f" n="class_signature_is_highlighted" l="1081" out="1"/>
+<s i="296" m="22" k="f" n="litestar_giant_class_hover_signature_and_args_doc_are_parsed" l="1097" out="2"/>
+<s i="297" m="22" k="f" n="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" l="1301" out="1"/>
+<s i="298" m="23" k="t" n="Cmd" x="enum:{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }"/>
+<s i="299" m="23" k="t" n="CodeAction" x="struct:{ title: String, kind: Option&lt;String&gt;, edit: Option&lt;WorkspaceEdit&gt;, code: Option&lt;String&gt; }"/>
+<s i="300" m="23" k="t" n="LspEvent" x="enum:{ Log { name: &amp;'static str, message: String }"/>
+<s i="301" m="23" k="t" n="LspServerDef" x="struct:{ pub(super) program: &amp;'static str, pub(super) args: &amp;'static [&amp;'static str], pub(super) language_id: &amp;'static str, #[allow(dead_code)] pub(super) extensions: &amp;'static [&amp;'static str] }"/>
+<s i="302" m="23" k="t" n="TextChange" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, new_text: String }"/>
+<s i="303" m="23" k="t" n="WorkspaceEdit" x="struct:{ changes: HashMap&lt;PathBuf, Vec&lt;TextChange&gt;&gt; }"/>
+<s i="304" m="23" k="f" n="highlight_diagnostic_message" l="9" v="1" r="Vec&lt;crate::highlighter::ColorSpan&gt;"/>
+<s i="305" m="23" k="f" n="offset_to_lsp_pos" l="236" v="1" r="(u32, u32)"/>
+<s i="306" m="23" k="f" n="json_escape" l="256" v="1" r="String" in_="8"/>
+<s i="307" m="23" k="f" n="path_to_uri" l="275" v="1" r="String" in_="9"/>
+<s i="308" m="23" k="f" n="uri_to_path" l="289" v="1" r="PathBuf" in_="3"/>
+<s i="309" m="23" k="f" n="make_initialize" l="300" v="1" r="Vec&lt;u8&gt;" in_="1" out="2"/>
+<s i="310" m="23" k="f" n="make_initialized" l="331" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="311" m="23" k="f" n="make_did_open" l="335" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="312" m="23" k="f" n="make_did_change_full" l="346" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="313" m="23" k="f" n="make_did_close" l="356" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="314" m="23" k="f" n="make_code_action" l="364" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="315" m="23" k="f" n="make_hover" l="391" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="316" m="23" k="f" n="make_definition" l="398" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="317" m="23" k="f" n="make_shutdown" l="405" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="318" m="23" k="f" n="make_exit" l="409" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="319" m="23" k="f" n="write_frame" l="415" v="1" r="bool" in_="1" out="1"/>
+<s i="320" m="23" k="f" n="parse_diagnostic_value" l="427" v="1" r="Option&lt;Diagnostic&gt;" in_="1" out="2"/>
+<s i="321" m="23" k="f" n="parse_text_edit_value" l="534" v="1" r="Option&lt;TextChange&gt;" in_="1"/>
+<s i="322" m="23" k="f" n="parse_workspace_edit_value" l="559" v="1" r="WorkspaceEdit" in_="1" out="1"/>
+<s i="323" m="23" k="f" n="parse_hover_value" l="595" v="1" r="Option&lt;String&gt;" in_="1"/>
+<s i="324" m="23" k="f" n="parse_definition_path" l="623" v="1" r="Option&lt;PathBuf&gt;" in_="1" out="1"/>
+<s i="325" m="23" k="f" n="parse_code_action_value" l="640" v="1" r="Option&lt;CodeAction&gt;"/>
+<s i="326" m="23" k="f" n="dispatch_frame" l="675" v="1" in_="1" out="5"/>
+<s i="327" m="24" k="t" n="DiagSeverity" x="enum:{ Error, Warning, Info, Hint }"/>
+<s i="328" m="24" k="t" n="Diagnostic" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, +4 }"/>
+<s i="329" m="24" k="t" n="LogEntry" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }"/>
+<s i="330" m="24" k="t" n="LspManager" x="struct:{ python: Option&lt;LspProcess&gt;, ty_process: Option&lt;LspProcess&gt;, workspaces: Vec&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, +15 }"/>
+<s i="331" m="24" k="t" n="LspProcess" x="struct:{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt;, workspace_scanned: bool }"/>
+<s i="332" m="24" k="t" n="LspServerInfo" x="struct:{ name: &amp;'static str, status: LspServerStatus, logs: Vec&lt;LogEntry&gt; }"/>
+<s i="333" m="24" k="t" n="LspServerStatus" x="enum:{ Starting, Running, Crashed, Disabled }"/>
+<s i="334" m="24" k="t" n="OpenFile" x="struct:{ uri: String, lang: &amp;'static str, version: i32, text: String }"/>
+<s i="335" m="24" k="t" n="QuickFix" x="struct:{ title: String, edits: Vec&lt;TextChange&gt; }"/>
+<s i="336" m="24" k="t" n="SpawnedProcess" x="struct:{ child: Child, out_tx: Sender&lt;Vec&lt;u8&gt;&gt; }"/>
+<s i="337" m="24" k="f" n="next_id" l="41" r="i32" in_="6"/>
+<s i="338" m="24" k="f" n="spawn_server" l="108" r="Option&lt;SpawnedProcess&gt;" in_="1" out="3"/>
+<s i="339" m="24" k="f" n="send_and_log" l="239" r="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" in_="1" out="1"/>
+<s i="340" m="24" k="f" n="run_supervisor" l="273" in_="1" out="13"/>
+<s i="341" m="24" k="f" n="start" l="498" r="Self" o="LspProcess" in_="2" out="2"/>
+<s i="342" m="24" k="f" n="notify_open" l="519" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx,def" wr="current_uri=,open_file_data=,workspace_scanned=" out="1"/>
+<s i="343" m="24" k="f" n="restart" l="563" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" in_="1"/>
+<s i="344" m="24" k="f" n="notify_change" l="569" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
+<s i="345" m="24" k="f" n="request_hover" l="579" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
+<s i="346" m="24" k="f" n="request_definition" l="586" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
+<s i="347" m="24" k="f" n="notify_close" l="594" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
+<s i="348" m="24" k="f" n="request_code_actions" l="602" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="3"/>
+<s i="349" m="24" k="f" n="poll" l="632" v="1" o="LspProcess" self="&amp;self" rd="event_rx"/>
+<s i="350" m="24" k="f" n="shutdown" l="641" v="1" o="LspProcess" self="self" rd="cmd_tx"/>
+<s i="351" m="24" k="f" n="encode_diagnostics_json" l="648" r="String" in_="1" out="1"/>
+<s i="352" m="24" k="f" n="new" l="704" v="1" r="Self" o="LspManager" in_="2"/>
+<s i="353" m="24" k="f" n="ensure_python" l="725" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="3"/>
+<s i="354" m="24" k="f" n="restart_python" l="737" v="1" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
+<s i="355" m="24" k="f" n="disable_python" l="755" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process" wr="diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_instant_diagnostics.clear(),ty_status=" in_="1" out="1"/>
+<s i="356" m="24" k="f" n="enable_python" l="774" v="1" o="LspManager" self="&amp;mut self" rd="current_path,workspaces" wr="python=,python_disabled=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
+<s i="357" m="24" k="f" n="servers_info" l="797" v="1" r="Vec&lt;LspServerInfo&gt;" o="LspManager" self="&amp;self" rd="python_status,ty_status" in_="2"/>
+<s i="358" m="24" k="f" n="process_for_ext" l="823" r="Option&lt;&amp;mut LspProcess&gt;" o="LspManager" self="&amp;mut self" rd="python" in_="3" out="1"/>
+<s i="359" m="24" k="f" n="notify_open" l="834" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="current_path=,suppress_diagnostics=" in_="4" out="1"/>
+<s i="360" m="24" k="f" n="notify_change" l="857" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="last_change=,suppress_diagnostics=" in_="3" out="1"/>
+<s i="361" m="24" k="f" n="request_hover" l="878" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
+<s i="362" m="24" k="f" n="request_definition" l="899" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
+<s i="363" m="24" k="f" n="notify_close" l="921" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" in_="2"/>
+<s i="364" m="24" k="f" n="request_code_actions" l="940" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="1" out="1"/>
+<s i="365" m="24" k="f" n="poll" l="972" v="1" r="Vec&lt;LspEvent&gt;" o="LspManager" self="&amp;mut self" rd="instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_instant_diagnostics,ty_process" wr="diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=" in_="2" out="2"/>
+<s i="366" m="24" k="f" n="get_diagnostics" l="1104" v="1" r="&amp;[Diagnostic]" o="LspManager" self="&amp;self" rd="diagnostics,workspaces" in_="5"/>
+<s i="367" m="24" k="f" n="get_instant_diagnostics_with_version" l="1118" v="1" r="(i32, &amp;[Diagnostic])" o="LspManager" self="&amp;self" rd="merged_instant_diagnostics,workspaces" in_="1"/>
+<s i="368" m="24" k="f" n="diagnostics_for_line" l="1133" v="1" r="Vec&lt;&amp;Diagnostic&gt;" o="LspManager" self="&amp;self" in_="1" out="1"/>
+<s i="369" m="24" k="f" n="request_fix_all" l="1141" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="3" out="3"/>
+<s i="370" m="24" k="f" n="request_organize_imports" l="1165" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="2" out="3"/>
+<s i="371" m="24" k="f" n="shutdown" l="1190" v="1" o="LspManager" self="mut self" rd="python,ty_process" wr="python_disabled=" in_="1"/>
+<s i="372" m="24" k="f" n="lsp_pos_to_offset" l="1205" v="1" r="usize" in_="2"/>
+<s i="373" m="24" k="f" n="format_and_highlight_json" l="1231" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="3"/>
+<s i="374" m="25" k="t" n="Config" x="struct:{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }"/>
+<s i="375" m="25" k="f" n="default" l="35" r="Self" o="Config"/>
+<s i="376" m="25" k="f" n="load_recent_files" l="47" v="1" r="Vec&lt;PathBuf&gt;" in_="1"/>
+<s i="377" m="25" k="f" n="save_recent_files" l="63" v="1" in_="2"/>
+<s i="378" m="25" k="f" n="load_open_tabs" l="77" v="1" r="(Vec&lt;Option&lt;PathBuf&gt;&gt;, usize)"/>
+<s i="379" m="25" k="f" n="save_open_tabs" l="104" v="1"/>
+<s i="380" m="25" k="f" n="save_panel_state" l="126" v="1"/>
+<s i="381" m="25" k="f" n="load_panel_state" l="156" v="1" r="crate::app::IdePanelState"/>
+<s i="382" m="25" k="f" n="save_config" l="210" v="1" in_="1"/>
+<s i="383" m="25" k="f" n="load_config" l="235" r="Config" in_="1" out="2"/>
+<s i="384" m="25" k="f" n="get_kde_color" l="308" r="Option&lt;[f32; 4]&gt;" in_="1"/>
+<s i="385" m="25" k="f" n="load_dracula" l="330" r="Theme" in_="1" out="1"/>
+<s i="386" m="25" k="f" n="main" l="349" entry="1" out="10"/>
+<s i="387" m="25" k="f" n="mallopt" l="355" r="i32; } mallopt(-8, 2); } let args: Vec&lt;String&gt; = env::args().collect(); let run_ide_on_startup = args.iter().any(|a| a == &quot;--ide&quot; || a == &quot;ide&quot;); let has_file_arg = args.iter().skip(1).any(|a| *a != &quot;--ide&quot; &amp;&amp; *a != &quot;ide&quot;); let mut initial_text = String::new(); let mut title = &quot;Безымянный&quot;.to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg" in_="1" out="1"/>
+<s i="388" m="26" k="f" n="get_params_query" l="3" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
+<s i="389" m="26" k="f" n="get_injection_query" l="82" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
+<s i="390" m="26" k="f" n="get_folding_query" l="131" v="1" r="Option&lt;&amp;'static str&gt;" in_="3"/>
+<s i="391" m="26" k="f" n="get_ts_config" l="336" v="1" r="Option&lt;(tree_sitter::Language, Vec&lt;&amp;'static str&gt;)&gt;" in_="3"/>
+<s i="392" m="26" k="f" n="test_all_tree_sitter_queries_are_valid" l="930" out="4"/>
+<s i="393" m="27" k="f" n="update_cache" l="6" v="1" o="Renderer" self="&amp;mut self" rd="height,left_padding,line_height,scale_factor,width" wr="last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()" out="3"/>
+<s i="394" m="27" k="f" n="get_cursor_xy" l="213" v="1" r="(f32, f32)" o="Renderer" self="&amp;mut self" rd="baseline_offset,last_scroll_x,left_padding,line_height,scale_factor" in_="9" out="4"/>
+<s i="395" m="27" k="f" n="get_byte_at_xy" l="350" v="1" r="usize" o="Renderer" self="&amp;mut self" rd="last_scroll_x,left_padding,line_height" in_="6" out="3"/>
+<s i="396" m="27" k="f" n="measure_width" l="450" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="1"/>
+<s i="397" m="27" k="f" n="get_max_scroll" l="476" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="line_height" in_="9" out="1"/>
+<s i="398" m="27" k="f" n="flush" l="483" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,program,vbo,width" wr="vertices.clear()" in_="5"/>
+<s i="399" m="27" k="f" n="push_vertical_gradient" l="525" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="400" m="27" k="f" n="push_horizontal_gradient" l="573" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="401" m="27" k="f" n="draw_string" l="621" v="1" o="Renderer" self="&amp;mut self"/>
+<s i="402" m="27" k="f" n="draw_string_scaled" l="637" v="1" o="Renderer" self="&amp;mut self" in_="1"/>
+<s i="403" m="27" k="f" n="draw_string_mono_scaled" l="660" v="1" o="Renderer" self="&amp;mut self"/>
+<s i="404" m="27" k="f" n="measure_mono_width" l="683" v="1" r="f32" o="Renderer" self="&amp;mut self"/>
+<s i="405" m="27" k="f" n="push_rounded_rect" l="694" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="2"/>
+<s i="406" m="28" k="t" n="DiagChar" x="struct:{ x: f32, y: f32, w: f32, h: f32, byte_offset: usize }"/>
+<s i="407" m="28" k="f" n="diag_popup_byte_at" l="19" v="1" r="usize" in_="2"/>
+<s i="408" m="28" k="f" n="draw_diagnostic_popup" l="57" v="1" o="Renderer" self="&amp;mut self" rd="height,hovered_diags_cache,scale_factor,theme,width" wr="last_diag_href=,last_diag_popup_rect=" out="3"/>
+<s i="409" m="29" k="f" n="draw_lsp_servers_panel" l="6" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" out="4"/>
+<s i="410" m="29" k="f" n="draw_lsp_actions_menu" l="785" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1"/>
+<s i="411" m="30" k="f" n="draw_minimap" l="6" v="1" o="Renderer" self="&amp;mut self" rd="line_height,minimap_width,theme,vertices,width" out="2"/>
+<s i="412" m="31" k="f" n="draw_search_panel" l="8" v="1" r="bool" o="Renderer" rd="gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width" wr="last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=" out="4"/>
+<s i="413" m="32" k="f" n="get_faq_max_scroll" l="6" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="scale_factor" in_="2" out="2"/>
+<s i="414" m="32" k="f" n="draw_settings" l="31" v="1" r="u8" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1" out="8"/>
+<s i="415" m="33" k="f" n="draw_sticky_lines" l="7" v="1" r="Vec&lt;(usize, usize)&gt;" o="Renderer" rd="baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width" wr="sticky_scroll_rects.clear(),sticky_scroll_rects.push()" out="2"/>
+<s i="416" m="34" k="f" n="draw_tab_bar" l="6" v="1" r="Option&lt;(std::path::PathBuf, f32, f32)&gt;" o="Renderer" self="&amp;mut self" rd="gl,height,hide_popups_until_mouse_move,theme" wr="max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=" out="3"/>
+<s i="417" m="34" k="f" n="draw_tab_tooltip" l="416" v="1" o="Renderer" self="&amp;mut self" rd="theme,width"/>
+<s i="418" m="35" k="f" n="draw_terminal_panel" l="7" v="1" o="Renderer" self="&amp;mut self" rd="baseline_offset,gl,height,line_height,theme,vertices" out="8"/>
+<s i="419" m="36" k="f" n="build_hover_popup_layout" l="4" r="crate::app::mouse::HoverLayoutCache" o="Renderer" self="&amp;mut self" rd="scale_factor" in_="1"/>
+<s i="420" m="36" k="f" n="draw_hover_popup" l="168" v="1" r="(f32, f32, f32, f32, f32)" o="Renderer" rd="gl,height,last_diag_popup_rect,line_height,phys_to_visual,scale_factor,theme,width" out="5"/>
+<s i="421" m="37" k="f" n="draw_problems_panel" l="4" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" wr="scratch_buffer=" out="4"/>
+<s i="422" m="38" k="f" n="draw_icon" l="7" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" in_="1"/>
+<s i="423" m="38" k="f" n="draw_atlas_icon" l="19" v="1" o="Renderer" self="&amp;mut self" rd="gl,icons,texture" in_="3"/>
+<s i="424" m="38" k="f" n="draw_file_icon" l="42" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="file_icon_cache.insert()" out="1"/>
+<s i="425" m="38" k="f" n="draw_autocomplete" l="142" v="1" r="(f32, f32, f32, f32)" o="Renderer" rd="gl,height,scale_factor,theme" in_="1" out="1"/>
+<s i="426" m="38" k="f" n="draw_dialog_window" l="371" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="last_mouse_x,last_mouse_y,scale_factor,theme" in_="1" out="4"/>
+<s i="427" m="38" k="f" n="draw_welcome" l="483" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width" wr="gl.clear()" out="5"/>
+<s i="428" m="38" k="f" n="draw_diagnostics_ruler" l="727" v="1" o="Renderer" self="&amp;mut self" rd="minimap_width,phys_to_visual,scale_factor,theme,width" out="1"/>
+<s i="429" m="38" k="f" n="draw_empty_ide" l="792" v="1" o="Renderer" self="&amp;mut self" rd="height,scale_factor,theme,width" wr="empty_ide_art_idx=,was_empty_ide="/>
+<s i="430" m="39" k="t" n="ModInterval" x="struct:{ top: f32, bottom: f32, state: crate::editor::LineModState }"/>
+<s i="431" m="39" k="t" n="Telemetry" x="struct:{ render_time: f32, render_count: u32, scroll_time: f32, scroll_count: u32, type_time: f32, type_count: u32, last_print: Instant }"/>
+<s i="432" m="39" k="f" n="default" l="36" r="Self" o="Telemetry"/>
+<s i="433" m="39" k="f" n="draw" l="59" v="1" r="(bool, Vec&lt;(usize, usize)&gt;)" o="Renderer" rd="baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,program,scale_factor,texture,theme,+3" wr="diag_hover_timer=,diag_hover_timer_idx=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),hide_popups_until_mouse_move=,hovered_diags_cache.clear(),hovered_diags_cache.push(),identical_words_cache.clear(),identical_words_cache.push(),+19" in_="1" out="24"/>
+<s i="434" m="40" k="t" n="FontData" x="struct:{ source: FontSource, index: u32 }"/>
+<s i="435" m="40" k="t" n="FontSource" x="enum:{ Static(&amp;'static [u8]), LoadedMmap(std::sync::Arc&lt;memmap2::Mmap&gt;), LoadedVec(std::sync::Arc&lt;Vec&lt;u8&gt;&gt;), Lazy( std::path::PathBuf, std::rc::Rc&lt;std::cell::RefCell&lt;Option&lt;Result&lt;std::sync::Arc&lt;memmap2::Mmap&gt;, ()&gt;&gt;&gt;&gt;, ) }"/>
+<s i="436" m="40" k="t" n="GlyphInfo" x="struct:{ u: f32, v: f32, uw: f32, vh: f32, width: f32, height: f32, offset_x: f32, offset_y: f32, +2 }"/>
+<s i="437" m="40" k="t" n="Renderer" x="struct:{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, +82 }"/>
+<s i="438" m="40" k="t" n="Theme" x="struct:{ bg: [f32; 4], fg: [f32; 4], sel: [f32; 4], minimap_bg: [f32; 4], line_num: [f32; 4], minimap_cursor: [f32; 4], modified_unsaved: [f32; 4], modified_saved: [f32; 4], +3 }"/>
+<s i="439" m="40" k="t" n="Vertex" x="struct:{ pos: [f32; 2], uv: [f32; 2], color: [f32; 4], mode: f32, sdf_params: [f32; 3] }"/>
+<s i="440" m="40" k="t" n="VisualLine" x="struct:{ byte_idx: usize, physical_line: usize, is_soft_wrap: bool, whitespace_px_width: f32, text_px_width: f32, y_offset: f32, is_folded: bool, fold_suffix: [char; 4], +1 }"/>
+<s i="441" m="40" k="f" n="new_lazy" l="84" v="1" r="Self" o="FontData"/>
+<s i="442" m="40" k="f" n="new_static" l="94" v="1" r="Self" o="FontData"/>
+<s i="443" m="40" k="f" n="ensure_loaded" l="101" v="1" o="FontData" self="&amp;mut self" wr="source=" in_="2"/>
+<s i="444" m="40" k="f" n="data_slice" l="128" v="1" r="&amp;[u8]" o="FontData" self="&amp;self" rd="source" in_="2"/>
+<s i="445" m="40" k="f" n="new" l="223" v="1" r="Self" o="Renderer" in_="2" out="2"/>
+<s i="446" m="40" k="f" n="get_custom_svg_glyph" l="543" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="atlas_y,font_size,gl,texture" wr="atlas_x=,max_row_h=" in_="2"/>
+<s i="447" m="40" k="f" n="get_glyph" l="610" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,fonts,gl,texture" wr="atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()" in_="2" out="4"/>
+<s i="448" m="40" k="f" n="get_ui_glyph" l="783" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,gl,texture,ui_fonts" wr="atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()" in_="5" out="4"/>
+<s i="449" m="40" k="f" n="resize" l="955" v="1" o="Renderer" self="&amp;mut self" rd="gl" wr="height=,width=" in_="9"/>
+<s i="450" m="40" k="f" n="measure_ui_width" l="965" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="5" out="1"/>
+<s i="451" m="40" k="f" n="char_advance" l="978" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="ascii_advances" in_="4" out="1"/>
+<s i="452" m="40" k="f" n="push_quad" l="995" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="1"/>
+<s i="453" m="40" k="f" n="load_builtin_icons" l="1047" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="icons.insert()" in_="1"/>
+<s i="454" m="40" k="f" n="push_squiggle" l="1230" v="1" o="Renderer" self="&amp;mut self" rd="scale_factor,vertices"/>
+<s i="455" m="40" k="f" n="push_rect" l="1283" v="1" o="Renderer" self="&amp;mut self" in_="1" out="1"/>
+<s i="456" m="40" k="f" n="push_rounded_rect_gradient" l="1287" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="457" m="41" k="t" n="ScrollState" x="struct:{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }"/>
+<s i="458" m="41" k="f" n="new" l="12" v="1" r="Self" o="ScrollState" in_="2"/>
+<s i="459" m="41" k="f" n="update" l="23" v="1" r="bool" o="ScrollState" self="&amp;mut self" rd="anim_speed,target" wr="current=,velocity=" in_="1"/>
+<s i="460" m="41" k="f" n="clamp_target" l="48" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="6"/>
+<s i="461" m="41" k="f" n="clamp_current" l="52" v="1" o="ScrollState" self="&amp;mut self" wr="current=" in_="3"/>
+<s i="462" m="41" k="f" n="scroll_by" l="56" v="1" o="ScrollState" self="&amp;mut self" rd="target" in_="2"/>
+<s i="463" m="41" k="f" n="set_target" l="60" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="1"/>
+<s i="464" m="41" k="f" n="stop_anim" l="64" v="1" o="ScrollState" self="&amp;mut self" wr="current=,target=,velocity=" in_="2"/>
+<s i="465" m="42" k="t" n="UiElement" x="enum:{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }"/>
+<s i="466" m="42" k="t" n="UiId" x="enum:{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), +56 }"/>
+<s i="467" m="42" k="t" n="UiRegistry" x="struct:{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }"/>
+<s i="468" m="42" k="f" n="contains" l="131" v="1" r="bool" o="UiElement" self="&amp;self" in_="63"/>
+<s i="469" m="42" k="f" n="id" l="158" v="1" r="UiId" o="UiElement" self="&amp;self" in_="3"/>
+<s i="470" m="42" k="f" n="new" l="182" v="1" r="Self" o="UiRegistry" in_="2"/>
+<s i="471" m="42" k="f" n="clear" l="193" v="1" o="UiRegistry" self="&amp;mut self" wr="elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text="/>
+<s i="472" m="42" k="f" n="mark_overlay_start" l="203" v="1" o="UiRegistry" self="&amp;mut self" rd="elements" wr="overlay_mark=" in_="1"/>
+<s i="473" m="42" k="f" n="find_overlay_at" l="209" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements,overlay_mark" in_="1" out="2"/>
+<s i="474" m="42" k="f" n="register_button" l="218" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="2" out="1"/>
+<s i="475" m="42" k="f" n="register_icon_button" l="246" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="3" out="1"/>
+<s i="476" m="42" k="f" n="register_text_input" l="275" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_text=" in_="4"/>
+<s i="477" m="42" k="f" n="register_blocker" l="298" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push()" in_="5"/>
+<s i="478" m="42" k="f" n="register_rect" l="315" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="10"/>
+<s i="479" m="42" k="f" n="find_at" l="337" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements" in_="1" out="2"/>
+<s i="480" m="42" k="f" n="hovered" l="347" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="hovered" in_="3"/>
+<s i="481" m="42" k="f" n="reset_cursor_state" l="354" v="1" o="UiRegistry" self="&amp;mut self" wr="wants_pointer=,wants_text=" in_="4"/>
+<s i="482" m="42" k="f" n="wants_pointer" l="360" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_pointer" in_="5"/>
+<s i="483" m="42" k="f" n="wants_text" l="365" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_text" in_="2"/>
+<s i="484" m="42" k="f" n="cursor_code" l="370" v="1" r="u8" o="UiRegistry" self="&amp;self" rd="wants_pointer,wants_text"/>
+<s i="485" m="43" k="t" n="Button" x="struct:{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }"/>
+<s i="486" m="43" k="t" n="IconButton" x="struct:{ x: f32, y: f32, size: f32, icon: Option&lt;IconType&gt;, is_active: bool, icon_size: Option&lt;f32&gt;, active_square_width: Option&lt;f32&gt;, custom_color: Option&lt;[f32; 4]&gt; }"/>
+<s i="487" m="43" k="t" n="IconType" x="enum:{ Save, Discard, Cancel, Warning, CaseMatch, Up, Down, Close, +7 }"/>
+<s i="488" m="43" k="f" n="is_hovered" l="34" v="1" r="bool" o="Button" self="&amp;self" rd="h,w,x,y"/>
+<s i="489" m="43" k="f" n="render" l="38" v="1" r="bool" o="Button" self="&amp;self" rd="h,icon,icon_size,text,text_scale,w,x,y" out="4"/>
+<s i="490" m="43" k="f" n="is_hovered" l="119" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,size,x,y" in_="2"/>
+<s i="491" m="43" k="f" n="render" l="128" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,custom_color,icon,icon_size,is_active,size,x,y" in_="6" out="4"/>
+<s i="492" m="43" k="f" n="get_welcome_buttons" l="220" v="1" r="(Button, Button, Button)" in_="1" out="1"/>
+<s i="493" m="43" k="f" n="get_dialog_buttons" l="273" v="1" r="(Button, Button, Button)" in_="2" out="1"/>
+</syms>
+<cg>
+<e f="0" t="1 3 5 9 12 26 27 43 44 45 60 81 124 126 132 137 151 152 153 155 170 177 185 189 217 230 232 357 361 362 365 397 459 460 461 468"/>
+<e f="1" t="2"/>
+<e f="3" t="38 189"/>
+<e f="5" t="4 7 8 10 12 13 185 271 468"/>
+<e f="6" t="468"/>
+<e f="7" t="4 10"/>
+<e f="9" t="10 468"/>
+<e f="10" t="468"/>
+<e f="12" t="11 185 199"/>
+<e f="13" t="468"/>
+<e f="14" t="13 271"/>
+<e f="15" t="5 185 189"/>
+<e f="16" t="5 185 189"/>
+<e f="17" t="5 185 189"/>
+<e f="18" t="26"/>
+<e f="19" t="12 185 189"/>
+<e f="20" t="5 185 189"/>
+<e f="21" t="9"/>
+<e f="22" t="9 468"/>
+<e f="23" t="1"/>
+<e f="24" t="1"/>
+<e f="25" t="5 185 189"/>
+<e f="26" t="27 468"/>
+<e f="27" t="468"/>
+<e f="29" t="88 167 177 229 352 445 458 470"/>
+<e f="30" t="28 89 122 124 177 366 394 397 410 414 425 426 433 449 468 469 472 483 490 493"/>
+<e f="31" t="0"/>
+<e f="38" t="35"/>
+<e f="40" t="33 34 37 39 468"/>
+<e f="41" t="38 40"/>
+<e f="43" t="41 468"/>
+<e f="45" t="42"/>
+<e f="46" t="43"/>
+<e f="47" t="121 124"/>
+<e f="48" t="174 175 177 182 183 185 189 190 191 192 193 194 198 202 204 207 208 209 210 211 212 213 214 215 216 218 219 230 231 232 234 235 360 363 365 394 397 460 461 462 464"/>
+<e f="49" t="75 124 174 185 189 190 191 192 193 202 204 207 208 209 210 211 212 468"/>
+<e f="50" t="204 398"/>
+<e f="51" t="174 189 190 191 202 204 207 208 209 210 211 212"/>
+<e f="52" t="174 189 190 191 202 204 207 208 209 210 211 212"/>
+<e f="53" t="122"/>
+<e f="54" t="55"/>
+<e f="55" t="56 468"/>
+<e f="56" t="468"/>
+<e f="57" t="185 364 368 394"/>
+<e f="58" t="59 60 369 370"/>
+<e f="59" t="177 185 188 199 231 234 235 360 468"/>
+<e f="60" t="177 185 188 231 234 235 360 372"/>
+<e f="61" t="75 79 80 82 83 122 124 184 185 217 395 397 407 448 451 468"/>
+<e f="62" t="75 83 122 123 124 185 369 370 397 398 407 448 450 451 460 461 473 479"/>
+<e f="63" t="75 122 124 397 398 413 450 460 462 468"/>
+<e f="69" t="79 185 189"/>
+<e f="70" t="79 185 189"/>
+<e f="71" t="82"/>
+<e f="72" t="82"/>
+<e f="73" t="82"/>
+<e f="74" t="82"/>
+<e f="76" t="199"/>
+<e f="78" t="80 185"/>
+<e f="79" t="76 78"/>
+<e f="80" t="76 185"/>
+<e f="81" t="80 185 198 451"/>
+<e f="83" t="448 451"/>
+<e f="90" t="91"/>
+<e f="91" t="92"/>
+<e f="92" t="89 449"/>
+<e f="93" t="89 449"/>
+<e f="95" t="90"/>
+<e f="96" t="90 91"/>
+<e f="102" t="89 92 93 449 468"/>
+<e f="103" t="398"/>
+<e f="104" t="89 449"/>
+<e f="105" t="75 103 123 124 175 177 185 196 197 217 230 354 355 356 357 366 369 372 394 397 448 464 468"/>
+<e f="126" t="33 124 129 130 133 153 177 185 233 359"/>
+<e f="127" t="128"/>
+<e f="128" t="33"/>
+<e f="129" t="127 128 177 185 230 359"/>
+<e f="130" t="127 128 147 230"/>
+<e f="131" t="127 128 147 177"/>
+<e f="132" t="134"/>
+<e f="133" t="134"/>
+<e f="134" t="129 130 154 177"/>
+<e f="135" t="394 397"/>
+<e f="136" t="199"/>
+<e f="137" t="125 136"/>
+<e f="138" t="460 463"/>
+<e f="139" t="136 174 177 189 234 235"/>
+<e f="140" t="185 341"/>
+<e f="142" t="185 341"/>
+<e f="143" t="397 460"/>
+<e f="145" t="88 167 229 352 445 458 470"/>
+<e f="147" t="127 131 175 230 363"/>
+<e f="151" t="103 127 150 176 185"/>
+<e f="154" t="127 152 153 175 180 185 189 230 233 359"/>
+<e f="155" t="128 175 177 180 185 189"/>
+<e f="170" t="184"/>
+<e f="171" t="184"/>
+<e f="172" t="89 184 449"/>
+<e f="174" t="169 179 181 186 190"/>
+<e f="175" t="171 179"/>
+<e f="176" t="171 179"/>
+<e f="179" t="164 170 171"/>
+<e f="180" t="179"/>
+<e f="181" t="468"/>
+<e f="182" t="168 169 179 186 187"/>
+<e f="183" t="168 169 179 186 187"/>
+<e f="185" t="184"/>
+<e f="187" t="168 186"/>
+<e f="188" t="169 179 181 186 187"/>
+<e f="189" t="179 181 187 190"/>
+<e f="190" t="169 179 181 186"/>
+<e f="191" t="169 179 181 186 190"/>
+<e f="192" t="165 190"/>
+<e f="193" t="165 190"/>
+<e f="195" t="166 199 200"/>
+<e f="196" t="165 199 200"/>
+<e f="197" t="199 200"/>
+<e f="198" t="199 200"/>
+<e f="201" t="199 200"/>
+<e f="202" t="199"/>
+<e f="203" t="468"/>
+<e f="204" t="200"/>
+<e f="206" t="200 212 468"/>
+<e f="207" t="198 205 206"/>
+<e f="208" t="198 200 205 206"/>
+<e f="209" t="166 199 205 206"/>
+<e f="210" t="166 199 200 205 206"/>
+<e f="211" t="199 200 205 468"/>
+<e f="212" t="199 200 205 468"/>
+<e f="213" t="205"/>
+<e f="214" t="200 205"/>
+<e f="215" t="205 394 395"/>
+<e f="216" t="205 394 395"/>
+<e f="217" t="395"/>
+<e f="218" t="205 394 395"/>
+<e f="219" t="205 394 395"/>
+<e f="228" t="468"/>
+<e f="229" t="188 189 198 227 228 237 388 389 390 391 468"/>
+<e f="233" t="232"/>
+<e f="237" t="89 236 449"/>
+<e f="243" t="468"/>
+<e f="244" t="468"/>
+<e f="245" t="239 240 241 242 243 244"/>
+<e f="247" t="246"/>
+<e f="248" t="188 245 247 249 250 468"/>
+<e f="253" t="248 254 255 256 257 258 264 265 266 267 268 269 270 468"/>
+<e f="254" t="272"/>
+<e f="255" t="468"/>
+<e f="256" t="468"/>
+<e f="257" t="468"/>
+<e f="258" t="468"/>
+<e f="261" t="260"/>
+<e f="262" t="260"/>
+<e f="263" t="259 468"/>
+<e f="264" t="468"/>
+<e f="270" t="261 262 263 272"/>
+<e f="271" t="468"/>
+<e f="272" t="13 271"/>
+<e f="273" t="253"/>
+<e f="274" t="253"/>
+<e f="275" t="253 468"/>
+<e f="276" t="253 468"/>
+<e f="277" t="253 468"/>
+<e f="278" t="253 468"/>
+<e f="279" t="253"/>
+<e f="280" t="253"/>
+<e f="281" t="253 468"/>
+<e f="282" t="253"/>
+<e f="283" t="253"/>
+<e f="284" t="253"/>
+<e f="285" t="253"/>
+<e f="286" t="253"/>
+<e f="287" t="253"/>
+<e f="288" t="253"/>
+<e f="289" t="253"/>
+<e f="290" t="253 468"/>
+<e f="291" t="253"/>
+<e f="292" t="253"/>
+<e f="293" t="253 468"/>
+<e f="294" t="253 468"/>
+<e f="295" t="253"/>
+<e f="296" t="253 468"/>
+<e f="297" t="253"/>
+<e f="309" t="306 307"/>
+<e f="311" t="306"/>
+<e f="312" t="306"/>
+<e f="313" t="306"/>
+<e f="314" t="306"/>
+<e f="315" t="306"/>
+<e f="316" t="306"/>
+<e f="319" t="398"/>
+<e f="320" t="321 468"/>
+<e f="322" t="308"/>
+<e f="324" t="308"/>
+<e f="326" t="308 320 322 323 324"/>
+<e f="338" t="103 319 326"/>
+<e f="339" t="468"/>
+<e f="340" t="309 310 311 312 313 314 315 316 317 318 337 338 339"/>
+<e f="341" t="103 340"/>
+<e f="342" t="307"/>
+<e f="344" t="307"/>
+<e f="345" t="307 337"/>
+<e f="346" t="307 337"/>
+<e f="347" t="307"/>
+<e f="348" t="307 337 351"/>
+<e f="351" t="306"/>
+<e f="354" t="343"/>
+<e f="355" t="371"/>
+<e f="356" t="359"/>
+<e f="358" t="353"/>
+<e f="359" t="353"/>
+<e f="360" t="353"/>
+<e f="364" t="358"/>
+<e f="365" t="198 373"/>
+<e f="368" t="366"/>
+<e f="369" t="307 337 358"/>
+<e f="370" t="307 337 358"/>
+<e f="373" t="390 391 468"/>
+<e f="383" t="382 468"/>
+<e f="385" t="384"/>
+<e f="386" t="175 180 185 189 230 376 377 383 385 387"/>
+<e f="387" t="377"/>
+<e f="392" t="388 389 390 391"/>
+<e f="393" t="184 199 468"/>
+<e f="394" t="184 199 396 468"/>
+<e f="395" t="184 199 468"/>
+<e f="397" t="203"/>
+<e f="408" t="477 478 481"/>
+<e f="409" t="184 468 477 478"/>
+<e f="411" t="184 468"/>
+<e f="412" t="185 475 476 482"/>
+<e f="413" t="185 468"/>
+<e f="414" t="185 413 476 478 481 482 483 491"/>
+<e f="415" t="184 478"/>
+<e f="416" t="33 177 478"/>
+<e f="418" t="89 104 185 449 475 476 477 478"/>
+<e f="420" t="419 477 478 480 481"/>
+<e f="421" t="366 468 478 480"/>
+<e f="424" t="38"/>
+<e f="425" t="468"/>
+<e f="426" t="423 474 482 493"/>
+<e f="427" t="422 474 478 482 492"/>
+<e f="428" t="468"/>
+<e f="433" t="82 89 118 119 122 124 172 173 178 184 199 201 366 367 449 468 475 476 477 478 480 481 482 491"/>
+<e f="445" t="447 453"/>
+<e f="447" t="443 444 446 491"/>
+<e f="448" t="443 444 446 491"/>
+<e f="450" t="448"/>
+<e f="451" t="447"/>
+<e f="455" t="452"/>
+<e f="473" t="468 469"/>
+<e f="474" t="491"/>
+<e f="475" t="491"/>
+<e f="479" t="468 469"/>
+<e f="489" t="402 405 423 450"/>
+<e f="491" t="405 423 455 490"/>
+<e f="492" t="450"/>
+<e f="493" t="450"/>
+</cg>
+</pm>
