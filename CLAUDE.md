@@ -306,6 +306,16 @@ Project divided into several independent, tightly coupled subsystems.
 ├── Makefile
 └── src
     ├── app
+    │   ├── events
+    │   │   ├── about.rs
+    │   │   └── hover.rs
+    │   ├── keyboard
+    │   │   ├── editor_keys.rs
+    │   │   └── main_keys.rs
+    │   ├── mouse
+    │   │   ├── cursor.rs
+    │   │   ├── input.rs
+    │   │   └── wheel.rs
     │   ├── events.rs
     │   ├── file_icons.rs
     │   ├── file_tree.rs
@@ -319,13 +329,19 @@ Project divided into several independent, tightly coupled subsystems.
     │   └── python.rs
     ├── app.rs
     ├── editor.rs
+    ├── editor_navigation.rs
     ├── fonts
     │   ├── Inter-Regular.otf
     │   ├── JetBrainsMonoNerdFont-Regular.ttf
     │   └── JetBrainsMono-Regular.ttf
     ├── highlighter.rs
+    ├── highlighter_runtime.rs
     ├── icons
     │   ├── ... (icons)
+    ├── lsp
+    │   ├── hover.rs
+    │   └── protocol.rs
+    ├── lsp.rs
     ├── main.rs
     ├── queries.rs
     ├── renderer.rs
@@ -339,6 +355,9 @@ Project divided into several independent, tightly coupled subsystems.
     │   ├── sticky.rs           ("Sticky" headers)
     │   ├── tabs_ui.rs          (Tab bar rendering)
     │   ├── terminal_ui.rs      (Terminal panel)
+    │   ├── ui
+    │   │   ├── hover_popup.rs
+    │   │   └── problems_panel.rs
     │   └── ui.rs               (Dialog boxes, icons)
     ├── render_view.rs      <-- Main render orchestrator file
     ├── scroll.rs
@@ -346,6 +365,22 @@ Project divided into several independent, tightly coupled subsystems.
     ├── widgets.rs
     └── ...
 ```
+
+### Split Module Quick Map
+
+- `editor_navigation.rs`: cursor movement, selection expansion, word/line selection, folded-code cursor snapping.
+- `highlighter_runtime.rs`: public highlighter runtime API, span shifting, bracket coloring, flattened span generation.
+- `app/events/about.rs`: `about_to_wait` frame tick; polling, animation, delayed file dialogs, LSP event drain.
+- `app/events/hover.rs`: hover source-signature replacement, module-path prefixing, hover tests.
+- `app/keyboard/editor_keys.rs`: editor-mode key handling, text edits, autocomplete, tab commands.
+- `app/keyboard/main_keys.rs`: top-level key router for dialogs/search/settings/terminal/editor.
+- `app/mouse/wheel.rs`: wheel routing for editor, panels, autocomplete, hover popup, terminal, settings.
+- `app/mouse/input.rs`: mouse press/release routing, UI clicks, drag state, tab/sidebar actions.
+- `app/mouse/cursor.rs`: cursor movement, hover hit-testing, drag updates, pointer hover state.
+- `lsp/hover.rs`: hover text normalization/highlighting plus hover-specific tests.
+- `lsp/protocol.rs`: JSON-RPC framing, LSP message encoding/decoding, server definitions, protocol data types.
+- `render_view/ui/hover_popup.rs`: hover popup layout, text selection rendering, scroll hitbox.
+- `render_view/ui/problems_panel.rs`: Problems panel rendering, grouped diagnostics, problem row hitboxes.
 
 ---
 
@@ -503,6 +538,7 @@ if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
 ## 🧠 Subsystem 1: Text Engine (`editor.rs`)
 
 Editor core: **Gap Buffer** data structure. Instead regular `String`, all text resides flat `Vec<u8>`. Inside array, "gap" between `gap_start`, `gap_end`.
+`editor_navigation.rs` extends `Editor` with cursor movement, selection expansion, page/word navigation, and folded-code cursor snapping.
 
 ### How Gap Buffer Works
 Cursor always at left gap boundary (`gap_start`).
@@ -562,6 +598,8 @@ Then, drawing 'A' just two triangles textured with correct atlas piece.
 - `render_view/sticky.rs` (New): Implements 'sticky' headers logic. Analyzes code nesting levels, determines which lines "stick" to screen top, renders them with animation.
 - `render_view/search.rs` (New): Encapsulates all rendering logic for search panel (Ctrl+F), including text field, buttons, result display.
 - `render_view/ui.rs`, `render_view/lsp_ui.rs`, `render_view/settings_ui.rs`: Responsible for other interface parts, like dialog boxes, icons, LSP diagnostics, settings window.
+- `render_view/ui/hover_popup.rs`: Type hover popup layout/rendering, inline-code styling, hover text selection.
+- `render_view/ui/problems_panel.rs`: Problems panel rows, grouped diagnostics, file collapse states, URL/copy hitboxes.
 - `render_view/diag_popup_ui.rs`, `render_view/minimap_ui.rs`, `render_view/tabs_ui.rs`, `render_view/terminal_ui.rs`: Additional UI components.
 
 **Rendering Sequence in `draw()`:**
@@ -577,6 +615,7 @@ Then, drawing 'A' just two triangles textured with correct atlas piece.
 ## 🌳 Subsystem 3: Syntax, Tree-sitter (`highlighter.rs`)
 
 RRiter syntax highlighting based on **Tree-sitter**—incremental parser builds abstract syntax tree (AST) of entire file.
+`highlighter_runtime.rs` contains runtime methods (`reset`, `poll`, `wait_for_first_result`) and fast optimistic span shifting while async highlighting catches up.
 
 ### Background Thread
 Tree-sitter fast, but parsing 10,000-line file takes 10-30 ms. Main thread, this cause typing stutter. Therefore, `Highlighter` runs separate thread. Main thread sends `HighlighterMessage::Edits` messages through channel (`mpsc::Sender`). Background thread applies edits, re-parses AST, executes queries (`queries.rs`). List "spans" (ranges with colors), autocomplete data sent back main thread.
@@ -593,7 +632,7 @@ Background thread asynchronous, its results always slightly delayed. Prevent hig
 
 ---
 
-## ⚡ Subsystem 4: Interface and Events (`app/events.rs` & `app/input.rs`)
+## ⚡ Subsystem 4: Interface and Events (`app/events.rs`, `app/keyboard.rs`, `app/mouse.rs`)
 
 ### Scrolling and Physics (`scroll.rs`)
 All mathematics for kinetic scrolling (exponential decay) encapsulated in single `ScrollState` struct. Encapsulates current position, target (`target`), velocity (`velocity`), dynamically changes animation speed (`anim_speed`):
@@ -604,11 +643,12 @@ Struct reused for main screen, minimap, autocomplete menu, settings window, ensu
 
 ### The Main Loop (`events.rs`)
 Based on `winit`. `window_event` method reacts to resizing, focus loss, mouse movement. "Physics" integration (calls to `scroll.update(dt)`) lives in `about_to_wait` method.
+`app/events/about.rs` owns the long `about_to_wait` tick. `app/events/hover.rs` owns source-backed hover replacement, module prefixes, and related tests.
 
-### Input Handling (`input.rs`)
-State machine for keyboard, mouse implemented here.
-* **Mouse:** Manages selection (drag), scrollbars, minimap, UI button clicks. Handles double-click (select word), triple-click (select line).
-* **Keyboard:** Huge `match` block. Filters key presses: if search open, events go to `search_editor`. If autocomplete active, up/down arrows intercepted by menu. Otherwise, events go main `Editor`.
+### Input Handling (`keyboard.rs`, `mouse.rs`)
+State machine for keyboard, mouse split by mode.
+* **Mouse:** `mouse/wheel.rs` routes wheel scrolling; `mouse/input.rs` handles press/release, clicks, and drag state; `mouse/cursor.rs` handles cursor movement and hover hit-testing.
+* **Keyboard:** `keyboard/editor_keys.rs` handles editor text commands/autocomplete/tabs; `keyboard/main_keys.rs` routes global key events between dialogs, search, settings, terminal, and editor.
 
 ---
 
@@ -679,7 +719,9 @@ RRiter features a lightweight, robust, and highly asynchronous LSP client.
 
 ### Hover & Diagnostics Highlighting
 LSP responses often contain Markdown or plain text. RRiter implements a custom pipeline to highlight hover documentation and diagnostic messages without blocking the main UI.
-- `lsp.rs` parses JSON-RPC responses and dispatches them to the `LspEvent` channel.
+- `lsp.rs` owns process lifecycle and public manager API.
+- `lsp/protocol.rs` parses JSON-RPC responses and dispatches them to the `LspEvent` channel.
+- `lsp/hover.rs` normalizes/highlights hover text and keeps hover tests close to that logic.
 - `languages/python.rs` provides Python-specific parsing and syntax highlighting for hover text using Tree-sitter (e.g., coloring parameter types, normalizing signature lines).
 
 ---
@@ -694,7 +736,8 @@ Discipline required with this codebase.
    - Allocate large strings (`format!()` permissible only for counters like FPS or search, but better use `std::fmt::Write` on reusable `String`, like `fps_string`).
 2. **No Runtime Unwraps:** Code must not crash (`panic!`). No `.unwrap()` when parsing, doing math, accessing buffer. If clipboard unavailable, ignore. If mouse out of array bounds, use `.saturating_sub()` or `.clamp()`.
 3. **No Mix Render, State Logic:** If widget changes color on hover, `Renderer` does that. But if widget needs perform action (e.g., save file), that logic handled by `app/ui_handlers.rs`. Rendering should not change global editor state (caching exception).
-4. Fully read PROJECT_MAP.xml before ANYTHING. If it is NOT provided, then ASK for it.
+4. **Large File Hygiene:** If a Rust source file grows past 1500 lines, split it by subsystem/behavior, not by arbitrary ranges. New extracted `.rs` modules should be at least 300 lines unless there is a strong architecture reason.
+5. Fully read PROJECT_MAP.xml before ANYTHING. If it is NOT provided, then ASK for it.
 
 
 CAVEMAN ULTRA ENABLED

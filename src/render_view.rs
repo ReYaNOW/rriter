@@ -812,7 +812,6 @@ impl Renderer {
                 }
             }
         }
-
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
         if is_ide_mode && tabs.is_empty() {
             self.draw_empty_ide(panel_left_w);
@@ -1531,7 +1530,6 @@ impl Renderer {
         }
 
         self.flush();
-
         let mut mouse_in_popup = false;
 
         let type_rect = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().rect);
@@ -1553,19 +1551,26 @@ impl Renderer {
                 mouse_in_popup = true;
             }
         }
-        
+
         if !mouse_in_popup {
             if let Some(tr) = type_rect {
-                let (has_type_meta, anchor_x, anchor_y, line_top_y, line_bottom_y) = crate::app::mouse::HOVER_STATE.with(|s| {
-                    let s = s.borrow();
-                    if let Some(popup) = &s.popup {
-                        // Assuming phys_line mapping happens correctly in mouse.rs, here we just do a pad fallback
-                        // if we don't have all the exact details. Or we can just use the popup rect + padding.
-                        (true, popup.anchor_x, popup.anchor_y, popup.anchor_y - 10.0 * self.scale_factor, popup.anchor_y + 10.0 * self.scale_factor)
-                    } else {
-                        (false, 0.0, 0.0, 0.0, 0.0)
-                    }
-                });
+                let (has_type_meta, anchor_x, anchor_y, line_top_y, line_bottom_y) =
+                    crate::app::mouse::HOVER_STATE.with(|s| {
+                        let s = s.borrow();
+                        if let Some(popup) = &s.popup {
+                            // Assuming phys_line mapping happens correctly in mouse.rs, here we just do a pad fallback
+                            // if we don't have all the exact details. Or we can just use the popup rect + padding.
+                            (
+                                true,
+                                popup.anchor_x,
+                                popup.anchor_y,
+                                popup.anchor_y - 10.0 * self.scale_factor,
+                                popup.anchor_y + 10.0 * self.scale_factor,
+                            )
+                        } else {
+                            (false, 0.0, 0.0, 0.0, 0.0)
+                        }
+                    });
 
                 if has_type_meta {
                     if crate::app::mouse::is_in_hover_popup_or_bridge(
@@ -1696,8 +1701,13 @@ impl Renderer {
                 }
 
                 if in_hitbox {
-                    self.hovered_diags_cache
-                        .push((idx, x_start, top_y, top_y + self.line_height, x_end));
+                    self.hovered_diags_cache.push((
+                        idx,
+                        x_start,
+                        top_y,
+                        top_y + self.line_height,
+                        x_end,
+                    ));
                 }
 
                 if x_end < self.left_padding || x_start > self.width {

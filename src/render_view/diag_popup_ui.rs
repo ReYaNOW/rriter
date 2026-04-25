@@ -229,7 +229,8 @@ impl Renderer {
         total_h = total_h.min(self.height - 60.0 * s);
         let box_w = global_max_w;
 
-        let (_, first_diag_x, first_line_y_top, first_diag_y_bottom, first_diag_x_end) = self.hovered_diags_cache[0];
+        let (_, first_diag_x, first_line_y_top, first_diag_y_bottom, first_diag_x_end) =
+            self.hovered_diags_cache[0];
         let mut bx = first_diag_x;
 
         crate::app::mouse::HOVER_STATE.with(|s| {
@@ -254,7 +255,15 @@ impl Renderer {
             by = first_diag_y_bottom + 8.0 * s;
         }
 
-        self.last_diag_popup_rect = Some((bx, by, box_w, total_h, first_diag_x, first_diag_x_end, (first_line_y_top + first_diag_y_bottom) * 0.5));
+        self.last_diag_popup_rect = Some((
+            bx,
+            by,
+            box_w,
+            total_h,
+            first_diag_x,
+            first_diag_x_end,
+            (first_line_y_top + first_diag_y_bottom) * 0.5,
+        ));
 
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
