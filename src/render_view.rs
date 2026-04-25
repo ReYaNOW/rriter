@@ -2258,18 +2258,26 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset, type_popup_byte) =
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let state = s.borrow();
-                (
-                    state.popup.is_some(),
-                    state.request_id.is_some() || state.definition_request_id.is_some(),
-                    state.timer,
-                    state.byte_offset.is_some(),
-                    state.byte_offset.or_else(|| state.popup.as_ref().map(|p| p.byte_offset)),
-                    state.popup.as_ref().map(|p| p.byte_offset),
-                )
-            });
+        let (
+            has_type_popup,
+            is_hover_pending,
+            hover_timer,
+            has_byte_offset,
+            hover_byte_offset,
+            type_popup_byte,
+        ) = crate::app::mouse::HOVER_STATE.with(|s| {
+            let state = s.borrow();
+            (
+                state.popup.is_some(),
+                state.request_id.is_some() || state.definition_request_id.is_some(),
+                state.timer,
+                state.byte_offset.is_some(),
+                state
+                    .byte_offset
+                    .or_else(|| state.popup.as_ref().map(|p| p.byte_offset)),
+                state.popup.as_ref().map(|p| p.byte_offset),
+            )
+        });
 
         if self.hovered_diags_cache.is_empty() {
             if let Some(byte_offset) = hover_byte_offset {
@@ -2400,16 +2408,13 @@ impl Renderer {
 
         let error_timer_ready = self.diag_hover_timer >= 0.2;
 
-        let (show_error, show_type, show_combined) =
-            crate::app::mouse::compute_hover_visibility(
-                is_error_hovered,
-                error_timer_ready,
-                has_type_popup,
-                hovered_diag_type_target,
-                type_popup_byte,
-            );
-
-
+        let (show_error, show_type, show_combined) = crate::app::mouse::compute_hover_visibility(
+            is_error_hovered,
+            error_timer_ready,
+            has_type_popup,
+            hovered_diag_type_target,
+            type_popup_byte,
+        );
 
         let (attached_hover_w, attached_hover_h) = if show_combined {
             crate::app::mouse::HOVER_STATE.with(|s| {

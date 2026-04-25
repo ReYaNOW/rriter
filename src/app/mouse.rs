@@ -80,8 +80,8 @@ impl Default for HoverState {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_hover_visibility, diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
-        is_in_hover_popup_or_bridge, normalize_hover_byte,
+        compute_hover_visibility, diagnostic_hover_byte_range_on_line,
+        diagnostic_hover_range_on_line, is_in_hover_popup_or_bridge, normalize_hover_byte,
     };
 
     #[test]
