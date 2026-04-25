@@ -207,10 +207,13 @@ pub fn clear_hover_popup(renderer: Option<&mut crate::renderer::Renderer>) -> bo
         state.selecting = false;
         state.diag_selection_anchor = None;
         state.diag_selection_cursor = None;
-        state.diag_selecting = false;
+                state.diag_selecting = false;
         if let Some(r) = renderer {
             r.last_diag_popup_rect = None;
+            r.last_hovered_diags.clear();
             r.hovered_diags_cache.clear();
+            r.diag_hover_timer = 0.0;
+            r.diag_hover_timer_idx = None;
         }
         had_popup
     })
@@ -293,6 +296,66 @@ fn normalize_hover_byte(editor: &crate::editor::Editor, byte_offset: usize) -> O
 }
 
 fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (usize, usize) {
+    let text = editor.get_full_text();
+    if !text.is_empty() {
+        let bytes = text.as_bytes();
+        let idx = byte_offset.min(bytes.len().saturating_sub(1));
+        let line_start = bytes[..=idx]
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|pos| pos + 1)
+            .unwrap_or(0);
+        let line_end = bytes[idx..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|pos| idx + pos)
+            .unwrap_or(bytes.len());
+
+        let mut quote_pos = None;
+        if matches!(bytes[idx], b'\'' | b'"') {
+            quote_pos = Some(idx);
+        } else {
+            let mut pos = idx;
+            while pos > line_start {
+                pos -= 1;
+                if matches!(bytes[pos], b'\'' | b'"') {
+                    quote_pos = Some(pos);
+                    break;
+                }
+            }
+            if quote_pos.is_none() && idx + 1 < line_end && matches!(bytes[idx + 1], b'\'' | b'"') {
+                quote_pos = Some(idx + 1);
+            }
+        }
+
+        if let Some(quote_start) = quote_pos {
+            let quote = bytes[quote_start];
+            let mut quote_end = quote_start + 1;
+            while quote_end < line_end {
+                if bytes[quote_end] == quote && bytes.get(quote_end.saturating_sub(1)) != Some(&b'\\') {
+                    break;
+                }
+                quote_end += 1;
+            }
+
+            if quote_end < line_end {
+                let mut prefix_start = quote_start;
+                while prefix_start > line_start {
+                    let prev = bytes[prefix_start - 1];
+                    if matches!(prev, b'f' | b'F' | b'r' | b'R' | b'b' | b'B' | b'u' | b'U') {
+                        prefix_start -= 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if idx >= prefix_start && idx <= quote_end {
+                    return (prefix_start, quote_end);
+                }
+            }
+        }
+    }
+
     let mut start = byte_offset;
     while start > 0 && is_hover_target_byte(editor, start - 1) {
         start -= 1;
@@ -306,8 +369,68 @@ fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (us
     (start, end)
 }
 
-pub fn is_in_hover_popup_or_bridge(
-    px: f32,
+pub fn hover_anchor_for_byte(
+    renderer: &mut crate::renderer::Renderer,
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    render_scroll_y: f32,
+) -> (f32, f32) {
+    let (start, end) = hover_token_bounds(editor, byte_offset);
+    let text = editor.get_full_text();
+    if text.is_empty() {
+        return (renderer.last_mouse_x, renderer.last_mouse_y);
+    }
+
+    let phys_line = editor
+        .line_offsets
+        .partition_point(|&o| o <= start)
+        .saturating_sub(1);
+    let line_start = editor.line_offsets.get(phys_line).copied().unwrap_or(0);
+
+    let mut token_start = start.min(text.len());
+    while token_start > line_start && !text.is_char_boundary(token_start) {
+        token_start -= 1;
+    }
+
+    let mut token_end = end.saturating_add(1).min(text.len());
+    while token_end < text.len() && !text.is_char_boundary(token_end) {
+        token_end += 1;
+    }
+
+    if token_start > token_end || line_start > token_start {
+        return (renderer.last_mouse_x, renderer.last_mouse_y);
+    }
+
+    let mut prefix_w = 0.0;
+    if let Some(prefix) = text.get(line_start..token_start) {
+        for c in prefix.chars() {
+            if c != '\n' && c != '\u{FE0F}' && c != '\u{200D}' {
+                prefix_w += renderer.char_advance(c);
+            }
+        }
+    }
+
+    let mut token_w = 0.0;
+    if let Some(token) = text.get(token_start..token_end) {
+        for c in token.chars() {
+            if c != '\n' && c != '\u{FE0F}' && c != '\u{200D}' {
+                token_w += renderer.char_advance(c);
+            }
+        }
+    }
+
+    let vis_line_idx = renderer
+        .phys_to_visual
+        .get(phys_line)
+        .copied()
+        .unwrap_or(phys_line) as f32;
+    let x = renderer.left_padding - renderer.last_scroll_x + prefix_w + token_w * 0.5;
+    let y = (vis_line_idx * renderer.line_height) - render_scroll_y + renderer.line_height * 0.5;
+
+    (x, y)
+}
+
+pub fn is_in_hover_popup_or_bridge(px: f32,
     py: f32,
     popup_rect: (f32, f32, f32, f32),
     anchor_x: f32,
@@ -1965,9 +2088,23 @@ impl App {
                 popup_selecting = true;
             }
         });
-        if popup_selecting {
+                if popup_selecting {
             self.window.as_ref().unwrap().request_redraw();
             return;
+        }
+
+                let editor_text_selecting =
+            self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings;
+        if editor_text_selecting {
+            clear_hover_popup(self.renderer.as_mut());
+            if let Some(r) = self.renderer.as_mut() {
+                r.hide_popups_until_mouse_move = true;
+                r.last_diag_popup_rect = None;
+                r.last_hovered_diags.clear();
+                r.hovered_diags_cache.clear();
+                r.diag_hover_timer = 0.0;
+                r.diag_hover_timer_idx = None;
+            }
         }
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -2115,7 +2252,7 @@ impl App {
             }
         }
 
-                let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
         let mut in_hover_popup = false;
         let mut in_hover_source_line = false;
 
@@ -2130,6 +2267,7 @@ impl App {
             )
         });
         let diag_rect_full = self.renderer.as_ref().unwrap().last_diag_popup_rect;
+        let had_visible_popup = type_rect.is_some() || diag_rect_full.is_some();
         let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
 
         if type_rect.is_some() || diag_rect.is_some() {
@@ -2202,7 +2340,7 @@ impl App {
                     let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
                     let px = position.x as f32;
                     let py = position.y as f32;
-                    if is_in_hover_popup_or_bridge(
+                                        if is_in_hover_popup_or_bridge(
                         px,
                         py,
                         (rx, ry, rw, rh),
@@ -2214,6 +2352,9 @@ impl App {
                         s,
                     ) {
                         in_hover_popup = true;
+                        if py >= anchor_y - 10.0 * s && py <= anchor_y + 10.0 * s {
+                            in_hover_source_line = true;
+                        }
                     }
                 }
             }
@@ -2251,8 +2392,12 @@ impl App {
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
 
-                        HOVER_STATE.with(|state| {
+                                                let mut clear_diag_popup = false;
+            HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
+                if editor_text_selecting {
+                    return;
+                }
                 if is_text_area {
                     let normalized = normalize_hover_byte(&self.editor, byte_offset);
                     if normalized.is_none() {
@@ -2274,10 +2419,12 @@ impl App {
                         let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
                         same_word = old_start == new_start && old_end == new_end;
                     }
-                    if !same_word && (!in_hover_popup || in_hover_source_line) {
+                                                            if !same_word && (!in_hover_popup || in_hover_source_line) {
+                        clear_diag_popup = true;
                         let keep_visible_popup = state.popup.is_some();
+                        let request_now = keep_visible_popup || had_visible_popup;
                         state.byte_offset = Some(byte_offset);
-                        state.timer = if keep_visible_popup {
+                        state.timer = if request_now {
                             HOVER_REQUEST_DELAY_SEC
                         } else {
                             0.0
@@ -2302,7 +2449,16 @@ impl App {
                     state.pending_popup = None;
                     state.rect = None;
                 }
-            });
+                                    });
+            if clear_diag_popup {
+                if let Some(r) = self.renderer.as_mut() {
+                    r.last_diag_popup_rect = None;
+                    r.last_hovered_diags.clear();
+                    r.hovered_diags_cache.clear();
+                    r.diag_hover_timer = 0.0;
+                    r.diag_hover_timer_idx = None;
+                }
+            }
         }
         let wh = window_size.height as f32;
 
@@ -2809,7 +2965,7 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-        } else if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings {
+                } else if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
@@ -2823,6 +2979,7 @@ impl App {
                 self.renderer.as_mut().unwrap(),
                 false,
             );
+                        clear_hover_popup(self.renderer.as_mut());
         }
 
         self.window.as_ref().unwrap().request_redraw();

@@ -630,8 +630,17 @@ impl App {
             UiId::EditorScrollbarX => {
                 self.scroll_x.is_dragging = true;
             }
-            UiId::EditorTextBody => {
+                        UiId::EditorTextBody => {
                 self.is_dragging = true;
+                                crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                if let Some(r) = self.renderer.as_mut() {
+                    r.hide_popups_until_mouse_move = true;
+                    r.last_diag_popup_rect = None;
+                    r.last_hovered_diags.clear();
+                    r.hovered_diags_cache.clear();
+                    r.diag_hover_timer = 0.0;
+                    r.diag_hover_timer_idx = None;
+                }
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();
                 self.ide_panel.lsp_logs_focused = None;

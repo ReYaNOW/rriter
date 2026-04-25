@@ -2198,27 +2198,47 @@ impl ApplicationHandler for App {
                                         } else {
                                             (clean_msg, spans, line_kinds, inline_code_ranges)
                                         };
+                                                                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                                        0.0
+                                    } else {
+                                        38.0 * self
+                                            .renderer
+                                            .as_ref()
+                                            .map(|r| r.scale_factor)
+                                            .unwrap_or(1.0)
+                                    };
+                                    let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+                                    let (anchor_x, anchor_y) =
+                                        if let Some(renderer) = self.renderer.as_mut() {
+                                            crate::app::mouse::hover_anchor_for_byte(
+                                                renderer,
+                                                &self.editor,
+                                                bo,
+                                                render_scroll_y,
+                                            )
+                                        } else {
+                                            (0.0, 0.0)
+                                        };
+
                                     let popup = crate::app::mouse::HoverPopup {
                                         text: clean_msg,
                                         spans,
                                         line_kinds,
                                         inline_code_ranges,
                                         byte_offset: bo,
-                                        anchor_x: self
-                                            .renderer
-                                            .as_ref()
-                                            .map(|r| r.last_mouse_x)
-                                            .unwrap_or(0.0),
-                                        anchor_y: self
-                                            .renderer
-                                            .as_ref()
-                                            .map(|r| r.last_mouse_y)
-                                            .unwrap_or(0.0),
+                                        anchor_x,
+                                        anchor_y,
                                         scroll: crate::scroll::ScrollState::new(15.0),
                                         layout_cache: None,
                                     };
-                                                                        state.pending_popup = None;
+                                                                                                            state.pending_popup = None;
                                     state.definition_request_id = None;
+                                    if let Some(r) = self.renderer.as_mut() {
+                                        r.last_diag_popup_rect = None;
+                                        r.hovered_diags_cache.clear();
+                                        r.diag_hover_timer = 0.0;
+                                        r.diag_hover_timer_idx = None;
+                                    }
                                     if let Some(path) = self.file_path.clone() {
                                         let (line, col) = crate::lsp::offset_to_lsp_pos(
                                             &self.editor.get_full_text(),
@@ -2237,7 +2257,8 @@ impl ApplicationHandler for App {
                                     } else {
                                         state.definition_request_id = None;
                                     }
-                                    if state.definition_request_id.is_some() {
+                                                                        if state.definition_request_id.is_some() {
+                                        state.popup = Some(popup.clone());
                                         state.pending_popup = Some(popup);
                                     } else {
                                         state.popup = Some(popup);
