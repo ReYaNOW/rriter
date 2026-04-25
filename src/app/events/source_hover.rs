@@ -621,7 +621,9 @@ pub(super) fn source_class_signature_from_definition_file(
         let trimmed = lines[idx].trim_start();
         if trimmed.starts_with(&class_prefix) {
             let next_char = trimmed[class_prefix.len()..].chars().next();
-            if next_char.is_none() || matches!(next_char, Some('(') | Some(':') | Some(' ') | Some('[')) {
+            if next_char.is_none()
+                || matches!(next_char, Some('(') | Some(':') | Some(' ') | Some('['))
+            {
                 let mut sig_lines = vec![];
                 for i in idx..lines.len() {
                     let l = lines[i].trim_end();

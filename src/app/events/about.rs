@@ -586,7 +586,6 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 state.definition_request_id = None;
                             }
                             if state.definition_request_id.is_some() {
-                                state.popup = Some(popup.clone());
                                 state.pending_popup = Some(popup);
                             } else {
                                 state.popup = Some(popup);
@@ -615,20 +614,31 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 module_path_from_definition_path(&path, &app.ide_workspaces)
                             {
                                 if let Some(popup) = &mut popup {
-                                                                        let mut text_changed_by_class = false;
-                                    if let Some(symbol) = symbol_at_offset(&app.editor, popup.byte_offset) {
-                                        if let Some(class_sig) = source_class_signature_from_definition_file(&path, &symbol) {
+                                    let mut text_changed_by_class = false;
+                                    if let Some(symbol) =
+                                        symbol_at_offset(&app.editor, popup.byte_offset)
+                                    {
+                                        if let Some(class_sig) =
+                                            source_class_signature_from_definition_file(
+                                                &path, &symbol,
+                                            )
+                                        {
                                             let mut new_text = popup.text.clone();
                                             let class_prefix = format!("class {}", symbol);
 
                                             if new_text.starts_with(&class_prefix) {
-                                                new_text = new_text.replacen(&class_prefix, &class_sig, 1);
-                                            } else if new_text.contains(&format!("\n{class_prefix}")) {
-                                                new_text = new_text.replace(&class_prefix, &class_sig);
+                                                new_text =
+                                                    new_text.replacen(&class_prefix, &class_sig, 1);
+                                            } else if new_text
+                                                .contains(&format!("\n{class_prefix}"))
+                                            {
+                                                new_text =
+                                                    new_text.replace(&class_prefix, &class_sig);
                                             } else if new_text == symbol {
                                                 new_text = class_sig.clone();
                                             } else if new_text.starts_with(&format!("{symbol}\n")) {
-                                                new_text = new_text.replacen(&symbol, &class_sig, 1);
+                                                new_text =
+                                                    new_text.replacen(&symbol, &class_sig, 1);
                                             }
 
                                             if new_text != popup.text {
@@ -643,14 +653,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                         }
                                     }
 
-                                    if !text_changed_by_class && should_replace_simple_type_hover(&popup.text) {
-                                        if let Some(symbol) = symbol_at_offset(&app.editor, popup.byte_offset) {
-                                            if let Some(attr_hover) = source_attribute_hover_from_definition_file(
-                                                &path,
-                                                &symbol,
-                                                &module_path,
-                                                Some(&popup.text),
-                                            ) {
+                                    if !text_changed_by_class
+                                        && should_replace_simple_type_hover(&popup.text)
+                                    {
+                                        if let Some(symbol) =
+                                            symbol_at_offset(&app.editor, popup.byte_offset)
+                                        {
+                                            if let Some(attr_hover) =
+                                                source_attribute_hover_from_definition_file(
+                                                    &path,
+                                                    &symbol,
+                                                    &module_path,
+                                                    Some(&popup.text),
+                                                )
+                                            {
                                                 let (clean, spans, kinds, inline) =
                                                     crate::lsp::highlight_hover_text(&attr_hover);
                                                 popup.text = clean;
@@ -661,8 +677,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                         }
                                     }
 
-                                    if popup.text.starts_with("class ")&& !popup.text.starts_with(&module_path)
-                                        && !popup.text.starts_with(HOVER_MODULE_PREFIX){
+                                    if popup.text.starts_with("class ")
+                                        && !popup.text.starts_with(&module_path)
+                                        && !popup.text.starts_with(HOVER_MODULE_PREFIX)
+                                    {
                                         prepend_hover_module_path(popup, &module_path);
                                     }
                                 }

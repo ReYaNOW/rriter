@@ -212,7 +212,6 @@ impl App {
             )
         });
         let diag_rect_full = self.renderer.as_ref().unwrap().last_diag_popup_rect;
-        let had_visible_popup = type_rect.is_some() || diag_rect_full.is_some();
         let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
 
         if type_rect.is_some() || diag_rect.is_some() {
@@ -369,13 +368,8 @@ impl App {
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                         clear_diag_popup = true;
                         let keep_visible_popup = state.popup.is_some();
-                        let request_now = keep_visible_popup || had_visible_popup;
                         state.byte_offset = Some(byte_offset);
-                        state.timer = if request_now {
-                            HOVER_REQUEST_DELAY_SEC
-                        } else {
-                            0.0
-                        };
+                        state.timer = 0.0;
                         state.request_id = None;
                         state.definition_request_id = None;
                         state.pending_popup = None;

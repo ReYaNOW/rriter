@@ -75,23 +75,23 @@
 <s i="9" m="1" k="f" n="source_attribute_hover_from_definition_file" l="419" v="1" r="Option&lt;String&gt;" in_="3" out="2"/>
 <s i="10" m="1" k="f" n="format_attribute_assignment_line" l="425" r="String" in_="3" out="1"/>
 <s i="11" m="1" k="f" n="source_class_signature_from_definition_file" l="612" v="1" r="Option&lt;String&gt;" in_="1"/>
-<s i="12" m="1" k="f" n="is_ident_byte" l="655" v="1" r="bool" in_="1"/>
-<s i="13" m="1" k="f" n="symbol_at_offset" l="659" v="1" r="Option&lt;String&gt;" in_="3" out="3"/>
-<s i="14" m="1" k="f" n="wrap_signature_after_first_param" l="688" v="1" r="String" in_="3" out="1"/>
-<s i="15" m="1" k="f" n="wraps_asynccontextmanager_signature_after_first_param" l="729" out="2"/>
-<s i="16" m="1" k="f" n="asynccontextmanager_source_signature_is_split_into_lines" l="739" out="3"/>
-<s i="17" m="1" k="f" n="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" l="756" out="3"/>
-<s i="18" m="1" k="f" n="attribute_hover_uses_source_attribute_line" l="774" out="3"/>
-<s i="19" m="1" k="f" n="simple_type_hover_triggers_source_replacement" l="791" out="1"/>
-<s i="20" m="1" k="f" n="symbol_at_offset_reads_identifier_from_nearby_position" l="798" out="3"/>
-<s i="21" m="1" k="f" n="strict_source_lookup_does_not_fallback_to_nearby_def" l="812" out="3"/>
-<s i="22" m="1" k="f" n="definition_file_attribute_hover_includes_fq_class_name" l="826" out="1"/>
-<s i="23" m="1" k="f" n="definition_file_attribute_hover_includes_lsp_type" l="850" out="2"/>
-<s i="24" m="1" k="f" n="module_path_from_site_packages_strips_noise_segments" l="872" out="1"/>
-<s i="25" m="1" k="f" n="module_path_strips_trailing_init" l="884" out="1"/>
-<s i="26" m="1" k="f" n="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" l="891" out="3"/>
-<s i="27" m="1" k="f" n="should_replace_hover_with_source_signature" l="930" v="1" r="bool" in_="2" out="2"/>
-<s i="28" m="1" k="f" n="should_replace_simple_type_hover" l="938" v="1" r="bool" in_="2" out="1"/>
+<s i="12" m="1" k="f" n="is_ident_byte" l="657" v="1" r="bool" in_="1"/>
+<s i="13" m="1" k="f" n="symbol_at_offset" l="661" v="1" r="Option&lt;String&gt;" in_="3" out="3"/>
+<s i="14" m="1" k="f" n="wrap_signature_after_first_param" l="690" v="1" r="String" in_="3" out="1"/>
+<s i="15" m="1" k="f" n="wraps_asynccontextmanager_signature_after_first_param" l="731" out="2"/>
+<s i="16" m="1" k="f" n="asynccontextmanager_source_signature_is_split_into_lines" l="741" out="3"/>
+<s i="17" m="1" k="f" n="classmethod_asynccontextmanager_source_signature_keeps_both_decorators" l="758" out="3"/>
+<s i="18" m="1" k="f" n="attribute_hover_uses_source_attribute_line" l="776" out="3"/>
+<s i="19" m="1" k="f" n="simple_type_hover_triggers_source_replacement" l="793" out="1"/>
+<s i="20" m="1" k="f" n="symbol_at_offset_reads_identifier_from_nearby_position" l="800" out="3"/>
+<s i="21" m="1" k="f" n="strict_source_lookup_does_not_fallback_to_nearby_def" l="814" out="3"/>
+<s i="22" m="1" k="f" n="definition_file_attribute_hover_includes_fq_class_name" l="828" out="1"/>
+<s i="23" m="1" k="f" n="definition_file_attribute_hover_includes_lsp_type" l="852" out="2"/>
+<s i="24" m="1" k="f" n="module_path_from_site_packages_strips_noise_segments" l="874" out="1"/>
+<s i="25" m="1" k="f" n="module_path_strips_trailing_init" l="886" out="1"/>
+<s i="26" m="1" k="f" n="attribute_hover_merges_lsp_type_and_ignores_when_on_declaration" l="893" out="3"/>
+<s i="27" m="1" k="f" n="should_replace_hover_with_source_signature" l="932" v="1" r="bool" in_="2" out="2"/>
+<s i="28" m="1" k="f" n="should_replace_simple_type_hover" l="940" v="1" r="bool" in_="2" out="1"/>
 <s i="29" m="2" k="f" n="save_state_and_exit" l="21" in_="1"/>
 <s i="30" m="2" k="f" n="resumed" l="47" o="App" self="&amp;mut self" rd="base_title,editor,theme,window_height,window_width" wr="gl_config=,gl_context=,gl_surface=,renderer=,window=" entry="1" out="8"/>
 <s i="31" m="2" k="f" n="window_event" l="130" o="App" self="&amp;mut self" rd="active_tab,autocomplete_active,autocomplete_anim_progress,autocomplete_hovered_idx,autocomplete_options,autocomplete_scroll,autocomplete_selected_idx,base_title,current_sticky_lines,dialog_gl_surface,dialog_window,editor,+42" wr="autocomplete_rect=,current_cursor=,is_focused=,is_ready=,last_resize_time=,modifiers=,target_sticky_lines=,tried_maximize=,ui_registry.clear()" entry="1" out="20"/>
