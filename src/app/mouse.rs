@@ -163,7 +163,7 @@ mod tests {
         ));
     }
 
-    #[test]
+        #[test]
     fn hover_bridge_does_not_capture_next_line_when_popup_is_above() {
         let popup_rect = (96.0, 80.0, 760.0, 210.0);
         let line_top_y = 340.0;
@@ -172,6 +172,25 @@ mod tests {
         assert!(!is_in_hover_popup_or_bridge(
             620.0,
             394.0,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways() {
+        let popup_rect = (96.0, 80.0, 760.0, 210.0);
+        let line_top_y = 340.0;
+        let line_bottom_y = 368.0;
+
+        assert!(is_in_hover_popup_or_bridge(
+            676.0,
+            300.0,
             popup_rect,
             620.0,
             354.0,
@@ -451,8 +470,8 @@ pub fn is_in_hover_popup_or_bridge(
         return true;
     }
 
-    let bridge_radius = 48.0 * scale;
-    let bridge_margin = 4.0 * scale;
+        let bridge_radius = 72.0 * scale;
+    let bridge_margin = 16.0 * scale;
 
     if ry + rh <= line_top_y {
         if py > line_bottom_y + bridge_margin {

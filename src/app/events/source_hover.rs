@@ -609,6 +609,49 @@ pub(super) fn source_attribute_hover_from_definition_file(
     None
 }
 
+pub(super) fn source_class_signature_from_definition_file(
+    path: &std::path::Path,
+    symbol: &str,
+) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = text.lines().collect();
+    let class_prefix = format!("class {symbol}");
+
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim_start();
+        if trimmed.starts_with(&class_prefix) {
+            let next_char = trimmed[class_prefix.len()..].chars().next();
+            if next_char.is_none() || matches!(next_char, Some('(') | Some(':') | Some(' ') | Some('[')) {
+                let mut sig_lines = vec![];
+                for i in idx..lines.len() {
+                    let l = lines[i].trim_end();
+                    if let Some(colon_idx) = l.find(':') {
+                        sig_lines.push(l[..colon_idx].to_string());
+                        break;
+                    } else {
+                        sig_lines.push(l.to_string());
+                    }
+                }
+                if sig_lines.is_empty() {
+                    return None;
+                }
+                let base_indent = lines[idx].len() - lines[idx].trim_start().len();
+                let mut out = vec![sig_lines[0].trim_start().to_string()];
+                for l in sig_lines.into_iter().skip(1) {
+                    let current_indent = l.len() - l.trim_start().len();
+                    if current_indent >= base_indent {
+                        out.push(l[base_indent..].to_string());
+                    } else {
+                        out.push(l.trim_start().to_string());
+                    }
+                }
+                return Some(out.join("\n"));
+            }
+        }
+    }
+    None
+}
+
 pub(super) fn is_ident_byte(b: u8) -> bool {
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
 }

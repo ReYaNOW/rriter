@@ -33,10 +33,11 @@ pub fn highlight_hover_text(
                             offset += line.len() + 1;
                             continue;
                         }
-                        if looks_like_python_code_line(line) {
+                                                if looks_like_python_code_line(line) {
                             let mut parse_line_owned = String::new();
                             let parse_line = if (line.trim_start().starts_with("def ")
-                                || line.trim_start().starts_with("async def "))
+                                || line.trim_start().starts_with("async def ")
+                                || line.trim_start().starts_with("class "))
                                 && !line.trim_end().ends_with(':')
                             {
                                 parse_line_owned.push_str(line);
