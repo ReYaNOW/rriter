@@ -19,7 +19,7 @@
 </meta>
 <mods>
 <m i="0" p="src/app/events/about.rs"/>
-<m i="1" p="src/app/events/hover.rs"/>
+<m i="1" p="src/app/events/source_hover.rs"/>
 <m i="2" p="src/app/events.rs"/>
 <m i="3" p="src/app/file_icons.rs"/>
 <m i="4" p="src/app/file_tree.rs"/>

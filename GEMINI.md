@@ -330,7 +330,7 @@ Project divided into several independent, tightly coupled subsystems.
     ├── app
     │   ├── events
     │   │   ├── about.rs
-    │   │   └── hover.rs
+    │   │   └── source_hover.rs
     │   ├── keyboard
     │   │   ├── editor_keys.rs
     │   │   └── main_keys.rs
@@ -393,7 +393,7 @@ Project divided into several independent, tightly coupled subsystems.
 - `editor_navigation.rs`: cursor movement, selection expansion, word/line selection, folded-code cursor snapping.
 - `highlighter_runtime.rs`: public highlighter runtime API, span shifting, bracket coloring, flattened span generation.
 - `app/events/about.rs`: `about_to_wait` frame tick; polling, animation, delayed file dialogs, LSP event drain.
-- `app/events/hover.rs`: hover source-signature replacement, module-path prefixing, hover tests.
+- `app/events/source_hover.rs`: hover source-signature replacement, module-path prefixing, hover tests.
 - `app/keyboard/editor_keys.rs`: editor-mode key handling, text edits, autocomplete, tab commands.
 - `app/keyboard/main_keys.rs`: top-level key router for dialogs/search/settings/terminal/editor.
 - `app/mouse/wheel.rs`: wheel routing for editor, panels, autocomplete, hover popup, terminal, settings.
@@ -665,7 +665,7 @@ Struct reused for main screen, minimap, autocomplete menu, settings window, ensu
 
 ### The Main Loop (`events.rs`)
 Based on `winit`. `window_event` method reacts to resizing, focus loss, mouse movement. "Physics" integration (calls to `scroll.update(dt)`) lives in `about_to_wait` method.
-`app/events/about.rs` owns the long `about_to_wait` tick. `app/events/hover.rs` owns source-backed hover replacement, module prefixes, and related tests.
+`app/events/about.rs` owns the long `about_to_wait` tick. `app/events/source_hover.rs` owns source-backed hover replacement, module prefixes, and related tests.
 
 ### Input Handling (`keyboard.rs`, `mouse.rs`)
 State machine for keyboard, mouse split by mode.

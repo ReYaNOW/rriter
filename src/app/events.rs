@@ -16,8 +16,8 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
 mod about;
-mod hover;
-use hover::*;
+mod source_hover;
+use source_hover::*;
 fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
     let w = app.window.as_ref().unwrap();
     let maximized = w.is_maximized();
