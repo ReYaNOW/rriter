@@ -133,701 +133,710 @@
 <s i="67" m="12" k="t" n="HoverState" x="struct:{ request_id: Option&lt;i32&gt;, definition_request_id: Option&lt;i32&gt;, popup: Option&lt;HoverPopup&gt;, pending_popup: Option&lt;HoverPopup&gt;, timer: f32, byte_offset: Option&lt;usize&gt;, rect: Option&lt;(f32, f32, +9 }"/>
 <s i="68" m="12" k="t" n="HoverVisualLine" x="struct:{ glyphs: Vec&lt;(char, [f32; 4], usize)&gt;, kind: crate::lsp::HoverLineKindPublic }"/>
 <s i="69" m="12" k="f" n="default" l="60" r="Self" o="HoverState"/>
-<s i="70" m="12" k="f" n="hover_byte_includes_identifier_edges_next_to_whitespace" l="88" out="3"/>
-<s i="71" m="12" k="f" n="hover_byte_ignores_python_keywords_so_diagnostics_can_show" l="104" out="3"/>
-<s i="72" m="12" k="f" n="diagnostic_hover_range_expands_to_whole_f_string_literal" l="115" out="5"/>
-<s i="73" m="12" k="f" n="diagnostic_hover_range_does_not_create_type_target_for_keyword" l="140" out="2"/>
-<s i="74" m="12" k="f" n="hover_bridge_reaches_full_source_line_when_popup_is_above" l="148" out="1"/>
-<s i="75" m="12" k="f" n="hover_bridge_handles_popup_shifted_away_from_anchor" l="167" out="1"/>
-<s i="76" m="12" k="f" n="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" l="186" out="1"/>
-<s i="77" m="12" k="f" n="hover_bridge_does_not_capture_next_line_when_popup_is_above" l="205" out="1"/>
-<s i="78" m="12" k="f" n="hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways" l="224" out="1"/>
-<s i="79" m="12" k="f" n="clear_hover_popup" l="249" v="1" r="bool" in_="5"/>
-<s i="80" m="12" k="f" n="is_hover_target_byte" l="282" r="bool" in_="3" out="1"/>
-<s i="81" m="12" k="f" n="is_python_hover_keyword" l="290" r="bool"/>
-<s i="82" m="12" k="f" n="hover_token_text" l="331" r="Option&lt;String&gt;" in_="1" out="2"/>
-<s i="83" m="12" k="f" n="diagnostic_hover_byte_range_on_line" l="337" v="1" r="Option&lt;(usize, usize, usize)&gt;" in_="3" out="4"/>
-<s i="84" m="12" k="f" n="diagnostic_hover_range_on_line" l="451" v="1" r="Option&lt;(u32, u32, usize)&gt;" in_="2" out="2"/>
-<s i="85" m="12" k="f" n="normalize_hover_byte" l="486" v="1" r="Option&lt;usize&gt;" in_="5" out="2"/>
-<s i="86" m="12" k="f" n="hover_token_bounds" l="510" r="(usize, usize)" in_="3" out="2"/>
-<s i="87" m="12" k="f" n="hover_anchor_for_byte" l="586" v="1" r="(f32, f32)" in_="1" out="4"/>
-<s i="88" m="12" k="f" n="is_in_hover_popup_or_bridge" l="647" v="1" r="bool" in_="7"/>
-<s i="89" m="12" k="f" n="hover_popup_byte_at" l="709" r="usize" in_="2" out="2"/>
-<s i="90" m="13" k="t" n="Cell" x="struct:{ c: char, fg: u8, bg: u8 }"/>
-<s i="91" m="13" k="t" n="TermGrid" x="struct:{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, +19 }"/>
-<s i="92" m="13" k="t" n="Terminal" x="struct:{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }"/>
-<s i="93" m="13" k="f" n="default" l="14" r="Self" o="Cell"/>
-<s i="94" m="13" k="f" n="new" l="48" v="1" r="Self" o="TermGrid" in_="2"/>
-<s i="95" m="13" k="f" n="resize" l="78" v="1" o="TermGrid" self="&amp;mut self" rd="alt_lines,alt_saved_cursor,is_alt,saved_cursor" wr="cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=" in_="9"/>
-<s i="96" m="13" k="f" n="put_char" l="207" v="1" o="TermGrid" self="&amp;mut self" rd="cols,cur_bg,cur_fg,lines,visible_rows" wr="cur_x=,cur_y=" in_="2" out="1"/>
-<s i="97" m="13" k="f" n="newline" l="227" v="1" o="TermGrid" self="&amp;mut self" rd="scroll_region,visible_rows" wr="cur_y=" in_="2" out="1"/>
-<s i="98" m="13" k="f" n="scroll_region_up" l="238" v="1" o="TermGrid" self="&amp;mut self" rd="cols,is_alt,scroll_region,visible_rows" wr="dirty=,lines.insert(),pool.push(),scrollback.push_back()" in_="2" out="2"/>
-<s i="99" m="13" k="f" n="scroll_region_down" l="281" v="1" o="TermGrid" self="&amp;mut self" rd="cols,scroll_region" wr="dirty=,lines.insert(),lines.remove(),pool.push()" in_="1" out="2"/>
-<s i="100" m="13" k="f" n="get_selection_text" l="303" v="1" r="String" o="TermGrid" self="&amp;self" rd="cols,lines,scrollback,selection"/>
-<s i="101" m="13" k="f" n="print" l="357" o="TermGrid" self="&amp;mut self" out="1"/>
-<s i="102" m="13" k="f" n="execute" l="360" o="TermGrid" self="&amp;mut self" wr="cur_x=" out="2"/>
-<s i="103" m="13" k="f" n="hook" l="374" o="TermGrid" self="&amp;mut self"/>
-<s i="104" m="13" k="f" n="put" l="375" o="TermGrid" self="&amp;mut self"/>
-<s i="105" m="13" k="f" n="unhook" l="376" o="TermGrid" self="&amp;mut self"/>
-<s i="106" m="13" k="f" n="osc_dispatch" l="377" o="TermGrid" self="&amp;mut self" rd="reply_tx"/>
-<s i="107" m="13" k="f" n="esc_dispatch" l="388" o="TermGrid" self="&amp;mut self" wr="cur_x=,cur_y=,saved_cursor="/>
-<s i="108" m="13" k="f" n="csi_dispatch" l="400" o="TermGrid" self="&amp;mut self" rd="cols,reply_tx,visible_rows" wr="alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6" out="5"/>
-<s i="109" m="13" k="f" n="spawn" l="753" v="1" r="Self" o="Terminal" in_="4" out="1"/>
-<s i="110" m="13" k="f" n="resize_pty" l="858" v="1" o="Terminal" self="&amp;self" rd="master_pty" in_="1" out="2"/>
-<s i="111" m="14" k="f" n="handle_ui_click" l="9" v="1" o="App" self="&amp;mut self" rd="clipboard,file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,+2" wr="base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12" out="23"/>
-<s i="112" m="15" k="t" n="App" x="struct:{ pending_key_log: Option&lt;KeyLog&gt;, gl_config: Option&lt;glutin::config::Config&gt;, gl_context: Option&lt;PossiblyCurrentContext&gt;, gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, settings_scroll: crate::scroll::ScrollState, +87 }"/>
-<s i="113" m="15" k="t" n="EditorTab" x="struct:{ editor: crate::editor::Editor, file_path: Option&lt;PathBuf&gt;, base_title: String, file_extension: String, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, completions: Vec&lt;crate::highlighter::CompletionItem&gt;, +12 }"/>
-<s i="114" m="15" k="t" n="IdePanelState" x="struct:{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, +33 }"/>
-<s i="115" m="15" k="t" n="KeyLog" x="struct:{ key: String, t0: std::time::Instant, t_highlight: Option&lt;std::time::Instant&gt;, t_render: Option&lt;std::time::Instant&gt; }"/>
-<s i="116" m="15" k="t" n="LspActionItem" x="enum:{ CodeAction(crate::lsp::CodeAction), AddNoqa { codes: Vec&lt;String&gt; }"/>
-<s i="117" m="15" k="t" n="LspActionsMenu" x="struct:{ cursor_line: u32, items: Vec&lt;LspActionItem&gt;, selected: usize, menu_x: f32, menu_y: f32, pending_request_id: Option&lt;i32&gt; }"/>
-<s i="118" m="15" k="t" n="PanelDragState" x="struct:{ panel_id: PanelId, start_y: f32, current_y: f32, threshold_passed: bool }"/>
-<s i="119" m="15" k="t" n="PanelGroup" x="enum:{ Top, Bottom }"/>
-<s i="120" m="15" k="t" n="PanelId" x="enum:{ Explorer, Terminal, Problems, LspServers }"/>
-<s i="121" m="15" k="t" n="PanelSlot" x="struct:{ id: PanelId, group: PanelGroup, open: bool }"/>
-<s i="122" m="15" k="t" n="PendingAction" x="enum:{ Quit, OpenFile, CloseFile }"/>
-<s i="123" m="15" k="t" n="TabDragState" x="struct:{ start_idx: usize, start_x: f32, current_x: f32, threshold_passed: bool }"/>
-<s i="124" m="15" k="f" n="label" l="59" v="1" r="&amp;'static str" o="PanelId" self="self" in_="1"/>
-<s i="125" m="15" k="f" n="icon" l="67" v="1" r="crate::widgets::IconType" o="PanelId" self="self" in_="1"/>
-<s i="126" m="15" k="f" n="default" l="173" r="Self" o="IdePanelState"/>
-<s i="127" m="15" k="f" n="any_top_open" l="235" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="1"/>
-<s i="128" m="15" k="f" n="any_bottom_open" l="240" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="6"/>
-<s i="129" m="15" k="f" n="toggle" l="245" v="1" o="IdePanelState" self="&amp;mut self" rd="slots" in_="2"/>
-<s i="130" m="15" k="f" n="is_open" l="250" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="10"/>
-<s i="131" m="15" k="f" n="fuzzy_match" l="260" r="Option&lt;Vec&lt;usize&gt;&gt;" in_="1"/>
-<s i="132" m="15" k="f" n="enter_ide_mode" l="408" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter,ide_workspaces,window" wr="active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()" in_="1" out="10"/>
-<s i="133" m="15" k="f" n="save_tabs_state" l="513" v="1" o="App" self="&amp;mut self" rd="active_tab,is_ide_mode,tabs" in_="6" out="1"/>
-<s i="134" m="15" k="f" n="sync_active_tab" l="522" v="1" o="App" self="&amp;mut self" rd="active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1" in_="5" out="1"/>
-<s i="135" m="15" k="f" n="switch_to_tab" l="569" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window" wr="active_tab=,autocomplete_active=,show_welcome=" in_="2" out="6"/>
-<s i="136" m="15" k="f" n="open_new_tab" l="624" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,window" wr="active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()" in_="2" out="4"/>
-<s i="137" m="15" k="f" n="close_tab_at" l="715" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_path,is_ide_mode,window" wr="active_tab=,autocomplete_active=,show_welcome=,tabs.remove()" in_="1" out="4"/>
-<s i="138" m="15" k="f" n="open_file_in_tab" l="749" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
-<s i="139" m="15" k="f" n="open_file_in_tab_bg" l="753" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
-<s i="140" m="15" k="f" n="open_file_in_tab_internal" l="757" v="1" o="App" self="&amp;mut self" rd="active_tab,editor,file_path,is_ide_mode,tabs" in_="2" out="4"/>
-<s i="141" m="15" k="f" n="ensure_cursor_visible" l="793" v="1" o="App" out="2"/>
-<s i="142" m="15" k="f" n="get_current_word_prefix" l="832" v="1" r="String" o="App" self="&amp;self" rd="editor" in_="2" out="1"/>
-<s i="143" m="15" k="f" n="update_autocomplete" l="852" v="1" o="App" self="&amp;mut self" rd="autocomplete_scroll,editor,highlighter" wr="autocomplete_active=,autocomplete_anim_progress=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=" in_="1" out="2"/>
-<s i="144" m="15" k="f" n="ensure_autocomplete_visible" l="931" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,autocomplete_selected_idx" out="2"/>
-<s i="145" m="15" k="f" n="apply_autocomplete" l="961" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,base_title,editor,highlighter,window" wr="autocomplete_active=,autocomplete_selected_idx=" out="6"/>
-<s i="146" m="15" k="f" n="update_terminal_search" l="995" v="1" o="App" self="&amp;mut self" rd="ide_panel" out="2"/>
-<s i="147" m="15" k="f" n="jump_to_terminal_search_result" l="1040" v="1" o="App" self="&amp;mut self" rd="ide_panel,renderer"/>
-<s i="148" m="15" k="f" n="update_search" l="1076" v="1" o="App" self="&amp;mut self" rd="editor,search_case_sensitive,search_editor" wr="search_current_idx=,search_results.clear(),search_results.push()" out="2"/>
-<s i="149" m="15" k="f" n="jump_to_search_result" l="1132" v="1" o="App" self="&amp;mut self" rd="editor,renderer,scroll_y,search_current_idx,search_results,window" out="2"/>
-<s i="150" m="15" k="f" n="update_window_title" l="1158" v="1" o="App"/>
-<s i="151" m="15" k="f" n="show_action_dialog" l="1167" v="1" o="App" self="&amp;mut self" rd="gl_config,scroll_x,scroll_y" wr="dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=" out="7"/>
-<s i="152" m="15" k="f" n="close_dialog" l="1209" v="1" o="App" self="&amp;mut self" rd="window" wr="dialog_gl_surface=,dialog_window="/>
-<s i="153" m="15" k="f" n="close_current_file" l="1217" v="1" o="App" self="&amp;mut self" rd="active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()" in_="2" out="5"/>
-<s i="154" m="15" k="f" n="trigger_file_picker" l="1263" v="1" o="App" self="&amp;mut self" wr="open_file_rx="/>
-<s i="155" m="15" k="f" n="trigger_folder_picker" l="1272" v="1" o="App" self="&amp;mut self" wr="open_folder_rx="/>
-<s i="156" m="15" k="f" n="trigger_save_as_picker" l="1283" v="1" o="App" self="&amp;mut self" wr="save_file_rx=" in_="1"/>
-<s i="157" m="15" k="f" n="save_current_file" l="1295" v="1" r="bool" o="App" self="&amp;mut self" rd="editor,file_path" in_="1" out="5"/>
-<s i="158" m="15" k="f" n="add_recent_file" l="1334" v="1" o="App" self="&amp;mut self" wr="recent_files.insert(),recent_files.retain(),recent_files.truncate()" in_="2"/>
-<s i="159" m="15" k="f" n="apply_highlight_results" l="1343" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter" wr="is_highlighted_once=" in_="3"/>
-<s i="160" m="15" k="f" n="load_file_internal" l="1378" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=" in_="1" out="10"/>
-<s i="161" m="15" k="f" n="check_external_changes" l="1464" v="1" o="App" self="&amp;mut self" rd="tabs,window" in_="1" out="6"/>
-<s i="162" m="16" k="t" n="EditOp" x="enum:{ Insert { offset: usize, text: String }"/>
-<s i="163" m="16" k="t" n="Editor" x="struct:{ data: Vec&lt;u8&gt;, gap_start: usize, gap_end: usize, cursor: usize, selection_anchor: Option&lt;usize&gt;, version: u64, line_offsets: Vec&lt;usize&gt;, longest_line_idx: usize, +19 }"/>
-<s i="164" m="16" k="t" n="HashSource" x="struct:(&amp;'a [u64])"/>
-<s i="165" m="16" k="t" n="HistoryStep" x="struct:{ op: EditOp, cursor_before: usize, cursor_after: usize }"/>
-<s i="166" m="16" k="t" n="LineModState" x="enum:{ ModifiedUnsaved, ModifiedSaved }"/>
-<s i="167" m="16" k="t" n="UndoRedoDelta" x="enum:{ Insert(usize, usize, String), Delete(usize, usize), Replace(usize, usize, String, +1 }"/>
-<s i="168" m="16" k="f" n="tokenize" l="16" r="Self::Tokenizer" self="&amp;self" rd="0"/>
-<s i="169" m="16" k="f" n="estimate_tokens" l="20" r="u32" self="&amp;self" rd="0"/>
-<s i="170" m="16" k="f" n="get_diff_info" l="25" r="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" in_="1"/>
-<s i="171" m="16" k="f" n="is_delimiter" l="45" r="bool" in_="3"/>
-<s i="172" m="16" k="f" n="char_class" l="52" r="u8" in_="3"/>
-<s i="173" m="16" k="f" n="new" l="130" v="1" r="Self" o="Editor" in_="2"/>
-<s i="174" m="16" k="f" n="shift_folds_insert" l="159" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="3"/>
-<s i="175" m="16" k="f" n="shift_folds_delete" l="182" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="6"/>
-<s i="176" m="16" k="f" n="rebuild_line_offsets" l="211" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=" in_="2" out="1"/>
-<s i="177" m="16" k="f" n="get_line_hashes" l="281" r="Vec&lt;u64&gt;" o="Editor" self="&amp;self" in_="3" out="1"/>
-<s i="178" m="16" k="f" n="ensure_indent_cache_updated" l="304" v="1" o="Editor" self="&amp;mut self" rd="version" wr="indent_cache.clear(),last_indent_version=" in_="1" out="3"/>
-<s i="179" m="16" k="f" n="get_cached_indent_levels" l="376" v="1" r="&amp;[u8]" o="Editor" self="&amp;self" rd="indent_cache" in_="1"/>
-<s i="180" m="16" k="f" n="backspace" l="380" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,gap_start,version" wr="cursor=,selection_anchor=,sync_edits.push()" in_="5" out="5"/>
-<s i="181" m="16" k="f" n="set_original_text" l="453" v="1" o="Editor" self="&amp;mut self" wr="original_hashes=,saved_hashes=" in_="6" out="2"/>
-<s i="182" m="16" k="f" n="mark_saved" l="459" v="1" o="Editor" self="&amp;mut self" wr="saved_hashes=" in_="1" out="2"/>
-<s i="183" m="16" k="f" n="is_dirty" l="464" v="1" r="bool" o="Editor" self="&amp;self" rd="is_dirty" in_="14"/>
-<s i="184" m="16" k="f" n="get_line_modification_state" l="468" v="1" r="Option&lt;LineModState&gt;" o="Editor" self="&amp;self" rd="line_states" in_="1"/>
-<s i="185" m="16" k="f" n="update_modifications" l="472" v="1" o="Editor" self="&amp;mut self" rd="original_hashes,saved_hashes" wr="deleted_gaps=,is_dirty=,line_states=" in_="10" out="3"/>
-<s i="186" m="16" k="f" n="clear_history" l="543" v="1" o="Editor" self="&amp;mut self" wr="history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()" in_="3" out="1"/>
-<s i="187" m="16" k="f" n="push_history" l="551" o="Editor" self="&amp;mut self" rd="history_size,is_working_history" wr="history.push_back(),redo_stack.clear()" in_="5" out="1"/>
-<s i="188" m="16" k="f" n="undo" l="635" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
-<s i="189" m="16" k="f" n="redo" l="693" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
-<s i="190" m="16" k="f" n="text_parts" l="751" v="1" r="(&amp;str, &amp;str)" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
-<s i="191" m="16" k="f" n="get_full_text" l="759" v="1" r="String" o="Editor" self="&amp;self" in_="35" out="1"/>
-<s i="192" m="16" k="f" n="move_gap" l="767" o="Editor" self="&amp;mut self" rd="data,gap_end,gap_start" in_="7"/>
-<s i="193" m="16" k="f" n="insert_str_internal" l="786" r="usize" o="Editor" self="&amp;mut self" rd="cursor,gap_start" wr="data=,gap_end=,sync_edits.push()" in_="4" out="2"/>
-<s i="194" m="16" k="f" n="replace_range" l="810" v="1" r="(usize, usize, String)" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="4" out="5"/>
-<s i="195" m="16" k="f" n="insert_str" l="857" v="1" r="(Option&lt;(usize, usize)&gt;, usize)" o="Editor" self="&amp;mut self" rd="cursor,version" wr="selection_anchor=" in_="21" out="4"/>
-<s i="196" m="16" k="f" n="delete_selection" l="884" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="9" out="4"/>
-<s i="197" m="16" k="f" n="delete_forward" l="922" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor,gap_end,version" wr="sync_edits.push()" in_="4" out="5"/>
-<s i="198" m="16" k="f" n="delete_word_backward" l="958" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="2" out="2"/>
-<s i="199" m="16" k="f" n="delete_word_forward" l="991" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="2" out="2"/>
-<s i="200" m="16" k="f" n="get_auto_indent" l="1025" v="1" r="String" o="Editor" self="&amp;self" rd="cursor" in_="1"/>
-<s i="201" m="17" k="f" n="select_expand" l="4" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" out="3"/>
-<s i="202" m="17" k="f" n="select_word" l="130" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="3"/>
-<s i="203" m="17" k="f" n="select_line" l="147" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="2"/>
-<s i="204" m="17" k="f" n="is_char_boundary" l="162" v="1" r="bool" o="Editor" in_="6" out="2"/>
-<s i="205" m="17" k="f" n="byte_at" l="170" v="1" r="u8" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="19"/>
-<s i="206" m="17" k="f" n="len" l="178" v="1" r="usize" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
-<s i="207" m="17" k="f" n="utf16_col_to_byte_advance" l="186" v="1" o="Editor" self="&amp;self" rd="line_offsets" in_="4" out="2"/>
-<s i="208" m="17" k="f" n="get_selection" l="223" v="1" r="Option&lt;String&gt;" o="Editor" self="&amp;self" rd="cursor,selection_anchor" in_="4" out="1"/>
-<s i="209" m="17" k="f" n="get_visible_lines_count" l="237" v="1" r="usize" o="Editor" self="&amp;self" rd="foldable_lines,folded_lines,line_offsets" in_="1" out="1"/>
-<s i="210" m="17" k="f" n="select_all" l="257" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="5" out="1"/>
-<s i="211" m="17" k="f" n="handle_selection" l="262" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="12"/>
-<s i="212" m="17" k="f" n="snap_cursor_out_of_fold" l="271" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="3"/>
-<s i="213" m="17" k="f" n="move_left" l="311" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="3"/>
-<s i="214" m="17" k="f" n="move_right" l="324" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
-<s i="215" m="17" k="f" n="move_word_left" l="337" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
-<s i="216" m="17" k="f" n="move_word_right" l="360" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="5"/>
-<s i="217" m="17" k="f" n="move_home" l="383" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="4"/>
-<s i="218" m="17" k="f" n="move_end" l="423" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="5" out="4"/>
-<s i="219" m="17" k="f" n="move_start_of_file" l="463" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="1"/>
-<s i="220" m="17" k="f" n="move_end_of_file" l="468" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="2"/>
-<s i="221" m="17" k="f" n="move_up" l="473" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
-<s i="222" m="17" k="f" n="move_down" l="479" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
-<s i="223" m="17" k="f" n="set_cursor_at_pos" l="485" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="3" out="1"/>
-<s i="224" m="17" k="f" n="move_page_up" l="500" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
-<s i="225" m="17" k="f" n="move_page_down" l="506" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
-<s i="226" m="18" k="t" n="ColorSpan" x="struct:{ start: usize, end: usize, color: [f32; 4] }"/>
-<s i="227" m="18" k="t" n="CompletionItem" x="struct:{ word: String, kind: SymbolKind, scope_start: usize, scope_end: usize }"/>
-<s i="228" m="18" k="t" n="Highlighter" x="struct:{ tx: Sender&lt;HighlighterMessage&gt;, rx: Receiver&lt;( u64, Vec&lt;ColorSpan&gt;, Vec&lt;CompletionItem&gt;, Vec&lt;(usize, usize, bool, bool)&gt;, +12 }"/>
-<s i="229" m="18" k="t" n="HighlighterMessage" x="enum:{ Reset { version: u64, text: String, ext: String }"/>
-<s i="230" m="18" k="t" n="Scope" x="struct:{ start: usize, end: usize, params: HashSet&lt;String&gt; }"/>
-<s i="231" m="18" k="t" n="SymbolKind" x="enum:{ Variable, Function, Class, Parameter, Keyword, Unknown }"/>
-<s i="232" m="18" k="t" n="SyncEdit" x="enum:{ Insert { offset: usize, text: String }"/>
-<s i="233" m="18" k="f" n="get_point" l="93" r="tree_sitter::Point" in_="1"/>
-<s i="234" m="18" k="f" n="resolve_color" l="106" r="[f32; 4]" in_="1" out="1"/>
-<s i="235" m="18" k="f" n="new" l="187" v="1" r="Self" o="Highlighter" in_="2" out="11"/>
-<s i="236" m="19" k="f" n="reset" l="4" v="1" o="Highlighter" self="&amp;self" in_="8"/>
-<s i="237" m="19" k="f" n="apply_edits" l="10" v="1" o="Highlighter" self="&amp;self" rd="tx" in_="3"/>
-<s i="238" m="19" k="f" n="poll" l="27" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="3"/>
-<s i="239" m="19" k="f" n="wait_for_first_result" l="48" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="2" out="1"/>
-<s i="240" m="19" k="f" n="shift_insert" l="77" v="1" o="Highlighter" self="&amp;mut self" wr="spans.extend(),spans.push(),spans.retain(),spans=" in_="4"/>
-<s i="241" m="19" k="f" n="shift_delete" l="174" v="1" o="Highlighter" self="&amp;mut self" wr="spans.retain()" in_="4"/>
-<s i="242" m="19" k="f" n="get_bracket_color" l="191" v="1" r="[f32; 4]" in_="1"/>
-<s i="243" m="19" k="f" n="flatten_spans" l="205" v="1" r="Vec&lt;ColorSpan&gt;" in_="1" out="3"/>
-<s i="244" m="21" k="t" n="HoverLineKind" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
-<s i="245" m="21" k="f" n="normalize_inline_rst_code" l="33" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="2"/>
-<s i="246" m="21" k="f" n="normalize_rst_roles" l="58" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1"/>
-<s i="247" m="21" k="f" n="flatten_rst_roles_and_code" l="99" v="1" r="String" in_="1"/>
-<s i="248" m="21" k="f" n="parse_param_line" l="147" v="1" r="Option&lt;(String, String, String)&gt;" in_="1"/>
-<s i="249" m="21" k="f" n="split_inline_python_after_colon" l="167" r="Option&lt;(String, String)&gt;" in_="1" out="1"/>
-<s i="250" m="21" k="f" n="normalize_coroutine_signature_line" l="187" r="String" in_="1" out="1"/>
-<s i="251" m="21" k="f" n="normalize_python_hover_doc" l="209" v="1" r="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" in_="1" out="6"/>
-<s i="252" m="21" k="f" n="ts_capture_color" l="608" v="1" r="Option&lt;[f32; 4]&gt;" in_="1"/>
-<s i="253" m="21" k="f" n="push_python_ts_spans" l="624" v="1" in_="2" out="1"/>
-<s i="254" m="21" k="f" n="highlight_python_hover_doc" l="677" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="6"/>
-<s i="255" m="21" k="f" n="force_color_on_ranges" l="1010" in_="1"/>
-<s i="256" m="21" k="f" n="color_keyword_args_orange" l="1052" in_="1"/>
-<s i="257" m="22" k="t" n="HoverLineKindPublic" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
-<s i="258" m="22" k="t" n="PendingRequestKind" x="enum:{ Hover, CodeAction, Definition }"/>
-<s i="259" m="22" k="f" n="highlight_hover_text" l="3" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="26" out="15"/>
-<s i="260" m="22" k="f" n="preprocess_hover_text" l="119" r="String" in_="1" out="1"/>
-<s i="261" m="22" k="f" n="looks_like_python_hover" l="132" r="bool" in_="1" out="1"/>
-<s i="262" m="22" k="f" n="looks_like_python_code_line" l="163" r="bool" in_="1" out="1"/>
-<s i="263" m="22" k="f" n="looks_like_type_expr_line" l="189" r="bool" in_="1" out="1"/>
-<s i="264" m="22" k="f" n="looks_like_simple_type_name_line" l="209" r="bool" in_="1" out="1"/>
-<s i="265" m="22" k="f" n="sanitize_hover_type_expr" l="230" r="String" in_="1"/>
-<s i="266" m="22" k="f" n="sanitize_module_path" l="248" r="String" in_="2"/>
-<s i="267" m="22" k="f" n="normalize_class_object_repr" l="260" r="Option&lt;(Option&lt;String&gt;, String)&gt;" in_="1" out="1"/>
-<s i="268" m="22" k="f" n="normalize_module_object_repr" l="285" r="Option&lt;String&gt;" in_="1" out="1"/>
-<s i="269" m="22" k="f" n="normalize_bound_method_signature" l="301" r="Option&lt;String&gt;" in_="1" out="2"/>
-<s i="270" m="22" k="f" n="add_bound_method_signature_spans" l="357" r="bool" in_="1" out="1"/>
-<s i="271" m="22" k="f" n="add_self_param_span_for_signature" l="427" in_="1"/>
-<s i="272" m="22" k="f" n="add_param_name_spans_for_signature" l="451" in_="1"/>
-<s i="273" m="22" k="f" n="add_class_keyword_spans_for_signature" l="491" in_="1"/>
-<s i="274" m="22" k="f" n="add_type_bracket_neutral_spans_for_signature" l="526" in_="1"/>
-<s i="275" m="22" k="f" n="add_type_expr_spans_for_line" l="546" in_="1"/>
-<s i="276" m="22" k="f" n="normalize_hover_text" l="586" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1" out="5"/>
-<s i="277" m="22" k="f" n="wrap_signature_after_first_param" l="648" r="String" in_="3" out="1"/>
-<s i="278" m="22" k="f" n="normalize_asynccontextmanager_signature_line" l="672" r="Option&lt;String&gt;" in_="2" out="2"/>
-<s i="279" m="22" k="f" n="variable_header_highlights_name_pink" l="704" out="1"/>
-<s i="280" m="22" k="f" n="uses_python_hover_pipeline_for_builtin_signatures" l="722" out="1"/>
-<s i="281" m="22" k="f" n="plain_bound_method_prose_stays_uncolored" l="742" out="2"/>
-<s i="282" m="22" k="f" n="inline_for_fragment_becomes_separate_code_line" l="779" out="2"/>
-<s i="283" m="22" k="f" n="rich_rst_docstring_path_is_preserved" l="789" out="2"/>
-<s i="284" m="22" k="f" n="bound_method_signature_line_is_highlighted_but_prose_stays_plain" l="808" out="2"/>
-<s i="285" m="22" k="f" n="coroutine_return_bound_method_becomes_async_def" l="828" out="1"/>
-<s i="286" m="22" k="f" n="coroutine_return_signature_becomes_async_def" l="835" out="1"/>
-<s i="287" m="22" k="f" n="long_bound_method_signature_is_normalized_and_highlighted" l="851" out="2"/>
-<s i="288" m="22" k="f" n="class_object_repr_is_normalized_and_highlighted" l="878" out="1"/>
-<s i="289" m="22" k="f" n="qualified_class_object_repr_prepends_module_path" l="900" out="1"/>
-<s i="290" m="22" k="f" n="backticked_qualified_class_repr_prepends_module_path" l="918" out="1"/>
-<s i="291" m="22" k="f" n="generic_type_line_gets_cyan_types_and_white_brackets" l="928" out="1"/>
-<s i="292" m="22" k="f" n="literal_type_line_is_highlighted" l="959" out="1"/>
-<s i="293" m="22" k="f" n="assignment_line_is_highlighted_in_hover_text" l="981" out="1"/>
-<s i="294" m="22" k="f" n="module_object_repr_is_normalized_to_module_header" l="994" out="1"/>
-<s i="295" m="22" k="f" n="site_packages_and_init_are_removed_from_module_and_class_repr" l="1001" out="1"/>
-<s i="296" m="22" k="f" n="builtin_dict_class_hover_is_normalized_without_angle_brackets" l="1012" out="2"/>
-<s i="297" m="22" k="f" n="builtin_str_heading_line_is_highlighted_as_type" l="1025" out="1"/>
-<s i="298" m="22" k="f" n="builtin_any_heading_line_is_highlighted_as_type" l="1040" out="1"/>
-<s i="299" m="22" k="f" n="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" l="1055" out="2"/>
-<s i="300" m="22" k="f" n="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" l="1062" out="2"/>
-<s i="301" m="22" k="f" n="class_signature_is_highlighted" l="1096" out="1"/>
-<s i="302" m="22" k="f" n="litestar_giant_class_hover_signature_and_args_doc_are_parsed" l="1112" out="2"/>
-<s i="303" m="22" k="f" n="double_backticks_are_stripped_and_highlighted_as_inline_code" l="1316" out="2"/>
-<s i="304" m="22" k="f" n="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" l="1345" out="1"/>
-<s i="305" m="23" k="t" n="Cmd" x="enum:{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }"/>
-<s i="306" m="23" k="t" n="CodeAction" x="struct:{ title: String, kind: Option&lt;String&gt;, edit: Option&lt;WorkspaceEdit&gt;, code: Option&lt;String&gt; }"/>
-<s i="307" m="23" k="t" n="LspEvent" x="enum:{ Log { name: &amp;'static str, message: String }"/>
-<s i="308" m="23" k="t" n="LspServerDef" x="struct:{ pub(super) program: &amp;'static str, pub(super) args: &amp;'static [&amp;'static str], pub(super) language_id: &amp;'static str, #[allow(dead_code)] pub(super) extensions: &amp;'static [&amp;'static str] }"/>
-<s i="309" m="23" k="t" n="TextChange" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, new_text: String }"/>
-<s i="310" m="23" k="t" n="WorkspaceEdit" x="struct:{ changes: HashMap&lt;PathBuf, Vec&lt;TextChange&gt;&gt; }"/>
-<s i="311" m="23" k="f" n="highlight_diagnostic_message" l="9" v="1" r="Vec&lt;crate::highlighter::ColorSpan&gt;"/>
-<s i="312" m="23" k="f" n="offset_to_lsp_pos" l="236" v="1" r="(u32, u32)"/>
-<s i="313" m="23" k="f" n="json_escape" l="256" v="1" r="String" in_="8"/>
-<s i="314" m="23" k="f" n="path_to_uri" l="275" v="1" r="String" in_="9"/>
-<s i="315" m="23" k="f" n="uri_to_path" l="289" v="1" r="PathBuf" in_="3"/>
-<s i="316" m="23" k="f" n="make_initialize" l="300" v="1" r="Vec&lt;u8&gt;" in_="1" out="2"/>
-<s i="317" m="23" k="f" n="make_initialized" l="331" v="1" r="Vec&lt;u8&gt;" in_="1"/>
-<s i="318" m="23" k="f" n="make_did_open" l="335" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="319" m="23" k="f" n="make_did_change_full" l="346" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="320" m="23" k="f" n="make_did_close" l="356" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="321" m="23" k="f" n="make_code_action" l="364" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="322" m="23" k="f" n="make_hover" l="391" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="323" m="23" k="f" n="make_definition" l="398" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
-<s i="324" m="23" k="f" n="make_shutdown" l="405" v="1" r="Vec&lt;u8&gt;" in_="1"/>
-<s i="325" m="23" k="f" n="make_exit" l="409" v="1" r="Vec&lt;u8&gt;" in_="1"/>
-<s i="326" m="23" k="f" n="write_frame" l="415" v="1" r="bool" in_="1" out="1"/>
-<s i="327" m="23" k="f" n="parse_diagnostic_value" l="427" v="1" r="Option&lt;Diagnostic&gt;" in_="1" out="2"/>
-<s i="328" m="23" k="f" n="parse_text_edit_value" l="534" v="1" r="Option&lt;TextChange&gt;" in_="1"/>
-<s i="329" m="23" k="f" n="parse_workspace_edit_value" l="559" v="1" r="WorkspaceEdit" in_="1" out="1"/>
-<s i="330" m="23" k="f" n="parse_hover_value" l="595" v="1" r="Option&lt;String&gt;" in_="1"/>
-<s i="331" m="23" k="f" n="parse_definition_path" l="623" v="1" r="Option&lt;PathBuf&gt;" in_="1" out="1"/>
-<s i="332" m="23" k="f" n="parse_code_action_value" l="640" v="1" r="Option&lt;CodeAction&gt;"/>
-<s i="333" m="23" k="f" n="dispatch_frame" l="675" v="1" in_="1" out="5"/>
-<s i="334" m="24" k="t" n="DiagSeverity" x="enum:{ Error, Warning, Info, Hint }"/>
-<s i="335" m="24" k="t" n="Diagnostic" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, +4 }"/>
-<s i="336" m="24" k="t" n="LogEntry" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }"/>
-<s i="337" m="24" k="t" n="LspManager" x="struct:{ python: Option&lt;LspProcess&gt;, ty_process: Option&lt;LspProcess&gt;, workspaces: Vec&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, +15 }"/>
-<s i="338" m="24" k="t" n="LspProcess" x="struct:{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt;, workspace_scanned: bool }"/>
-<s i="339" m="24" k="t" n="LspServerInfo" x="struct:{ name: &amp;'static str, status: LspServerStatus, logs: Vec&lt;LogEntry&gt; }"/>
-<s i="340" m="24" k="t" n="LspServerStatus" x="enum:{ Starting, Running, Crashed, Disabled }"/>
-<s i="341" m="24" k="t" n="OpenFile" x="struct:{ uri: String, lang: &amp;'static str, version: i32, text: String }"/>
-<s i="342" m="24" k="t" n="QuickFix" x="struct:{ title: String, edits: Vec&lt;TextChange&gt; }"/>
-<s i="343" m="24" k="t" n="SpawnedProcess" x="struct:{ child: Child, out_tx: Sender&lt;Vec&lt;u8&gt;&gt; }"/>
-<s i="344" m="24" k="f" n="next_id" l="41" r="i32" in_="6"/>
-<s i="345" m="24" k="f" n="spawn_server" l="108" r="Option&lt;SpawnedProcess&gt;" in_="1" out="3"/>
-<s i="346" m="24" k="f" n="send_and_log" l="239" r="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" in_="1" out="1"/>
-<s i="347" m="24" k="f" n="run_supervisor" l="273" in_="1" out="13"/>
-<s i="348" m="24" k="f" n="start" l="498" r="Self" o="LspProcess" in_="2" out="2"/>
-<s i="349" m="24" k="f" n="notify_open" l="519" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx,def" wr="current_uri=,open_file_data=,workspace_scanned=" out="1"/>
-<s i="350" m="24" k="f" n="restart" l="563" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" in_="1"/>
-<s i="351" m="24" k="f" n="notify_change" l="569" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
-<s i="352" m="24" k="f" n="request_hover" l="579" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
-<s i="353" m="24" k="f" n="request_definition" l="586" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
-<s i="354" m="24" k="f" n="notify_close" l="594" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
-<s i="355" m="24" k="f" n="request_code_actions" l="602" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="3"/>
-<s i="356" m="24" k="f" n="poll" l="632" v="1" o="LspProcess" self="&amp;self" rd="event_rx"/>
-<s i="357" m="24" k="f" n="shutdown" l="641" v="1" o="LspProcess" self="self" rd="cmd_tx"/>
-<s i="358" m="24" k="f" n="encode_diagnostics_json" l="648" r="String" in_="1" out="1"/>
-<s i="359" m="24" k="f" n="new" l="704" v="1" r="Self" o="LspManager" in_="2"/>
-<s i="360" m="24" k="f" n="ensure_python" l="725" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="3"/>
-<s i="361" m="24" k="f" n="restart_python" l="737" v="1" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
-<s i="362" m="24" k="f" n="disable_python" l="755" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process" wr="diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_instant_diagnostics.clear(),ty_status=" in_="1" out="1"/>
-<s i="363" m="24" k="f" n="enable_python" l="774" v="1" o="LspManager" self="&amp;mut self" rd="current_path,workspaces" wr="python=,python_disabled=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
-<s i="364" m="24" k="f" n="servers_info" l="797" v="1" r="Vec&lt;LspServerInfo&gt;" o="LspManager" self="&amp;self" rd="python_status,ty_status" in_="2"/>
-<s i="365" m="24" k="f" n="process_for_ext" l="823" r="Option&lt;&amp;mut LspProcess&gt;" o="LspManager" self="&amp;mut self" rd="python" in_="3" out="1"/>
-<s i="366" m="24" k="f" n="notify_open" l="834" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="current_path=,suppress_diagnostics=" in_="4" out="1"/>
-<s i="367" m="24" k="f" n="notify_change" l="857" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="last_change=,suppress_diagnostics=" in_="3" out="1"/>
-<s i="368" m="24" k="f" n="request_hover" l="878" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
-<s i="369" m="24" k="f" n="request_definition" l="899" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
-<s i="370" m="24" k="f" n="notify_close" l="921" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" in_="2"/>
-<s i="371" m="24" k="f" n="request_code_actions" l="940" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="1" out="1"/>
-<s i="372" m="24" k="f" n="poll" l="972" v="1" r="Vec&lt;LspEvent&gt;" o="LspManager" self="&amp;mut self" rd="instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_instant_diagnostics,ty_process" wr="diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=" in_="2" out="2"/>
-<s i="373" m="24" k="f" n="get_diagnostics" l="1104" v="1" r="&amp;[Diagnostic]" o="LspManager" self="&amp;self" rd="diagnostics,workspaces" in_="5"/>
-<s i="374" m="24" k="f" n="get_instant_diagnostics_with_version" l="1118" v="1" r="(i32, &amp;[Diagnostic])" o="LspManager" self="&amp;self" rd="merged_instant_diagnostics,workspaces" in_="2"/>
-<s i="375" m="24" k="f" n="diagnostics_for_line" l="1133" v="1" r="Vec&lt;&amp;Diagnostic&gt;" o="LspManager" self="&amp;self" in_="1" out="1"/>
-<s i="376" m="24" k="f" n="request_fix_all" l="1141" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="3" out="3"/>
-<s i="377" m="24" k="f" n="request_organize_imports" l="1165" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="2" out="3"/>
-<s i="378" m="24" k="f" n="shutdown" l="1190" v="1" o="LspManager" self="mut self" rd="python,ty_process" wr="python_disabled=" in_="1"/>
-<s i="379" m="24" k="f" n="lsp_pos_to_offset" l="1205" v="1" r="usize" in_="2"/>
-<s i="380" m="24" k="f" n="format_and_highlight_json" l="1231" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="3"/>
-<s i="381" m="25" k="t" n="Config" x="struct:{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }"/>
-<s i="382" m="25" k="f" n="default" l="35" r="Self" o="Config"/>
-<s i="383" m="25" k="f" n="load_recent_files" l="47" v="1" r="Vec&lt;PathBuf&gt;" in_="1"/>
-<s i="384" m="25" k="f" n="save_recent_files" l="63" v="1" in_="2"/>
-<s i="385" m="25" k="f" n="load_open_tabs" l="77" v="1" r="(Vec&lt;Option&lt;PathBuf&gt;&gt;, usize)"/>
-<s i="386" m="25" k="f" n="save_open_tabs" l="104" v="1"/>
-<s i="387" m="25" k="f" n="save_panel_state" l="126" v="1"/>
-<s i="388" m="25" k="f" n="load_panel_state" l="156" v="1" r="crate::app::IdePanelState"/>
-<s i="389" m="25" k="f" n="save_config" l="210" v="1" in_="1"/>
-<s i="390" m="25" k="f" n="load_config" l="235" r="Config" in_="1" out="2"/>
-<s i="391" m="25" k="f" n="get_kde_color" l="308" r="Option&lt;[f32; 4]&gt;" in_="1"/>
-<s i="392" m="25" k="f" n="load_dracula" l="330" r="Theme" in_="1" out="1"/>
-<s i="393" m="25" k="f" n="main" l="349" entry="1" out="10"/>
-<s i="394" m="25" k="f" n="mallopt" l="355" r="i32; } mallopt(-8, 2); } let args: Vec&lt;String&gt; = env::args().collect(); let run_ide_on_startup = args.iter().any(|a| a == &quot;--ide&quot; || a == &quot;ide&quot;); let has_file_arg = args.iter().skip(1).any(|a| *a != &quot;--ide&quot; &amp;&amp; *a != &quot;ide&quot;); let mut initial_text = String::new(); let mut title = &quot;Безымянный&quot;.to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg" in_="1" out="1"/>
-<s i="395" m="26" k="f" n="get_params_query" l="3" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
-<s i="396" m="26" k="f" n="get_injection_query" l="82" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
-<s i="397" m="26" k="f" n="get_folding_query" l="131" v="1" r="Option&lt;&amp;'static str&gt;" in_="3"/>
-<s i="398" m="26" k="f" n="get_ts_config" l="336" v="1" r="Option&lt;(tree_sitter::Language, Vec&lt;&amp;'static str&gt;)&gt;" in_="3"/>
-<s i="399" m="26" k="f" n="test_all_tree_sitter_queries_are_valid" l="930" out="4"/>
-<s i="400" m="27" k="f" n="update_cache" l="6" v="1" o="Renderer" self="&amp;mut self" rd="height,left_padding,line_height,scale_factor,width" wr="last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()" out="3"/>
-<s i="401" m="27" k="f" n="get_cursor_xy" l="213" v="1" r="(f32, f32)" o="Renderer" self="&amp;mut self" rd="baseline_offset,last_scroll_x,left_padding,line_height,scale_factor" in_="9" out="4"/>
-<s i="402" m="27" k="f" n="get_byte_at_xy" l="350" v="1" r="usize" o="Renderer" self="&amp;mut self" rd="last_scroll_x,left_padding,line_height" in_="6" out="3"/>
-<s i="403" m="27" k="f" n="measure_width" l="450" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="1"/>
-<s i="404" m="27" k="f" n="get_max_scroll" l="476" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="line_height" in_="9" out="1"/>
-<s i="405" m="27" k="f" n="flush" l="483" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,program,vbo,width" wr="vertices.clear()" in_="5"/>
-<s i="406" m="27" k="f" n="push_vertical_gradient" l="525" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
-<s i="407" m="27" k="f" n="push_horizontal_gradient" l="573" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
-<s i="408" m="27" k="f" n="draw_string" l="621" v="1" o="Renderer" self="&amp;mut self"/>
-<s i="409" m="27" k="f" n="draw_string_scaled" l="637" v="1" o="Renderer" self="&amp;mut self" in_="1"/>
-<s i="410" m="27" k="f" n="draw_string_mono_scaled" l="660" v="1" o="Renderer" self="&amp;mut self"/>
-<s i="411" m="27" k="f" n="measure_mono_width" l="683" v="1" r="f32" o="Renderer" self="&amp;mut self"/>
-<s i="412" m="27" k="f" n="push_rounded_rect" l="694" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="2"/>
-<s i="413" m="28" k="t" n="DiagChar" x="struct:{ x: f32, y: f32, w: f32, h: f32, byte_offset: usize }"/>
-<s i="414" m="28" k="f" n="diag_popup_byte_at" l="20" v="1" r="usize" in_="2"/>
-<s i="415" m="28" k="f" n="draw_diagnostic_popup" l="58" v="1" o="Renderer" self="&amp;mut self" rd="diag_popup_scroll,gl,height,hovered_diags_cache,scale_factor,theme,width" wr="last_diag_href=,last_diag_popup_rect=,max_diag_popup_scroll=" out="4"/>
-<s i="416" m="29" k="f" n="draw_lsp_servers_panel" l="6" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" out="4"/>
-<s i="417" m="29" k="f" n="draw_lsp_actions_menu" l="785" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1"/>
-<s i="418" m="30" k="f" n="draw_minimap" l="6" v="1" o="Renderer" self="&amp;mut self" rd="line_height,minimap_width,theme,vertices,width" out="2"/>
-<s i="419" m="31" k="f" n="draw_search_panel" l="8" v="1" r="bool" o="Renderer" rd="gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width" wr="last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=" out="4"/>
-<s i="420" m="32" k="f" n="get_faq_max_scroll" l="6" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="scale_factor" in_="2" out="2"/>
-<s i="421" m="32" k="f" n="draw_settings" l="31" v="1" r="u8" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1" out="8"/>
-<s i="422" m="33" k="f" n="draw_sticky_lines" l="7" v="1" r="Vec&lt;(usize, usize)&gt;" o="Renderer" rd="baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width" wr="sticky_scroll_rects.clear(),sticky_scroll_rects.push()" out="2"/>
-<s i="423" m="34" k="f" n="draw_tab_bar" l="6" v="1" r="Option&lt;(std::path::PathBuf, f32, f32)&gt;" o="Renderer" self="&amp;mut self" rd="gl,height,hide_popups_until_mouse_move,theme" wr="max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=" out="3"/>
-<s i="424" m="34" k="f" n="draw_tab_tooltip" l="416" v="1" o="Renderer" self="&amp;mut self" rd="theme,width"/>
-<s i="425" m="35" k="f" n="draw_terminal_panel" l="7" v="1" o="Renderer" self="&amp;mut self" rd="baseline_offset,gl,height,line_height,theme,vertices" out="8"/>
-<s i="426" m="36" k="f" n="build_hover_popup_layout" l="4" v="1" r="crate::app::mouse::HoverLayoutCache" o="Renderer" rd="scale_factor" in_="1"/>
-<s i="427" m="36" k="f" n="draw_hover_popup" l="168" v="1" r="(f32, f32, f32, f32, f32)" o="Renderer" rd="gl,height,line_height,phys_to_visual,scale_factor,theme,width" out="5"/>
-<s i="428" m="37" k="f" n="draw_problems_panel" l="4" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" wr="scratch_buffer=" out="4"/>
-<s i="429" m="38" k="f" n="draw_icon" l="7" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" in_="1"/>
-<s i="430" m="38" k="f" n="draw_atlas_icon" l="19" v="1" o="Renderer" self="&amp;mut self" rd="gl,icons,texture" in_="3"/>
-<s i="431" m="38" k="f" n="draw_file_icon" l="42" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="file_icon_cache.insert()" out="1"/>
-<s i="432" m="38" k="f" n="draw_autocomplete" l="142" v="1" r="(f32, f32, f32, f32)" o="Renderer" rd="gl,height,scale_factor,theme" in_="1" out="1"/>
-<s i="433" m="38" k="f" n="draw_dialog_window" l="371" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="last_mouse_x,last_mouse_y,scale_factor,theme" in_="1" out="4"/>
-<s i="434" m="38" k="f" n="draw_welcome" l="483" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width" wr="gl.clear()" out="5"/>
-<s i="435" m="38" k="f" n="draw_diagnostics_ruler" l="727" v="1" o="Renderer" self="&amp;mut self" rd="minimap_width,phys_to_visual,scale_factor,theme,width" out="1"/>
-<s i="436" m="38" k="f" n="draw_empty_ide" l="792" v="1" o="Renderer" self="&amp;mut self" rd="height,scale_factor,theme,width" wr="empty_ide_art_idx=,was_empty_ide="/>
-<s i="437" m="39" k="t" n="ModInterval" x="struct:{ top: f32, bottom: f32, state: crate::editor::LineModState }"/>
-<s i="438" m="39" k="t" n="Telemetry" x="struct:{ render_time: f32, render_count: u32, scroll_time: f32, scroll_count: u32, type_time: f32, type_count: u32, last_print: Instant }"/>
-<s i="439" m="39" k="f" n="default" l="36" r="Self" o="Telemetry"/>
-<s i="440" m="39" k="f" n="draw" l="59" v="1" r="(bool, Vec&lt;(usize, usize)&gt;)" o="Renderer" rd="baseline_offset,diag_popup_scroll,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,program,scale_factor,texture,+4" wr="diag_hover_timer=,diag_hover_timer_idx=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),hide_popups_until_mouse_move=,hovered_diags_cache.clear(),hovered_diags_cache.push(),identical_words_cache.clear(),identical_words_cache.push(),+20" in_="1" out="25"/>
-<s i="441" m="40" k="t" n="FontData" x="struct:{ source: FontSource, index: u32 }"/>
-<s i="442" m="40" k="t" n="FontSource" x="enum:{ Static(&amp;'static [u8]), LoadedMmap(std::sync::Arc&lt;memmap2::Mmap&gt;), LoadedVec(std::sync::Arc&lt;Vec&lt;u8&gt;&gt;), Lazy( std::path::PathBuf, std::rc::Rc&lt;std::cell::RefCell&lt;Option&lt;Result&lt;std::sync::Arc&lt;memmap2::Mmap&gt;, ()&gt;&gt;&gt;&gt;, ) }"/>
-<s i="443" m="40" k="t" n="GlyphInfo" x="struct:{ u: f32, v: f32, uw: f32, vh: f32, width: f32, height: f32, offset_x: f32, offset_y: f32, +2 }"/>
-<s i="444" m="40" k="t" n="Renderer" x="struct:{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, +84 }"/>
-<s i="445" m="40" k="t" n="Theme" x="struct:{ bg: [f32; 4], fg: [f32; 4], sel: [f32; 4], minimap_bg: [f32; 4], line_num: [f32; 4], minimap_cursor: [f32; 4], modified_unsaved: [f32; 4], modified_saved: [f32; 4], +3 }"/>
-<s i="446" m="40" k="t" n="Vertex" x="struct:{ pos: [f32; 2], uv: [f32; 2], color: [f32; 4], mode: f32, sdf_params: [f32; 3] }"/>
-<s i="447" m="40" k="t" n="VisualLine" x="struct:{ byte_idx: usize, physical_line: usize, is_soft_wrap: bool, whitespace_px_width: f32, text_px_width: f32, y_offset: f32, is_folded: bool, fold_suffix: [char; 4], +1 }"/>
-<s i="448" m="40" k="f" n="new_lazy" l="84" v="1" r="Self" o="FontData"/>
-<s i="449" m="40" k="f" n="new_static" l="94" v="1" r="Self" o="FontData"/>
-<s i="450" m="40" k="f" n="ensure_loaded" l="101" v="1" o="FontData" self="&amp;mut self" wr="source=" in_="2"/>
-<s i="451" m="40" k="f" n="data_slice" l="128" v="1" r="&amp;[u8]" o="FontData" self="&amp;self" rd="source" in_="2"/>
-<s i="452" m="40" k="f" n="new" l="225" v="1" r="Self" o="Renderer" in_="2" out="2"/>
-<s i="453" m="40" k="f" n="get_custom_svg_glyph" l="547" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="atlas_y,font_size,gl,texture" wr="atlas_x=,max_row_h=" in_="2"/>
-<s i="454" m="40" k="f" n="get_glyph" l="614" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,fonts,gl,texture" wr="atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()" in_="2" out="4"/>
-<s i="455" m="40" k="f" n="get_ui_glyph" l="787" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,gl,texture,ui_fonts" wr="atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()" in_="5" out="4"/>
-<s i="456" m="40" k="f" n="resize" l="959" v="1" o="Renderer" self="&amp;mut self" rd="gl" wr="height=,width=" in_="9"/>
-<s i="457" m="40" k="f" n="measure_ui_width" l="969" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="5" out="1"/>
-<s i="458" m="40" k="f" n="char_advance" l="982" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="ascii_advances" in_="4" out="1"/>
-<s i="459" m="40" k="f" n="push_quad" l="999" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="1"/>
-<s i="460" m="40" k="f" n="load_builtin_icons" l="1051" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="icons.insert()" in_="1"/>
-<s i="461" m="40" k="f" n="push_squiggle" l="1234" v="1" o="Renderer" self="&amp;mut self" rd="scale_factor,vertices"/>
-<s i="462" m="40" k="f" n="push_rect" l="1287" v="1" o="Renderer" self="&amp;mut self" in_="1" out="1"/>
-<s i="463" m="40" k="f" n="push_rounded_rect_gradient" l="1291" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
-<s i="464" m="41" k="t" n="ScrollState" x="struct:{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }"/>
-<s i="465" m="41" k="f" n="new" l="12" v="1" r="Self" o="ScrollState" in_="2"/>
-<s i="466" m="41" k="f" n="update" l="23" v="1" r="bool" o="ScrollState" self="&amp;mut self" rd="anim_speed,target" wr="current=,velocity=" in_="1"/>
-<s i="467" m="41" k="f" n="clamp_target" l="48" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="7"/>
-<s i="468" m="41" k="f" n="clamp_current" l="52" v="1" o="ScrollState" self="&amp;mut self" wr="current=" in_="3"/>
-<s i="469" m="41" k="f" n="scroll_by" l="56" v="1" o="ScrollState" self="&amp;mut self" rd="target" in_="2"/>
-<s i="470" m="41" k="f" n="set_target" l="60" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="1"/>
-<s i="471" m="41" k="f" n="stop_anim" l="64" v="1" o="ScrollState" self="&amp;mut self" wr="current=,target=,velocity=" in_="2"/>
-<s i="472" m="42" k="t" n="UiElement" x="enum:{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }"/>
-<s i="473" m="42" k="t" n="UiId" x="enum:{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), +56 }"/>
-<s i="474" m="42" k="t" n="UiRegistry" x="struct:{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }"/>
-<s i="475" m="42" k="f" n="contains" l="131" v="1" r="bool" o="UiElement" self="&amp;self" in_="64"/>
-<s i="476" m="42" k="f" n="id" l="158" v="1" r="UiId" o="UiElement" self="&amp;self" in_="3"/>
-<s i="477" m="42" k="f" n="new" l="182" v="1" r="Self" o="UiRegistry" in_="2"/>
-<s i="478" m="42" k="f" n="clear" l="193" v="1" o="UiRegistry" self="&amp;mut self" wr="elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text="/>
-<s i="479" m="42" k="f" n="mark_overlay_start" l="203" v="1" o="UiRegistry" self="&amp;mut self" rd="elements" wr="overlay_mark=" in_="1"/>
-<s i="480" m="42" k="f" n="find_overlay_at" l="209" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements,overlay_mark" in_="1" out="2"/>
-<s i="481" m="42" k="f" n="register_button" l="218" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="2" out="1"/>
-<s i="482" m="42" k="f" n="register_icon_button" l="246" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="3" out="1"/>
-<s i="483" m="42" k="f" n="register_text_input" l="275" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_text=" in_="4"/>
-<s i="484" m="42" k="f" n="register_blocker" l="298" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push()" in_="5"/>
-<s i="485" m="42" k="f" n="register_rect" l="315" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="10"/>
-<s i="486" m="42" k="f" n="find_at" l="337" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements" in_="1" out="2"/>
-<s i="487" m="42" k="f" n="hovered" l="347" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="hovered" in_="3"/>
-<s i="488" m="42" k="f" n="reset_cursor_state" l="354" v="1" o="UiRegistry" self="&amp;mut self" wr="wants_pointer=,wants_text=" in_="4"/>
-<s i="489" m="42" k="f" n="wants_pointer" l="360" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_pointer" in_="5"/>
-<s i="490" m="42" k="f" n="wants_text" l="365" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_text" in_="2"/>
-<s i="491" m="42" k="f" n="cursor_code" l="370" v="1" r="u8" o="UiRegistry" self="&amp;self" rd="wants_pointer,wants_text"/>
-<s i="492" m="43" k="t" n="Button" x="struct:{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }"/>
-<s i="493" m="43" k="t" n="IconButton" x="struct:{ x: f32, y: f32, size: f32, icon: Option&lt;IconType&gt;, is_active: bool, icon_size: Option&lt;f32&gt;, active_square_width: Option&lt;f32&gt;, custom_color: Option&lt;[f32; 4]&gt; }"/>
-<s i="494" m="43" k="t" n="IconType" x="enum:{ Save, Discard, Cancel, Warning, CaseMatch, Up, Down, Close, +7 }"/>
-<s i="495" m="43" k="f" n="is_hovered" l="34" v="1" r="bool" o="Button" self="&amp;self" rd="h,w,x,y"/>
-<s i="496" m="43" k="f" n="render" l="38" v="1" r="bool" o="Button" self="&amp;self" rd="h,icon,icon_size,text,text_scale,w,x,y" out="4"/>
-<s i="497" m="43" k="f" n="is_hovered" l="119" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,size,x,y" in_="2"/>
-<s i="498" m="43" k="f" n="render" l="128" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,custom_color,icon,icon_size,is_active,size,x,y" in_="6" out="4"/>
-<s i="499" m="43" k="f" n="get_welcome_buttons" l="220" v="1" r="(Button, Button, Button)" in_="1" out="1"/>
-<s i="500" m="43" k="f" n="get_dialog_buttons" l="273" v="1" r="(Button, Button, Button)" in_="2" out="1"/>
+<s i="70" m="12" k="f" n="hover_visibility_linter_error_only" l="88" out="1"/>
+<s i="71" m="12" k="f" n="hover_visibility_type_only" l="102" out="1"/>
+<s i="72" m="12" k="f" n="hover_visibility_combined" l="116" out="1"/>
+<s i="73" m="12" k="f" n="hover_visibility_during_transition" l="130" out="1"/>
+<s i="74" m="12" k="f" n="hover_byte_includes_identifier_edges_next_to_whitespace" l="145" out="3"/>
+<s i="75" m="12" k="f" n="hover_byte_ignores_python_keywords_so_diagnostics_can_show" l="161" out="3"/>
+<s i="76" m="12" k="f" n="diagnostic_hover_range_expands_to_whole_f_string_literal" l="172" out="5"/>
+<s i="77" m="12" k="f" n="diagnostic_hover_range_does_not_create_type_target_for_keyword" l="197" out="2"/>
+<s i="78" m="12" k="f" n="hover_bridge_reaches_full_source_line_when_popup_is_above" l="205" out="1"/>
+<s i="79" m="12" k="f" n="hover_bridge_handles_popup_shifted_away_from_anchor" l="224" out="1"/>
+<s i="80" m="12" k="f" n="hover_bridge_keeps_popup_when_moving_up_from_token_anchor" l="243" out="1"/>
+<s i="81" m="12" k="f" n="hover_bridge_does_not_capture_next_line_when_popup_is_above" l="262" out="1"/>
+<s i="82" m="12" k="f" n="hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways" l="281" out="1"/>
+<s i="83" m="12" k="f" n="compute_hover_visibility" l="306" v="1" r="(bool, bool, bool)" in_="5"/>
+<s i="84" m="12" k="f" n="clear_hover_popup" l="331" v="1" r="bool" in_="5"/>
+<s i="85" m="12" k="f" n="is_hover_target_byte" l="364" r="bool" in_="3" out="1"/>
+<s i="86" m="12" k="f" n="is_python_hover_keyword" l="372" r="bool"/>
+<s i="87" m="12" k="f" n="hover_token_text" l="413" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="88" m="12" k="f" n="diagnostic_hover_byte_range_on_line" l="419" v="1" r="Option&lt;(usize, usize, usize)&gt;" in_="3" out="4"/>
+<s i="89" m="12" k="f" n="diagnostic_hover_range_on_line" l="533" v="1" r="Option&lt;(u32, u32, usize)&gt;" in_="2" out="2"/>
+<s i="90" m="12" k="f" n="normalize_hover_byte" l="568" v="1" r="Option&lt;usize&gt;" in_="5" out="2"/>
+<s i="91" m="12" k="f" n="hover_token_bounds" l="592" r="(usize, usize)" in_="3" out="2"/>
+<s i="92" m="12" k="f" n="hover_anchor_for_byte" l="668" v="1" r="(f32, f32)" in_="1" out="4"/>
+<s i="93" m="12" k="f" n="is_in_hover_popup_or_bridge" l="729" v="1" r="bool" in_="7"/>
+<s i="94" m="12" k="f" n="hover_popup_byte_at" l="791" r="usize" in_="2" out="2"/>
+<s i="95" m="13" k="t" n="Cell" x="struct:{ c: char, fg: u8, bg: u8 }"/>
+<s i="96" m="13" k="t" n="TermGrid" x="struct:{ scrollback: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, lines: std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;, alt_lines: Option&lt;std::collections::VecDeque&lt;Vec&lt;Cell&gt;&gt;&gt;, alt_saved_cursor: Option&lt;(usize, usize)&gt;, is_alt: bool, cols: usize, visible_rows: usize, +19 }"/>
+<s i="97" m="13" k="t" n="Terminal" x="struct:{ grid: Arc&lt;Mutex&lt;TermGrid&gt;&gt;, writer: Arc&lt;Mutex&lt;Box&lt;dyn Write + Send&gt;&gt;&gt;, master_pty: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::MasterPty + Send&gt;&gt;&gt;, child: Arc&lt;Mutex&lt;Box&lt;dyn portable_pty::Child + Send + Sync&gt;&gt;&gt;, scroll_y: crate::scroll::ScrollState, title: String }"/>
+<s i="98" m="13" k="f" n="default" l="14" r="Self" o="Cell"/>
+<s i="99" m="13" k="f" n="new" l="48" v="1" r="Self" o="TermGrid" in_="2"/>
+<s i="100" m="13" k="f" n="resize" l="78" v="1" o="TermGrid" self="&amp;mut self" rd="alt_lines,alt_saved_cursor,is_alt,saved_cursor" wr="cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=" in_="9"/>
+<s i="101" m="13" k="f" n="put_char" l="207" v="1" o="TermGrid" self="&amp;mut self" rd="cols,cur_bg,cur_fg,lines,visible_rows" wr="cur_x=,cur_y=" in_="2" out="1"/>
+<s i="102" m="13" k="f" n="newline" l="227" v="1" o="TermGrid" self="&amp;mut self" rd="scroll_region,visible_rows" wr="cur_y=" in_="2" out="1"/>
+<s i="103" m="13" k="f" n="scroll_region_up" l="238" v="1" o="TermGrid" self="&amp;mut self" rd="cols,is_alt,scroll_region,visible_rows" wr="dirty=,lines.insert(),pool.push(),scrollback.push_back()" in_="2" out="2"/>
+<s i="104" m="13" k="f" n="scroll_region_down" l="281" v="1" o="TermGrid" self="&amp;mut self" rd="cols,scroll_region" wr="dirty=,lines.insert(),lines.remove(),pool.push()" in_="1" out="2"/>
+<s i="105" m="13" k="f" n="get_selection_text" l="303" v="1" r="String" o="TermGrid" self="&amp;self" rd="cols,lines,scrollback,selection"/>
+<s i="106" m="13" k="f" n="print" l="357" o="TermGrid" self="&amp;mut self" out="1"/>
+<s i="107" m="13" k="f" n="execute" l="360" o="TermGrid" self="&amp;mut self" wr="cur_x=" out="2"/>
+<s i="108" m="13" k="f" n="hook" l="374" o="TermGrid" self="&amp;mut self"/>
+<s i="109" m="13" k="f" n="put" l="375" o="TermGrid" self="&amp;mut self"/>
+<s i="110" m="13" k="f" n="unhook" l="376" o="TermGrid" self="&amp;mut self"/>
+<s i="111" m="13" k="f" n="osc_dispatch" l="377" o="TermGrid" self="&amp;mut self" rd="reply_tx"/>
+<s i="112" m="13" k="f" n="esc_dispatch" l="388" o="TermGrid" self="&amp;mut self" wr="cur_x=,cur_y=,saved_cursor="/>
+<s i="113" m="13" k="f" n="csi_dispatch" l="400" o="TermGrid" self="&amp;mut self" rd="cols,reply_tx,visible_rows" wr="alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6" out="5"/>
+<s i="114" m="13" k="f" n="spawn" l="753" v="1" r="Self" o="Terminal" in_="4" out="1"/>
+<s i="115" m="13" k="f" n="resize_pty" l="858" v="1" o="Terminal" self="&amp;self" rd="master_pty" in_="1" out="2"/>
+<s i="116" m="14" k="f" n="handle_ui_click" l="9" v="1" o="App" self="&amp;mut self" rd="clipboard,file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,+2" wr="base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12" out="23"/>
+<s i="117" m="15" k="t" n="App" x="struct:{ pending_key_log: Option&lt;KeyLog&gt;, gl_config: Option&lt;glutin::config::Config&gt;, gl_context: Option&lt;PossiblyCurrentContext&gt;, gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_window: Option&lt;std::sync::Arc&lt;Window&gt;&gt;, dialog_gl_surface: Option&lt;Surface&lt;WindowSurface&gt;&gt;, settings_scroll: crate::scroll::ScrollState, +87 }"/>
+<s i="118" m="15" k="t" n="EditorTab" x="struct:{ editor: crate::editor::Editor, file_path: Option&lt;PathBuf&gt;, base_title: String, file_extension: String, scroll_y: crate::scroll::ScrollState, scroll_x: crate::scroll::ScrollState, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, completions: Vec&lt;crate::highlighter::CompletionItem&gt;, +12 }"/>
+<s i="119" m="15" k="t" n="IdePanelState" x="struct:{ slots: Vec&lt;PanelSlot&gt;, left_width: f32, bottom_height: f32, drag: Option&lt;PanelDragState&gt;, is_resizing_left: bool, is_resizing_bottom: bool, file_tree_nodes: Vec&lt;crate::app::file_tree::FileNode&gt;, file_tree_expanded: FxHashSet&lt;std::path::PathBuf&gt;, +33 }"/>
+<s i="120" m="15" k="t" n="KeyLog" x="struct:{ key: String, t0: std::time::Instant, t_highlight: Option&lt;std::time::Instant&gt;, t_render: Option&lt;std::time::Instant&gt; }"/>
+<s i="121" m="15" k="t" n="LspActionItem" x="enum:{ CodeAction(crate::lsp::CodeAction), AddNoqa { codes: Vec&lt;String&gt; }"/>
+<s i="122" m="15" k="t" n="LspActionsMenu" x="struct:{ cursor_line: u32, items: Vec&lt;LspActionItem&gt;, selected: usize, menu_x: f32, menu_y: f32, pending_request_id: Option&lt;i32&gt; }"/>
+<s i="123" m="15" k="t" n="PanelDragState" x="struct:{ panel_id: PanelId, start_y: f32, current_y: f32, threshold_passed: bool }"/>
+<s i="124" m="15" k="t" n="PanelGroup" x="enum:{ Top, Bottom }"/>
+<s i="125" m="15" k="t" n="PanelId" x="enum:{ Explorer, Terminal, Problems, LspServers }"/>
+<s i="126" m="15" k="t" n="PanelSlot" x="struct:{ id: PanelId, group: PanelGroup, open: bool }"/>
+<s i="127" m="15" k="t" n="PendingAction" x="enum:{ Quit, OpenFile, CloseFile }"/>
+<s i="128" m="15" k="t" n="TabDragState" x="struct:{ start_idx: usize, start_x: f32, current_x: f32, threshold_passed: bool }"/>
+<s i="129" m="15" k="f" n="label" l="59" v="1" r="&amp;'static str" o="PanelId" self="self" in_="1"/>
+<s i="130" m="15" k="f" n="icon" l="67" v="1" r="crate::widgets::IconType" o="PanelId" self="self" in_="1"/>
+<s i="131" m="15" k="f" n="default" l="173" r="Self" o="IdePanelState"/>
+<s i="132" m="15" k="f" n="any_top_open" l="235" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="1"/>
+<s i="133" m="15" k="f" n="any_bottom_open" l="240" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="6"/>
+<s i="134" m="15" k="f" n="toggle" l="245" v="1" o="IdePanelState" self="&amp;mut self" rd="slots" in_="2"/>
+<s i="135" m="15" k="f" n="is_open" l="250" v="1" r="bool" o="IdePanelState" self="&amp;self" rd="slots" in_="10"/>
+<s i="136" m="15" k="f" n="fuzzy_match" l="260" r="Option&lt;Vec&lt;usize&gt;&gt;" in_="1"/>
+<s i="137" m="15" k="f" n="enter_ide_mode" l="408" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter,ide_workspaces,window" wr="active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()" in_="1" out="10"/>
+<s i="138" m="15" k="f" n="save_tabs_state" l="513" v="1" o="App" self="&amp;mut self" rd="active_tab,is_ide_mode,tabs" in_="6" out="1"/>
+<s i="139" m="15" k="f" n="sync_active_tab" l="522" v="1" o="App" self="&amp;mut self" rd="active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1" in_="5" out="1"/>
+<s i="140" m="15" k="f" n="switch_to_tab" l="569" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window" wr="active_tab=,autocomplete_active=,show_welcome=" in_="2" out="6"/>
+<s i="141" m="15" k="f" n="open_new_tab" l="624" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,window" wr="active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()" in_="2" out="4"/>
+<s i="142" m="15" k="f" n="close_tab_at" l="715" v="1" o="App" self="&amp;mut self" rd="base_title,editor,file_path,is_ide_mode,window" wr="active_tab=,autocomplete_active=,show_welcome=,tabs.remove()" in_="1" out="4"/>
+<s i="143" m="15" k="f" n="open_file_in_tab" l="749" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
+<s i="144" m="15" k="f" n="open_file_in_tab_bg" l="753" v="1" o="App" self="&amp;mut self" in_="1" out="1"/>
+<s i="145" m="15" k="f" n="open_file_in_tab_internal" l="757" v="1" o="App" self="&amp;mut self" rd="active_tab,editor,file_path,is_ide_mode,tabs" in_="2" out="4"/>
+<s i="146" m="15" k="f" n="ensure_cursor_visible" l="793" v="1" o="App" out="2"/>
+<s i="147" m="15" k="f" n="get_current_word_prefix" l="832" v="1" r="String" o="App" self="&amp;self" rd="editor" in_="2" out="1"/>
+<s i="148" m="15" k="f" n="update_autocomplete" l="852" v="1" o="App" self="&amp;mut self" rd="autocomplete_scroll,editor,highlighter" wr="autocomplete_active=,autocomplete_anim_progress=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=" in_="1" out="2"/>
+<s i="149" m="15" k="f" n="ensure_autocomplete_visible" l="931" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,autocomplete_selected_idx" out="2"/>
+<s i="150" m="15" k="f" n="apply_autocomplete" l="961" v="1" o="App" self="&amp;mut self" rd="autocomplete_options,autocomplete_scroll,base_title,editor,highlighter,window" wr="autocomplete_active=,autocomplete_selected_idx=" out="6"/>
+<s i="151" m="15" k="f" n="update_terminal_search" l="995" v="1" o="App" self="&amp;mut self" rd="ide_panel" out="2"/>
+<s i="152" m="15" k="f" n="jump_to_terminal_search_result" l="1040" v="1" o="App" self="&amp;mut self" rd="ide_panel,renderer"/>
+<s i="153" m="15" k="f" n="update_search" l="1076" v="1" o="App" self="&amp;mut self" rd="editor,search_case_sensitive,search_editor" wr="search_current_idx=,search_results.clear(),search_results.push()" out="2"/>
+<s i="154" m="15" k="f" n="jump_to_search_result" l="1132" v="1" o="App" self="&amp;mut self" rd="editor,renderer,scroll_y,search_current_idx,search_results,window" out="2"/>
+<s i="155" m="15" k="f" n="update_window_title" l="1158" v="1" o="App"/>
+<s i="156" m="15" k="f" n="show_action_dialog" l="1167" v="1" o="App" self="&amp;mut self" rd="gl_config,scroll_x,scroll_y" wr="dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=" out="7"/>
+<s i="157" m="15" k="f" n="close_dialog" l="1209" v="1" o="App" self="&amp;mut self" rd="window" wr="dialog_gl_surface=,dialog_window="/>
+<s i="158" m="15" k="f" n="close_current_file" l="1217" v="1" o="App" self="&amp;mut self" rd="active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()" in_="2" out="5"/>
+<s i="159" m="15" k="f" n="trigger_file_picker" l="1263" v="1" o="App" self="&amp;mut self" wr="open_file_rx="/>
+<s i="160" m="15" k="f" n="trigger_folder_picker" l="1272" v="1" o="App" self="&amp;mut self" wr="open_folder_rx="/>
+<s i="161" m="15" k="f" n="trigger_save_as_picker" l="1283" v="1" o="App" self="&amp;mut self" wr="save_file_rx=" in_="1"/>
+<s i="162" m="15" k="f" n="save_current_file" l="1295" v="1" r="bool" o="App" self="&amp;mut self" rd="editor,file_path" in_="1" out="5"/>
+<s i="163" m="15" k="f" n="add_recent_file" l="1334" v="1" o="App" self="&amp;mut self" wr="recent_files.insert(),recent_files.retain(),recent_files.truncate()" in_="2"/>
+<s i="164" m="15" k="f" n="apply_highlight_results" l="1343" v="1" o="App" self="&amp;mut self" rd="editor,file_extension,highlighter" wr="is_highlighted_once=" in_="3"/>
+<s i="165" m="15" k="f" n="load_file_internal" l="1378" v="1" o="App" self="&amp;mut self" rd="highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window" wr="autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=" in_="1" out="10"/>
+<s i="166" m="15" k="f" n="check_external_changes" l="1464" v="1" o="App" self="&amp;mut self" rd="tabs,window" in_="1" out="6"/>
+<s i="167" m="16" k="t" n="EditOp" x="enum:{ Insert { offset: usize, text: String }"/>
+<s i="168" m="16" k="t" n="Editor" x="struct:{ data: Vec&lt;u8&gt;, gap_start: usize, gap_end: usize, cursor: usize, selection_anchor: Option&lt;usize&gt;, version: u64, line_offsets: Vec&lt;usize&gt;, longest_line_idx: usize, +19 }"/>
+<s i="169" m="16" k="t" n="HashSource" x="struct:(&amp;'a [u64])"/>
+<s i="170" m="16" k="t" n="HistoryStep" x="struct:{ op: EditOp, cursor_before: usize, cursor_after: usize }"/>
+<s i="171" m="16" k="t" n="LineModState" x="enum:{ ModifiedUnsaved, ModifiedSaved }"/>
+<s i="172" m="16" k="t" n="UndoRedoDelta" x="enum:{ Insert(usize, usize, String), Delete(usize, usize), Replace(usize, usize, String, +1 }"/>
+<s i="173" m="16" k="f" n="tokenize" l="16" r="Self::Tokenizer" self="&amp;self" rd="0"/>
+<s i="174" m="16" k="f" n="estimate_tokens" l="20" r="u32" self="&amp;self" rd="0"/>
+<s i="175" m="16" k="f" n="get_diff_info" l="25" r="(Vec&lt;bool&gt;, Vec&lt;bool&gt;)" in_="1"/>
+<s i="176" m="16" k="f" n="is_delimiter" l="45" r="bool" in_="3"/>
+<s i="177" m="16" k="f" n="char_class" l="52" r="u8" in_="3"/>
+<s i="178" m="16" k="f" n="new" l="130" v="1" r="Self" o="Editor" in_="2"/>
+<s i="179" m="16" k="f" n="shift_folds_insert" l="159" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="3"/>
+<s i="180" m="16" k="f" n="shift_folds_delete" l="182" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="folded_start_bytes=" in_="6"/>
+<s i="181" m="16" k="f" n="rebuild_line_offsets" l="211" v="1" o="Editor" self="&amp;mut self" rd="foldable_ranges_bytes" wr="foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=" in_="2" out="1"/>
+<s i="182" m="16" k="f" n="get_line_hashes" l="281" r="Vec&lt;u64&gt;" o="Editor" self="&amp;self" in_="3" out="1"/>
+<s i="183" m="16" k="f" n="ensure_indent_cache_updated" l="304" v="1" o="Editor" self="&amp;mut self" rd="version" wr="indent_cache.clear(),last_indent_version=" in_="1" out="3"/>
+<s i="184" m="16" k="f" n="get_cached_indent_levels" l="376" v="1" r="&amp;[u8]" o="Editor" self="&amp;self" rd="indent_cache" in_="1"/>
+<s i="185" m="16" k="f" n="backspace" l="380" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,gap_start,version" wr="cursor=,selection_anchor=,sync_edits.push()" in_="5" out="5"/>
+<s i="186" m="16" k="f" n="set_original_text" l="453" v="1" o="Editor" self="&amp;mut self" wr="original_hashes=,saved_hashes=" in_="6" out="2"/>
+<s i="187" m="16" k="f" n="mark_saved" l="459" v="1" o="Editor" self="&amp;mut self" wr="saved_hashes=" in_="1" out="2"/>
+<s i="188" m="16" k="f" n="is_dirty" l="464" v="1" r="bool" o="Editor" self="&amp;self" rd="is_dirty" in_="14"/>
+<s i="189" m="16" k="f" n="get_line_modification_state" l="468" v="1" r="Option&lt;LineModState&gt;" o="Editor" self="&amp;self" rd="line_states" in_="1"/>
+<s i="190" m="16" k="f" n="update_modifications" l="472" v="1" o="Editor" self="&amp;mut self" rd="original_hashes,saved_hashes" wr="deleted_gaps=,is_dirty=,line_states=" in_="10" out="3"/>
+<s i="191" m="16" k="f" n="clear_history" l="543" v="1" o="Editor" self="&amp;mut self" wr="history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()" in_="3" out="1"/>
+<s i="192" m="16" k="f" n="push_history" l="551" o="Editor" self="&amp;mut self" rd="history_size,is_working_history" wr="history.push_back(),redo_stack.clear()" in_="5" out="1"/>
+<s i="193" m="16" k="f" n="undo" l="635" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
+<s i="194" m="16" k="f" n="redo" l="693" v="1" r="Option&lt;UndoRedoDelta&gt;" o="Editor" self="&amp;mut self" rd="gap_end,version" wr="cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()" in_="1" out="5"/>
+<s i="195" m="16" k="f" n="text_parts" l="751" v="1" r="(&amp;str, &amp;str)" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
+<s i="196" m="16" k="f" n="get_full_text" l="759" v="1" r="String" o="Editor" self="&amp;self" in_="35" out="1"/>
+<s i="197" m="16" k="f" n="move_gap" l="767" o="Editor" self="&amp;mut self" rd="data,gap_end,gap_start" in_="7"/>
+<s i="198" m="16" k="f" n="insert_str_internal" l="786" r="usize" o="Editor" self="&amp;mut self" rd="cursor,gap_start" wr="data=,gap_end=,sync_edits.push()" in_="4" out="2"/>
+<s i="199" m="16" k="f" n="replace_range" l="810" v="1" r="(usize, usize, String)" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="4" out="5"/>
+<s i="200" m="16" k="f" n="insert_str" l="857" v="1" r="(Option&lt;(usize, usize)&gt;, usize)" o="Editor" self="&amp;mut self" rd="cursor,version" wr="selection_anchor=" in_="21" out="4"/>
+<s i="201" m="16" k="f" n="delete_selection" l="884" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="gap_end,sync_edits,version" wr="cursor=,selection_anchor=" in_="9" out="4"/>
+<s i="202" m="16" k="f" n="delete_forward" l="922" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor,gap_end,version" wr="sync_edits.push()" in_="4" out="5"/>
+<s i="203" m="16" k="f" n="delete_word_backward" l="958" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="2" out="2"/>
+<s i="204" m="16" k="f" n="delete_word_forward" l="991" v="1" r="Option&lt;(usize, usize)&gt;" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="2" out="2"/>
+<s i="205" m="16" k="f" n="get_auto_indent" l="1025" v="1" r="String" o="Editor" self="&amp;self" rd="cursor" in_="1"/>
+<s i="206" m="17" k="f" n="select_expand" l="4" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" out="3"/>
+<s i="207" m="17" k="f" n="select_word" l="130" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="3"/>
+<s i="208" m="17" k="f" n="select_line" l="147" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="1" out="2"/>
+<s i="209" m="17" k="f" n="is_char_boundary" l="162" v="1" r="bool" o="Editor" in_="6" out="2"/>
+<s i="210" m="17" k="f" n="byte_at" l="170" v="1" r="u8" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="19"/>
+<s i="211" m="17" k="f" n="len" l="178" v="1" r="usize" o="Editor" self="&amp;self" rd="data,gap_end,gap_start" in_="12"/>
+<s i="212" m="17" k="f" n="utf16_col_to_byte_advance" l="186" v="1" o="Editor" self="&amp;self" rd="line_offsets" in_="4" out="2"/>
+<s i="213" m="17" k="f" n="get_selection" l="223" v="1" r="Option&lt;String&gt;" o="Editor" self="&amp;self" rd="cursor,selection_anchor" in_="4" out="1"/>
+<s i="214" m="17" k="f" n="get_visible_lines_count" l="237" v="1" r="usize" o="Editor" self="&amp;self" rd="foldable_lines,folded_lines,line_offsets" in_="1" out="1"/>
+<s i="215" m="17" k="f" n="select_all" l="257" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="5" out="1"/>
+<s i="216" m="17" k="f" n="handle_selection" l="262" o="Editor" self="&amp;mut self" rd="cursor" wr="selection_anchor=" in_="12"/>
+<s i="217" m="17" k="f" n="snap_cursor_out_of_fold" l="271" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="3"/>
+<s i="218" m="17" k="f" n="move_left" l="311" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="3"/>
+<s i="219" m="17" k="f" n="move_right" l="324" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
+<s i="220" m="17" k="f" n="move_word_left" l="337" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="4"/>
+<s i="221" m="17" k="f" n="move_word_right" l="360" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="4" out="5"/>
+<s i="222" m="17" k="f" n="move_home" l="383" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="4" out="4"/>
+<s i="223" m="17" k="f" n="move_end" l="423" v="1" o="Editor" self="&amp;mut self" rd="foldable_lines,folded_lines,line_offsets" wr="cursor=" in_="5" out="4"/>
+<s i="224" m="17" k="f" n="move_start_of_file" l="463" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="1"/>
+<s i="225" m="17" k="f" n="move_end_of_file" l="468" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="2"/>
+<s i="226" m="17" k="f" n="move_up" l="473" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="227" m="17" k="f" n="move_down" l="479" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="228" m="17" k="f" n="set_cursor_at_pos" l="485" v="1" o="Editor" self="&amp;mut self" wr="cursor=,selection_anchor=" in_="3" out="1"/>
+<s i="229" m="17" k="f" n="move_page_up" l="500" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="230" m="17" k="f" n="move_page_down" l="506" v="1" o="Editor" self="&amp;mut self" wr="cursor=" in_="1" out="3"/>
+<s i="231" m="18" k="t" n="ColorSpan" x="struct:{ start: usize, end: usize, color: [f32; 4] }"/>
+<s i="232" m="18" k="t" n="CompletionItem" x="struct:{ word: String, kind: SymbolKind, scope_start: usize, scope_end: usize }"/>
+<s i="233" m="18" k="t" n="Highlighter" x="struct:{ tx: Sender&lt;HighlighterMessage&gt;, rx: Receiver&lt;( u64, Vec&lt;ColorSpan&gt;, Vec&lt;CompletionItem&gt;, Vec&lt;(usize, usize, bool, bool)&gt;, +12 }"/>
+<s i="234" m="18" k="t" n="HighlighterMessage" x="enum:{ Reset { version: u64, text: String, ext: String }"/>
+<s i="235" m="18" k="t" n="Scope" x="struct:{ start: usize, end: usize, params: HashSet&lt;String&gt; }"/>
+<s i="236" m="18" k="t" n="SymbolKind" x="enum:{ Variable, Function, Class, Parameter, Keyword, Unknown }"/>
+<s i="237" m="18" k="t" n="SyncEdit" x="enum:{ Insert { offset: usize, text: String }"/>
+<s i="238" m="18" k="f" n="get_point" l="93" r="tree_sitter::Point" in_="1"/>
+<s i="239" m="18" k="f" n="resolve_color" l="106" r="[f32; 4]" in_="1" out="1"/>
+<s i="240" m="18" k="f" n="new" l="187" v="1" r="Self" o="Highlighter" in_="2" out="11"/>
+<s i="241" m="19" k="f" n="reset" l="4" v="1" o="Highlighter" self="&amp;self" in_="8"/>
+<s i="242" m="19" k="f" n="apply_edits" l="10" v="1" o="Highlighter" self="&amp;self" rd="tx" in_="3"/>
+<s i="243" m="19" k="f" n="poll" l="27" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="3"/>
+<s i="244" m="19" k="f" n="wait_for_first_result" l="48" v="1" r="bool" o="Highlighter" self="&amp;mut self" rd="rx" wr="completions=,current_version=,foldable_ranges=,spans=,syntax_errors=" in_="2" out="1"/>
+<s i="245" m="19" k="f" n="shift_insert" l="77" v="1" o="Highlighter" self="&amp;mut self" wr="spans.extend(),spans.push(),spans.retain(),spans=" in_="4"/>
+<s i="246" m="19" k="f" n="shift_delete" l="174" v="1" o="Highlighter" self="&amp;mut self" wr="spans.retain()" in_="4"/>
+<s i="247" m="19" k="f" n="get_bracket_color" l="191" v="1" r="[f32; 4]" in_="1"/>
+<s i="248" m="19" k="f" n="flatten_spans" l="205" v="1" r="Vec&lt;ColorSpan&gt;" in_="1" out="3"/>
+<s i="249" m="21" k="t" n="HoverLineKind" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
+<s i="250" m="21" k="f" n="normalize_inline_rst_code" l="33" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="2"/>
+<s i="251" m="21" k="f" n="normalize_rst_roles" l="58" v="1" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1"/>
+<s i="252" m="21" k="f" n="flatten_rst_roles_and_code" l="99" v="1" r="String" in_="1"/>
+<s i="253" m="21" k="f" n="parse_param_line" l="147" v="1" r="Option&lt;(String, String, String)&gt;" in_="1"/>
+<s i="254" m="21" k="f" n="split_inline_python_after_colon" l="167" r="Option&lt;(String, String)&gt;" in_="1" out="1"/>
+<s i="255" m="21" k="f" n="normalize_coroutine_signature_line" l="187" r="String" in_="1" out="1"/>
+<s i="256" m="21" k="f" n="normalize_python_hover_doc" l="209" v="1" r="(String, Vec&lt;HoverLineKind&gt;, Vec&lt;(usize, usize)&gt;)" in_="1" out="6"/>
+<s i="257" m="21" k="f" n="ts_capture_color" l="608" v="1" r="Option&lt;[f32; 4]&gt;" in_="1"/>
+<s i="258" m="21" k="f" n="push_python_ts_spans" l="624" v="1" in_="2" out="1"/>
+<s i="259" m="21" k="f" n="highlight_python_hover_doc" l="677" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="6"/>
+<s i="260" m="21" k="f" n="force_color_on_ranges" l="1010" in_="1"/>
+<s i="261" m="21" k="f" n="color_keyword_args_orange" l="1052" in_="1"/>
+<s i="262" m="22" k="t" n="HoverLineKindPublic" x="enum:{ Text, Code, Separator, Header1, Header2 }"/>
+<s i="263" m="22" k="t" n="PendingRequestKind" x="enum:{ Hover, CodeAction, Definition }"/>
+<s i="264" m="22" k="f" n="highlight_hover_text" l="3" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;HoverLineKindPublic&gt;, Vec&lt;(usize, usize)&gt;, )" in_="26" out="15"/>
+<s i="265" m="22" k="f" n="preprocess_hover_text" l="119" r="String" in_="1" out="1"/>
+<s i="266" m="22" k="f" n="looks_like_python_hover" l="132" r="bool" in_="1" out="1"/>
+<s i="267" m="22" k="f" n="looks_like_python_code_line" l="163" r="bool" in_="1" out="1"/>
+<s i="268" m="22" k="f" n="looks_like_type_expr_line" l="189" r="bool" in_="1" out="1"/>
+<s i="269" m="22" k="f" n="looks_like_simple_type_name_line" l="209" r="bool" in_="1" out="1"/>
+<s i="270" m="22" k="f" n="sanitize_hover_type_expr" l="230" r="String" in_="1"/>
+<s i="271" m="22" k="f" n="sanitize_module_path" l="248" r="String" in_="2"/>
+<s i="272" m="22" k="f" n="normalize_class_object_repr" l="260" r="Option&lt;(Option&lt;String&gt;, String)&gt;" in_="1" out="1"/>
+<s i="273" m="22" k="f" n="normalize_module_object_repr" l="285" r="Option&lt;String&gt;" in_="1" out="1"/>
+<s i="274" m="22" k="f" n="normalize_bound_method_signature" l="301" r="Option&lt;String&gt;" in_="1" out="2"/>
+<s i="275" m="22" k="f" n="add_bound_method_signature_spans" l="357" r="bool" in_="1" out="1"/>
+<s i="276" m="22" k="f" n="add_self_param_span_for_signature" l="427" in_="1"/>
+<s i="277" m="22" k="f" n="add_param_name_spans_for_signature" l="451" in_="1"/>
+<s i="278" m="22" k="f" n="add_class_keyword_spans_for_signature" l="491" in_="1"/>
+<s i="279" m="22" k="f" n="add_type_bracket_neutral_spans_for_signature" l="526" in_="1"/>
+<s i="280" m="22" k="f" n="add_type_expr_spans_for_line" l="546" in_="1"/>
+<s i="281" m="22" k="f" n="normalize_hover_text" l="586" r="(String, Vec&lt;(usize, usize)&gt;)" in_="1" out="5"/>
+<s i="282" m="22" k="f" n="wrap_signature_after_first_param" l="648" r="String" in_="3" out="1"/>
+<s i="283" m="22" k="f" n="normalize_asynccontextmanager_signature_line" l="672" r="Option&lt;String&gt;" in_="2" out="2"/>
+<s i="284" m="22" k="f" n="variable_header_highlights_name_pink" l="704" out="1"/>
+<s i="285" m="22" k="f" n="uses_python_hover_pipeline_for_builtin_signatures" l="722" out="1"/>
+<s i="286" m="22" k="f" n="plain_bound_method_prose_stays_uncolored" l="742" out="2"/>
+<s i="287" m="22" k="f" n="inline_for_fragment_becomes_separate_code_line" l="779" out="2"/>
+<s i="288" m="22" k="f" n="rich_rst_docstring_path_is_preserved" l="789" out="2"/>
+<s i="289" m="22" k="f" n="bound_method_signature_line_is_highlighted_but_prose_stays_plain" l="808" out="2"/>
+<s i="290" m="22" k="f" n="coroutine_return_bound_method_becomes_async_def" l="828" out="1"/>
+<s i="291" m="22" k="f" n="coroutine_return_signature_becomes_async_def" l="835" out="1"/>
+<s i="292" m="22" k="f" n="long_bound_method_signature_is_normalized_and_highlighted" l="851" out="2"/>
+<s i="293" m="22" k="f" n="class_object_repr_is_normalized_and_highlighted" l="878" out="1"/>
+<s i="294" m="22" k="f" n="qualified_class_object_repr_prepends_module_path" l="900" out="1"/>
+<s i="295" m="22" k="f" n="backticked_qualified_class_repr_prepends_module_path" l="918" out="1"/>
+<s i="296" m="22" k="f" n="generic_type_line_gets_cyan_types_and_white_brackets" l="928" out="1"/>
+<s i="297" m="22" k="f" n="literal_type_line_is_highlighted" l="959" out="1"/>
+<s i="298" m="22" k="f" n="assignment_line_is_highlighted_in_hover_text" l="981" out="1"/>
+<s i="299" m="22" k="f" n="module_object_repr_is_normalized_to_module_header" l="994" out="1"/>
+<s i="300" m="22" k="f" n="site_packages_and_init_are_removed_from_module_and_class_repr" l="1001" out="1"/>
+<s i="301" m="22" k="f" n="builtin_dict_class_hover_is_normalized_without_angle_brackets" l="1012" out="2"/>
+<s i="302" m="22" k="f" n="builtin_str_heading_line_is_highlighted_as_type" l="1025" out="1"/>
+<s i="303" m="22" k="f" n="builtin_any_heading_line_is_highlighted_as_type" l="1040" out="1"/>
+<s i="304" m="22" k="f" n="header_with_inline_code_preserves_correct_spans_without_byte_shift_panic" l="1055" out="2"/>
+<s i="305" m="22" k="f" n="class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args" l="1062" out="2"/>
+<s i="306" m="22" k="f" n="class_signature_is_highlighted" l="1096" out="1"/>
+<s i="307" m="22" k="f" n="litestar_giant_class_hover_signature_and_args_doc_are_parsed" l="1112" out="2"/>
+<s i="308" m="22" k="f" n="double_backticks_are_stripped_and_highlighted_as_inline_code" l="1316" out="2"/>
+<s i="309" m="22" k="f" n="asynccontextmanager_one_line_signature_is_wrapped_and_highlighted" l="1345" out="1"/>
+<s i="310" m="23" k="t" n="Cmd" x="enum:{ Restart, Open { uri: String, lang: &amp;'static str, version: i32, text: String }"/>
+<s i="311" m="23" k="t" n="CodeAction" x="struct:{ title: String, kind: Option&lt;String&gt;, edit: Option&lt;WorkspaceEdit&gt;, code: Option&lt;String&gt; }"/>
+<s i="312" m="23" k="t" n="LspEvent" x="enum:{ Log { name: &amp;'static str, message: String }"/>
+<s i="313" m="23" k="t" n="LspServerDef" x="struct:{ pub(super) program: &amp;'static str, pub(super) args: &amp;'static [&amp;'static str], pub(super) language_id: &amp;'static str, #[allow(dead_code)] pub(super) extensions: &amp;'static [&amp;'static str] }"/>
+<s i="314" m="23" k="t" n="TextChange" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, new_text: String }"/>
+<s i="315" m="23" k="t" n="WorkspaceEdit" x="struct:{ changes: HashMap&lt;PathBuf, Vec&lt;TextChange&gt;&gt; }"/>
+<s i="316" m="23" k="f" n="highlight_diagnostic_message" l="9" v="1" r="Vec&lt;crate::highlighter::ColorSpan&gt;"/>
+<s i="317" m="23" k="f" n="offset_to_lsp_pos" l="236" v="1" r="(u32, u32)"/>
+<s i="318" m="23" k="f" n="json_escape" l="256" v="1" r="String" in_="8"/>
+<s i="319" m="23" k="f" n="path_to_uri" l="275" v="1" r="String" in_="9"/>
+<s i="320" m="23" k="f" n="uri_to_path" l="289" v="1" r="PathBuf" in_="3"/>
+<s i="321" m="23" k="f" n="make_initialize" l="300" v="1" r="Vec&lt;u8&gt;" in_="1" out="2"/>
+<s i="322" m="23" k="f" n="make_initialized" l="331" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="323" m="23" k="f" n="make_did_open" l="335" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="324" m="23" k="f" n="make_did_change_full" l="346" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="325" m="23" k="f" n="make_did_close" l="356" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="326" m="23" k="f" n="make_code_action" l="364" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="327" m="23" k="f" n="make_hover" l="391" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="328" m="23" k="f" n="make_definition" l="398" v="1" r="Vec&lt;u8&gt;" in_="1" out="1"/>
+<s i="329" m="23" k="f" n="make_shutdown" l="405" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="330" m="23" k="f" n="make_exit" l="409" v="1" r="Vec&lt;u8&gt;" in_="1"/>
+<s i="331" m="23" k="f" n="write_frame" l="415" v="1" r="bool" in_="1" out="1"/>
+<s i="332" m="23" k="f" n="parse_diagnostic_value" l="427" v="1" r="Option&lt;Diagnostic&gt;" in_="1" out="2"/>
+<s i="333" m="23" k="f" n="parse_text_edit_value" l="534" v="1" r="Option&lt;TextChange&gt;" in_="1"/>
+<s i="334" m="23" k="f" n="parse_workspace_edit_value" l="559" v="1" r="WorkspaceEdit" in_="1" out="1"/>
+<s i="335" m="23" k="f" n="parse_hover_value" l="595" v="1" r="Option&lt;String&gt;" in_="1"/>
+<s i="336" m="23" k="f" n="parse_definition_path" l="623" v="1" r="Option&lt;PathBuf&gt;" in_="1" out="1"/>
+<s i="337" m="23" k="f" n="parse_code_action_value" l="640" v="1" r="Option&lt;CodeAction&gt;"/>
+<s i="338" m="23" k="f" n="dispatch_frame" l="675" v="1" in_="1" out="5"/>
+<s i="339" m="24" k="t" n="DiagSeverity" x="enum:{ Error, Warning, Info, Hint }"/>
+<s i="340" m="24" k="t" n="Diagnostic" x="struct:{ start_line: u32, start_col: u32, end_line: u32, end_col: u32, severity: DiagSeverity, code: Option&lt;String&gt;, code_href: Option&lt;String&gt;, message: String, +4 }"/>
+<s i="341" m="24" k="t" n="LogEntry" x="struct:{ text: String, spans: Vec&lt;crate::highlighter::ColorSpan&gt;, folds: Vec&lt;(usize, usize)&gt; }"/>
+<s i="342" m="24" k="t" n="LspManager" x="struct:{ python: Option&lt;LspProcess&gt;, ty_process: Option&lt;LspProcess&gt;, workspaces: Vec&lt;PathBuf&gt;, diagnostics: HashMap&lt;PathBuf, Vec&lt;Diagnostic&gt;&gt;, instant_diagnostics: HashMap&lt;PathBuf, (i32, Vec&lt;Diagnostic&gt;)&gt;, +15 }"/>
+<s i="343" m="24" k="t" n="LspProcess" x="struct:{ cmd_tx: Sender&lt;Cmd&gt;, event_rx: Receiver&lt;LspEvent&gt;, current_uri: Option&lt;String&gt;, def: &amp;'static LspServerDef, open_file_data: Option&lt;(String, String)&gt;, workspace_scanned: bool }"/>
+<s i="344" m="24" k="t" n="LspServerInfo" x="struct:{ name: &amp;'static str, status: LspServerStatus, logs: Vec&lt;LogEntry&gt; }"/>
+<s i="345" m="24" k="t" n="LspServerStatus" x="enum:{ Starting, Running, Crashed, Disabled }"/>
+<s i="346" m="24" k="t" n="OpenFile" x="struct:{ uri: String, lang: &amp;'static str, version: i32, text: String }"/>
+<s i="347" m="24" k="t" n="QuickFix" x="struct:{ title: String, edits: Vec&lt;TextChange&gt; }"/>
+<s i="348" m="24" k="t" n="SpawnedProcess" x="struct:{ child: Child, out_tx: Sender&lt;Vec&lt;u8&gt;&gt; }"/>
+<s i="349" m="24" k="f" n="next_id" l="41" r="i32" in_="6"/>
+<s i="350" m="24" k="f" n="spawn_server" l="108" r="Option&lt;SpawnedProcess&gt;" in_="1" out="3"/>
+<s i="351" m="24" k="f" n="send_and_log" l="239" r="Result&lt;(), mpsc::SendError&lt;Vec&lt;u8&gt;&gt;&gt;" in_="1" out="1"/>
+<s i="352" m="24" k="f" n="run_supervisor" l="273" in_="1" out="13"/>
+<s i="353" m="24" k="f" n="start" l="498" r="Self" o="LspProcess" in_="2" out="2"/>
+<s i="354" m="24" k="f" n="notify_open" l="519" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx,def" wr="current_uri=,open_file_data=,workspace_scanned=" out="1"/>
+<s i="355" m="24" k="f" n="restart" l="563" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" in_="1"/>
+<s i="356" m="24" k="f" n="notify_change" l="569" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
+<s i="357" m="24" k="f" n="request_hover" l="579" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
+<s i="358" m="24" k="f" n="request_definition" l="586" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="2"/>
+<s i="359" m="24" k="f" n="notify_close" l="594" v="1" o="LspProcess" self="&amp;mut self" rd="cmd_tx" wr="current_uri=" out="1"/>
+<s i="360" m="24" k="f" n="request_code_actions" l="602" v="1" r="i32" o="LspProcess" self="&amp;mut self" rd="cmd_tx" out="3"/>
+<s i="361" m="24" k="f" n="poll" l="632" v="1" o="LspProcess" self="&amp;self" rd="event_rx"/>
+<s i="362" m="24" k="f" n="shutdown" l="641" v="1" o="LspProcess" self="self" rd="cmd_tx"/>
+<s i="363" m="24" k="f" n="encode_diagnostics_json" l="648" r="String" in_="1" out="1"/>
+<s i="364" m="24" k="f" n="new" l="704" v="1" r="Self" o="LspManager" in_="2"/>
+<s i="365" m="24" k="f" n="ensure_python" l="725" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="3"/>
+<s i="366" m="24" k="f" n="restart_python" l="737" v="1" o="LspManager" self="&amp;mut self" rd="python_disabled,workspaces" wr="python=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
+<s i="367" m="24" k="f" n="disable_python" l="755" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process" wr="diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_instant_diagnostics.clear(),ty_status=" in_="1" out="1"/>
+<s i="368" m="24" k="f" n="enable_python" l="774" v="1" o="LspManager" self="&amp;mut self" rd="current_path,workspaces" wr="python=,python_disabled=,python_status=,ty_process=,ty_status=" in_="1" out="1"/>
+<s i="369" m="24" k="f" n="servers_info" l="797" v="1" r="Vec&lt;LspServerInfo&gt;" o="LspManager" self="&amp;self" rd="python_status,ty_status" in_="2"/>
+<s i="370" m="24" k="f" n="process_for_ext" l="823" r="Option&lt;&amp;mut LspProcess&gt;" o="LspManager" self="&amp;mut self" rd="python" in_="3" out="1"/>
+<s i="371" m="24" k="f" n="notify_open" l="834" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="current_path=,suppress_diagnostics=" in_="4" out="1"/>
+<s i="372" m="24" k="f" n="notify_change" l="857" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" wr="last_change=,suppress_diagnostics=" in_="3" out="1"/>
+<s i="373" m="24" k="f" n="request_hover" l="878" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
+<s i="374" m="24" k="f" n="request_definition" l="899" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="ty_process,workspaces" in_="1"/>
+<s i="375" m="24" k="f" n="notify_close" l="921" v="1" o="LspManager" self="&amp;mut self" rd="python,ty_process,workspaces" in_="2"/>
+<s i="376" m="24" k="f" n="request_code_actions" l="940" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="1" out="1"/>
+<s i="377" m="24" k="f" n="poll" l="972" v="1" r="Vec&lt;LspEvent&gt;" o="LspManager" self="&amp;mut self" rd="instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_instant_diagnostics,ty_process" wr="diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=" in_="2" out="2"/>
+<s i="378" m="24" k="f" n="get_diagnostics" l="1104" v="1" r="&amp;[Diagnostic]" o="LspManager" self="&amp;self" rd="diagnostics,workspaces" in_="5"/>
+<s i="379" m="24" k="f" n="get_instant_diagnostics_with_version" l="1118" v="1" r="(i32, &amp;[Diagnostic])" o="LspManager" self="&amp;self" rd="merged_instant_diagnostics,workspaces" in_="2"/>
+<s i="380" m="24" k="f" n="diagnostics_for_line" l="1133" v="1" r="Vec&lt;&amp;Diagnostic&gt;" o="LspManager" self="&amp;self" in_="1" out="1"/>
+<s i="381" m="24" k="f" n="request_fix_all" l="1141" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="3" out="3"/>
+<s i="382" m="24" k="f" n="request_organize_imports" l="1165" v="1" r="Option&lt;i32&gt;" o="LspManager" self="&amp;mut self" rd="workspaces" in_="2" out="3"/>
+<s i="383" m="24" k="f" n="shutdown" l="1190" v="1" o="LspManager" self="mut self" rd="python,ty_process" wr="python_disabled=" in_="1"/>
+<s i="384" m="24" k="f" n="lsp_pos_to_offset" l="1205" v="1" r="usize" in_="2"/>
+<s i="385" m="24" k="f" n="format_and_highlight_json" l="1231" v="1" r="( String, Vec&lt;crate::highlighter::ColorSpan&gt;, Vec&lt;(usize, usize)&gt;, )" in_="1" out="3"/>
+<s i="386" m="25" k="t" n="Config" x="struct:{ window_width: f64, window_height: f64, maximized: bool, ide_workspaces: Vec&lt;std::path::PathBuf&gt;, ide_ignore_patterns: Vec&lt;String&gt;, enable_telemetry: bool }"/>
+<s i="387" m="25" k="f" n="default" l="35" r="Self" o="Config"/>
+<s i="388" m="25" k="f" n="load_recent_files" l="47" v="1" r="Vec&lt;PathBuf&gt;" in_="1"/>
+<s i="389" m="25" k="f" n="save_recent_files" l="63" v="1" in_="2"/>
+<s i="390" m="25" k="f" n="load_open_tabs" l="77" v="1" r="(Vec&lt;Option&lt;PathBuf&gt;&gt;, usize)"/>
+<s i="391" m="25" k="f" n="save_open_tabs" l="104" v="1"/>
+<s i="392" m="25" k="f" n="save_panel_state" l="126" v="1"/>
+<s i="393" m="25" k="f" n="load_panel_state" l="156" v="1" r="crate::app::IdePanelState"/>
+<s i="394" m="25" k="f" n="save_config" l="210" v="1" in_="1"/>
+<s i="395" m="25" k="f" n="load_config" l="235" r="Config" in_="1" out="2"/>
+<s i="396" m="25" k="f" n="get_kde_color" l="308" r="Option&lt;[f32; 4]&gt;" in_="1"/>
+<s i="397" m="25" k="f" n="load_dracula" l="330" r="Theme" in_="1" out="1"/>
+<s i="398" m="25" k="f" n="main" l="349" entry="1" out="10"/>
+<s i="399" m="25" k="f" n="mallopt" l="355" r="i32; } mallopt(-8, 2); } let args: Vec&lt;String&gt; = env::args().collect(); let run_ide_on_startup = args.iter().any(|a| a == &quot;--ide&quot; || a == &quot;ide&quot;); let has_file_arg = args.iter().skip(1).any(|a| *a != &quot;--ide&quot; &amp;&amp; *a != &quot;ide&quot;); let mut initial_text = String::new(); let mut title = &quot;Безымянный&quot;.to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg" in_="1" out="1"/>
+<s i="400" m="26" k="f" n="get_params_query" l="3" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
+<s i="401" m="26" k="f" n="get_injection_query" l="82" v="1" r="Option&lt;&amp;'static str&gt;" in_="2"/>
+<s i="402" m="26" k="f" n="get_folding_query" l="131" v="1" r="Option&lt;&amp;'static str&gt;" in_="3"/>
+<s i="403" m="26" k="f" n="get_ts_config" l="336" v="1" r="Option&lt;(tree_sitter::Language, Vec&lt;&amp;'static str&gt;)&gt;" in_="3"/>
+<s i="404" m="26" k="f" n="test_all_tree_sitter_queries_are_valid" l="930" out="4"/>
+<s i="405" m="27" k="f" n="update_cache" l="6" v="1" o="Renderer" self="&amp;mut self" rd="height,left_padding,line_height,scale_factor,width" wr="last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()" out="3"/>
+<s i="406" m="27" k="f" n="get_cursor_xy" l="213" v="1" r="(f32, f32)" o="Renderer" self="&amp;mut self" rd="baseline_offset,last_scroll_x,left_padding,line_height,scale_factor" in_="9" out="4"/>
+<s i="407" m="27" k="f" n="get_byte_at_xy" l="350" v="1" r="usize" o="Renderer" self="&amp;mut self" rd="last_scroll_x,left_padding,line_height" in_="6" out="3"/>
+<s i="408" m="27" k="f" n="measure_width" l="450" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="1"/>
+<s i="409" m="27" k="f" n="get_max_scroll" l="476" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="line_height" in_="9" out="1"/>
+<s i="410" m="27" k="f" n="flush" l="483" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,program,vbo,width" wr="vertices.clear()" in_="5"/>
+<s i="411" m="27" k="f" n="push_vertical_gradient" l="525" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="412" m="27" k="f" n="push_horizontal_gradient" l="573" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="413" m="27" k="f" n="draw_string" l="621" v="1" o="Renderer" self="&amp;mut self"/>
+<s i="414" m="27" k="f" n="draw_string_scaled" l="637" v="1" o="Renderer" self="&amp;mut self" in_="1"/>
+<s i="415" m="27" k="f" n="draw_string_mono_scaled" l="660" v="1" o="Renderer" self="&amp;mut self"/>
+<s i="416" m="27" k="f" n="measure_mono_width" l="683" v="1" r="f32" o="Renderer" self="&amp;mut self"/>
+<s i="417" m="27" k="f" n="push_rounded_rect" l="694" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="2"/>
+<s i="418" m="28" k="t" n="DiagChar" x="struct:{ x: f32, y: f32, w: f32, h: f32, byte_offset: usize }"/>
+<s i="419" m="28" k="f" n="diag_popup_byte_at" l="20" v="1" r="usize" in_="2"/>
+<s i="420" m="28" k="f" n="draw_diagnostic_popup" l="58" v="1" o="Renderer" self="&amp;mut self" rd="diag_popup_scroll,gl,height,hovered_diags_cache,scale_factor,theme,width" wr="last_diag_href=,last_diag_popup_rect=,max_diag_popup_scroll=" out="4"/>
+<s i="421" m="29" k="f" n="draw_lsp_servers_panel" l="6" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" out="4"/>
+<s i="422" m="29" k="f" n="draw_lsp_actions_menu" l="785" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1"/>
+<s i="423" m="30" k="f" n="draw_minimap" l="6" v="1" o="Renderer" self="&amp;mut self" rd="line_height,minimap_width,theme,vertices,width" out="2"/>
+<s i="424" m="31" k="f" n="draw_search_panel" l="8" v="1" r="bool" o="Renderer" rd="gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width" wr="last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=" out="4"/>
+<s i="425" m="32" k="f" n="get_faq_max_scroll" l="6" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="scale_factor" in_="2" out="2"/>
+<s i="426" m="32" k="f" n="draw_settings" l="31" v="1" r="u8" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width" in_="1" out="8"/>
+<s i="427" m="33" k="f" n="draw_sticky_lines" l="7" v="1" r="Vec&lt;(usize, usize)&gt;" o="Renderer" rd="baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width" wr="sticky_scroll_rects.clear(),sticky_scroll_rects.push()" out="2"/>
+<s i="428" m="34" k="f" n="draw_tab_bar" l="6" v="1" r="Option&lt;(std::path::PathBuf, f32, f32)&gt;" o="Renderer" self="&amp;mut self" rd="gl,height,hide_popups_until_mouse_move,theme" wr="max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=" out="3"/>
+<s i="429" m="34" k="f" n="draw_tab_tooltip" l="416" v="1" o="Renderer" self="&amp;mut self" rd="theme,width"/>
+<s i="430" m="35" k="f" n="draw_terminal_panel" l="7" v="1" o="Renderer" self="&amp;mut self" rd="baseline_offset,gl,height,line_height,theme,vertices" out="8"/>
+<s i="431" m="36" k="f" n="build_hover_popup_layout" l="4" v="1" r="crate::app::mouse::HoverLayoutCache" o="Renderer" rd="scale_factor" in_="1"/>
+<s i="432" m="36" k="f" n="draw_hover_popup" l="168" v="1" r="(f32, f32, f32, f32, f32)" o="Renderer" rd="gl,height,line_height,phys_to_visual,scale_factor,theme,width" out="5"/>
+<s i="433" m="37" k="f" n="draw_problems_panel" l="4" v="1" o="Renderer" self="&amp;mut self" rd="gl,height,last_mouse_x,last_mouse_y,theme" wr="scratch_buffer=" out="4"/>
+<s i="434" m="38" k="f" n="draw_icon" l="7" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" in_="1"/>
+<s i="435" m="38" k="f" n="draw_atlas_icon" l="19" v="1" o="Renderer" self="&amp;mut self" rd="gl,icons,texture" in_="3"/>
+<s i="436" m="38" k="f" n="draw_file_icon" l="42" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="file_icon_cache.insert()" out="1"/>
+<s i="437" m="38" k="f" n="draw_autocomplete" l="142" v="1" r="(f32, f32, f32, f32)" o="Renderer" rd="gl,height,scale_factor,theme" in_="1" out="1"/>
+<s i="438" m="38" k="f" n="draw_dialog_window" l="371" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="last_mouse_x,last_mouse_y,scale_factor,theme" in_="1" out="4"/>
+<s i="439" m="38" k="f" n="draw_welcome" l="483" v="1" r="bool" o="Renderer" self="&amp;mut self" rd="height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width" wr="gl.clear()" out="5"/>
+<s i="440" m="38" k="f" n="draw_diagnostics_ruler" l="727" v="1" o="Renderer" self="&amp;mut self" rd="minimap_width,phys_to_visual,scale_factor,theme,width" out="1"/>
+<s i="441" m="38" k="f" n="draw_empty_ide" l="792" v="1" o="Renderer" self="&amp;mut self" rd="height,scale_factor,theme,width" wr="empty_ide_art_idx=,was_empty_ide="/>
+<s i="442" m="39" k="t" n="ModInterval" x="struct:{ top: f32, bottom: f32, state: crate::editor::LineModState }"/>
+<s i="443" m="39" k="t" n="Telemetry" x="struct:{ render_time: f32, render_count: u32, scroll_time: f32, scroll_count: u32, type_time: f32, type_count: u32, last_print: Instant }"/>
+<s i="444" m="39" k="f" n="default" l="36" r="Self" o="Telemetry"/>
+<s i="445" m="39" k="f" n="draw" l="59" v="1" r="(bool, Vec&lt;(usize, usize)&gt;)" o="Renderer" rd="baseline_offset,diag_popup_scroll,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,program,scale_factor,texture,+4" wr="diag_hover_timer=,diag_hover_timer_idx=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),hide_popups_until_mouse_move=,hovered_diags_cache.clear(),hovered_diags_cache.push(),identical_words_cache.clear(),identical_words_cache.push(),+20" in_="1" out="26"/>
+<s i="446" m="40" k="t" n="FontData" x="struct:{ source: FontSource, index: u32 }"/>
+<s i="447" m="40" k="t" n="FontSource" x="enum:{ Static(&amp;'static [u8]), LoadedMmap(std::sync::Arc&lt;memmap2::Mmap&gt;), LoadedVec(std::sync::Arc&lt;Vec&lt;u8&gt;&gt;), Lazy( std::path::PathBuf, std::rc::Rc&lt;std::cell::RefCell&lt;Option&lt;Result&lt;std::sync::Arc&lt;memmap2::Mmap&gt;, ()&gt;&gt;&gt;&gt;, ) }"/>
+<s i="448" m="40" k="t" n="GlyphInfo" x="struct:{ u: f32, v: f32, uw: f32, vh: f32, width: f32, height: f32, offset_x: f32, offset_y: f32, +2 }"/>
+<s i="449" m="40" k="t" n="Renderer" x="struct:{ gl: glow::Context, program: glow::Program, vao: glow::VertexArray, vbo: glow::Buffer, texture: glow::Texture, vertices: Vec&lt;Vertex&gt;, fonts: Vec&lt;FontData&gt;, ui_fonts: Vec&lt;FontData&gt;, +84 }"/>
+<s i="450" m="40" k="t" n="Theme" x="struct:{ bg: [f32; 4], fg: [f32; 4], sel: [f32; 4], minimap_bg: [f32; 4], line_num: [f32; 4], minimap_cursor: [f32; 4], modified_unsaved: [f32; 4], modified_saved: [f32; 4], +3 }"/>
+<s i="451" m="40" k="t" n="Vertex" x="struct:{ pos: [f32; 2], uv: [f32; 2], color: [f32; 4], mode: f32, sdf_params: [f32; 3] }"/>
+<s i="452" m="40" k="t" n="VisualLine" x="struct:{ byte_idx: usize, physical_line: usize, is_soft_wrap: bool, whitespace_px_width: f32, text_px_width: f32, y_offset: f32, is_folded: bool, fold_suffix: [char; 4], +1 }"/>
+<s i="453" m="40" k="f" n="new_lazy" l="84" v="1" r="Self" o="FontData"/>
+<s i="454" m="40" k="f" n="new_static" l="94" v="1" r="Self" o="FontData"/>
+<s i="455" m="40" k="f" n="ensure_loaded" l="101" v="1" o="FontData" self="&amp;mut self" wr="source=" in_="2"/>
+<s i="456" m="40" k="f" n="data_slice" l="128" v="1" r="&amp;[u8]" o="FontData" self="&amp;self" rd="source" in_="2"/>
+<s i="457" m="40" k="f" n="new" l="225" v="1" r="Self" o="Renderer" in_="2" out="2"/>
+<s i="458" m="40" k="f" n="get_custom_svg_glyph" l="547" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="atlas_y,font_size,gl,texture" wr="atlas_x=,max_row_h=" in_="2"/>
+<s i="459" m="40" k="f" n="get_glyph" l="614" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,fonts,gl,texture" wr="atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()" in_="2" out="4"/>
+<s i="460" m="40" k="f" n="get_ui_glyph" l="787" v="1" r="Option&lt;GlyphInfo&gt;" o="Renderer" self="&amp;mut self" rd="font_size,gl,texture,ui_fonts" wr="atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()" in_="5" out="4"/>
+<s i="461" m="40" k="f" n="resize" l="959" v="1" o="Renderer" self="&amp;mut self" rd="gl" wr="height=,width=" in_="9"/>
+<s i="462" m="40" k="f" n="measure_ui_width" l="969" v="1" r="f32" o="Renderer" self="&amp;mut self" in_="5" out="1"/>
+<s i="463" m="40" k="f" n="char_advance" l="982" v="1" r="f32" o="Renderer" self="&amp;mut self" rd="ascii_advances" in_="4" out="1"/>
+<s i="464" m="40" k="f" n="push_quad" l="999" v="1" o="Renderer" self="&amp;mut self" rd="vertices" in_="1"/>
+<s i="465" m="40" k="f" n="load_builtin_icons" l="1051" v="1" o="Renderer" self="&amp;mut self" rd="gl,texture" wr="icons.insert()" in_="1"/>
+<s i="466" m="40" k="f" n="push_squiggle" l="1234" v="1" o="Renderer" self="&amp;mut self" rd="scale_factor,vertices"/>
+<s i="467" m="40" k="f" n="push_rect" l="1287" v="1" o="Renderer" self="&amp;mut self" in_="1" out="1"/>
+<s i="468" m="40" k="f" n="push_rounded_rect_gradient" l="1291" v="1" o="Renderer" self="&amp;mut self" rd="vertices"/>
+<s i="469" m="41" k="t" n="ScrollState" x="struct:{ current: f32, target: f32, velocity: f32, anim_speed: f32, is_dragging: bool, drag_offset: f32 }"/>
+<s i="470" m="41" k="f" n="new" l="12" v="1" r="Self" o="ScrollState" in_="2"/>
+<s i="471" m="41" k="f" n="update" l="23" v="1" r="bool" o="ScrollState" self="&amp;mut self" rd="anim_speed,target" wr="current=,velocity=" in_="1"/>
+<s i="472" m="41" k="f" n="clamp_target" l="48" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="7"/>
+<s i="473" m="41" k="f" n="clamp_current" l="52" v="1" o="ScrollState" self="&amp;mut self" wr="current=" in_="3"/>
+<s i="474" m="41" k="f" n="scroll_by" l="56" v="1" o="ScrollState" self="&amp;mut self" rd="target" in_="2"/>
+<s i="475" m="41" k="f" n="set_target" l="60" v="1" o="ScrollState" self="&amp;mut self" wr="target=" in_="1"/>
+<s i="476" m="41" k="f" n="stop_anim" l="64" v="1" o="ScrollState" self="&amp;mut self" wr="current=,target=,velocity=" in_="2"/>
+<s i="477" m="42" k="t" n="UiElement" x="enum:{ Button { id: UiId, x: f32, y: f32, w: f32, h: f32 }"/>
+<s i="478" m="42" k="t" n="UiId" x="enum:{ WelcomeNewFile, WelcomeOpenFile, WelcomeIdeMode, WelcomeRecentFile(usize), DialogSave, DialogDiscard, DialogCancel, SettingsTab(usize), +56 }"/>
+<s i="479" m="42" k="t" n="UiRegistry" x="struct:{ elements: Vec&lt;UiElement&gt;, hovered: Option&lt;UiId&gt;, wants_pointer: bool, wants_text: bool, overlay_mark: usize }"/>
+<s i="480" m="42" k="f" n="contains" l="131" v="1" r="bool" o="UiElement" self="&amp;self" in_="64"/>
+<s i="481" m="42" k="f" n="id" l="158" v="1" r="UiId" o="UiElement" self="&amp;self" in_="3"/>
+<s i="482" m="42" k="f" n="new" l="182" v="1" r="Self" o="UiRegistry" in_="2"/>
+<s i="483" m="42" k="f" n="clear" l="193" v="1" o="UiRegistry" self="&amp;mut self" wr="elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text="/>
+<s i="484" m="42" k="f" n="mark_overlay_start" l="203" v="1" o="UiRegistry" self="&amp;mut self" rd="elements" wr="overlay_mark=" in_="1"/>
+<s i="485" m="42" k="f" n="find_overlay_at" l="209" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements,overlay_mark" in_="1" out="2"/>
+<s i="486" m="42" k="f" n="register_button" l="218" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="2" out="1"/>
+<s i="487" m="42" k="f" n="register_icon_button" l="246" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="3" out="1"/>
+<s i="488" m="42" k="f" n="register_text_input" l="275" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_text=" in_="4"/>
+<s i="489" m="42" k="f" n="register_blocker" l="298" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push()" in_="5"/>
+<s i="490" m="42" k="f" n="register_rect" l="315" v="1" r="bool" o="UiRegistry" self="&amp;mut self" wr="elements.push(),hovered=,wants_pointer=" in_="10"/>
+<s i="491" m="42" k="f" n="find_at" l="337" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="elements" in_="1" out="2"/>
+<s i="492" m="42" k="f" n="hovered" l="347" v="1" r="Option&lt;UiId&gt;" o="UiRegistry" self="&amp;self" rd="hovered" in_="3"/>
+<s i="493" m="42" k="f" n="reset_cursor_state" l="354" v="1" o="UiRegistry" self="&amp;mut self" wr="wants_pointer=,wants_text=" in_="4"/>
+<s i="494" m="42" k="f" n="wants_pointer" l="360" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_pointer" in_="5"/>
+<s i="495" m="42" k="f" n="wants_text" l="365" v="1" r="bool" o="UiRegistry" self="&amp;self" rd="wants_text" in_="2"/>
+<s i="496" m="42" k="f" n="cursor_code" l="370" v="1" r="u8" o="UiRegistry" self="&amp;self" rd="wants_pointer,wants_text"/>
+<s i="497" m="43" k="t" n="Button" x="struct:{ x: f32, y: f32, w: f32, h: f32, text: String, icon: Option&lt;IconType&gt;, text_scale: f32, icon_size: f32 }"/>
+<s i="498" m="43" k="t" n="IconButton" x="struct:{ x: f32, y: f32, size: f32, icon: Option&lt;IconType&gt;, is_active: bool, icon_size: Option&lt;f32&gt;, active_square_width: Option&lt;f32&gt;, custom_color: Option&lt;[f32; 4]&gt; }"/>
+<s i="499" m="43" k="t" n="IconType" x="enum:{ Save, Discard, Cancel, Warning, CaseMatch, Up, Down, Close, +7 }"/>
+<s i="500" m="43" k="f" n="is_hovered" l="34" v="1" r="bool" o="Button" self="&amp;self" rd="h,w,x,y"/>
+<s i="501" m="43" k="f" n="render" l="38" v="1" r="bool" o="Button" self="&amp;self" rd="h,icon,icon_size,text,text_scale,w,x,y" out="4"/>
+<s i="502" m="43" k="f" n="is_hovered" l="119" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,size,x,y" in_="2"/>
+<s i="503" m="43" k="f" n="render" l="128" v="1" r="bool" o="IconButton" self="&amp;self" rd="active_square_width,custom_color,icon,icon_size,is_active,size,x,y" in_="6" out="4"/>
+<s i="504" m="43" k="f" n="get_welcome_buttons" l="220" v="1" r="(Button, Button, Button)" in_="1" out="1"/>
+<s i="505" m="43" k="f" n="get_dialog_buttons" l="273" v="1" r="(Button, Button, Button)" in_="2" out="1"/>
 </syms>
 <cg>
-<e f="0" t="1 3 5 9 11 13 27 28 44 45 46 61 87 130 132 138 143 157 158 159 161 176 183 191 195 223 236 238 364 368 369 372 404 466 467 468 475"/>
+<e f="0" t="1 3 5 9 11 13 27 28 44 45 46 61 92 135 137 143 148 162 163 164 166 181 188 196 200 228 241 243 369 373 374 377 409 471 472 473 480"/>
 <e f="1" t="2"/>
-<e f="3" t="39 195"/>
-<e f="5" t="4 7 8 10 13 14 191 277 475"/>
-<e f="6" t="475"/>
+<e f="3" t="39 200"/>
+<e f="5" t="4 7 8 10 13 14 196 282 480"/>
+<e f="6" t="480"/>
 <e f="7" t="4 10"/>
-<e f="9" t="10 475"/>
-<e f="10" t="475"/>
-<e f="13" t="12 191 205"/>
-<e f="14" t="475"/>
-<e f="15" t="14 277"/>
-<e f="16" t="5 191 195"/>
-<e f="17" t="5 191 195"/>
-<e f="18" t="5 191 195"/>
+<e f="9" t="10 480"/>
+<e f="10" t="480"/>
+<e f="13" t="12 196 210"/>
+<e f="14" t="480"/>
+<e f="15" t="14 282"/>
+<e f="16" t="5 196 200"/>
+<e f="17" t="5 196 200"/>
+<e f="18" t="5 196 200"/>
 <e f="19" t="27"/>
-<e f="20" t="13 191 195"/>
-<e f="21" t="5 191 195"/>
+<e f="20" t="13 196 200"/>
+<e f="21" t="5 196 200"/>
 <e f="22" t="9"/>
-<e f="23" t="9 475"/>
+<e f="23" t="9 480"/>
 <e f="24" t="1"/>
 <e f="25" t="1"/>
-<e f="26" t="5 191 195"/>
-<e f="27" t="28 475"/>
-<e f="28" t="475"/>
-<e f="30" t="94 173 183 235 359 452 465 477"/>
-<e f="31" t="29 95 128 130 183 373 401 404 417 421 432 433 440 456 475 476 479 490 497 500"/>
+<e f="26" t="5 196 200"/>
+<e f="27" t="28 480"/>
+<e f="28" t="480"/>
+<e f="30" t="99 178 188 240 364 457 470 482"/>
+<e f="31" t="29 100 133 135 188 378 406 409 422 426 437 438 445 461 480 481 484 495 502 505"/>
 <e f="32" t="0"/>
 <e f="39" t="36"/>
-<e f="41" t="34 35 38 40 475"/>
+<e f="41" t="34 35 38 40 480"/>
 <e f="42" t="39 41"/>
-<e f="44" t="42 475"/>
+<e f="44" t="42 480"/>
 <e f="46" t="43"/>
 <e f="47" t="44"/>
-<e f="48" t="127 130"/>
-<e f="49" t="180 181 183 188 189 191 195 196 197 198 199 200 204 208 210 213 214 215 216 217 218 219 220 221 222 224 225 236 237 238 240 241 367 370 372 401 404 467 468 469 471"/>
-<e f="50" t="79 130 180 191 195 196 197 198 199 208 210 213 214 215 216 217 218 475"/>
-<e f="51" t="210 405"/>
-<e f="52" t="180 195 196 197 208 210 213 214 215 216 217 218"/>
-<e f="53" t="180 195 196 197 208 210 213 214 215 216 217 218"/>
-<e f="54" t="128"/>
+<e f="48" t="132 135"/>
+<e f="49" t="185 186 188 193 194 196 200 201 202 203 204 205 209 213 215 218 219 220 221 222 223 224 225 226 227 229 230 241 242 243 245 246 372 375 377 406 409 472 473 474 476"/>
+<e f="50" t="84 135 185 196 200 201 202 203 204 213 215 218 219 220 221 222 223 480"/>
+<e f="51" t="215 410"/>
+<e f="52" t="185 200 201 202 213 215 218 219 220 221 222 223"/>
+<e f="53" t="185 200 201 202 213 215 218 219 220 221 222 223"/>
+<e f="54" t="133"/>
 <e f="55" t="56"/>
-<e f="56" t="57 475"/>
-<e f="57" t="475"/>
-<e f="58" t="191 371 375 401"/>
-<e f="59" t="60 61 376 377"/>
-<e f="60" t="183 191 194 205 237 240 241 367 475"/>
-<e f="61" t="183 191 194 237 240 241 367 379"/>
-<e f="62" t="79 85 86 88 89 128 130 190 191 207 223 374 402 404 414 455 458 475"/>
-<e f="63" t="79 89 128 129 130 191 376 377 404 405 414 455 457 458 467 468 480 486"/>
-<e f="64" t="79 128 130 404 405 420 457 467 469 475"/>
-<e f="70" t="85 191 195"/>
-<e f="71" t="85 191 195"/>
-<e f="72" t="83 84 85 191 195"/>
-<e f="73" t="84 195"/>
-<e f="74" t="88"/>
-<e f="75" t="88"/>
-<e f="76" t="88"/>
-<e f="77" t="88"/>
-<e f="78" t="88"/>
-<e f="80" t="205"/>
-<e f="82" t="86 191"/>
-<e f="83" t="80 85 205 207"/>
-<e f="84" t="83 207"/>
-<e f="85" t="80 82"/>
-<e f="86" t="80 191"/>
-<e f="87" t="86 191 204 458"/>
-<e f="89" t="455 458"/>
-<e f="96" t="97"/>
-<e f="97" t="98"/>
-<e f="98" t="95 456"/>
-<e f="99" t="95 456"/>
-<e f="101" t="96"/>
-<e f="102" t="96 97"/>
-<e f="108" t="95 98 99 456 475"/>
-<e f="109" t="405"/>
-<e f="110" t="95 456"/>
-<e f="111" t="79 109 129 130 181 183 191 202 203 223 236 361 362 363 364 373 376 379 401 404 455 471 475"/>
-<e f="132" t="34 130 135 136 139 159 183 191 239 366"/>
-<e f="133" t="134"/>
-<e f="134" t="34"/>
-<e f="135" t="133 134 183 191 236 366"/>
-<e f="136" t="133 134 153 236"/>
-<e f="137" t="133 134 153 183"/>
-<e f="138" t="140"/>
-<e f="139" t="140"/>
-<e f="140" t="135 136 160 183"/>
-<e f="141" t="401 404"/>
-<e f="142" t="205"/>
-<e f="143" t="131 142"/>
-<e f="144" t="467 470"/>
-<e f="145" t="142 180 183 195 240 241"/>
-<e f="146" t="191 348"/>
-<e f="148" t="191 348"/>
-<e f="149" t="404 467"/>
-<e f="151" t="94 173 235 359 452 465 477"/>
-<e f="153" t="133 137 181 236 370"/>
-<e f="157" t="109 133 156 182 191"/>
-<e f="160" t="133 158 159 181 186 191 195 236 239 366"/>
-<e f="161" t="134 181 183 186 191 195"/>
-<e f="176" t="190"/>
-<e f="177" t="190"/>
-<e f="178" t="95 190 456"/>
-<e f="180" t="175 185 187 192 196"/>
-<e f="181" t="177 185"/>
-<e f="182" t="177 185"/>
-<e f="185" t="170 176 177"/>
-<e f="186" t="185"/>
-<e f="187" t="475"/>
-<e f="188" t="174 175 185 192 193"/>
-<e f="189" t="174 175 185 192 193"/>
+<e f="56" t="57 480"/>
+<e f="57" t="480"/>
+<e f="58" t="196 376 380 406"/>
+<e f="59" t="60 61 381 382"/>
+<e f="60" t="188 196 199 210 242 245 246 372 480"/>
+<e f="61" t="188 196 199 242 245 246 372 384"/>
+<e f="62" t="84 90 91 93 94 133 135 195 196 212 228 379 407 409 419 460 463 480"/>
+<e f="63" t="84 94 133 134 135 196 381 382 409 410 419 460 462 463 472 473 485 491"/>
+<e f="64" t="84 133 135 409 410 425 462 472 474 480"/>
+<e f="70" t="83"/>
+<e f="71" t="83"/>
+<e f="72" t="83"/>
+<e f="73" t="83"/>
+<e f="74" t="90 196 200"/>
+<e f="75" t="90 196 200"/>
+<e f="76" t="88 89 90 196 200"/>
+<e f="77" t="89 200"/>
+<e f="78" t="93"/>
+<e f="79" t="93"/>
+<e f="80" t="93"/>
+<e f="81" t="93"/>
+<e f="82" t="93"/>
+<e f="85" t="210"/>
+<e f="87" t="91 196"/>
+<e f="88" t="85 90 210 212"/>
+<e f="89" t="88 212"/>
+<e f="90" t="85 87"/>
+<e f="91" t="85 196"/>
+<e f="92" t="91 196 209 463"/>
+<e f="94" t="460 463"/>
+<e f="101" t="102"/>
+<e f="102" t="103"/>
+<e f="103" t="100 461"/>
+<e f="104" t="100 461"/>
+<e f="106" t="101"/>
+<e f="107" t="101 102"/>
+<e f="113" t="100 103 104 461 480"/>
+<e f="114" t="410"/>
+<e f="115" t="100 461"/>
+<e f="116" t="84 114 134 135 186 188 196 207 208 228 241 366 367 368 369 378 381 384 406 409 460 476 480"/>
+<e f="137" t="34 135 140 141 144 164 188 196 244 371"/>
+<e f="138" t="139"/>
+<e f="139" t="34"/>
+<e f="140" t="138 139 188 196 241 371"/>
+<e f="141" t="138 139 158 241"/>
+<e f="142" t="138 139 158 188"/>
+<e f="143" t="145"/>
+<e f="144" t="145"/>
+<e f="145" t="140 141 165 188"/>
+<e f="146" t="406 409"/>
+<e f="147" t="210"/>
+<e f="148" t="136 147"/>
+<e f="149" t="472 475"/>
+<e f="150" t="147 185 188 200 245 246"/>
+<e f="151" t="196 353"/>
+<e f="153" t="196 353"/>
+<e f="154" t="409 472"/>
+<e f="156" t="99 178 240 364 457 470 482"/>
+<e f="158" t="138 142 186 241 375"/>
+<e f="162" t="114 138 161 187 196"/>
+<e f="165" t="138 163 164 186 191 196 200 241 244 371"/>
+<e f="166" t="139 186 188 191 196 200"/>
+<e f="181" t="195"/>
+<e f="182" t="195"/>
+<e f="183" t="100 195 461"/>
+<e f="185" t="180 190 192 197 201"/>
+<e f="186" t="182 190"/>
+<e f="187" t="182 190"/>
+<e f="190" t="175 181 182"/>
 <e f="191" t="190"/>
-<e f="193" t="174 192"/>
-<e f="194" t="175 185 187 192 193"/>
-<e f="195" t="185 187 193 196"/>
-<e f="196" t="175 185 187 192"/>
-<e f="197" t="175 185 187 192 196"/>
-<e f="198" t="171 196"/>
-<e f="199" t="171 196"/>
-<e f="201" t="172 205 206"/>
-<e f="202" t="171 205 206"/>
-<e f="203" t="205 206"/>
-<e f="204" t="205 206"/>
-<e f="207" t="205 206"/>
-<e f="208" t="205"/>
-<e f="209" t="475"/>
-<e f="210" t="206"/>
-<e f="212" t="206 218 475"/>
-<e f="213" t="204 211 212"/>
-<e f="214" t="204 206 211 212"/>
-<e f="215" t="172 205 211 212"/>
-<e f="216" t="172 205 206 211 212"/>
-<e f="217" t="205 206 211 475"/>
-<e f="218" t="205 206 211 475"/>
-<e f="219" t="211"/>
-<e f="220" t="206 211"/>
-<e f="221" t="211 401 402"/>
-<e f="222" t="211 401 402"/>
-<e f="223" t="402"/>
-<e f="224" t="211 401 402"/>
-<e f="225" t="211 401 402"/>
-<e f="234" t="475"/>
-<e f="235" t="194 195 204 233 234 243 395 396 397 398 475"/>
-<e f="239" t="238"/>
-<e f="243" t="95 242 456"/>
-<e f="249" t="475"/>
-<e f="250" t="475"/>
-<e f="251" t="245 246 247 248 249 250"/>
-<e f="253" t="252"/>
-<e f="254" t="194 251 253 255 256 475"/>
-<e f="259" t="253 254 260 261 262 263 264 270 271 272 273 274 275 276 475"/>
-<e f="260" t="278"/>
-<e f="261" t="475"/>
-<e f="262" t="475"/>
-<e f="263" t="475"/>
-<e f="264" t="475"/>
-<e f="267" t="266"/>
-<e f="268" t="266"/>
-<e f="269" t="265 475"/>
-<e f="270" t="475"/>
-<e f="276" t="245 267 268 269 278"/>
-<e f="277" t="475"/>
-<e f="278" t="14 277"/>
-<e f="279" t="259"/>
-<e f="280" t="259"/>
-<e f="281" t="259 475"/>
-<e f="282" t="259 475"/>
-<e f="283" t="259 475"/>
-<e f="284" t="259 475"/>
-<e f="285" t="259"/>
-<e f="286" t="259"/>
-<e f="287" t="259 475"/>
-<e f="288" t="259"/>
-<e f="289" t="259"/>
-<e f="290" t="259"/>
-<e f="291" t="259"/>
-<e f="292" t="259"/>
-<e f="293" t="259"/>
-<e f="294" t="259"/>
-<e f="295" t="259"/>
-<e f="296" t="259 475"/>
-<e f="297" t="259"/>
-<e f="298" t="259"/>
-<e f="299" t="259 475"/>
-<e f="300" t="259 475"/>
-<e f="301" t="259"/>
-<e f="302" t="259 475"/>
-<e f="303" t="259 475"/>
-<e f="304" t="259"/>
-<e f="316" t="313 314"/>
-<e f="318" t="313"/>
-<e f="319" t="313"/>
-<e f="320" t="313"/>
-<e f="321" t="313"/>
-<e f="322" t="313"/>
-<e f="323" t="313"/>
-<e f="326" t="405"/>
-<e f="327" t="328 475"/>
-<e f="329" t="315"/>
-<e f="331" t="315"/>
-<e f="333" t="315 327 329 330 331"/>
-<e f="345" t="109 326 333"/>
-<e f="346" t="475"/>
-<e f="347" t="316 317 318 319 320 321 322 323 324 325 344 345 346"/>
-<e f="348" t="109 347"/>
-<e f="349" t="314"/>
-<e f="351" t="314"/>
-<e f="352" t="314 344"/>
-<e f="353" t="314 344"/>
-<e f="354" t="314"/>
-<e f="355" t="314 344 358"/>
-<e f="358" t="313"/>
-<e f="361" t="350"/>
-<e f="362" t="378"/>
-<e f="363" t="366"/>
-<e f="365" t="360"/>
-<e f="366" t="360"/>
-<e f="367" t="360"/>
+<e f="192" t="480"/>
+<e f="193" t="179 180 190 197 198"/>
+<e f="194" t="179 180 190 197 198"/>
+<e f="196" t="195"/>
+<e f="198" t="179 197"/>
+<e f="199" t="180 190 192 197 198"/>
+<e f="200" t="190 192 198 201"/>
+<e f="201" t="180 190 192 197"/>
+<e f="202" t="180 190 192 197 201"/>
+<e f="203" t="176 201"/>
+<e f="204" t="176 201"/>
+<e f="206" t="177 210 211"/>
+<e f="207" t="176 210 211"/>
+<e f="208" t="210 211"/>
+<e f="209" t="210 211"/>
+<e f="212" t="210 211"/>
+<e f="213" t="210"/>
+<e f="214" t="480"/>
+<e f="215" t="211"/>
+<e f="217" t="211 223 480"/>
+<e f="218" t="209 216 217"/>
+<e f="219" t="209 211 216 217"/>
+<e f="220" t="177 210 216 217"/>
+<e f="221" t="177 210 211 216 217"/>
+<e f="222" t="210 211 216 480"/>
+<e f="223" t="210 211 216 480"/>
+<e f="224" t="216"/>
+<e f="225" t="211 216"/>
+<e f="226" t="216 406 407"/>
+<e f="227" t="216 406 407"/>
+<e f="228" t="407"/>
+<e f="229" t="216 406 407"/>
+<e f="230" t="216 406 407"/>
+<e f="239" t="480"/>
+<e f="240" t="199 200 209 238 239 248 400 401 402 403 480"/>
+<e f="244" t="243"/>
+<e f="248" t="100 247 461"/>
+<e f="254" t="480"/>
+<e f="255" t="480"/>
+<e f="256" t="250 251 252 253 254 255"/>
+<e f="258" t="257"/>
+<e f="259" t="199 256 258 260 261 480"/>
+<e f="264" t="258 259 265 266 267 268 269 275 276 277 278 279 280 281 480"/>
+<e f="265" t="283"/>
+<e f="266" t="480"/>
+<e f="267" t="480"/>
+<e f="268" t="480"/>
+<e f="269" t="480"/>
+<e f="272" t="271"/>
+<e f="273" t="271"/>
+<e f="274" t="270 480"/>
+<e f="275" t="480"/>
+<e f="281" t="250 272 273 274 283"/>
+<e f="282" t="480"/>
+<e f="283" t="14 282"/>
+<e f="284" t="264"/>
+<e f="285" t="264"/>
+<e f="286" t="264 480"/>
+<e f="287" t="264 480"/>
+<e f="288" t="264 480"/>
+<e f="289" t="264 480"/>
+<e f="290" t="264"/>
+<e f="291" t="264"/>
+<e f="292" t="264 480"/>
+<e f="293" t="264"/>
+<e f="294" t="264"/>
+<e f="295" t="264"/>
+<e f="296" t="264"/>
+<e f="297" t="264"/>
+<e f="298" t="264"/>
+<e f="299" t="264"/>
+<e f="300" t="264"/>
+<e f="301" t="264 480"/>
+<e f="302" t="264"/>
+<e f="303" t="264"/>
+<e f="304" t="264 480"/>
+<e f="305" t="264 480"/>
+<e f="306" t="264"/>
+<e f="307" t="264 480"/>
+<e f="308" t="264 480"/>
+<e f="309" t="264"/>
+<e f="321" t="318 319"/>
+<e f="323" t="318"/>
+<e f="324" t="318"/>
+<e f="325" t="318"/>
+<e f="326" t="318"/>
+<e f="327" t="318"/>
+<e f="328" t="318"/>
+<e f="331" t="410"/>
+<e f="332" t="333 480"/>
+<e f="334" t="320"/>
+<e f="336" t="320"/>
+<e f="338" t="320 332 334 335 336"/>
+<e f="350" t="114 331 338"/>
+<e f="351" t="480"/>
+<e f="352" t="321 322 323 324 325 326 327 328 329 330 349 350 351"/>
+<e f="353" t="114 352"/>
+<e f="354" t="319"/>
+<e f="356" t="319"/>
+<e f="357" t="319 349"/>
+<e f="358" t="319 349"/>
+<e f="359" t="319"/>
+<e f="360" t="319 349 363"/>
+<e f="363" t="318"/>
+<e f="366" t="355"/>
+<e f="367" t="383"/>
+<e f="368" t="371"/>
+<e f="370" t="365"/>
 <e f="371" t="365"/>
-<e f="372" t="204 380"/>
-<e f="375" t="373"/>
-<e f="376" t="314 344 365"/>
-<e f="377" t="314 344 365"/>
-<e f="380" t="397 398 475"/>
-<e f="390" t="389 475"/>
-<e f="392" t="391"/>
-<e f="393" t="181 186 191 195 236 383 384 390 392 394"/>
-<e f="394" t="384"/>
-<e f="399" t="395 396 397 398"/>
-<e f="400" t="190 205 475"/>
-<e f="401" t="190 205 403 475"/>
-<e f="402" t="190 205 475"/>
-<e f="404" t="209"/>
-<e f="415" t="467 484 485 488"/>
-<e f="416" t="190 475 484 485"/>
-<e f="418" t="190 475"/>
-<e f="419" t="191 482 483 489"/>
-<e f="420" t="191 475"/>
-<e f="421" t="191 420 483 485 488 489 490 498"/>
-<e f="422" t="190 485"/>
-<e f="423" t="34 183 485"/>
-<e f="425" t="95 110 191 456 482 483 484 485"/>
-<e f="427" t="426 484 485 487 488"/>
-<e f="428" t="373 475 485 487"/>
-<e f="431" t="39"/>
-<e f="432" t="475"/>
-<e f="433" t="430 481 489 500"/>
-<e f="434" t="429 481 485 489 499"/>
-<e f="435" t="475"/>
-<e f="440" t="83 88 95 124 125 128 130 178 179 184 190 205 207 373 374 456 475 482 483 484 485 487 488 489 498"/>
-<e f="452" t="454 460"/>
-<e f="454" t="450 451 453 498"/>
-<e f="455" t="450 451 453 498"/>
-<e f="457" t="455"/>
-<e f="458" t="454"/>
-<e f="462" t="459"/>
-<e f="480" t="475 476"/>
-<e f="481" t="498"/>
-<e f="482" t="498"/>
-<e f="486" t="475 476"/>
-<e f="496" t="409 412 430 457"/>
-<e f="498" t="412 430 462 497"/>
-<e f="499" t="457"/>
-<e f="500" t="457"/>
+<e f="372" t="365"/>
+<e f="376" t="370"/>
+<e f="377" t="209 385"/>
+<e f="380" t="378"/>
+<e f="381" t="319 349 370"/>
+<e f="382" t="319 349 370"/>
+<e f="385" t="402 403 480"/>
+<e f="395" t="394 480"/>
+<e f="397" t="396"/>
+<e f="398" t="186 191 196 200 241 388 389 395 397 399"/>
+<e f="399" t="389"/>
+<e f="404" t="400 401 402 403"/>
+<e f="405" t="195 210 480"/>
+<e f="406" t="195 210 408 480"/>
+<e f="407" t="195 210 480"/>
+<e f="409" t="214"/>
+<e f="420" t="472 489 490 493"/>
+<e f="421" t="195 480 489 490"/>
+<e f="423" t="195 480"/>
+<e f="424" t="196 487 488 494"/>
+<e f="425" t="196 480"/>
+<e f="426" t="196 425 488 490 493 494 495 503"/>
+<e f="427" t="195 490"/>
+<e f="428" t="34 188 490"/>
+<e f="430" t="100 115 196 461 487 488 489 490"/>
+<e f="432" t="431 489 490 492 493"/>
+<e f="433" t="378 480 490 492"/>
+<e f="436" t="39"/>
+<e f="437" t="480"/>
+<e f="438" t="435 486 494 505"/>
+<e f="439" t="434 486 490 494 504"/>
+<e f="440" t="480"/>
+<e f="445" t="83 88 93 100 129 130 133 135 183 184 189 195 210 212 378 379 461 480 487 488 489 490 492 493 494 503"/>
+<e f="457" t="459 465"/>
+<e f="459" t="455 456 458 503"/>
+<e f="460" t="455 456 458 503"/>
+<e f="462" t="460"/>
+<e f="463" t="459"/>
+<e f="467" t="464"/>
+<e f="485" t="480 481"/>
+<e f="486" t="503"/>
+<e f="487" t="503"/>
+<e f="491" t="480 481"/>
+<e f="501" t="414 417 435 462"/>
+<e f="503" t="417 435 467 502"/>
+<e f="504" t="462"/>
+<e f="505" t="462"/>
 </cg>
 </pm>

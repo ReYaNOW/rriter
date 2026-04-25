@@ -221,7 +221,7 @@ impl Renderer {
             by += oy;
         }
 
-        if popup.offset_x.is_none() || popup.offset_y.is_none() {
+        if popup.offset_x.is_none() || popup.offset_y.is_none() || attached_diag.is_some() {
             let orig_bx = bx;
             let orig_by = by;
             if let Some((rx, _, _, _)) = attached_diag {
@@ -242,8 +242,10 @@ impl Renderer {
                 bx = 20.0 * s;
             }
 
-            popup.offset_x = Some(bx - orig_bx);
-            popup.offset_y = Some(by - orig_by);
+            if attached_diag.is_none() {
+                popup.offset_x = Some(bx - orig_bx);
+                popup.offset_y = Some(by - orig_by);
+            }
         }
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,

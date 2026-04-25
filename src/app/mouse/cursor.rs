@@ -482,19 +482,39 @@ impl App {
                 }
                 if is_text_area {
                     let normalized = normalize_hover_byte(&self.editor, byte_offset);
-                                        if normalized.is_none() {
-                                                                                                        if diag_hover_byte.is_none() && !in_hover_popup {
-                        if state.byte_offset.is_some() {
-                            println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
-                            state.byte_offset = None;
-                            state.timer = 0.0;
-                            state.request_id = None;
-                            state.definition_request_id = None;
+                    if normalized.is_none() {
+                        if let Some(diag_byte) = diag_hover_byte {
+                            if !in_hover_popup {
+                                // We are over a diagnostic squiggle, but not a text word.
+                                // Trigger hover for the diagnostic!
+                                if state.byte_offset != Some(diag_byte) {
+                                    let keep_visible = state.popup.is_some();
+                                    state.byte_offset = Some(diag_byte);
+                                    state.timer = 0.0;
+                                    state.request_id = None;
+                                    state.definition_request_id = None;
+                                    state.pending_popup = None;
+                                    state.selection_anchor = None;
+                                    state.selection_cursor = None;
+                                    state.selecting = false;
+                                    if !keep_visible {
+                                        state.popup = None;
+                                        state.rect = None;
+                                    }
+                                }
+                            }
+                        } else if !in_hover_popup {
+                            if state.byte_offset.is_some() {
+                                println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
+                                state.byte_offset = None;
+                                state.timer = 0.0;
+                                state.request_id = None;
+                                state.definition_request_id = None;
+                            }
                         }
+                        return;
                     }
-                    return;
-                }
-                let byte_offset = normalized.unwrap_or(byte_offset);
+                    let byte_offset = normalized.unwrap_or(byte_offset);
                     let mut same_word = false;
                     if let Some(old_byte) = state.byte_offset {
                         let (old_start, old_end) = hover_token_bounds(&self.editor, old_byte);
@@ -503,7 +523,8 @@ impl App {
                     }
                                                                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                     clear_diag_popup = true;
-                    println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. clearing old popup. start 0.34s request timer.", byte_offset, state.byte_offset);
+                    let keep_visible_popup = state.popup.is_some();
+                    println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
                     state.byte_offset = Some(byte_offset);
                     state.timer = 0.0;
                         state.request_id = None;
@@ -512,8 +533,10 @@ impl App {
                         state.selection_anchor = None;
                         state.selection_cursor = None;
                         state.selecting = false;
-                        state.popup = None;
-                        state.rect = None;
+                        if !keep_visible_popup {
+                            state.popup = None;
+                            state.rect = None;
+                        }
                     }
                                                                                 } else if !in_hover_popup {
                     if state.byte_offset.is_some() {

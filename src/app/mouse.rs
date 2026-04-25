@@ -80,9 +80,66 @@ impl Default for HoverState {
 #[cfg(test)]
 mod tests {
     use super::{
-        diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+        compute_hover_visibility, diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
         is_in_hover_popup_or_bridge, normalize_hover_byte,
     };
+
+    #[test]
+    fn hover_visibility_linter_error_only() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility(
+            true,  // is_error_hovered
+            true,  // error_timer_ready
+            false, // has_type_popup
+            None,  // hovered_diag_type_target
+            None,  // type_popup_byte
+        );
+        assert!(show_err);
+        assert!(!show_type);
+        assert!(!show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_type_only() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility(
+            false,     // is_error_hovered
+            false,     // error_timer_ready
+            true,      // has_type_popup
+            None,      // hovered_diag_type_target
+            Some(100), // type_popup_byte
+        );
+        assert!(!show_err);
+        assert!(show_type);
+        assert!(!show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_combined() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility(
+            true,      // is_error_hovered
+            true,      // error_timer_ready
+            true,      // has_type_popup
+            Some(100), // hovered_diag_type_target
+            Some(100), // type_popup_byte
+        );
+        assert!(show_err);
+        assert!(show_type);
+        assert!(show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_during_transition() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility(
+            true,      // is_error_hovered
+            true,      // error_timer_ready
+            true,      // has_type_popup
+            Some(200), // hovered_diag_type_target (new location)
+            Some(100), // type_popup_byte (old location)
+        );
+        // Error renders independently, type renders independently, but NOT combined
+        assert!(show_err);
+        assert!(show_type);
+        assert!(!show_comb);
+    }
 
     #[test]
     fn hover_byte_includes_identifier_edges_next_to_whitespace() {
@@ -245,6 +302,31 @@ thread_local! {
 }
 
 pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
+
+pub fn compute_hover_visibility(
+    is_error_hovered: bool,
+    error_timer_ready: bool,
+    has_type_popup: bool,
+    hovered_diag_type_target: Option<usize>,
+    type_popup_byte: Option<usize>,
+) -> (bool, bool, bool) {
+    let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
+    let type_matches_diag = hovered_diag_type_target == type_popup_byte;
+    let show_combined =
+        diagnostic_needs_type && has_type_popup && type_matches_diag && error_timer_ready;
+    let show_error = if diagnostic_needs_type {
+        if type_matches_diag {
+            show_combined
+        } else {
+            is_error_hovered && error_timer_ready
+        }
+    } else {
+        is_error_hovered && error_timer_ready
+    };
+    let show_type = has_type_popup;
+
+    (show_error, show_type, show_combined)
+}
 
 pub fn clear_hover_popup(renderer: Option<&mut crate::renderer::Renderer>) -> bool {
     HOVER_STATE.with(|state| {

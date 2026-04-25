@@ -2258,25 +2258,7 @@ impl Renderer {
             .unwrap_or(0.0);
         self.last_draw_instant = Some(now);
 
-        if let Some(byte_offset) = hovered_diag_type_target {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                if state.byte_offset != Some(byte_offset) {
-                    state.byte_offset = Some(byte_offset);
-                    state.timer = 0.0;
-                    state.request_id = None;
-                    state.definition_request_id = None;
-                    state.popup = None;
-                    state.pending_popup = None;
-                    state.rect = None;
-                    state.selection_anchor = None;
-                    state.selection_cursor = None;
-                    state.selecting = false;
-                }
-            });
-        }
-
-        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset) =
+        let (has_type_popup, is_hover_pending, hover_timer, has_byte_offset, hover_byte_offset, type_popup_byte) =
             crate::app::mouse::HOVER_STATE.with(|s| {
                 let state = s.borrow();
                 (
@@ -2284,11 +2266,8 @@ impl Renderer {
                     state.request_id.is_some() || state.definition_request_id.is_some(),
                     state.timer,
                     state.byte_offset.is_some(),
-                    state
-                        .popup
-                        .as_ref()
-                        .map(|p| p.byte_offset)
-                        .or(state.byte_offset),
+                    state.byte_offset.or_else(|| state.popup.as_ref().map(|p| p.byte_offset)),
+                    state.popup.as_ref().map(|p| p.byte_offset),
                 )
             });
 
@@ -2420,22 +2399,17 @@ impl Renderer {
         }
 
         let error_timer_ready = self.diag_hover_timer >= 0.2;
-        let waiting_for_type = has_byte_offset
-            && !has_type_popup
-            && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
 
-        let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
-        let show_combined = diagnostic_needs_type && has_type_popup && error_timer_ready;
-        let show_error = if diagnostic_needs_type {
-            show_combined
-        } else {
-            is_error_hovered && error_timer_ready
-        };
-        let show_type = if is_error_hovered || waiting_for_type {
-            show_combined
-        } else {
-            has_type_popup
-        };
+        let (show_error, show_type, show_combined) =
+            crate::app::mouse::compute_hover_visibility(
+                is_error_hovered,
+                error_timer_ready,
+                has_type_popup,
+                hovered_diag_type_target,
+                type_popup_byte,
+            );
+
+
 
         let (attached_hover_w, attached_hover_h) = if show_combined {
             crate::app::mouse::HOVER_STATE.with(|s| {
