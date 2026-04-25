@@ -15,7 +15,7 @@ pub fn highlight_hover_text(
         spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
-    let clean_msg = normalize_hover_text(&preprocessed);
+    let (clean_msg, inline_code_ranges) = normalize_hover_text(&preprocessed);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
@@ -92,6 +92,13 @@ pub fn highlight_hover_text(
         })
     });
 
+    for &(start, end) in &inline_code_ranges {
+        if end > start && end <= clean_msg.len() {
+            let code_chunk = &clean_msg[start..end];
+            crate::languages::python::push_python_ts_spans(code_chunk, start, &mut spans);
+        }
+    }
+
     spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
     let line_kinds = clean_msg
         .split('\n')
@@ -105,7 +112,7 @@ pub fn highlight_hover_text(
             }
         })
         .collect();
-    (clean_msg, spans, line_kinds, Vec::new())
+    (clean_msg, spans, line_kinds, inline_code_ranges)
 }
 
 fn preprocess_hover_text(msg: &str) -> String {
@@ -575,9 +582,11 @@ fn add_type_expr_spans_for_line(
     }
 }
 
-fn normalize_hover_text(msg: &str) -> String {
+fn normalize_hover_text(msg: &str) -> (String, Vec<(usize, usize)>) {
     let mut out = String::new();
     let mut in_fence = false;
+    let mut inline_ranges = Vec::new();
+
     for raw in msg.replace('\r', "").lines() {
         let trimmed = raw.trim();
         if let Some(normalized) = normalize_bound_method_signature(trimmed) {
@@ -624,10 +633,15 @@ fn normalize_hover_text(msg: &str) -> String {
             out.push('\n');
             continue;
         }
-        out.push_str(raw);
+        let (normalized_line, line_ranges) =
+            crate::languages::python::normalize_inline_rst_code(raw);
+        for (s, e) in line_ranges {
+            inline_ranges.push((out.len() + s, out.len() + e));
+        }
+        out.push_str(&normalized_line);
         out.push('\n');
     }
-    out.trim_end().to_string()
+    (out.trim_end().to_string(), inline_ranges)
 }
 
 fn wrap_signature_after_first_param(signature: &str, def_prefix: &str) -> String {
@@ -1295,6 +1309,35 @@ Args:
                 "doc argument `{name}` should be highlighted orange"
             );
         }
+    }
+
+    #[test]
+    fn double_backticks_are_stripped_and_highlighted_as_inline_code() {
+        let raw = "Litestar\n\
+---------------------------------------------\n\
+The Litestar application.\n\
+\n\
+``Litestar`` is the root level of the app - it has the base path of ``/``";
+        let (text, _spans, _kinds, inline) = highlight_hover_text(raw);
+
+        assert!(!text.contains("``"), "Double backticks should be stripped");
+        assert!(text.contains("Litestar is the root level"));
+        assert!(text.contains("base path of /"));
+
+        let litestar_idx = text.find("Litestar is the root").unwrap();
+        assert!(
+            inline
+                .iter()
+                .any(|&(s, e)| s == litestar_idx && e == litestar_idx + 8),
+            "Litestar should be extracted as inline code range"
+        );
+        let slash_idx = text.find("/").unwrap();
+        assert!(
+            inline
+                .iter()
+                .any(|&(s, e)| s == slash_idx && e == slash_idx + 1),
+            "/ should be extracted as inline code range"
+        );
     }
 
     #[test]

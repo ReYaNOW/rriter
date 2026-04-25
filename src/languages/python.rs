@@ -521,7 +521,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                             "Variable"
                         };
                         header_text = format!("{} {} of {}", kind, clean_name, cls);
-                                        } else {
+                    } else {
                         let kind = if is_ru_attr || is_en_attr {
                             "Class attribute"
                         } else {
@@ -554,7 +554,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             kinds.push(HoverLineKind::Text);
         }
 
-                if is_header2 {
+        if is_header2 {
             out.push_str(&header_text);
             out.push('\n');
             kinds.push(HoverLineKind::Header2);
@@ -909,7 +909,7 @@ pub fn highlight_python_hover_doc(
             saw_separator = true;
         }
 
-                if saw_separator && kind == HoverLineKind::Text && !is_blank {
+        if saw_separator && kind == HoverLineKind::Text && !is_blank {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
