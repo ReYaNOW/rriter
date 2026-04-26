@@ -12,7 +12,7 @@ impl App {
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             let mut in_hover_popup = false;
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
-            let diag_rect_full = self.renderer.as_ref().unwrap().last_diag_popup_rect;
+            let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
             let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
 
             if type_rect.is_some() || diag_rect.is_some() {
@@ -337,12 +337,11 @@ impl App {
                             }
                         });
                     let in_diag_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
-                        && self.renderer.as_ref().unwrap().last_diag_popup_rect.map_or(
-                            false,
-                            |(x, y, w, h, _, _, _)| {
+                        && HOVER_STATE.with(|s| {
+                            s.borrow().diag_rect.map_or(false, |(x, y, w, h, _, _, _)| {
                                 mx >= x && mx <= x + w && my >= y && my <= y + h
-                            },
-                        );
+                            })
+                        });
 
                     if in_hover_popup_body || in_diag_popup_body {
                         if button == winit::event::MouseButton::Left {
@@ -370,10 +369,7 @@ impl App {
                             } else {
                                 HOVER_STATE.with(|hover_state| {
                                     let mut hs = hover_state.borrow_mut();
-                                    let byte =
-                                        crate::render_view::diag_popup_ui::diag_popup_byte_at(
-                                            mx, my,
-                                        );
+                                    let byte = crate::render_view::ui::diag_popup_byte_at(mx, my);
                                     if state == ElementState::Pressed {
                                         hs.diag_selection_anchor = Some(byte);
                                         hs.diag_selection_cursor = Some(byte);

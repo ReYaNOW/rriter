@@ -409,20 +409,18 @@ impl ApplicationHandler for App {
                 self.target_sticky_lines = target_sticky;
 
                 // Продолжаем рендерить пока tooltip ещё не показан
-                if let Some(r) = self.renderer.as_ref() {
-                    if r.diag_hover_timer > 0.0 && r.diag_hover_timer < 0.2 {
-                        self.window.as_ref().unwrap().request_redraw();
-                    }
+                let diag_timer_active = crate::app::mouse::HOVER_STATE.with(|state| {
+                    let state = state.borrow();
+                    state.diag_hover_timer > 0.0 && state.diag_hover_timer < 0.2
+                });
+                if diag_timer_active {
+                    self.window.as_ref().unwrap().request_redraw();
                 }
 
                 // Сбрасываем иконку копирования когда popup диагностики закрывается
-                if self
-                    .renderer
-                    .as_ref()
-                    .unwrap()
-                    .last_hovered_diags
-                    .is_empty()
-                {
+                let no_hovered_diags =
+                    crate::app::mouse::HOVER_STATE.with(|s| s.borrow().hovered_diags.is_empty());
+                if no_hovered_diags {
                     self.ide_panel.diag_copied_idx = None;
                 }
 
@@ -605,11 +603,8 @@ impl ApplicationHandler for App {
                     let s = r.scale_factor;
                     let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-                    let diag_popup_hovered = self
-                        .renderer
-                        .as_ref()
-                        .unwrap()
-                        .last_diag_popup_rect
+                    let diag_popup_hovered = crate::app::mouse::HOVER_STATE
+                        .with(|state| state.borrow().diag_rect)
                         .map(|(rx, ry, rw, rh, _, _, _)| {
                             mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh
                         })

@@ -441,15 +441,26 @@ impl App {
                 });
                 if let Some(r) = self.renderer.as_ref() {
                     if !copied {
-                        if let Some((rx, ry, rw, rh, _, _, _)) = r.last_diag_popup_rect {
-                            let mx = r.last_mouse_x;
-                            let my = r.last_mouse_y;
-                            if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
-                                if !r.last_diag_popup_text.is_empty() {
-                                    let _ = self.clipboard.set_text(&r.last_diag_popup_text);
-                                    copied = true;
+                        let diag_copy = crate::app::mouse::HOVER_STATE.with(|s| {
+                            let s = s.borrow();
+                            s.diag_rect.and_then(|(rx, ry, rw, rh, _, _, _)| {
+                                let mx = r.last_mouse_x;
+                                let my = r.last_mouse_y;
+                                if mx >= rx
+                                    && mx <= rx + rw
+                                    && my >= ry
+                                    && my <= ry + rh
+                                    && !s.diag_text.is_empty()
+                                {
+                                    Some(s.diag_text.clone())
+                                } else {
+                                    None
                                 }
-                            }
+                            })
+                        });
+                        if let Some(text) = diag_copy {
+                            let _ = self.clipboard.set_text(text);
+                            copied = true;
                         }
                     }
                 }

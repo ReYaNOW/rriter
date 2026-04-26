@@ -635,11 +635,6 @@ impl App {
                 crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 if let Some(r) = self.renderer.as_mut() {
                     r.hide_popups_until_mouse_move = true;
-                    r.last_diag_popup_rect = None;
-                    r.last_hovered_diags.clear();
-                    r.hovered_diags_cache.clear();
-                    r.diag_hover_timer = 0.0;
-                    r.diag_hover_timer_idx = None;
                 }
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();
@@ -751,7 +746,9 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
-                if let Some(href) = self.renderer.as_ref().unwrap().last_diag_href.clone() {
+                if let Some(href) =
+                    crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_href.clone())
+                {
                     #[cfg(target_os = "windows")]
                     let _ = std::process::Command::new("cmd")
                         .args(["/c", "start", "", &href])

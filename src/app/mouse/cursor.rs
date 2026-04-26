@@ -25,7 +25,7 @@ impl App {
                     popup_selecting = true;
                 }
             } else if hs.diag_selecting {
-                let byte = crate::render_view::diag_popup_ui::diag_popup_byte_at(
+                let byte = crate::render_view::ui::diag_popup_byte_at(
                     position.x as f32,
                     position.y as f32,
                 );
@@ -44,11 +44,6 @@ impl App {
             clear_hover_popup(self.renderer.as_mut());
             if let Some(r) = self.renderer.as_mut() {
                 r.hide_popups_until_mouse_move = true;
-                r.last_diag_popup_rect = None;
-                r.last_hovered_diags.clear();
-                r.hovered_diags_cache.clear();
-                r.diag_hover_timer = 0.0;
-                r.diag_hover_timer_idx = None;
             }
         }
 
@@ -211,7 +206,7 @@ impl App {
                     .map(|popup| (popup.anchor_x, popup.anchor_y, popup.byte_offset)),
             )
         });
-        let diag_rect_full = self.renderer.as_ref().unwrap().last_diag_popup_rect;
+        let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
         let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
 
         if type_rect.is_some() || diag_rect.is_some() {
@@ -390,61 +385,55 @@ impl App {
                             x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
                         }
 
-                        let x_start = left_padding + x_start_px - render_scroll_x;
-                        let x_end = left_padding + x_end_px - render_scroll_x;
-                        let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
+                        let Some((hit_start_byte, hit_end_byte, type_target)) =
+                            diagnostic_hover_byte_range_on_line(
+                                &self.editor,
+                                line,
+                                start_col,
+                                end_col,
+                            )
+                        else {
+                            continue;
+                        };
 
-                        if px < x_start || px > x_start + squiggle_w {
+                        let mut hit_x_start_px = x_start_px;
+                        let mut hit_x_end_px = x_end_px;
+                        let mut hit_cur_x = 0.0f32;
+                        let mut hit_start_found = false;
+                        let mut hit_end_found = false;
+                        self.editor
+                            .utf16_col_to_byte_advance(line, |ch, _utf16_before, pos| {
+                                if !hit_start_found && pos >= hit_start_byte {
+                                    hit_x_start_px = hit_cur_x;
+                                    hit_start_found = true;
+                                }
+                                if !hit_end_found && pos >= hit_end_byte {
+                                    hit_x_end_px = hit_cur_x;
+                                    hit_end_found = true;
+                                }
+                                hit_cur_x += if ch == '\t' {
+                                    self.renderer.as_mut().unwrap().char_advance(' ') * 4.0
+                                } else {
+                                    self.renderer.as_mut().unwrap().char_advance(ch)
+                                };
+                            });
+                        if !hit_start_found {
+                            hit_x_start_px = hit_cur_x;
+                        }
+                        if !hit_end_found {
+                            hit_x_end_px = hit_cur_x.max(hit_x_start_px + avg_adv * 4.0);
+                        }
+
+                        let hit_x_start = left_padding + hit_x_start_px - render_scroll_x;
+                        let hit_x_end = left_padding + hit_x_end_px - render_scroll_x;
+                        let hit_w = (hit_x_end - hit_x_start).max(avg_adv / 2.0);
+
+                        if px < hit_x_start || px > hit_x_start + hit_w {
                             continue;
                         }
 
-                        let line_start = self.editor.line_offsets[line];
-                        let line_end = self
-                            .editor
-                            .line_offsets
-                            .get(line + 1)
-                            .copied()
-                            .unwrap_or(self.editor.len());
-
-                        let mut start_byte = line_start;
-                        let mut end_byte = line_end;
-                        let mut start_byte_found = false;
-                        let mut end_byte_found = false;
-
-                        self.editor
-                            .utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
-                                if !start_byte_found && utf16_before >= start_col {
-                                    start_byte = pos;
-                                    start_byte_found = true;
-                                }
-                                if !end_byte_found && utf16_before >= end_col {
-                                    end_byte = pos;
-                                    end_byte_found = true;
-                                }
-                            });
-
-                        if !start_byte_found {
-                            start_byte = line_start;
-                        }
-                        if !end_byte_found {
-                            end_byte = line_end;
-                        }
-
-                        let scan_start = start_byte.min(line_end);
-                        let scan_end = end_byte.max(scan_start).min(line_end);
-                        for byte in scan_start..scan_end {
-                            if let Some(byte) = normalize_hover_byte(&self.editor, byte) {
-                                diag_hover_byte = Some(byte);
-                                break 'diag_scan;
-                            }
-                        }
-
-                        for byte in line_start..line_end {
-                            if let Some(byte) = normalize_hover_byte(&self.editor, byte) {
-                                diag_hover_byte = Some(byte);
-                                break 'diag_scan;
-                            }
-                        }
+                        diag_hover_byte = Some(type_target);
+                        break 'diag_scan;
                     }
                 }
             }
@@ -458,11 +447,8 @@ impl App {
                     py + render_scroll_y,
                 )
             };
-            let in_diag_popup = self
-                .renderer
-                .as_ref()
-                .unwrap()
-                .last_diag_popup_rect
+            let in_diag_popup = HOVER_STATE
+                .with(|s| s.borrow().diag_rect)
                 .map(|(rx, ry, rw, rh, _, _, _)| {
                     position.x as f32 >= rx
                         && position.x as f32 <= rx + rw
@@ -521,12 +507,12 @@ impl App {
                         let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
                         same_word = old_start == new_start && old_end == new_end;
                     }
-                                                                    if !same_word && (!in_hover_popup || in_hover_source_line) {
-                    clear_diag_popup = true;
-                    let keep_visible_popup = state.popup.is_some();
-                    println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
-                    state.byte_offset = Some(byte_offset);
-                    state.timer = 0.0;
+                    if !same_word && (!in_hover_popup || in_hover_source_line) {
+                        clear_diag_popup = true;
+                        let keep_visible_popup = state.popup.is_some();
+                        println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
+                        state.byte_offset = Some(byte_offset);
+                        state.timer = 0.0;
                         state.request_id = None;
                         state.definition_request_id = None;
                         state.pending_popup = None;
@@ -538,7 +524,7 @@ impl App {
                             state.rect = None;
                         }
                     }
-                                                                                } else if !in_hover_popup {
+                } else if !in_hover_popup {
                     if state.byte_offset.is_some() {
                         println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
                         state.byte_offset = None;
@@ -549,13 +535,7 @@ impl App {
                 }
             });
             if clear_diag_popup {
-                if let Some(r) = self.renderer.as_mut() {
-                    r.last_diag_popup_rect = None;
-                    r.last_hovered_diags.clear();
-                    r.hovered_diags_cache.clear();
-                    r.diag_hover_timer = 0.0;
-                    r.diag_hover_timer_idx = None;
-                }
+                HOVER_STATE.with(|s| s.borrow_mut().reset_diagnostic_popup());
             }
         }
         let wh = window_size.height as f32;

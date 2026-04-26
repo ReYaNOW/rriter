@@ -39,6 +39,9 @@ pub struct HoverLayoutCache {
     pub total_text_h: f32,
 }
 
+pub type DiagnosticPopupRect = (f32, f32, f32, f32, f32, f32, f32);
+pub type HoveredDiagnostic = (usize, f32, f32, f32, f32);
+
 pub struct HoverState {
     pub request_id: Option<i32>,
     pub definition_request_id: Option<i32>,
@@ -54,6 +57,15 @@ pub struct HoverState {
     pub diag_selection_anchor: Option<usize>,
     pub diag_selection_cursor: Option<usize>,
     pub diag_selecting: bool,
+    pub diag_rect: Option<DiagnosticPopupRect>,
+    pub diag_scroll: crate::scroll::ScrollState,
+    pub diag_max_scroll: f32,
+    pub diag_hover_timer: f32,
+    pub diag_hover_timer_idx: Option<usize>,
+    pub hovered_diags: Vec<usize>,
+    pub hovered_diags_cache: Vec<HoveredDiagnostic>,
+    pub diag_text: String,
+    pub diag_href: Option<String>,
 }
 
 impl Default for HoverState {
@@ -73,7 +85,150 @@ impl Default for HoverState {
             diag_selection_anchor: None,
             diag_selection_cursor: None,
             diag_selecting: false,
+            diag_rect: None,
+            diag_scroll: crate::scroll::ScrollState::new(15.0),
+            diag_max_scroll: 0.0,
+            diag_hover_timer: 0.0,
+            diag_hover_timer_idx: None,
+            hovered_diags: Vec::new(),
+            hovered_diags_cache: Vec::with_capacity(16),
+            diag_text: String::new(),
+            diag_href: None,
         }
+    }
+}
+
+impl HoverState {
+    pub fn reset_diagnostic_popup(&mut self) {
+        self.diag_rect = None;
+        self.diag_scroll.target = 0.0;
+        self.diag_scroll.current = 0.0;
+        self.diag_max_scroll = 0.0;
+        self.diag_hover_timer = 0.0;
+        self.diag_hover_timer_idx = None;
+        self.hovered_diags.clear();
+        self.hovered_diags_cache.clear();
+        self.diag_selection_anchor = None;
+        self.diag_selection_cursor = None;
+        self.diag_selecting = false;
+        self.diag_text.clear();
+        self.diag_href = None;
+    }
+
+    pub fn hide_diagnostic_popup_until_ready(&mut self) {
+        self.diag_rect = None;
+        self.diag_scroll.target = 0.0;
+        self.diag_scroll.current = 0.0;
+        self.diag_max_scroll = 0.0;
+        self.diag_selection_anchor = None;
+        self.diag_selection_cursor = None;
+        self.diag_selecting = false;
+        self.diag_text.clear();
+        self.diag_href = None;
+    }
+
+    pub fn advance_diagnostic_hover_timer(
+        &mut self,
+        first_diag_idx: Option<usize>,
+        has_type_popup: bool,
+        type_in_progress: bool,
+        dt: f32,
+    ) -> bool {
+        if first_diag_idx != self.diag_hover_timer_idx {
+            self.diag_hover_timer_idx = first_diag_idx;
+            self.diag_hover_timer = 0.0;
+        } else if first_diag_idx.is_some() || has_type_popup || type_in_progress {
+            self.diag_hover_timer += dt;
+        }
+
+        self.diag_hover_timer >= 0.2
+    }
+
+    pub fn take_type_popup_for_draw(
+        &mut self,
+    ) -> (
+        Option<HoverPopup>,
+        Option<(usize, usize)>,
+        Option<(f32, f32, f32, f32)>,
+    ) {
+        let selection = match (self.selection_anchor, self.selection_cursor) {
+            (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+            _ => None,
+        };
+        let attached_diag = self
+            .diag_rect
+            .map(|(rx, ry, rw, rh, _, _, _)| (rx, ry, rw, rh));
+        (self.popup.take(), selection, attached_diag)
+    }
+
+    pub fn put_type_popup_after_draw(
+        &mut self,
+        popup: Option<HoverPopup>,
+        rect: Option<(f32, f32, f32, f32)>,
+        max_scroll: f32,
+    ) {
+        self.popup = popup;
+        self.rect = rect;
+        self.max_scroll = max_scroll;
+    }
+
+    pub fn should_show_stale_popup_while_target_loads(&self, show_type: bool) -> bool {
+        self.popup.is_some()
+            && !show_type
+            && self.byte_offset.is_some()
+            && self.popup.as_ref().map(|p| p.byte_offset) != self.byte_offset
+    }
+
+    pub fn popup_or_bridge_contains(
+        &self,
+        px: f32,
+        py: f32,
+        viewport_w: f32,
+        scale: f32,
+    ) -> (bool, bool) {
+        let mut inside = false;
+        let mut source_line = false;
+
+        if let Some((rx, ry, rw, rh, anchor_x_start, anchor_x_end, anchor_y)) = self.diag_rect {
+            let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
+            let line_top_y = anchor_y - 10.0 * scale;
+            let line_bottom_y = anchor_y + 10.0 * scale;
+            if is_in_hover_popup_or_bridge(
+                px,
+                py,
+                (rx, ry, rw, rh),
+                anchor_x,
+                anchor_y,
+                line_top_y,
+                line_bottom_y,
+                viewport_w,
+                scale,
+            ) {
+                inside = true;
+                source_line |= py >= line_top_y && py <= line_bottom_y;
+            }
+        }
+
+        if let (Some((rx, ry, rw, rh)), Some(popup)) = (self.rect, self.popup.as_ref()) {
+            let line_top_y = popup.anchor_y - 10.0 * scale;
+            let line_bottom_y = popup.anchor_y + 10.0 * scale;
+            if is_in_hover_popup_or_bridge(
+                px,
+                py,
+                (rx, ry, rw, rh),
+                popup.anchor_x,
+                popup.anchor_y,
+                line_top_y,
+                line_bottom_y,
+                viewport_w,
+                scale,
+            ) {
+                inside = true;
+                source_line |= py >= line_top_y && py <= line_bottom_y;
+            }
+        }
+
+        (inside, source_line)
     }
 }
 
@@ -81,7 +236,8 @@ impl Default for HoverState {
 mod tests {
     use super::{
         compute_hover_visibility, diagnostic_hover_byte_range_on_line,
-        diagnostic_hover_range_on_line, is_in_hover_popup_or_bridge, normalize_hover_byte,
+        diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
+        is_in_hover_popup_or_bridge, normalize_hover_byte, HoverState,
     };
 
     #[test]
@@ -135,10 +291,263 @@ mod tests {
             Some(200), // hovered_diag_type_target (new location)
             Some(100), // type_popup_byte (old location)
         );
-        // Error renders independently, type renders independently, but NOT combined
+        assert!(!show_err);
+        assert!(!show_type);
+        assert!(!show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_waits_for_matching_type_before_showing_combined_type() {
+        let (show_err, show_type, show_comb) =
+            compute_hover_visibility(true, false, true, Some(100), Some(100));
+        assert!(!show_err);
+        assert!(!show_type);
+        assert!(!show_comb);
+
+        let (show_err, show_type, show_comb) =
+            compute_hover_visibility(true, true, true, Some(100), Some(200));
+        assert!(!show_err);
+        assert!(!show_type);
+        assert!(!show_comb);
+
+        let (show_err, show_type, show_comb) =
+            compute_hover_visibility(true, true, true, Some(100), Some(100));
         assert!(show_err);
         assert!(show_type);
-        assert!(!show_comb);
+        assert!(show_comb);
+    }
+
+    #[test]
+    fn hover_state_resets_all_diagnostic_popup_fields() {
+        let mut state = HoverState::default();
+        state.diag_rect = Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0));
+        state.diag_scroll.current = 12.0;
+        state.diag_scroll.target = 24.0;
+        state.diag_max_scroll = 99.0;
+        state.diag_hover_timer = 0.3;
+        state.diag_hover_timer_idx = Some(7);
+        state.hovered_diags.push(7);
+        state.hovered_diags_cache.push((7, 1.0, 2.0, 3.0, 4.0));
+        state.diag_selection_anchor = Some(1);
+        state.diag_selection_cursor = Some(3);
+        state.diag_selecting = true;
+        state.diag_text.push_str("diagnostic");
+        state.diag_href = Some("https://example.invalid".to_string());
+
+        state.reset_diagnostic_popup();
+
+        assert!(state.diag_rect.is_none());
+        assert_eq!(state.diag_scroll.current, 0.0);
+        assert_eq!(state.diag_scroll.target, 0.0);
+        assert_eq!(state.diag_max_scroll, 0.0);
+        assert_eq!(state.diag_hover_timer, 0.0);
+        assert!(state.diag_hover_timer_idx.is_none());
+        assert!(state.hovered_diags.is_empty());
+        assert!(state.hovered_diags_cache.is_empty());
+        assert!(state.diag_selection_anchor.is_none());
+        assert!(state.diag_selection_cursor.is_none());
+        assert!(!state.diag_selecting);
+        assert!(state.diag_text.is_empty());
+        assert!(state.diag_href.is_none());
+    }
+
+    #[test]
+    fn diagnostic_hover_timer_resets_when_hovered_diagnostic_changes() {
+        let mut state = HoverState::default();
+
+        assert!(!state.advance_diagnostic_hover_timer(Some(1), false, false, 0.21));
+        assert_eq!(state.diag_hover_timer_idx, Some(1));
+        assert_eq!(state.diag_hover_timer, 0.0);
+        assert!(state.advance_diagnostic_hover_timer(Some(1), false, false, 0.21));
+
+        assert!(!state.advance_diagnostic_hover_timer(Some(2), false, false, 0.21));
+        assert_eq!(state.diag_hover_timer_idx, Some(2));
+        assert_eq!(state.diag_hover_timer, 0.0);
+    }
+
+    #[test]
+    fn diagnostic_hover_timer_keeps_ticking_during_type_popup_transition() {
+        let mut state = HoverState::default();
+
+        assert!(!state.advance_diagnostic_hover_timer(None, false, true, 0.11));
+        assert!(state.advance_diagnostic_hover_timer(None, false, true, 0.10));
+
+        state.reset_diagnostic_popup();
+        assert!(!state.advance_diagnostic_hover_timer(None, true, false, 0.19));
+        assert!(state.advance_diagnostic_hover_timer(None, true, false, 0.02));
+    }
+
+    #[test]
+    fn pending_linter_popup_hide_does_not_reset_hover_timer_or_cache() {
+        let mut state = HoverState::default();
+        state.diag_rect = Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0));
+        state.diag_scroll.current = 9.0;
+        state.diag_scroll.target = 9.0;
+        state.diag_max_scroll = 30.0;
+        state.diag_hover_timer = 0.11;
+        state.diag_hover_timer_idx = Some(3);
+        state.hovered_diags.push(3);
+        state
+            .hovered_diags_cache
+            .push((3, 100.0, 200.0, 220.0, 140.0));
+        state.diag_selection_anchor = Some(1);
+        state.diag_selection_cursor = Some(2);
+        state.diag_selecting = true;
+        state.diag_text.push_str("pending");
+        state.diag_href = Some("https://example.invalid".to_string());
+
+        state.hide_diagnostic_popup_until_ready();
+
+        assert!(state.diag_rect.is_none());
+        assert_eq!(state.diag_scroll.current, 0.0);
+        assert_eq!(state.diag_scroll.target, 0.0);
+        assert_eq!(state.diag_max_scroll, 0.0);
+        assert_eq!(state.diag_hover_timer, 0.11);
+        assert_eq!(state.diag_hover_timer_idx, Some(3));
+        assert_eq!(state.hovered_diags, vec![3]);
+        assert_eq!(
+            state.hovered_diags_cache,
+            vec![(3, 100.0, 200.0, 220.0, 140.0)]
+        );
+        assert!(state.diag_selection_anchor.is_none());
+        assert!(state.diag_selection_cursor.is_none());
+        assert!(!state.diag_selecting);
+        assert!(state.diag_text.is_empty());
+        assert!(state.diag_href.is_none());
+    }
+
+    #[test]
+    fn keyword_linter_popup_becomes_visible_after_delay_without_type_target() {
+        let mut state = HoverState::default();
+        state.hovered_diags_cache.push((0, 10.0, 20.0, 40.0, 60.0));
+        state.hovered_diags.push(0);
+
+        let ready = state.advance_diagnostic_hover_timer(Some(0), false, false, 0.0);
+        let (show_err, show_type, show_combined) =
+            compute_hover_visibility(true, ready, false, None, None);
+        assert!(!show_err);
+        assert!(!show_type);
+        assert!(!show_combined);
+
+        state.hide_diagnostic_popup_until_ready();
+        let ready = state.advance_diagnostic_hover_timer(Some(0), false, false, 0.21);
+        let (show_err, show_type, show_combined) =
+            compute_hover_visibility(true, ready, false, None, None);
+
+        assert!(show_err);
+        assert!(!show_type);
+        assert!(!show_combined);
+        assert_eq!(state.hovered_diags_cache, vec![(0, 10.0, 20.0, 40.0, 60.0)]);
+    }
+
+    #[test]
+    fn type_popup_draw_flow_does_not_hold_hover_state_borrow() {
+        let mut state = HoverState::default();
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "type info".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 42,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.selection_anchor = Some(9);
+        state.selection_cursor = Some(3);
+        state.diag_rect = Some((10.0, 20.0, 30.0, 40.0, 1.0, 2.0, 3.0));
+
+        let (mut popup, selection, attached_diag) = state.take_type_popup_for_draw();
+
+        assert!(state.popup.is_none());
+        assert_eq!(selection, Some((3, 9)));
+        assert_eq!(attached_diag, Some((10.0, 20.0, 30.0, 40.0)));
+
+        popup
+            .as_mut()
+            .expect("popup must be detached for draw")
+            .offset_x = Some(5.0);
+        state.put_type_popup_after_draw(popup, Some((1.0, 2.0, 3.0, 4.0)), 12.0);
+
+        assert!(state.popup.is_some());
+        assert_eq!(state.rect, Some((1.0, 2.0, 3.0, 4.0)));
+        assert_eq!(state.max_scroll, 12.0);
+        assert_eq!(state.popup.as_ref().and_then(|p| p.offset_x), Some(5.0));
+    }
+
+    #[test]
+    fn stale_type_popup_stays_visible_while_new_target_loads() {
+        let mut state = HoverState::default();
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "old ValueError hover".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.byte_offset = Some(25);
+
+        assert!(state.should_show_stale_popup_while_target_loads(false));
+        assert!(!state.should_show_stale_popup_while_target_loads(true));
+
+        state.byte_offset = None;
+        assert!(!state.should_show_stale_popup_while_target_loads(false));
+    }
+
+    #[test]
+    fn hover_response_preserves_pending_diagnostic_context_for_combined_popup() {
+        let mut state = HoverState::default();
+        state.hovered_diags.push(0);
+        state.hovered_diags_cache.push((0, 10.0, 20.0, 40.0, 60.0));
+        state.diag_hover_timer = 0.21;
+        state.diag_hover_timer_idx = Some(0);
+
+        state.hide_diagnostic_popup_until_ready();
+
+        assert_eq!(state.hovered_diags, vec![0]);
+        assert_eq!(state.hovered_diags_cache, vec![(0, 10.0, 20.0, 40.0, 60.0)]);
+        assert_eq!(state.diag_hover_timer, 0.21);
+        assert_eq!(state.diag_hover_timer_idx, Some(0));
+    }
+
+    #[test]
+    fn hover_state_bridge_keeps_diagnostic_and_type_as_one_popup_area() {
+        let mut state = HoverState::default();
+        state.diag_rect = Some((220.0, 100.0, 500.0, 120.0, 440.0, 480.0, 305.0));
+        state.rect = Some((220.0, 220.0, 500.0, 180.0));
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "type info".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 0,
+            anchor_x: 460.0,
+            anchor_y: 305.0,
+            offset_x: None,
+            offset_y: None,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+
+        let (inside_diag, diag_line) = state.popup_or_bridge_contains(450.0, 150.0, 1000.0, 1.0);
+        let (inside_type, type_line) = state.popup_or_bridge_contains(450.0, 310.0, 1000.0, 1.0);
+        let (outside, outside_line) = state.popup_or_bridge_contains(450.0, 460.0, 1000.0, 1.0);
+
+        assert!(inside_diag);
+        assert!(!diag_line);
+        assert!(inside_type);
+        assert!(type_line);
+        assert!(!outside);
+        assert!(!outside_line);
     }
 
     #[test]
@@ -191,6 +600,24 @@ mod tests {
         assert!(literal_offset >= byte_range.0);
         assert!(literal_offset + "513".len() <= byte_range.1);
         assert_eq!(normalize_hover_byte(&editor, range.2), Some(range.2));
+    }
+
+    #[test]
+    fn diagnostic_hover_target_is_stable_for_expanded_f_string_literal() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("raise ValueError(f'513')\n");
+        let text = editor.get_full_text();
+        let f_string_offset = text.find("f'513'").unwrap();
+        let f_string_col = text[..f_string_offset].encode_utf16().count() as u32;
+        let f_string_end_col = f_string_col + "f'513'".encode_utf16().count() as u32;
+
+        let first_target =
+            diagnostic_hover_target_byte_on_line(&editor, 0, f_string_col, f_string_end_col);
+        let second_target =
+            diagnostic_hover_target_byte_on_line(&editor, 0, f_string_col, f_string_end_col);
+
+        assert_eq!(first_target, Some(f_string_offset));
+        assert_eq!(second_target, Some(f_string_offset));
     }
 
     #[test]
@@ -315,27 +742,39 @@ pub fn compute_hover_visibility(
     let show_combined =
         diagnostic_needs_type && has_type_popup && type_matches_diag && error_timer_ready;
     let show_error = if diagnostic_needs_type {
-        if type_matches_diag {
-            show_combined
-        } else {
-            is_error_hovered && error_timer_ready
-        }
+        show_combined
     } else {
         is_error_hovered && error_timer_ready
     };
-    let show_type = has_type_popup;
+    let show_type = if diagnostic_needs_type {
+        has_type_popup && type_matches_diag && error_timer_ready
+    } else {
+        has_type_popup
+    };
 
     (show_error, show_type, show_combined)
 }
 
-pub fn clear_hover_popup(renderer: Option<&mut crate::renderer::Renderer>) -> bool {
+#[cfg(test)]
+fn diagnostic_hover_target_byte_on_line(
+    editor: &crate::editor::Editor,
+    line: usize,
+    start_col: u32,
+    end_col: u32,
+) -> Option<usize> {
+    diagnostic_hover_byte_range_on_line(editor, line, start_col, end_col)
+        .map(|(_, _, type_target)| type_target)
+}
+
+pub fn clear_hover_popup(_renderer: Option<&mut crate::renderer::Renderer>) -> bool {
     HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let had_popup = state.popup.is_some()
             || state.request_id.is_some()
             || state.definition_request_id.is_some()
             || state.byte_offset.is_some()
-            || state.rect.is_some();
+            || state.rect.is_some()
+            || state.diag_rect.is_some();
         state.request_id = None;
         state.definition_request_id = None;
         state.popup = None;
@@ -350,13 +789,7 @@ pub fn clear_hover_popup(renderer: Option<&mut crate::renderer::Renderer>) -> bo
         state.diag_selection_anchor = None;
         state.diag_selection_cursor = None;
         state.diag_selecting = false;
-        if let Some(r) = renderer {
-            r.last_diag_popup_rect = None;
-            r.last_hovered_diags.clear();
-            r.hovered_diags_cache.clear();
-            r.diag_hover_timer = 0.0;
-            r.diag_hover_timer_idx = None;
-        }
+        state.reset_diagnostic_popup();
         had_popup
     })
 }

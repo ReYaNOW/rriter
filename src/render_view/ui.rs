@@ -1,8 +1,10 @@
 use crate::renderer::Renderer;
 use glow::HasContext;
 
-mod hover_popup;
+mod hover_widget;
 mod problems_panel;
+
+pub(crate) use hover_widget::diag_popup_byte_at;
 impl Renderer {
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
         self.flush();

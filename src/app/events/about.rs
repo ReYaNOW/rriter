@@ -587,12 +587,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             };
                             state.pending_popup = None;
                             state.definition_request_id = None;
-                            if let Some(r) = app.renderer.as_mut() {
-                                r.last_diag_popup_rect = None;
-                                r.hovered_diags_cache.clear();
-                                r.diag_hover_timer = 0.0;
-                                r.diag_hover_timer_idx = None;
-                            }
+                            state.hide_diagnostic_popup_until_ready();
                             if let Some(path) = app.file_path.clone() {
                                 let (line, col) = crate::lsp::offset_to_lsp_pos(
                                     &app.editor.get_full_text(),
