@@ -336,3 +336,39 @@ pub fn get_dialog_buttons(
 
     (btn_save, btn_discard, btn_cancel)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn widget_hitboxes_cover_regular_and_sidebar_buttons() {
+        let button = Button {
+            x: 10.0,
+            y: 20.0,
+            w: 120.0,
+            h: 40.0,
+            text: "Save".to_string(),
+            icon: None,
+            text_scale: 1.0,
+            icon_size: 16.0,
+        };
+        assert!(button.is_hovered(10.0, 20.0));
+        assert!(button.is_hovered(130.0, 60.0));
+        assert!(!button.is_hovered(131.0, 60.0));
+
+        let icon = IconButton {
+            x: 12.0,
+            y: 100.0,
+            size: 24.0,
+            icon: Some(IconType::Explorer),
+            is_active: false,
+            icon_size: None,
+            active_square_width: Some(48.0),
+            custom_color: None,
+        };
+        assert!(icon.is_hovered(0.0, 88.0));
+        assert!(icon.is_hovered(48.0, 136.0));
+        assert!(!icon.is_hovered(49.0, 112.0));
+    }
+}

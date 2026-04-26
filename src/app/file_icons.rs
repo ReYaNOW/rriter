@@ -100,3 +100,29 @@ pub fn svg_for_key(key: &str, is_folder: bool) -> &'static [u8] {
         file_svg(key)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_icon_resolution_covers_exact_extension_pattern_and_fallback() {
+        assert_ne!(file_icon_key("cargo.toml"), "default_file");
+        assert_ne!(file_icon_key("main.py"), "default_file");
+        assert_ne!(file_icon_key("component.test.ts"), "default_file");
+        assert_eq!(file_icon_key("unknown.rriter-no-icon"), "default_file");
+
+        assert!(!svg_for_key(file_icon_key("main.py"), false).is_empty());
+        assert!(!svg_for_key("default_file", false).is_empty());
+    }
+
+    #[test]
+    fn folder_icon_resolution_covers_exact_pattern_and_fallback() {
+        assert_ne!(folder_icon_key("src"), "default");
+        assert_ne!(folder_icon_key(".github"), "default");
+        assert_eq!(folder_icon_key("rriter-no-icon-folder"), "default");
+
+        assert!(!svg_for_key(folder_icon_key("src"), true).is_empty());
+        assert!(!svg_for_key("default", true).is_empty());
+    }
+}

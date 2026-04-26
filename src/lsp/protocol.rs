@@ -861,3 +861,137 @@ pub(super) fn dispatch_frame(
 }
 
 // ── Запуск процесса ───────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::mpsc;
+
+    #[test]
+    fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
+        let text = "a\nпривет\n";
+        let line_offsets = vec![0, 2, text.len()];
+        assert_eq!(
+            offset_to_lsp_pos(text, text.find("вет").unwrap(), &line_offsets),
+            (1, 3)
+        );
+
+        let uri = path_to_uri("/tmp/rriter file.py");
+        assert_eq!(uri_to_path(&uri), PathBuf::from("/tmp/rriter file.py"));
+
+        let hover = String::from_utf8(make_hover(7, &uri, 1, 3)).unwrap();
+        assert!(hover.contains(r#""id":7"#));
+        assert!(hover.contains(r#""method":"textDocument/hover""#));
+        assert!(hover.contains(r#""character":3"#));
+
+        let open = String::from_utf8(make_did_open(&uri, "python", 2, "x = \"q\"\n")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&open).unwrap();
+        assert_eq!(parsed["params"]["textDocument"]["languageId"], "python");
+        assert_eq!(parsed["params"]["textDocument"]["text"], "x = \"q\"\n");
+    }
+
+    #[test]
+    fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
+        let diag_json = serde_json::json!({
+            "range": {
+                "start": {"line": 1, "character": 2},
+                "end": {"line": 1, "character": 5}
+            },
+            "severity": 2,
+            "code": "F401",
+            "source": "ruff",
+            "message": "info: remove unused import\\nnext",
+            "codeDescription": {"href": "https://example.invalid/F401"},
+            "data": {
+                "title": "Remove import",
+                "edits": [{
+                    "range": {
+                        "start": {"line": 1, "character": 2},
+                        "end": {"line": 1, "character": 5}
+                    },
+                    "newText": ""
+                }]
+            },
+            "tags": [1]
+        });
+        let diag = parse_diagnostic_value(&diag_json).unwrap();
+        assert_eq!(diag.start_line, 1);
+        assert_eq!(diag.severity, DiagSeverity::Warning);
+        assert_eq!(diag.code.as_deref(), Some("F401"));
+        assert_eq!(diag.source.as_deref(), Some("ruff"));
+        assert_eq!(diag.message, "remove unused import\nnext");
+        assert_eq!(diag.quickfixes.len(), 1);
+
+        let edit_json = serde_json::json!({
+            "changes": {
+                "file:///tmp/a.py": [{
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 1}
+                    },
+                    "newText": "b"
+                }]
+            },
+            "documentChanges": [{
+                "textDocument": {"uri": "file:///tmp/b.py"},
+                "edits": [{
+                    "range": {
+                        "start": {"line": 2, "character": 0},
+                        "end": {"line": 2, "character": 3}
+                    },
+                    "newText": "pass"
+                }]
+            }]
+        });
+        let edit = parse_workspace_edit_value(&edit_json);
+        assert_eq!(edit.changes.len(), 2);
+
+        let hover_json = serde_json::json!({
+            "contents": [
+                {"language": "python", "value": "def fn() -> int"},
+                "docs"
+            ]
+        });
+        assert_eq!(
+            parse_hover_value(&hover_json).as_deref(),
+            Some("def fn() -> int\ndocs")
+        );
+
+        let action_json = serde_json::json!({
+            "title": "Fix all",
+            "kind": "source.fixAll",
+            "diagnostics": [{"code": 123}],
+            "edit": edit_json
+        });
+        let action = parse_code_action_value(&action_json).unwrap();
+        assert_eq!(action.title, "Fix all");
+        assert_eq!(action.kind.as_deref(), Some("source.fixAll"));
+        assert_eq!(action.code.as_deref(), Some("123"));
+        assert!(action.edit.is_some());
+    }
+
+    #[test]
+    fn lsp_dispatch_routes_pending_responses_end_to_end() {
+        let (event_tx, event_rx) = mpsc::channel();
+        let (out_tx, _out_rx) = mpsc::channel();
+        let pending = Arc::new(Mutex::new(HashMap::from([(9, PendingRequestKind::Hover)])));
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":9,"result":{"contents":{"value":"hover text"}}}"#,
+            &event_tx,
+            "test",
+            &out_tx,
+            &pending,
+        );
+
+        let _log = event_rx.recv().unwrap();
+        match event_rx.recv().unwrap() {
+            LspEvent::HoverResponse { request_id, text } => {
+                assert_eq!(request_id, 9);
+                assert_eq!(text.as_deref(), Some("hover text"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+}

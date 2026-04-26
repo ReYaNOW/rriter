@@ -2340,6 +2340,7 @@ impl Renderer {
 
         let first_idx = crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
+            state.hovered_diag_type_target = hovered_diag_type_target;
             state.hovered_diags.clear();
             let len = state.hovered_diags_cache.len();
             for i in 0..len {
@@ -2371,7 +2372,25 @@ impl Renderer {
             has_type_popup,
             hovered_diag_type_target,
             type_popup_byte,
+            hover_byte_offset,
         );
+
+        static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let last_log = LAST_LOG.load(Ordering::Relaxed);
+        if (is_error_hovered || has_type_popup || hover_byte_offset.is_some())
+            && now_ms - last_log > 500
+        {
+            println!(
+                "[HOVER VIS LOG] is_error: {}, timer_ready: {}, has_type: {}, d_type_target: {:?}, type_byte: {:?}, hover_byte: {:?}, SHOW_ERR: {}, SHOW_TYPE: {}, SHOW_COMB: {}",
+                is_error_hovered, error_timer_ready, has_type_popup, hovered_diag_type_target, type_popup_byte, hover_byte_offset, show_error, show_type, show_combined
+            );
+            LAST_LOG.store(now_ms, Ordering::Relaxed);
+        }
+
         let show_placeholder_type = crate::app::mouse::HOVER_STATE.with(|s| {
             s.borrow()
                 .should_show_stale_popup_while_target_loads(show_type)
@@ -2441,8 +2460,8 @@ impl Renderer {
         }
 
         if show_type || show_placeholder_type {
-            let (mut popup, selection, attached_diag) =
-                crate::app::mouse::HOVER_STATE.with(|s| s.borrow_mut().take_type_popup_for_draw());
+            let (mut popup, selection, attached_diag) = crate::app::mouse::HOVER_STATE
+                .with(|s| s.borrow_mut().take_type_popup_for_draw(show_combined));
             if let Some(popup_ref) = popup.as_mut() {
                 let (bx, by, bw, bh, ms) = self.draw_hover_popup(
                     popup_ref,

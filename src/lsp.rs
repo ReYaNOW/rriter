@@ -1334,3 +1334,27 @@ pub fn format_and_highlight_json(
     spans.sort_by_key(|s| s.start);
     (final_string, spans, folds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lsp_position_and_log_formatting_end_to_end() {
+        let text = "one\nemoji 😀\nlast";
+        assert_eq!(lsp_pos_to_offset(text, 1, 6), text.find("😀").unwrap());
+        assert_eq!(lsp_pos_to_offset(text, 9, 0), text.len());
+
+        let (pretty, spans, folds) =
+            format_and_highlight_json(r#"[LSP RECV] {"jsonrpc":"2.0","result":{"items":[1,2,3]}}"#);
+
+        assert!(pretty.starts_with("[LSP RECV]\n"));
+        assert!(pretty.contains("\"jsonrpc\": \"2.0\""));
+        assert!(pretty.contains("\"items\": ["));
+        assert!(!spans.is_empty());
+        assert!(spans.iter().any(|span| span.end <= pretty.len()));
+        assert!(folds
+            .iter()
+            .all(|(start, end)| start < end && *end <= pretty.len()));
+    }
+}

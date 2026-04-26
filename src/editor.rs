@@ -1052,3 +1052,67 @@ impl Editor {
         indent
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_edit_history_dirty_state_end_to_end() {
+        let mut editor = Editor::new(4);
+        editor.set_original_text();
+
+        editor.insert_str("hello");
+        assert_eq!(editor.get_full_text(), "hello");
+        assert!(editor.is_dirty());
+
+        editor.mark_saved();
+        assert!(!editor.is_dirty());
+
+        editor.replace_range(0, 5, "hey");
+        assert_eq!(editor.get_full_text(), "hey");
+        assert!(editor.is_dirty());
+
+        editor.undo();
+        assert_eq!(editor.get_full_text(), "hello");
+        assert!(!editor.is_dirty());
+
+        editor.redo();
+        assert_eq!(editor.get_full_text(), "hey");
+        assert!(editor.is_dirty());
+    }
+
+    #[test]
+    fn editor_navigation_selection_indent_and_utf8_end_to_end() {
+        let mut editor = Editor::new(16);
+        editor.insert_str("def main:\n    привет\n");
+        let text = editor.get_full_text();
+        editor.cursor = text.find("привет").unwrap() + "при".len();
+
+        editor.select_word();
+        assert_eq!(editor.get_selection().as_deref(), Some("привет"));
+
+        editor.cursor = text.find("def main:").unwrap() + "def main:".len();
+        assert_eq!(editor.get_auto_indent(), "    ");
+
+        editor.move_end_of_file(false);
+        editor.move_word_left(false);
+        assert_eq!(editor.cursor, text.find("привет").unwrap());
+    }
+
+    #[test]
+    fn editor_fold_visibility_and_offsets_end_to_end() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("fn main() {\n    call();\n}\nlast\n");
+        editor.foldable_ranges_bytes.push((0, 24, false));
+        editor.folded_start_bytes.insert(0);
+        editor.rebuild_line_offsets();
+
+        assert_eq!(editor.line_offsets, vec![0, 12, 24, 26, 31]);
+        assert_eq!(editor.get_visible_lines_count(), 3);
+
+        editor.cursor = editor.line_offsets[1];
+        editor.snap_cursor_out_of_fold(0);
+        assert_eq!(editor.cursor, editor.line_offsets[3]);
+    }
+}

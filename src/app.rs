@@ -1495,3 +1495,44 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_state_toggle_and_group_queries_end_to_end() {
+        let mut panels = IdePanelState::default();
+
+        assert!(!panels.any_top_open());
+        assert!(!panels.any_bottom_open());
+        assert!(!panels.is_open(PanelId::Explorer));
+
+        panels.toggle(PanelId::Explorer);
+        panels.toggle(PanelId::Terminal);
+
+        assert!(panels.is_open(PanelId::Explorer));
+        assert!(panels.is_open(PanelId::Terminal));
+        assert!(panels.any_top_open());
+        assert!(panels.any_bottom_open());
+
+        panels.toggle(PanelId::Explorer);
+        assert!(!panels.is_open(PanelId::Explorer));
+        assert!(panels.any_bottom_open());
+    }
+
+    #[test]
+    fn fuzzy_match_preserves_target_indices_case_insensitively() {
+        assert_eq!(fuzzy_match("rtr", "RRiter"), Some(vec![0, 3, 5]));
+        assert_eq!(fuzzy_match("IDE", "IntegratedDevEnv"), Some(vec![0, 9, 11]));
+        assert_eq!(fuzzy_match("xyz", "RRiter"), None);
+    }
+
+    #[test]
+    fn panel_metadata_maps_to_labels_and_icons() {
+        assert_eq!(PanelId::Explorer.label(), "Проводник");
+        assert_eq!(PanelId::Terminal.label(), "Терминал");
+        assert!(PanelId::Problems.icon() == crate::widgets::IconType::Problems);
+        assert!(PanelId::LspServers.icon() == crate::widgets::IconType::LspServers);
+    }
+}

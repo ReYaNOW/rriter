@@ -323,3 +323,39 @@ pub(super) fn flatten_spans(
     });
     flat
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end() {
+        let text = "fn call((x))";
+        let mut byte_colors = Vec::new();
+        let spans = vec![ColorSpan {
+            start: 0,
+            end: 2,
+            color: DRACULA_PINK,
+        }];
+
+        let flat = flatten_spans(spans, text.len(), text, &mut byte_colors, &[], true, false);
+
+        assert_eq!(flat.first().map(|span| span.color), Some(DRACULA_PINK));
+        assert_eq!(byte_colors[0], DRACULA_PINK);
+        let nested_open = text.find("((").unwrap() + 1;
+        let nested_close = text.find("))").unwrap();
+        assert_ne!(byte_colors[nested_open], DRACULA_FG);
+        assert_ne!(byte_colors[nested_close], DRACULA_FG);
+    }
+
+    #[test]
+    fn highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans() {
+        let mut byte_colors = Vec::new();
+        let flat = flatten_spans(Vec::new(), 4, "text", &mut byte_colors, &[], false, true);
+
+        assert_eq!(flat.len(), 1);
+        assert_eq!(flat[0].start, 0);
+        assert_eq!(flat[0].end, 4);
+        assert_eq!(flat[0].color, DRACULA_FG);
+    }
+}

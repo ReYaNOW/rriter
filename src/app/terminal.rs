@@ -353,6 +353,38 @@ impl TermGrid {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_grid_print_scroll_resize_and_selection_end_to_end() {
+        let mut grid = TermGrid::new(4, 2);
+        for ch in "abcd".chars() {
+            grid.put_char(ch);
+        }
+        grid.put_char('e');
+
+        assert_eq!(grid.lines[0][0].c, 'a');
+        assert_eq!(grid.lines[0][3].c, 'd');
+        assert_eq!(grid.lines[1][0].c, 'e');
+
+        grid.newline();
+        grid.execute(b'\r');
+        grid.put_char('z');
+        assert_eq!(grid.scrollback.len(), 1);
+        assert_eq!(grid.lines[1][0].c, 'z');
+
+        grid.selection = Some((0, 2, 0, 2));
+        assert_eq!(grid.get_selection_text(), "z");
+
+        grid.resize(6, 3);
+        assert_eq!(grid.cols, 6);
+        assert_eq!(grid.visible_rows, 3);
+        assert!(grid.lines.iter().all(|line| line.len() == 6));
+    }
+}
+
 impl Perform for TermGrid {
     fn print(&mut self, c: char) {
         self.put_char(c);

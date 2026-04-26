@@ -377,3 +377,53 @@ impl UiRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_registry_hit_testing_overlay_and_cursor_state_end_to_end() {
+        let mut registry = UiRegistry::new();
+
+        assert!(registry.register_rect(UiId::EditorTextBody, 0.0, 0.0, 100.0, 40.0, 10.0, 10.0));
+        assert_eq!(registry.hovered(), Some(UiId::EditorTextBody));
+        assert!(registry.wants_pointer());
+        assert_eq!(registry.cursor_code(), 1);
+
+        assert!(registry.register_text_input(UiId::SearchInput, 5.0, 5.0, 50.0, 20.0, 10.0, 10.0));
+        assert_eq!(registry.find_at(10.0, 10.0), Some(UiId::SearchInput));
+        assert!(registry.wants_text());
+        assert_eq!(registry.cursor_code(), 2);
+
+        registry.mark_overlay_start();
+        registry.register_blocker(UiId::BottomPanelBody, 0.0, 0.0, 200.0, 200.0, 10.0, 10.0);
+        assert_eq!(
+            registry.find_overlay_at(10.0, 10.0),
+            Some(UiId::BottomPanelBody)
+        );
+
+        registry.reset_cursor_state();
+        assert_eq!(registry.cursor_code(), 0);
+
+        registry.clear();
+        assert_eq!(registry.find_at(10.0, 10.0), None);
+        assert_eq!(registry.find_overlay_at(10.0, 10.0), None);
+    }
+
+    #[test]
+    fn ui_element_icon_active_square_uses_fitts_law_hitbox() {
+        let icon = UiElement::IconButton {
+            id: UiId::SidebarSlot(crate::app::PanelId::Explorer),
+            x: 12.0,
+            y: 100.0,
+            size: 24.0,
+            active_square_width: Some(48.0),
+            custom_color: None,
+        };
+
+        assert!(icon.contains(1.0, 88.0));
+        assert!(icon.contains(47.0, 135.0));
+        assert!(!icon.contains(49.0, 112.0));
+    }
+}

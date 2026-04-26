@@ -491,3 +491,57 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("rriter_{name}_{}", std::process::id()))
+    }
+
+    #[test]
+    fn file_tree_ignore_patterns_cover_exact_prefix_and_suffix() {
+        let patterns = ["node_modules", "*.pyc", "target*"];
+
+        assert!(matches_ignore_pattern("node_modules", &patterns));
+        assert!(matches_ignore_pattern("main.pyc", &patterns));
+        assert!(matches_ignore_pattern("target-debug", &patterns));
+        assert!(!matches_ignore_pattern("src", &patterns));
+    }
+
+    #[test]
+    fn file_tree_scan_sorts_expands_and_skips_ignored_nodes_end_to_end() {
+        let root = test_root("file_tree_scan");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("dir10")).unwrap();
+        std::fs::create_dir_all(root.join("dir2")).unwrap();
+        std::fs::create_dir_all(root.join("__pycache__")).unwrap();
+        std::fs::write(root.join("b.txt"), "b").unwrap();
+        std::fs::write(root.join("a.py"), "a").unwrap();
+        std::fs::write(root.join("z.pyc"), "ignored").unwrap();
+
+        let mut expanded = FxHashSet::default();
+        expanded.insert(root.clone());
+        let gitignore = ignore::gitignore::Gitignore::empty();
+        let nodes = scan_dir_parallel(
+            root.clone(),
+            "workspace".to_string(),
+            0,
+            &expanded,
+            true,
+            2,
+            &gitignore,
+            DEFAULT_IGNORE_PATTERNS,
+        );
+        let names: Vec<_> = nodes.iter().map(|node| node.name.as_str()).collect();
+
+        assert_eq!(names, vec!["workspace", "dir2", "dir10", "a.py", "b.txt"]);
+        assert!(nodes[0].is_expanded);
+        assert_eq!(nodes[1].depth, 1);
+        assert!(nodes.iter().all(|node| node.name != "__pycache__"));
+        assert!(nodes.iter().all(|node| node.name != "z.pyc"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

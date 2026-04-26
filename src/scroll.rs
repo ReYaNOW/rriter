@@ -67,3 +67,33 @@ impl ScrollState {
         self.velocity = 0.0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_state_clamps_animates_and_stops_end_to_end() {
+        let mut scroll = ScrollState::new(15.0);
+
+        scroll.scroll_by(120.0);
+        scroll.clamp_target(0.0, 80.0);
+        assert_eq!(scroll.target, 80.0);
+
+        assert!(scroll.update(0.016));
+        assert!(scroll.current > 0.0);
+        assert!(scroll.current < 80.0);
+
+        scroll.current = 90.0;
+        scroll.clamp_current(0.0, 80.0);
+        assert_eq!(scroll.current, 80.0);
+
+        scroll.current = 12.4;
+        scroll.velocity = 99.0;
+        scroll.stop_anim();
+        assert_eq!(scroll.current, 12.0);
+        assert_eq!(scroll.target, 12.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert!(!scroll.update(0.016));
+    }
+}

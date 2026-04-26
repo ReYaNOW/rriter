@@ -508,21 +508,9 @@ impl App {
                         same_word = old_start == new_start && old_end == new_end;
                     }
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
-                        clear_diag_popup = true;
                         let keep_visible_popup = state.popup.is_some();
                         println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
-                        state.byte_offset = Some(byte_offset);
-                        state.timer = 0.0;
-                        state.request_id = None;
-                        state.definition_request_id = None;
-                        state.pending_popup = None;
-                        state.selection_anchor = None;
-                        state.selection_cursor = None;
-                        state.selecting = false;
-                        if !keep_visible_popup {
-                            state.popup = None;
-                            state.rect = None;
-                        }
+                        clear_diag_popup = state.begin_type_hover_transition(byte_offset);
                     }
                 } else if !in_hover_popup {
                     if state.byte_offset.is_some() {
