@@ -2281,81 +2281,19 @@ fn hover_popup_byte_at(
     let max_text_w = (renderer.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
     let (bx, by, _bw, _bh) = rect;
 
-    let mut lines: Vec<(Vec<(char, usize)>, crate::lsp::HoverLineKindPublic)> = Vec::new();
-    let mut cur_line_w = 0.0;
-    let mut cur_line: Vec<(char, usize)> = Vec::new();
-    let mut last_space_idx = None;
-    let mut raw_line_no = 0usize;
-
-    let push_line = |lines: &mut Vec<_>,
-                     cur_line: Vec<(char, usize)>,
-                     kind: crate::lsp::HoverLineKindPublic| {
-        lines.push((cur_line, kind));
+    let computed_layout;
+    let layout = if let Some(cache) = popup.layout_cache.as_ref().filter(|cache| {
+        cache.scale_factor == renderer.scale_factor
+            && cache.max_text_w == max_text_w
+            && cache.span_count == popup.spans.len()
+            && cache.text_len == popup.text.len()
+    }) {
+        cache
+    } else {
+        computed_layout = renderer.build_hover_popup_layout(popup, max_text_w, line_h);
+        &computed_layout
     };
-
-    for (offset, c) in popup.text.char_indices() {
-        let kind = popup
-            .line_kinds
-            .get(raw_line_no)
-            .copied()
-            .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
-        let scale_mul = match kind {
-            crate::lsp::HoverLineKindPublic::Header1 => 1.15,
-            crate::lsp::HoverLineKindPublic::Header2 => 1.05,
-            _ => 1.0,
-        };
-
-        if c == '\n' {
-            push_line(&mut lines, std::mem::take(&mut cur_line), kind);
-            cur_line_w = 0.0;
-            last_space_idx = None;
-            raw_line_no += 1;
-            continue;
-        }
-
-        let adv = renderer.char_advance(c) * scale_mul;
-        if cur_line_w + adv > max_text_w && cur_line_w > 40.0 * s {
-            if let Some(space_pos) = last_space_idx {
-                let mut remainder = cur_line.split_off(space_pos);
-                if !remainder.is_empty() && remainder[0].0 == ' ' {
-                    remainder.remove(0);
-                }
-                push_line(&mut lines, std::mem::take(&mut cur_line), kind);
-                cur_line = remainder;
-                cur_line_w = cur_line
-                    .iter()
-                    .map(|&(ch, _)| renderer.char_advance(ch) * scale_mul)
-                    .sum();
-            } else {
-                push_line(&mut lines, std::mem::take(&mut cur_line), kind);
-                cur_line_w = 0.0;
-            }
-            last_space_idx = None;
-        }
-
-        cur_line.push((c, offset));
-        cur_line_w += adv;
-
-        if c == ' ' {
-            last_space_idx = Some(cur_line.len() - 1);
-        }
-    }
-    if !cur_line.is_empty() {
-        let kind = popup
-            .line_kinds
-            .get(raw_line_no)
-            .copied()
-            .unwrap_or(crate::lsp::HoverLineKindPublic::Text);
-        push_line(&mut lines, cur_line, kind);
-    }
-
-    while let Some((line, _)) = lines.last() {
-        if line.is_empty() {
-            lines.pop();
-        } else {
-            break;
-        }
-    }
+    let lines = &layout.lines;
 
     if lines.is_empty() {
         return 0;
@@ -2364,8 +2302,8 @@ fn hover_popup_byte_at(
     let mut current_top = by + pad - popup.scroll.current;
     let mut found_line_idx = lines.len().saturating_sub(1);
 
-    for (i, (_line, kind)) in lines.iter().enumerate() {
-        let scale_mul = match kind {
+    for (i, line) in lines.iter().enumerate() {
+        let scale_mul = match line.kind {
             crate::lsp::HoverLineKindPublic::Header1 => 1.15,
             crate::lsp::HoverLineKindPublic::Header2 => 1.05,
             _ => 1.0,
@@ -2379,7 +2317,9 @@ fn hover_popup_byte_at(
         current_top += cur_line_h;
     }
 
-    let (found_line, found_kind) = &lines[found_line_idx];
+    let found_visual_line = &lines[found_line_idx];
+    let found_line = &found_visual_line.glyphs;
+    let found_kind = found_visual_line.kind;
     let found_scale = match found_kind {
         crate::lsp::HoverLineKindPublic::Header1 => 1.15,
         crate::lsp::HoverLineKindPublic::Header2 => 1.05,
@@ -2388,31 +2328,31 @@ fn hover_popup_byte_at(
 
     if found_line.is_empty() {
         if found_line_idx > 0 {
-            if let Some((prev_line, _)) = lines.get(found_line_idx - 1) {
-                if let Some(&(prev_ch, prev_off)) = prev_line.last() {
+            if let Some(prev_line) = lines.get(found_line_idx - 1) {
+                if let Some(&(prev_ch, _, prev_off)) = prev_line.glyphs.last() {
                     return prev_off + prev_ch.len_utf8();
                 }
             }
         }
         for next_idx in (found_line_idx + 1)..lines.len() {
-            if let Some(&(_next_ch, next_off)) = lines[next_idx].0.first() {
+            if let Some(&(_next_ch, _, next_off)) = lines[next_idx].glyphs.first() {
                 return next_off;
             }
         }
         return 0;
     }
 
-    let is_code = *found_kind == crate::lsp::HoverLineKindPublic::Code;
-    let is_module_header = *found_kind == crate::lsp::HoverLineKindPublic::Text
+    let is_code = found_kind == crate::lsp::HoverLineKindPublic::Code;
+    let is_module_header = found_kind == crate::lsp::HoverLineKindPublic::Text
         && found_line.len() >= 11
         && found_line
             .iter()
             .take(11)
-            .map(|&(c, _)| c)
+            .map(|&(c, _, _)| c)
             .collect::<String>()
             == "[[MODULE]] ";
     let is_header = matches!(
-        *found_kind,
+        found_kind,
         crate::lsp::HoverLineKindPublic::Header1 | crate::lsp::HoverLineKindPublic::Header2
     );
 
@@ -2433,7 +2373,7 @@ fn hover_popup_byte_at(
     let mut draw_x = 0.0;
 
     for i in glyph_start..found_line.len() {
-        let (ch, off) = found_line[i];
+        let (ch, _, off) = found_line[i];
         let adv = if is_header {
             renderer.get_ui_glyph(ch).map(|g| g.advance).unwrap_or(10.0) * found_scale
         } else {
@@ -2444,6 +2384,6 @@ fn hover_popup_byte_at(
         }
         draw_x += adv;
     }
-    let (last_ch, last_off) = found_line[found_line.len() - 1];
+    let (last_ch, _, last_off) = found_line[found_line.len() - 1];
     last_off + last_ch.len_utf8()
 }

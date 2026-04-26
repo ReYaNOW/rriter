@@ -12,7 +12,9 @@ pub fn highlight_hover_text(
     if preprocessed.contains(":param ") || looks_like_python_hover(&preprocessed) {
         let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
             crate::languages::python::highlight_python_hover_doc(&preprocessed);
+        add_doc_arg_name_spans(&clean_msg, &mut spans);
         spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+        let spans = crate::highlighter::flatten_color_spans_prefer_specific(spans, clean_msg.len());
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
     let (clean_msg, inline_code_ranges) = normalize_hover_text(&preprocessed);
@@ -100,7 +102,9 @@ pub fn highlight_hover_text(
         }
     }
 
+    add_doc_arg_name_spans(&clean_msg, &mut spans);
     spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+    let spans = crate::highlighter::flatten_color_spans_prefer_specific(spans, clean_msg.len());
     let line_kinds = clean_msg
         .split('\n')
         .map(|line| {
@@ -118,7 +122,11 @@ pub fn highlight_hover_text(
 
 fn preprocess_hover_text(msg: &str) -> String {
     let mut out = String::new();
-    for line in msg.replace('\r', "").lines() {
+    let cleaned = msg
+        .replace('\r', "")
+        .replace('\u{a0}', " ")
+        .replace('\u{200b}', "");
+    for line in cleaned.lines() {
         if let Some(normalized) = normalize_asynccontextmanager_signature_line(line.trim()) {
             out.push_str(&normalized);
         } else {
@@ -225,6 +233,47 @@ fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool
         return false;
     }
     matches!(next_line.map(str::trim), Some("---"))
+}
+
+fn add_doc_arg_name_spans(text: &str, spans: &mut Vec<crate::highlighter::ColorSpan>) {
+    let mut in_args = false;
+    let mut offset = 0usize;
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        if matches!(trimmed, "Args:" | "Arguments:" | "Keyword Args:" | "Parameters") {
+            in_args = true;
+            offset += line.len() + 1;
+            continue;
+        }
+        if in_args {
+            if trimmed.is_empty() {
+                offset += line.len() + 1;
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            if indent == 0 && !line.starts_with('*') {
+                in_args = false;
+                offset += line.len() + 1;
+                continue;
+            }
+            if let Some(colon) = line.find(':') {
+                let name = line[..colon].trim();
+                let name_start_in_line = line[..colon].find(name).unwrap_or(0);
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '*')
+                {
+                    spans.push(crate::highlighter::ColorSpan {
+                        start: offset + name_start_in_line,
+                        end: offset + name_start_in_line + name.len(),
+                        color: crate::highlighter::DRACULA_ORANGE,
+                    });
+                }
+            }
+        }
+        offset += line.len() + 1;
+    }
 }
 
 fn sanitize_hover_type_expr(mut s: &str) -> String {
@@ -699,6 +748,17 @@ pub(crate) enum PendingRequestKind {
 #[cfg(test)]
 mod tests {
     use super::{highlight_hover_text, HoverLineKindPublic};
+
+    fn rendered_color_at(
+        spans: &[crate::highlighter::ColorSpan],
+        offset: usize,
+    ) -> [f32; 4] {
+        spans
+            .iter()
+            .find(|span| offset >= span.start && offset < span.end)
+            .map(|span| span.color)
+            .unwrap_or(crate::highlighter::DRACULA_FG)
+    }
 
     #[test]
     fn variable_header_highlights_name_pink() {
@@ -1273,7 +1333,8 @@ Args:
             text.contains("experimental_features: Iterable[ExperimentalFeatures] | None = None\n)")
         );
         assert!(text.contains("Initialize a Litestar application."));
-        assert!(text.contains("Args:"));
+        assert!(text.contains("Parameters"));
+        assert!(!text.contains("Args:"));
         assert!(kinds
             .iter()
             .any(|kind| *kind == HoverLineKindPublic::Separator));
@@ -1292,7 +1353,12 @@ Args:
                 && s.color == [0.545, 0.913, 0.992, 1.0]
         }));
 
-        let args_idx = text.find("Args:").unwrap();
+        let args_idx = text.find("Parameters").unwrap();
+        assert_eq!(
+            rendered_color_at(&spans, args_idx),
+            [0.972, 0.972, 0.949, 1.0],
+            "`Parameters` heading should render as normal header text"
+        );
         for name in [
             "after_exception",
             "after_request",
@@ -1301,6 +1367,11 @@ Args:
             "experimental_features",
         ] {
             let idx = args_idx + text[args_idx..].find(name).unwrap();
+            assert_eq!(
+                rendered_color_at(&spans, idx),
+                [0.973, 0.584, 0.502, 1.0],
+                "doc argument `{name}` should render orange"
+            );
             assert!(
                 spans.iter().any(|s| {
                     s.start == idx
@@ -1310,6 +1381,39 @@ Args:
                 "doc argument `{name}` should be highlighted orange"
             );
         }
+    }
+
+    #[test]
+    fn litestar_hover_hidden_chars_do_not_shift_rendered_arg_colors() {
+        let raw = "class\u{200b} Litestar(\n\
+    route_handlers:\u{a0}Sequence[type[Controller] | HTTPRouteHandler] | None = None,\n\
+)\n\
+---------------------------------------------\n\
+Initialize a ``Litestar`` application.\n\
+\n\
+Args:\n\
+    route_handlers: A sequence of route handlers, which can include instances of\n\
+        :class:`Router <.router.Router>` or subclasses of :class:`Controller <.controller.Controller>`.";
+
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+
+        assert!(!text.contains('\u{200b}'));
+        assert!(!text.contains('\u{a0}'));
+        assert!(text.starts_with("class Litestar("));
+        assert!(text.contains("Initialize a Litestar application."));
+        assert!(text.contains("Parameters"));
+        assert!(!text.contains("Args:"));
+
+        let args_idx = text.find("Parameters").unwrap();
+        let route_handlers_idx = args_idx + text[args_idx..].find("route_handlers").unwrap();
+        assert_eq!(
+            rendered_color_at(&spans, args_idx),
+            [0.972, 0.972, 0.949, 1.0]
+        );
+        assert_eq!(
+            rendered_color_at(&spans, route_handlers_idx),
+            [0.973, 0.584, 0.502, 1.0]
+        );
     }
 
     #[test]

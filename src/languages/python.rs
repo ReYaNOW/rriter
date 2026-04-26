@@ -63,6 +63,7 @@ pub fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
         let rest = &line[i..];
         let role_prefix = [
             ":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`",
+            ":data:`",
         ]
         .iter()
         .find(|p| rest.starts_with(**p))
@@ -368,6 +369,15 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
             out.push_str("Warning");
             out.push('\n');
             kinds.push(HoverLineKind::Header2);
+            i += 1;
+            continue;
+        }
+
+        if trimmed == "Args:" || trimmed == "Arguments:" || trimmed == "Keyword Args:" {
+            out.push_str("Parameters");
+            out.push('\n');
+            kinds.push(HoverLineKind::Header1);
+            parameters_header_added = true;
             i += 1;
             continue;
         }

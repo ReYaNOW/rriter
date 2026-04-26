@@ -17,6 +17,54 @@ pub struct ColorSpan {
     pub color: [f32; 4],
 }
 
+pub fn flatten_color_spans_prefer_specific(
+    mut spans: Vec<ColorSpan>,
+    len: usize,
+) -> Vec<ColorSpan> {
+    if spans.is_empty() || len == 0 {
+        return Vec::new();
+    }
+
+    spans.sort_by_key(|s| std::cmp::Reverse(s.end.saturating_sub(s.start)));
+
+    let mut byte_colors = vec![None; len];
+    for span in spans {
+        let start = span.start.min(len);
+        let end = span.end.min(len);
+        if start >= end {
+            continue;
+        }
+        for color in &mut byte_colors[start..end] {
+            *color = Some(span.color);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut current = byte_colors[0];
+    let mut start = 0usize;
+    for (i, color) in byte_colors.iter().copied().enumerate().skip(1) {
+        if color != current {
+            if let Some(color) = current {
+                out.push(ColorSpan {
+                    start,
+                    end: i,
+                    color,
+                });
+            }
+            start = i;
+            current = color;
+        }
+    }
+    if let Some(color) = current {
+        out.push(ColorSpan {
+            start,
+            end: len,
+            color,
+        });
+    }
+    out
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     Variable,
