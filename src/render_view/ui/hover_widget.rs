@@ -133,7 +133,7 @@ impl Renderer {
     ) {
         let hovered_diags_cache = crate::app::mouse::HOVER_STATE.with(|s| {
             let s = s.borrow();
-            s.hovered_diags_cache.clone()
+            s.diagnostic_popup_cache().to_vec()
         });
         if hovered_diags_cache.is_empty() {
             return;

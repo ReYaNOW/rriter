@@ -113,6 +113,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 state.popup = None;
                 state.pending_popup = None;
                 state.rect = None;
+                state.clear_type_popup_transition_markers();
                 needs_redraw = true;
             } else {
                 hover_wake_at =
@@ -605,7 +606,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 state.pending_popup = Some(popup);
                             } else {
                                 println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
-                                state.stale_combined_popup = false;
+                                state.finish_stale_combined_transition();
                                 state.popup = Some(popup);
                             }
                             state.selection_anchor = None;
@@ -705,7 +706,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             }
                         }
                         if let Some(popup) = popup {
-                            state.stale_combined_popup = false;
+                            state.finish_stale_combined_transition();
                             state.popup = Some(popup);
                             if let Some(w) = app.window.as_ref() {
                                 w.request_redraw();

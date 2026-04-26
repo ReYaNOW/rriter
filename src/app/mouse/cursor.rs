@@ -490,7 +490,12 @@ impl App {
                                 }
                             }
                         } else if !in_hover_popup {
-                            if state.byte_offset.is_some() {
+                            if state.keep_active_combined_popup_on_empty_space() {
+                                return;
+                            }
+                            if state.byte_offset.is_some()
+                                && !state.should_keep_popup_through_empty_space()
+                            {
                                 println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
                                 state.byte_offset = None;
                                 state.timer = 0.0;
@@ -513,7 +518,9 @@ impl App {
                         clear_diag_popup = state.begin_type_hover_transition(byte_offset);
                     }
                 } else if !in_hover_popup {
-                    if state.byte_offset.is_some() {
+                    if state.byte_offset.is_some()
+                        && !state.should_keep_popup_through_empty_space()
+                    {
                         println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
                         state.byte_offset = None;
                         state.timer = 0.0;
