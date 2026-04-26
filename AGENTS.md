@@ -36,11 +36,11 @@ When working in chat and source files are not available:
 
 Map format:
 
-- `M|mid|path` = source file
-- `T|sid|mid|line|kind|name|body` = type symbol
-- `F|sid|mid|line|flags|qual|ret|self|rd|wr` = function or method
-- `E|caller_sid|callee_sid callee_sid` = direct calls
-- flags: `p` = public, `e` = entry/root handler
+* `M|mid|path` = source file
+* `T|sid|mid|line|kind|name|body` = type symbol
+* `F|sid|mid|line|flags|qual|ret|self|rd|wr` = function or method
+* `E|caller_sid|callee_sid callee_sid` = direct calls
+* flags: `p` = public, `e` = entry/root handler
 
 Required file request format:
 
@@ -53,7 +53,7 @@ Need files:
 2. path/to/other.rs
    Reason: called by / calls previous symbol.
    Map ref: `E|caller|callee`
-````
+```
 
 Request minimum files:
 
@@ -94,8 +94,7 @@ Use this only when the user explicitly needs exact-substring parser patches.
 exact_old_code
 // After:
 exact_new_code
-````
-
+```
 ````
 
 Rules for strict parser patches:
@@ -112,42 +111,42 @@ Rules for strict parser patches:
 
 New file format:
 
-```text
+````text
 2) path/to/new_file.rs (New file)
 ```rust
 file contents
-````
-
+```
 ````
 
 ## 4. Allowed operations
 
 Allowed file operations inside project:
 
-- Read files
-- Search files
-- Edit files
-- Create only `.rs`, `.py`, `.dart`, `.md`, `.txt`
-- Delete only `.rs`, `.py`, `.dart`, `.md`, `.txt` if deletion is directly required
+* Read files
+* Search files
+* Edit files
+* Create only `.rs`, `.py`, `.dart`, `.md`, `.txt`
+* Delete only `.rs`, `.py`, `.dart`, `.md`, `.txt` if deletion is directly required
 
 Allowed shell commands:
 
-- `ls`
-- `grep`
-- `python3 gen_project_ai_map.py`
-- `make fast`
-- `make test`
-- `make api-map` only if still present in project
-- Read-only inspection commands that do not leave project root
+* `ls`
+* `grep`
+* `python3 gen_project_ai_map.py`
+* `make fast`
+* `make test`
+* `cargo +nightly fmt`
+* `make api-map` only if still present in project
+* Read-only inspection commands that do not leave project root
 
 Forbidden unless user explicitly asks:
 
-- `git *`
-- network commands
-- package install commands
-- destructive commands outside project
-- commands outside project root
-- formatting entire project without explicit request
+* `git *`
+* network commands
+* package install commands
+* destructive commands outside project
+* commands outside project root
+* formatting entire project without explicit request
 
 ## 5. Planning and verification
 
@@ -156,7 +155,7 @@ Before multi-file or risky changes, state short plan:
 ```text
 1. Change X -> verify Y
 2. Change Z -> verify make fast
-````
+```
 
 For bug fixes:
 
@@ -220,16 +219,109 @@ Use declarative UI registry for new buttons/elements when applicable:
 
 ## 7. Communication style
 
-Default response style:
+CAVEMAN ULTRA ENABLED by default.
 
-* Direct.
-* Dense.
-* No filler.
-* No pleasantries.
-* State assumptions.
-* Ask when exact source is missing.
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure.
 
-Pattern:
+Default: **ultra**. Switch: `/caveman lite|full|ultra`.
+
+### Rules
+
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
+
+Pattern: `[thing] [action] [reason]. [next step].`
+
+Not:
+
+```text
+Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by...
+```
+
+Yes:
+
+```text
+Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:
+```
+
+### Intensity
+
+| Level     | What change                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **lite**  | No filler/hedging. Keep articles + full sentences. Professional but tight                                                       |
+| **full**  | Drop articles, fragments OK, short synonyms. Classic caveman                                                                    |
+| **ultra** | Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (`X -> Y`), one word when one word enough |
+
+Example — "Why React component re-render?"
+
+```text
+lite: Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`.
+full: New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`.
+ultra: Inline obj prop -> new ref -> re-render. `useMemo`.
+```
+
+Example — "Explain database connection pooling."
+
+```text
+lite: Connection pooling reuses open connections instead of creating new ones per request. Avoids repeated handshake overhead.
+full: Pool reuse open DB connections. No new connection per request. Skip handshake overhead.
+ultra: Pool = reuse DB conn. Skip handshake -> fast under load.
+```
+
+### Auto-Clarity
+
+Drop caveman for:
+
+* security warnings
+* irreversible action confirmations
+* multi-step sequences where fragment order risks misread
+* parser patch blocks
+* exact file request lists
+* user asks to clarify or repeats question
+
+Resume caveman after clear part done.
+
+Example — destructive op:
+
+```text
+Warning: This will permanently delete all rows in the `users` table and cannot be undone.
+```
+
+```sql
+DROP TABLE users;
+```
+
+```text
+Caveman resume. Verify backup exist first.
+```
+
+### Boundaries
+
+Code/commits/PRs/diffs/docs for users: write normal unless user explicitly requests caveman style there.
+
+Caveman controls assistant speech, not generated code quality.
+
+For file requests, stay compact but not ambiguous.
+
+Good:
+
+```text
+Need files:
+1. src/app/mouse/input.rs
+   Reason: exact click routing needed for `App.handle_main_mouse_input`.
+   Map ref: `F|123|...`
+
+2. src/ui_system.rs
+   Reason: hit-test and `UiId` registry may own click target.
+   Map ref: `E|123|87`
+```
+
+Bad:
+
+```text
+Need some mouse files maybe input stuff.
+```
+
+Default response shape:
 
 ```text
 Issue: ...
@@ -239,13 +331,12 @@ Fix: ...
 Verify: ...
 ```
 
-Drop terse style for:
+Use fewer labels for small answers:
 
-* destructive actions
-* security warnings
-* exact multi-step instructions
-* parser patch blocks
-* unclear user request
+```text
+Cause: ...
+Fix: ...
+```
 
 ## 8. Project structure
 
