@@ -65,6 +65,7 @@ pub struct HoverState {
     pub hovered_diags: Vec<usize>,
     pub hovered_diags_cache: Vec<HoveredDiagnostic>,
     pub hovered_diag_type_target: Option<usize>,
+    pub stale_combined_popup: bool,
     pub diag_text: String,
     pub diag_href: Option<String>,
 }
@@ -94,6 +95,7 @@ impl Default for HoverState {
             hovered_diags: Vec::new(),
             hovered_diags_cache: Vec::with_capacity(16),
             hovered_diag_type_target: None,
+            stale_combined_popup: false,
             diag_text: String::new(),
             diag_href: None,
         }
@@ -111,6 +113,7 @@ impl HoverState {
         self.hovered_diags.clear();
         self.hovered_diags_cache.clear();
         self.hovered_diag_type_target = None;
+        self.stale_combined_popup = false;
         self.diag_selection_anchor = None;
         self.diag_selection_cursor = None;
         self.diag_selecting = false;
@@ -119,6 +122,9 @@ impl HoverState {
     }
 
     pub fn hide_diagnostic_popup_until_ready(&mut self) {
+        if self.stale_combined_popup {
+            return;
+        }
         self.diag_rect = None;
         self.diag_scroll.target = 0.0;
         self.diag_scroll.current = 0.0;
@@ -186,6 +192,7 @@ impl HoverState {
             .is_some_and(|target| popup_byte == Some(target) && self.byte_offset != Some(target));
         self.popup.is_some()
             && !show_type
+            && !self.stale_combined_popup
             && self.byte_offset.is_some()
             && popup_byte != self.byte_offset
             && !stale_diagnostic_popup
@@ -198,7 +205,16 @@ impl HoverState {
                 .is_some_and(|popup| popup.byte_offset == target)
                 && target != byte_offset
         });
-        let keep_visible_popup = self.popup.is_some() && !popup_is_stale_diagnostic;
+        let popup_is_combined = self.popup.is_some() && self.diag_rect.is_some();
+        if (popup_is_stale_diagnostic || popup_is_combined)
+            && self
+                .popup
+                .as_ref()
+                .is_some_and(|popup| popup.byte_offset != byte_offset)
+        {
+            self.stale_combined_popup = true;
+        }
+        let keep_visible_popup = self.popup.is_some();
         self.byte_offset = Some(byte_offset);
         self.timer = 0.0;
         self.request_id = None;
@@ -212,6 +228,24 @@ impl HoverState {
             self.rect = None;
         }
         !keep_visible_popup
+    }
+
+    pub fn record_hovered_diagnostic(
+        &mut self,
+        diagnostic: HoveredDiagnostic,
+        type_target: Option<usize>,
+    ) -> Option<usize> {
+        if self.stale_combined_popup {
+            return self.hovered_diag_type_target;
+        }
+        if !self
+            .hovered_diags_cache
+            .iter()
+            .any(|existing| existing.0 == diagnostic.0)
+        {
+            self.hovered_diags_cache.push(diagnostic);
+        }
+        type_target
     }
 
     pub fn popup_or_bridge_contains(
@@ -270,8 +304,9 @@ impl HoverState {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_hover_visibility, diagnostic_hover_byte_range_on_line,
-        diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line, hover_token_bounds,
+        compute_hover_visibility, compute_hover_visibility_from_matches,
+        diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+        diagnostic_hover_target_byte_on_line, hover_bytes_share_token, hover_token_bounds,
         hover_token_text, is_hover_target_byte, is_in_hover_popup_or_bridge,
         is_python_hover_keyword, normalize_hover_byte, HoverState,
     };
@@ -285,6 +320,7 @@ mod tests {
             None,  // hovered_diag_type_target
             None,  // type_popup_byte
             None,  // hover_byte_offset
+            false, // stale_combined_popup
         );
         assert!(show_err);
         assert!(!show_type);
@@ -300,6 +336,7 @@ mod tests {
             None,      // hovered_diag_type_target
             Some(100), // type_popup_byte
             Some(100), // hover_byte_offset
+            false,     // stale_combined_popup
         );
         assert!(!show_err);
         assert!(show_type);
@@ -315,6 +352,7 @@ mod tests {
             Some(100), // hovered_diag_type_target
             Some(100), // type_popup_byte
             Some(100), // hover_byte_offset
+            false,     // stale_combined_popup
         );
         assert!(show_err);
         assert!(show_type);
@@ -330,6 +368,7 @@ mod tests {
             Some(200), // hovered_diag_type_target (new location)
             Some(100), // type_popup_byte (old location)
             Some(200), // hover_byte_offset (new location)
+            false,     // stale_combined_popup
         );
         assert!(!show_err);
         assert!(!show_type);
@@ -339,19 +378,49 @@ mod tests {
     #[test]
     fn hover_visibility_waits_for_matching_type_before_showing_combined_type() {
         let (show_err, show_type, show_comb) =
-            compute_hover_visibility(true, false, true, Some(100), Some(100), Some(100));
+            compute_hover_visibility(true, false, true, Some(100), Some(100), Some(100), false);
         assert!(!show_err);
         assert!(!show_type);
         assert!(!show_comb);
 
         let (show_err, show_type, show_comb) =
-            compute_hover_visibility(true, true, true, Some(100), Some(200), Some(100));
+            compute_hover_visibility(true, true, true, Some(100), Some(200), Some(100), false);
         assert!(!show_err);
         assert!(!show_type);
         assert!(!show_comb);
 
         let (show_err, show_type, show_comb) =
-            compute_hover_visibility(true, true, true, Some(100), Some(100), Some(100));
+            compute_hover_visibility(true, true, true, Some(100), Some(100), Some(100), false);
+        assert!(show_err);
+        assert!(show_type);
+        assert!(show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_combines_offsets_inside_same_identifier() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("    handlers\n");
+        let text = editor.get_full_text();
+        let handlers_start = text.find("handlers").unwrap();
+        let handlers_middle = handlers_start + 7;
+
+        assert!(hover_bytes_share_token(
+            &editor,
+            Some(handlers_start),
+            Some(handlers_middle)
+        ));
+
+        let (show_err, show_type, show_comb) = compute_hover_visibility_from_matches(
+            true,
+            true,
+            true,
+            true,
+            hover_bytes_share_token(&editor, Some(handlers_start), Some(handlers_middle)),
+            hover_bytes_share_token(&editor, Some(handlers_start), Some(handlers_middle)),
+            true,
+            false,
+        );
+
         assert!(show_err);
         assert!(show_type);
         assert!(show_comb);
@@ -369,6 +438,7 @@ mod tests {
         state.hovered_diags.push(7);
         state.hovered_diags_cache.push((7, 1.0, 2.0, 3.0, 4.0));
         state.hovered_diag_type_target = Some(99);
+        state.stale_combined_popup = true;
         state.diag_selection_anchor = Some(1);
         state.diag_selection_cursor = Some(3);
         state.diag_selecting = true;
@@ -386,6 +456,7 @@ mod tests {
         assert!(state.hovered_diags.is_empty());
         assert!(state.hovered_diags_cache.is_empty());
         assert!(state.hovered_diag_type_target.is_none());
+        assert!(!state.stale_combined_popup);
         assert!(state.diag_selection_anchor.is_none());
         assert!(state.diag_selection_cursor.is_none());
         assert!(!state.diag_selecting);
@@ -466,7 +537,7 @@ mod tests {
 
         let ready = state.advance_diagnostic_hover_timer(Some(0), false, false, 0.0);
         let (show_err, show_type, show_combined) =
-            compute_hover_visibility(true, ready, false, None, None, None);
+            compute_hover_visibility(true, ready, false, None, None, None, false);
         assert!(!show_err);
         assert!(!show_type);
         assert!(!show_combined);
@@ -475,7 +546,7 @@ mod tests {
         assert!(!state.advance_diagnostic_hover_timer(Some(0), false, false, 0.0));
         let ready = state.advance_diagnostic_hover_timer(Some(0), false, false, 0.21);
         let (show_err, show_type, show_combined) =
-            compute_hover_visibility(true, ready, false, None, None, None);
+            compute_hover_visibility(true, ready, false, None, None, None, false);
 
         assert!(show_err);
         assert!(!show_type);
@@ -547,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_diagnostic_type_popup_is_not_reused_after_fast_return() {
+    fn stale_combined_popup_stays_visible_while_next_word_loads() {
         let mut state = HoverState::default();
         state.popup = Some(crate::app::mouse::HoverPopup {
             text: "Literal[\"513\"]".to_string(),
@@ -568,22 +639,40 @@ mod tests {
         state
             .hovered_diags_cache
             .push((0, 100.0, 140.0, 162.0, 130.0));
-        state.hovered_diag_type_target = Some(20);
+        state.hovered_diag_type_target = Some(17);
 
         let should_reset_diagnostics = state.begin_type_hover_transition(7);
 
-        assert!(should_reset_diagnostics);
+        assert!(!should_reset_diagnostics);
         assert_eq!(state.byte_offset, Some(7));
-        assert!(state.popup.is_none());
-        assert!(state.rect.is_none());
+        assert_eq!(state.popup.as_ref().map(|p| p.byte_offset), Some(20));
+        assert_eq!(state.hovered_diags, vec![0]);
+        assert_eq!(
+            state.hovered_diags_cache,
+            vec![(0, 100.0, 140.0, 162.0, 130.0)]
+        );
+        assert!(state.stale_combined_popup);
         assert!(!state.should_show_stale_popup_while_target_loads(false));
 
-        let (show_error, show_type, show_combined) =
-            compute_hover_visibility(true, true, true, Some(20), Some(20), state.byte_offset);
+        assert_eq!(
+            state.record_hovered_diagnostic((0, 100.0, 140.0, 162.0, 130.0), Some(17)),
+            Some(17)
+        );
+        assert_eq!(
+            state.record_hovered_diagnostic((0, 100.0, 140.0, 162.0, 130.0), Some(17)),
+            Some(17)
+        );
+        assert_eq!(
+            state.hovered_diags_cache,
+            vec![(0, 100.0, 140.0, 162.0, 130.0)]
+        );
 
-        assert!(!show_error);
-        assert!(!show_type);
-        assert!(!show_combined);
+        let (show_error, show_type, show_combined) =
+            compute_hover_visibility_from_matches(true, true, true, true, true, false, false, true);
+
+        assert!(show_error);
+        assert!(show_type);
+        assert!(show_combined);
     }
 
     #[test]
@@ -628,6 +717,7 @@ mod tests {
             Some(100), // hovered_diag_type_target (e.g. byte of 'f')
             Some(103), // type_popup_byte (e.g. byte of '5')
             Some(103), // hover_byte_offset (e.g. byte of '5')
+            false,     // stale_combined_popup
         );
         // Мы требуем ровно 1 попап в любой момент времени.
         // Приоритет отдается Type Popup для конкретного слова под курсором!
@@ -939,6 +1029,7 @@ mod tests {
             Some(42),
             Some(42),
             Some(42),
+            false,
         );
         let (inside_popup, _) = state.popup_or_bridge_contains(100.0, 60.0, 800.0, 1.0);
 
@@ -1041,20 +1132,49 @@ pub fn compute_hover_visibility(
     hovered_diag_type_target: Option<usize>,
     type_popup_byte: Option<usize>,
     hover_byte_offset: Option<usize>,
+    stale_combined_popup: bool,
 ) -> (bool, bool, bool) {
     let diagnostic_needs_type = is_error_hovered && hovered_diag_type_target.is_some();
     let type_matches_diag = hovered_diag_type_target == type_popup_byte;
     let hover_matches_diag = hovered_diag_type_target == hover_byte_offset;
+    let type_matches_hover = type_popup_byte == hover_byte_offset;
 
-    let show_combined = diagnostic_needs_type
+    compute_hover_visibility_from_matches(
+        is_error_hovered,
+        error_timer_ready,
+        has_type_popup,
+        diagnostic_needs_type,
+        type_matches_diag,
+        hover_matches_diag,
+        type_matches_hover,
+        stale_combined_popup,
+    )
+}
+
+pub fn compute_hover_visibility_from_matches(
+    is_error_hovered: bool,
+    error_timer_ready: bool,
+    has_type_popup: bool,
+    diagnostic_needs_type: bool,
+    type_matches_diag: bool,
+    hover_matches_diag: bool,
+    type_matches_hover: bool,
+    stale_combined_popup: bool,
+) -> (bool, bool, bool) {
+    let show_stale_combined =
+        stale_combined_popup && diagnostic_needs_type && has_type_popup && type_matches_diag;
+    let show_combined = (diagnostic_needs_type
         && hover_matches_diag
         && has_type_popup
         && type_matches_diag
-        && error_timer_ready;
+        && error_timer_ready)
+        || show_stale_combined;
 
     let mut show_error = if diagnostic_needs_type {
         if hover_matches_diag {
             show_combined
+        } else if show_stale_combined {
+            true
         } else {
             false
         }
@@ -1065,11 +1185,13 @@ pub fn compute_hover_visibility(
     let show_type = if diagnostic_needs_type {
         if hover_matches_diag {
             has_type_popup && type_matches_diag && error_timer_ready
+        } else if show_stale_combined {
+            true
         } else {
-            has_type_popup && type_popup_byte == hover_byte_offset
+            has_type_popup && type_matches_hover
         }
     } else {
-        has_type_popup && type_popup_byte == hover_byte_offset
+        has_type_popup && type_matches_hover
     };
 
     // Строгое правило 1 окна: если всплывают два независимых попапа,
@@ -1360,7 +1482,10 @@ pub(crate) fn normalize_hover_byte(
     Some(normalized)
 }
 
-fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (usize, usize) {
+pub(crate) fn hover_token_bounds(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+) -> (usize, usize) {
     let text = editor.get_full_text();
     if !text.is_empty() {
         let bytes = text.as_bytes();
@@ -1435,6 +1560,19 @@ fn hover_token_bounds(editor: &crate::editor::Editor, byte_offset: usize) -> (us
     }
 
     (start, end)
+}
+
+pub(crate) fn hover_bytes_share_token(
+    editor: &crate::editor::Editor,
+    first: Option<usize>,
+    second: Option<usize>,
+) -> bool {
+    match (first, second) {
+        (Some(first), Some(second)) => {
+            hover_token_bounds(editor, first) == hover_token_bounds(editor, second)
+        }
+        _ => false,
+    }
 }
 
 pub fn hover_anchor_for_byte(

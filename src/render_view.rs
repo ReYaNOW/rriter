@@ -1537,7 +1537,10 @@ impl Renderer {
 
         // LSP squiggles — волнистые подчёркивания диагностик
         crate::app::mouse::HOVER_STATE.with(|s| {
-            s.borrow_mut().hovered_diags_cache.clear();
+            let mut state = s.borrow_mut();
+            if !state.stale_combined_popup {
+                state.hovered_diags_cache.clear();
+            }
         });
         let mut hovered_diag_type_target = None;
         if !lsp_diagnostics.is_empty() {
@@ -1690,18 +1693,20 @@ impl Renderer {
 
                 if in_hitbox {
                     if hovered_diag_type_target.is_none() {
-                        hovered_diag_type_target = hit_type_target;
+                        hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
+                            s.borrow_mut().record_hovered_diagnostic(
+                                (idx, x_start, top_y, top_y + self.line_height, x_end),
+                                hit_type_target,
+                            )
+                        });
+                    } else {
+                        crate::app::mouse::HOVER_STATE.with(|s| {
+                            s.borrow_mut().record_hovered_diagnostic(
+                                (idx, x_start, top_y, top_y + self.line_height, x_end),
+                                hit_type_target,
+                            );
+                        });
                     }
-
-                    crate::app::mouse::HOVER_STATE.with(|s| {
-                        s.borrow_mut().hovered_diags_cache.push((
-                            idx,
-                            x_start,
-                            top_y,
-                            top_y + self.line_height,
-                            x_end,
-                        ));
-                    });
                 }
 
                 if x_end < self.left_padding || x_start > self.width {
@@ -2322,15 +2327,17 @@ impl Renderer {
                                 x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
                             }
 
-                            hovered_diag_type_target = Some(type_target);
-                            crate::app::mouse::HOVER_STATE.with(|s| {
-                                s.borrow_mut().hovered_diags_cache.push((
-                                    idx,
-                                    self.left_padding + x_start_px - render_scroll_x,
-                                    top_y,
-                                    top_y + self.line_height,
-                                    self.left_padding + x_end_px - render_scroll_x,
-                                ));
+                            hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
+                                s.borrow_mut().record_hovered_diagnostic(
+                                    (
+                                        idx,
+                                        self.left_padding + x_start_px - render_scroll_x,
+                                        top_y,
+                                        top_y + self.line_height,
+                                        self.left_padding + x_end_px - render_scroll_x,
+                                    ),
+                                    Some(type_target),
+                                )
                             });
                         }
                     }
@@ -2340,7 +2347,9 @@ impl Renderer {
 
         let first_idx = crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
-            state.hovered_diag_type_target = hovered_diag_type_target;
+            if hovered_diag_type_target.is_some() || !state.stale_combined_popup {
+                state.hovered_diag_type_target = hovered_diag_type_target;
+            }
             state.hovered_diags.clear();
             let len = state.hovered_diags_cache.len();
             for i in 0..len {
@@ -2355,6 +2364,32 @@ impl Renderer {
             && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
         let is_error_hovered =
             crate::app::mouse::HOVER_STATE.with(|s| !s.borrow().hovered_diags_cache.is_empty());
+        let effective_hovered_diag_type_target = if hovered_diag_type_target.is_some() {
+            hovered_diag_type_target
+        } else {
+            crate::app::mouse::HOVER_STATE.with(|s| {
+                let state = s.borrow();
+                if state.stale_combined_popup {
+                    state.hovered_diag_type_target
+                } else {
+                    None
+                }
+            })
+        };
+        let diagnostic_needs_type =
+            is_error_hovered && effective_hovered_diag_type_target.is_some();
+        let type_matches_diag = crate::app::mouse::hover_bytes_share_token(
+            editor,
+            effective_hovered_diag_type_target,
+            type_popup_byte,
+        );
+        let hover_matches_diag = crate::app::mouse::hover_bytes_share_token(
+            editor,
+            effective_hovered_diag_type_target,
+            hover_byte_offset,
+        );
+        let type_matches_hover =
+            crate::app::mouse::hover_bytes_share_token(editor, type_popup_byte, hover_byte_offset);
 
         let error_timer_ready = crate::app::mouse::HOVER_STATE.with(|s| {
             let mut state = s.borrow_mut();
@@ -2366,14 +2401,17 @@ impl Renderer {
             )
         });
 
-        let (show_error, show_type, show_combined) = crate::app::mouse::compute_hover_visibility(
-            is_error_hovered,
-            error_timer_ready,
-            has_type_popup,
-            hovered_diag_type_target,
-            type_popup_byte,
-            hover_byte_offset,
-        );
+        let (show_error, show_type, show_combined) =
+            crate::app::mouse::compute_hover_visibility_from_matches(
+                is_error_hovered,
+                error_timer_ready,
+                has_type_popup,
+                diagnostic_needs_type,
+                type_matches_diag,
+                hover_matches_diag,
+                type_matches_hover,
+                crate::app::mouse::HOVER_STATE.with(|s| s.borrow().stale_combined_popup),
+            );
 
         static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let now_ms = std::time::SystemTime::now()
@@ -2386,7 +2424,7 @@ impl Renderer {
         {
             println!(
                 "[HOVER VIS LOG] is_error: {}, timer_ready: {}, has_type: {}, d_type_target: {:?}, type_byte: {:?}, hover_byte: {:?}, SHOW_ERR: {}, SHOW_TYPE: {}, SHOW_COMB: {}",
-                is_error_hovered, error_timer_ready, has_type_popup, hovered_diag_type_target, type_popup_byte, hover_byte_offset, show_error, show_type, show_combined
+                is_error_hovered, error_timer_ready, has_type_popup, effective_hovered_diag_type_target, type_popup_byte, hover_byte_offset, show_error, show_type, show_combined
             );
             LAST_LOG.store(now_ms, Ordering::Relaxed);
         }

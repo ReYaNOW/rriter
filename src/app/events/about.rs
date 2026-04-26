@@ -600,11 +600,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             } else {
                                 state.definition_request_id = None;
                             }
-                                                                                                                if state.definition_request_id.is_some() {
+                            if state.definition_request_id.is_some() {
                                 println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
                                 state.pending_popup = Some(popup);
                             } else {
                                 println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
+                                state.stale_combined_popup = false;
                                 state.popup = Some(popup);
                             }
                             state.selection_anchor = None;
@@ -704,6 +705,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             }
                         }
                         if let Some(popup) = popup {
+                            state.stale_combined_popup = false;
                             state.popup = Some(popup);
                             if let Some(w) = app.window.as_ref() {
                                 w.request_redraw();
