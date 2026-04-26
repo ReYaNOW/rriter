@@ -3,6 +3,6 @@ repos:
     hooks:
       - id: api-map
         name: Generate Project Map
-        entry: bash -c 'make api-map && git add PROJECT_MAP.xml'
+        entry: bash -c 'make api-map && git add PROJECT_AI_MAP.txt'
         language: system
         pass_filenames: false

@@ -193,7 +193,6 @@ impl HoverState {
         self.popup.is_some()
             && !show_type
             && !self.stale_combined_popup
-            && self.byte_offset.is_some()
             && popup_byte != self.byte_offset
             && !stale_diagnostic_popup
     }
@@ -614,7 +613,29 @@ mod tests {
         assert!(!state.should_show_stale_popup_while_target_loads(true));
 
         state.byte_offset = None;
-        assert!(!state.should_show_stale_popup_while_target_loads(false));
+        assert!(state.should_show_stale_popup_while_target_loads(false));
+    }
+
+    #[test]
+    fn stale_type_popup_stays_visible_when_cursor_moves_to_whitespace() {
+        let mut state = HoverState::default();
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "some text".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.byte_offset = None;
+
+        assert!(state.should_show_stale_popup_while_target_loads(false));
+        assert!(!state.should_show_stale_popup_while_target_loads(true));
     }
 
     #[test]
@@ -1125,6 +1146,7 @@ thread_local! {
 
 pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
 
+#[allow(dead_code)]
 pub fn compute_hover_visibility(
     is_error_hovered: bool,
     error_timer_ready: bool,
@@ -1151,6 +1173,7 @@ pub fn compute_hover_visibility(
     )
 }
 
+#[allow(dead_code)]
 pub fn compute_hover_visibility_from_matches(
     is_error_hovered: bool,
     error_timer_ready: bool,

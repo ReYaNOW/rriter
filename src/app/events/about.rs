@@ -572,7 +572,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 (0.0, 0.0)
                             };
 
-                                                        let popup = crate::app::mouse::HoverPopup {
+                            let popup = crate::app::mouse::HoverPopup {
                                 text: clean_msg,
                                 spans,
                                 line_kinds,

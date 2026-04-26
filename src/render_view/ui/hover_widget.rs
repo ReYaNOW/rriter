@@ -16,6 +16,72 @@ thread_local! {
     static DIAG_CHARS: std::cell::RefCell<Vec<DiagChar>> = std::cell::RefCell::new(Vec::new());
 }
 
+pub fn compute_hover_y_position(
+    line_top_y: f32,
+    line_height: f32,
+    box_h: f32,
+    screen_height: f32,
+    scale_factor: f32,
+) -> f32 {
+    let margin = 8.0 * scale_factor;
+    let min_y = 40.0 * scale_factor; // Учитываем высоту таб-бара (38.0) + микро-отступ
+    let max_y = screen_height - 10.0 * scale_factor;
+
+    let mut target_by = line_top_y - box_h - margin;
+
+    if target_by < min_y {
+        let below_y = line_top_y + line_height + margin;
+        if below_y + box_h <= max_y {
+            target_by = below_y;
+        } else {
+            // Если ни сверху, ни снизу попап полностью не влезает,
+            // выбираем ту сторону, где места больше.
+            let space_above = line_top_y - min_y;
+            let space_below = max_y - (line_top_y + line_height);
+            if space_below > space_above {
+                target_by = below_y;
+            } else {
+                target_by = min_y; // Прижимаем к верхнему краю экрана
+            }
+        }
+    }
+    target_by
+}
+
+pub fn compute_diagnostic_layout(
+    first_line_y_top: f32,
+    line_height: f32,
+    box_w: f32,
+    combined_h: f32,
+    screen_width: f32,
+    screen_height: f32,
+    scale_factor: f32,
+    first_diag_x: f32,
+    popup_anchor_x: Option<f32>,
+) -> (f32, f32) {
+    let mut bx = first_diag_x;
+    if let Some(ax) = popup_anchor_x {
+        bx = bx.min(ax);
+    }
+
+    if bx + box_w > screen_width - 20.0 * scale_factor {
+        bx = screen_width - box_w - 20.0 * scale_factor;
+    }
+    if bx < 20.0 * scale_factor {
+        bx = 20.0 * scale_factor;
+    }
+
+    let by = compute_hover_y_position(
+        first_line_y_top,
+        line_height,
+        combined_h,
+        screen_height,
+        scale_factor,
+    );
+
+    (bx, by)
+}
+
 pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
     DIAG_CHARS.with(|chars| {
         let chars = chars.borrow();
@@ -253,23 +319,24 @@ impl Renderer {
 
         let (_, first_diag_x, first_line_y_top, first_diag_y_bottom, first_diag_x_end) =
             hovered_diags_cache[0];
-        let mut bx = first_diag_x;
 
-        crate::app::mouse::HOVER_STATE.with(|s| {
-            if let Some(popup) = &s.borrow().popup {
-                bx = bx.min(popup.anchor_x);
-            }
-        });
+        let popup_anchor_x =
+            crate::app::mouse::HOVER_STATE.with(|s| s.borrow().popup.as_ref().map(|p| p.anchor_x));
 
-        if bx + box_w > self.width - 20.0 * s {
-            bx = self.width - box_w - 20.0 * s;
-        }
-        if bx < 20.0 * s {
-            bx = 20.0 * s;
-        }
         box_w = box_w.round();
         let combined_h = total_h + combined_hover_h;
-        let by = (first_line_y_top - combined_h - 8.0 * s).max(10.0 * s);
+
+        let (bx, by) = compute_diagnostic_layout(
+            first_line_y_top,
+            line_h,
+            box_w,
+            combined_h,
+            self.width,
+            self.height,
+            s,
+            first_diag_x,
+            popup_anchor_x,
+        );
 
         crate::app::mouse::HOVER_STATE.with(|state| {
             state.borrow_mut().diag_rect = Some((
@@ -778,12 +845,11 @@ impl Renderer {
             if let Some((rx, _, _, _)) = attached_diag {
                 bx = rx;
             }
-            let mut target_by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
-            if let Some((_, diag_y, _, diag_h)) = attached_diag {
-                target_by = diag_y + diag_h;
-            } else if target_by + box_h > line_top_y - 8.0 * s {
-                target_by = (line_top_y - box_h - 8.0 * s).max(10.0 * s);
-            }
+            let target_by = if let Some((_, diag_y, _, diag_h)) = attached_diag {
+                diag_y + diag_h
+            } else {
+                compute_hover_y_position(line_top_y, self.line_height, box_h, self.height, s)
+            };
             by = target_by;
 
             if bx + box_w > self.width - 20.0 * s {
@@ -1054,5 +1120,85 @@ impl Renderer {
         }
 
         (bx, by, box_w, box_h, max_scroll)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hover_y_position_fits_above() {
+        let y = compute_hover_y_position(100.0, 20.0, 40.0, 1000.0, 1.0);
+        // line_top_y=100, box_h=40, margin=8. Ожидаем сверху: 100 - 40 - 8 = 52.
+        // 52 >= 40.0 (min_y). Влезает сверху.
+        assert_eq!(y, 52.0);
+    }
+
+    #[test]
+    fn test_hover_y_position_fallback_below() {
+        let y = compute_hover_y_position(60.0, 20.0, 40.0, 1000.0, 1.0);
+        // line_top_y=60, box_h=40, margin=8. Ожидаем сверху: 60 - 40 - 8 = 12.
+        // 12 < 40.0. Не влезает сверху.
+        // Снизу: 60 + 20 + 8 = 88. Высота: 88 + 40 = 128 <= 990 (max_y). Влезает снизу!
+        assert_eq!(y, 88.0);
+    }
+
+    #[test]
+    fn test_hover_y_position_clamped_top_when_both_fail_but_above_is_better() {
+        // Окно очень маленькое (200px). line_top_y = 120, box_h = 100.
+        // Сверху: 120 - 100 - 8 = 12. Места сверху: 120 - 40 = 80.
+        // Снизу: 120 + 20 + 8 = 148. Места снизу: 190 - 140 = 50.
+        // 80 > 50 -> оставляем сверху и прижимаем к минимуму (40.0).
+        let y = compute_hover_y_position(120.0, 20.0, 100.0, 200.0, 1.0);
+        assert_eq!(y, 40.0);
+    }
+
+    #[test]
+    fn test_hover_y_position_forced_below_when_both_fail_but_below_is_better() {
+        // Окно 200px. line_top_y = 60, box_h = 100.
+        // Сверху: 60 - 100 - 8 = -48. Места сверху: 60 - 40 = 20.
+        // Снизу: 60 + 20 + 8 = 88. Места снизу: 190 - 80 = 110.
+        // 110 > 20 -> насильно переносим вниз.
+        let y = compute_hover_y_position(60.0, 20.0, 100.0, 200.0, 1.0);
+        assert_eq!(y, 88.0);
+    }
+
+    #[test]
+    fn test_diagnostic_layout_end_to_end_fits_above() {
+        let (bx, by) =
+            compute_diagnostic_layout(500.0, 20.0, 200.0, 100.0, 1000.0, 1000.0, 1.0, 300.0, None);
+        assert_eq!(bx, 300.0);
+        assert_eq!(by, 392.0); // 500 - 100 - 8
+    }
+
+    #[test]
+    fn test_diagnostic_layout_end_to_end_shifts_x_when_out_of_bounds() {
+        let (bx, _by) =
+            compute_diagnostic_layout(500.0, 20.0, 200.0, 100.0, 1000.0, 1000.0, 1.0, 900.0, None);
+        assert_eq!(bx, 780.0); // 1000 - 200 - 20 = 780
+    }
+
+    #[test]
+    fn test_diagnostic_layout_end_to_end_considers_hover_anchor_x() {
+        let (bx, _by) = compute_diagnostic_layout(
+            500.0,
+            20.0,
+            200.0,
+            100.0,
+            1000.0,
+            1000.0,
+            1.0,
+            400.0,
+            Some(350.0),
+        );
+        assert_eq!(bx, 350.0); // min(400, 350)
+    }
+
+    #[test]
+    fn test_diagnostic_layout_end_to_end_forces_below_when_y_too_small() {
+        let (_bx, by) =
+            compute_diagnostic_layout(40.0, 20.0, 200.0, 100.0, 1000.0, 1000.0, 1.0, 100.0, None);
+        assert_eq!(by, 68.0); // Не влезло сверху (40-100-8 < 40). Идет вниз: 40 + 20 + 8 = 68
     }
 }

@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
-"""gen_project_map.py — генератор PROJECT_MAP.xml под ИИ: компактный граф символов + вызовы."""
+"""gen_project_ai_map.py
+
+Generate one compact project map for AI chat/code agents.
+
+Output:
+    PROJECT_AI_MAP.txt
+
+Format:
+    AIMAP3
+    # M|mid|path
+    # T|sid|mid|line|kind|name|body
+    # F|sid|mid|line|flags|qual|ret|self|rd|wr
+    # E|caller_sid|callee_sid callee_sid ...
+
+Flags:
+    p = public function/method
+    e = entry/root handler
+
+Purpose:
+    - Let AI identify minimal exact source files to request.
+    - Provide function/method call graph.
+    - Provide enough structure for navigation.
+    - Not source code. Do not create exact patches from map only.
+"""
+
+import argparse
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-SRC_DIR = Path("src")
 
-STD_CALLS = {
-    "unwrap", "expect", "map", "and_then", "or_else", "ok", "err", "is_some", "is_none",
-    "len", "is_empty", "collect", "clone", "to_string", "as_str", "as_bytes", "chars",
-    "bytes", "lines", "split", "trim", "starts_with", "ends_with", "replace",
-    "min", "max", "abs", "clamp", "round", "floor", "ceil", "sqrt", "from", "into",
-    "default", "get", "set", "remove", "entry", "or_insert", "lock", "read", "write",
-    "send", "recv", "try_recv", "sort", "sort_by", "dedup", "retain", "extend", "drain",
-    "parse", "to_owned", "borrow", "as_ref", "as_mut", "zip", "enumerate", "filter",
-    "flat_map", "for_each", "any", "all", "first", "last", "next", "take", "skip",
-    "unwrap_or", "unwrap_or_default", "sum", "count", "find", "fold",
-    "push", "pop", "insert", "clear", "push_back", "pop_back", "push_front", "pop_front",
-}
-
-ROOT_NAMES = {
+ROOT_FN_NAMES = {
     "main",
     "resumed",
     "window_event",
@@ -32,45 +43,102 @@ ROOT_NAMES = {
     "handle_main_cursor_moved",
 }
 
-MAX_TYPE_ITEMS = 8
+STD_CALLS = {
+    "abs", "all", "and_then", "any", "as_bytes", "as_mut", "as_ref", "as_str",
+    "borrow", "bytes", "ceil", "chars", "clamp", "clear", "clone", "collect",
+    "count", "default", "dedup", "drain", "ends_with", "enumerate", "entry",
+    "err", "expect", "extend", "filter", "find", "first", "flat_map", "floor",
+    "fold", "for_each", "from", "get", "insert", "into", "is_empty", "is_none",
+    "is_some", "last", "len", "lines", "lock", "map", "max", "min", "new",
+    "next", "ok", "or_else", "or_insert", "parse", "pop", "pop_back",
+    "pop_front", "push", "push_back", "push_front", "read", "recv", "remove",
+    "replace", "retain", "round", "send", "set", "skip", "sort", "sort_by",
+    "split", "sqrt", "starts_with", "sum", "take", "to_owned", "to_string",
+    "trim", "try_recv", "unwrap", "unwrap_or", "unwrap_or_default",
+    "with_capacity", "write", "zip",
+}
+
+KEYWORDS = {
+    "Self", "async", "await", "break", "continue", "crate", "else", "enum",
+    "false", "fn", "for", "if", "impl", "let", "loop", "match", "mod", "move",
+    "pub", "return", "self", "struct", "super", "trait", "true", "unsafe",
+    "use", "where", "while",
+}
+
+MAX_TYPE_ITEMS = 10
 MAX_RW_ITEMS = 12
 
+FN_RE = re.compile(
+    r"^([ \t]*)(pub(?:\s*\([^)]*\))?\s+)?"
+    r"(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_]\w*)([^{]*)\{",
+    re.MULTILINE,
+)
 
-def short_path(p):
-    return str(p).replace("\\", "/")
+IMPL_RE = re.compile(r"\bimpl\b[^{]*\{", re.MULTILINE)
+
+TYPE_BLOCK_RE = re.compile(
+    r"(?m)^([ \t]*)(pub\s+)?(struct|enum)\s+([A-Za-z_]\w*)[^{;]*(?:\{([^}]*)\}|;)"
+)
+
+TYPE_TUPLE_RE = re.compile(
+    r"(?m)^([ \t]*)(pub\s+)?struct\s+([A-Za-z_]\w*)[^(;]*\(([^)]*)\)\s*;"
+)
+
+QUAL_CALL_RE = re.compile(r"\b([A-Za-z_]\w*)::([A-Za-z_]\w*)\s*\(")
+SELF_CALL_RE = re.compile(r"\bself\.([A-Za-z_]\w*)\s*\(")
+BARE_CALL_RE = re.compile(r"(?<![:.])\b([A-Za-z_]\w*)\s*\(")
+
+SELF_ACCESS_RE = re.compile(r"\bself\.([A-Za-z_]\w*)\s*(\()?")
+SELF_ASSIGN_RE = re.compile(r"\bself\.([A-Za-z_]\w*)\s*=[^=]")
+SELF_MUTATE_RE = re.compile(
+    r"\bself\.([A-Za-z_]\w*)\."
+    r"(push|pop|clear|insert|extend|retain|remove|truncate|sort|drain|push_back|pop_back)\b"
+)
 
 
-def module_name(sp):
-    return sp.removeprefix("src/").removesuffix(".rs").replace("/", "::")
+def short_path(path):
+    return str(path).replace("\\", "/")
 
 
-def compact_list_str(s, max_items):
-    if not s:
-        return s
+def module_name(path_text):
+    return path_text.removeprefix("src/").removesuffix(".rs").replace("/", "::")
 
-    items = [item.strip() for item in s.split(",") if item.strip()]
+
+def esc(value):
+    text = "" if value is None else str(value)
+    text = re.sub(r"\s+", " ", text.strip())
+    return (
+        text
+        .replace("\\", "\\\\")
+        .replace("|", "\\p")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+
+
+def compact_csv(text, max_items):
+    if not text:
+        return ""
+
+    items = [item.strip() for item in text.split(",") if item.strip()]
     if len(items) <= max_items:
         return ",".join(items)
 
     kept = items[:max_items]
-    rest = len(items) - max_items
-    return ",".join(kept + [f"+{rest}"])
+    return ",".join(kept + [f"+{len(items) - max_items}"])
 
 
-def compact_type_body(body, max_items = MAX_TYPE_ITEMS):
+def compact_type_body(body):
     if not body:
-        return body
+        return ""
 
-    inner = body.strip()
-    if inner.startswith("{") and inner.endswith("}"):
-        content = inner[1:-1].strip()
-        items = [item.strip() for item in content.split(",") if item.strip()]
-        if len(items) <= max_items:
-            return "{ " + ", ".join(items) + " }"
-        kept = items[:max_items]
-        rest = len(items) - max_items
-        return "{ " + ", ".join(kept) + f", +{rest} }}"
-    return body
+    body = re.sub(r"\s+", " ", body)
+    body = body.replace("pub ", "").strip()
+
+    if body.endswith(","):
+        body = body[:-1]
+
+    return compact_csv(body, MAX_TYPE_ITEMS)
 
 
 def strip_strings_and_comments(src):
@@ -79,12 +147,9 @@ def strip_strings_and_comments(src):
     n = len(src)
 
     while i < n:
-        if src[i] == "'" and i + 2 < n and src[i + 2] == "'":
-            result[i + 1] = " "
-            i += 3
-            continue
+        ch = src[i]
 
-        if src[i] == "/" and i + 1 < n and src[i + 1] == "/":
+        if ch == "/" and i + 1 < n and src[i + 1] == "/":
             j = i
             while j < n and src[j] != "\n":
                 result[j] = " "
@@ -92,12 +157,14 @@ def strip_strings_and_comments(src):
             i = j
             continue
 
-        if src[i] == "/" and i + 1 < n and src[i + 1] == "*":
-            result[i] = result[i + 1] = " "
+        if ch == "/" and i + 1 < n and src[i + 1] == "*":
+            result[i] = " "
+            result[i + 1] = " "
             j = i + 2
             while j < n - 1:
                 if src[j] == "*" and src[j + 1] == "/":
-                    result[j] = result[j + 1] = " "
+                    result[j] = " "
+                    result[j + 1] = " "
                     j += 2
                     break
                 if src[j] != "\n":
@@ -106,12 +173,25 @@ def strip_strings_and_comments(src):
             i = j
             continue
 
-        if src[i] == '"':
+        if ch == "r" and i + 1 < n and src[i + 1] in ('"', "#"):
+            next_i = strip_raw_string(src, result, i)
+            if next_i != i:
+                i = next_i
+                continue
+
+        if ch == "b" and i + 2 < n and src[i + 1] == "r" and src[i + 2] in ('"', "#"):
+            next_i = strip_raw_string(src, result, i)
+            if next_i != i:
+                i = next_i
+                continue
+
+        if ch == '"':
             result[i] = " "
             j = i + 1
             while j < n:
                 if src[j] == "\\" and j + 1 < n:
-                    result[j] = result[j + 1] = " "
+                    result[j] = " "
+                    result[j + 1] = " "
                     j += 2
                     continue
                 if src[j] == '"':
@@ -124,9 +204,57 @@ def strip_strings_and_comments(src):
             i = j
             continue
 
+        if ch == "'" and i + 2 < n:
+            j = i + 1
+            if src[j] == "\\" and j + 2 < n and src[j + 2] == "'":
+                for x in range(i, j + 3):
+                    result[x] = " "
+                i = j + 3
+                continue
+            if j + 1 < n and src[j + 1] == "'":
+                result[i] = " "
+                result[j] = " "
+                result[j + 1] = " "
+                i = j + 2
+                continue
+
         i += 1
 
     return "".join(result)
+
+
+def strip_raw_string(src, result, i):
+    n = len(src)
+    j = i
+
+    if src.startswith("br", i):
+        j += 2
+    elif src.startswith("r", i):
+        j += 1
+    else:
+        return i
+
+    hashes = 0
+    while j < n and src[j] == "#":
+        hashes += 1
+        j += 1
+
+    if j >= n or src[j] != '"':
+        return i
+
+    end_pat = '"' + ("#" * hashes)
+    k = j + 1
+
+    while k < n:
+        if src.startswith(end_pat, k):
+            end = k + len(end_pat)
+            for x in range(i, end):
+                if src[x] != "\n":
+                    result[x] = " "
+            return end
+        k += 1
+
+    return i
 
 
 def extract_body(src, brace_pos):
@@ -144,24 +272,6 @@ def extract_body(src, brace_pos):
     return src[brace_pos + 1:i - 1], i
 
 
-FN_RE = re.compile(
-    r"^([ \t]*)(pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)([^{]*)\{",
-    re.MULTILINE,
-)
-
-IMPL_RE = re.compile(r"\bimpl\b[^{]*\{", re.MULTILINE)
-
-TYPE_BLOCK_RE = re.compile(r"(?:pub\s+)?(struct|enum)\s+([A-Za-z0-9_]+)[^{]*\{([^}]*)\}")
-TYPE_TUPLE_RE = re.compile(r"(?:pub\s+)?struct\s+([A-Za-z0-9_]+)[^(]*\(([^)]+)\)\s*;")
-
-CALL_RE = re.compile(r"\b(\w+)::(\w+)\s*\(|\b(\w+)\s*\(")
-SELF_ACCESS_RE = re.compile(r"\bself\.([A-Za-z0-9_]+)\s*(\()?")
-SELF_MUTATE_RE = re.compile(
-    r"\bself\.([A-Za-z0-9_]+)\.(push|pop|clear|insert|extend|retain|remove|truncate|sort|drain|push_back|pop_back)\b"
-)
-SELF_ASSIGN_RE = re.compile(r"\bself\.([A-Za-z0-9_]+)\s*=[^=]")
-
-
 def extract_impl_blocks(src_clean):
     impls = []
 
@@ -172,11 +282,11 @@ def extract_impl_blocks(src_clean):
 
         owner = ""
 
-        owner_m = re.search(r"\bfor\s+([A-Za-z0-9_:]+)\s*$", header)
+        owner_m = re.search(r"\bfor\s+([A-Za-z_][A-Za-z0-9_:]*)\s*$", header)
         if owner_m:
             owner = owner_m.group(1).split("::")[-1]
         else:
-            owner_m = re.search(r"\bimpl(?:<[^>]*>)?\s+([A-Za-z0-9_:]+)\s*$", header)
+            owner_m = re.search(r"\bimpl(?:<[^>]*>)?\s+([A-Za-z_][A-Za-z0-9_:]*)\s*$", header)
             if owner_m:
                 owner = owner_m.group(1).split("::")[-1]
 
@@ -187,6 +297,39 @@ def extract_impl_blocks(src_clean):
         })
 
     return impls
+
+
+def extract_types(src_clean, src_orig):
+    types = {}
+
+    for m in TYPE_BLOCK_RE.finditer(src_clean):
+        kind = m.group(3)
+        name = m.group(4)
+        body = m.group(5) or ""
+        line_no = src_orig[:m.start()].count("\n") + 1
+
+        types[name] = {
+            "id": -1,
+            "kind": kind,
+            "name": name,
+            "line": line_no,
+            "body": compact_type_body(body),
+        }
+
+    for m in TYPE_TUPLE_RE.finditer(src_clean):
+        name = m.group(3)
+        body = m.group(4)
+        line_no = src_orig[:m.start()].count("\n") + 1
+
+        types[name] = {
+            "id": -1,
+            "kind": "struct",
+            "name": name,
+            "line": line_no,
+            "body": "(" + compact_type_body(body) + ")",
+        }
+
+    return types
 
 
 def extract_functions(src_clean, src_orig):
@@ -225,307 +368,288 @@ def extract_functions(src_clean, src_orig):
                 if parts and parts[0] in ("self", "&self", "&mut self", "mut self"):
                     recv = parts[0]
 
+        qual = f"{owner}.{name}" if owner else name
+
         fns.append({
+            "id": -1,
             "name": name,
+            "qual": qual,
             "ret": ret,
             "is_pub": is_pub,
             "body": body,
             "line": line_no,
             "owner": owner,
             "recv": recv,
+            "entry": name in ROOT_FN_NAMES,
+            "reads": [],
+            "writes": [],
+            "call_ids": [],
         })
 
     return fns
 
 
-def extract_structs_enums(src_clean):
-    types = {}
-
-    for m in TYPE_BLOCK_RE.finditer(src_clean):
-        kind = m.group(1)
-        name = m.group(2)
-        body = m.group(3)
-        body = re.sub(r"\s+", " ", body).replace("pub ", "").strip()
-        if body.endswith(","):
-            body = body[:-1]
-        types[name] = {
-            "kind": kind,
-            "body": compact_type_body(f"{{ {body} }}"),
-        }
-
-    for m in TYPE_TUPLE_RE.finditer(src_clean):
-        name = m.group(1)
-        body = m.group(2)
-        body = re.sub(r"\s+", " ", body).replace("pub ", "").strip()
-        types[name] = {
-            "kind": "struct",
-            "body": f"({body})",
-        }
-
-    return types
-
-
-def analyze_function_body(body, known_fns):
-    analysis = {
-        "calls": set(),
-        "self_calls": set(),
-        "reads": set(),
-        "writes": set(),
-    }
-
-    for m in CALL_RE.finditer(body):
-        module, fn1, fn2 = m.groups()
-        fn_name = fn1 or fn2
-        if fn_name and fn_name in known_fns and fn_name not in STD_CALLS:
-            call_str = f"{module}::{fn_name}" if module else fn_name
-            analysis["calls"].add(call_str)
+def analyze_reads_writes(body):
+    reads = set()
+    writes = set()
 
     for m in SELF_ACCESS_RE.finditer(body):
         name = m.group(1)
         is_call = m.group(2) == "("
-        if is_call:
-            if name in known_fns:
-                analysis["self_calls"].add(name)
-        else:
-            analysis["reads"].add(name)
+        if not is_call:
+            reads.add(name)
 
     for m in SELF_ASSIGN_RE.finditer(body):
-        analysis["writes"].add(f"{m.group(1)}=")
+        writes.add(f"{m.group(1)}=")
 
     for m in SELF_MUTATE_RE.finditer(body):
-        analysis["writes"].add(f"{m.group(1)}.{m.group(2)}()")
+        writes.add(f"{m.group(1)}.{m.group(2)}()")
 
-    analysis["reads"] -= {w.split(".")[0].replace("=", "") for w in analysis["writes"]}
-    analysis["calls"] -= analysis["self_calls"]
+    reads -= {w.split(".")[0].replace("=", "") for w in writes}
 
-    for key in analysis:
-        analysis[key] = sorted(analysis[key])
-
-    return analysis
+    return sorted(reads), sorted(writes)
 
 
-def group_calls(calls, fn_to_file, fn_to_module):
-    result = defaultdict(list)
-
-    for call_str in calls:
-        if "::" in call_str:
-            module, fn_name = call_str.split("::", 1)
-            for path, mod_name in fn_to_module.items():
-                if mod_name.endswith(module):
-                    if fn_name not in result[path]:
-                        result[path].append(fn_name)
-        else:
-            fn_name = call_str
-            for path in fn_to_file.get(fn_name, []):
-                if fn_name not in result[path]:
-                    result[path].append(fn_name)
-
-    return dict(result)
+def add_call(call_ids, target_id, current_id):
+    if target_id is not None and target_id != current_id:
+        call_ids.add(target_id)
 
 
-def build():
-    files = sorted(p for p in SRC_DIR.rglob("*.rs") if "test" not in p.name)
+def resolve_qualified_call(prefix, name, current_fn, module_by_path, fns_by_owner_name, fns_by_module_name):
+    results = []
+
+    if prefix == "Self" and current_fn["owner"]:
+        results.extend(fns_by_owner_name.get((current_fn["owner"], name), []))
+        return results
+
+    results.extend(fns_by_owner_name.get((prefix, name), []))
+
+    if results:
+        return results
+
+    for path, mod_name in module_by_path.items():
+        if mod_name.endswith(prefix):
+            results.extend(fns_by_module_name.get((path, name), []))
+
+    return results
+
+
+def analyze_calls(current_fn, local_fns_by_name, global_fns_by_name, module_by_path, fns_by_owner_name, fns_by_module_name):
+    body = current_fn["body"]
+    call_ids = set()
+
+    for m in SELF_CALL_RE.finditer(body):
+        name = m.group(1)
+
+        if name in STD_CALLS or name in KEYWORDS:
+            continue
+
+        if current_fn["owner"]:
+            for target in fns_by_owner_name.get((current_fn["owner"], name), []):
+                add_call(call_ids, target["id"], current_fn["id"])
+
+        for target in local_fns_by_name.get(name, []):
+            add_call(call_ids, target["id"], current_fn["id"])
+
+    for m in QUAL_CALL_RE.finditer(body):
+        prefix = m.group(1)
+        name = m.group(2)
+
+        if name in STD_CALLS or name in KEYWORDS:
+            continue
+
+        targets = resolve_qualified_call(
+            prefix,
+            name,
+            current_fn,
+            module_by_path,
+            fns_by_owner_name,
+            fns_by_module_name,
+        )
+
+        for target in targets:
+            add_call(call_ids, target["id"], current_fn["id"])
+
+    for m in BARE_CALL_RE.finditer(body):
+        name = m.group(1)
+
+        if name in STD_CALLS or name in KEYWORDS:
+            continue
+
+        local_targets = local_fns_by_name.get(name, [])
+        if local_targets:
+            for target in local_targets:
+                add_call(call_ids, target["id"], current_fn["id"])
+            continue
+
+        global_targets = global_fns_by_name.get(name, [])
+        if len(global_targets) == 1:
+            add_call(call_ids, global_targets[0]["id"], current_fn["id"])
+
+    return sorted(call_ids)
+
+
+def build(src_dir, include_tests):
+    if include_tests:
+        files = sorted(p for p in src_dir.rglob("*.rs"))
+    else:
+        files = sorted(p for p in src_dir.rglob("*.rs") if "test" not in p.name)
 
     file_data = []
-    fn_to_file = defaultdict(list)
-    all_fn_names = set()
-    fn_to_module = {}
+    module_by_path = {}
 
     for path in files:
-        src_orig = path.read_text(encoding = "utf-8", errors = "replace")
+        src_orig = path.read_text(encoding="utf-8", errors="replace")
         src_clean = strip_strings_and_comments(src_orig)
         sp = short_path(path)
 
-        fn_to_module[sp] = module_name(sp)
-
-        structs = extract_structs_enums(src_clean)
-        fns = extract_functions(src_clean, src_orig)
-
-        for fn in fns:
-            fn_to_file[fn["name"]].append(sp)
-            all_fn_names.add(fn["name"])
+        module_by_path[sp] = module_name(sp)
 
         file_data.append({
-            "sp": sp,
-            "structs": structs,
-            "fns": fns,
+            "id": len(file_data),
+            "path": sp,
+            "types": extract_types(src_clean, src_orig),
+            "fns": extract_functions(src_clean, src_orig),
         })
 
-    next_sym_id = 0
-
-    for mod_id, fd in enumerate(file_data):
-        fd["id"] = mod_id
-
-        for t_name in sorted(fd["structs"]):
-            fd["structs"][t_name]["id"] = next_sym_id
-            next_sym_id += 1
-
-        for fn in sorted(fd["fns"], key = lambda x: x["line"]):
-            fn["id"] = next_sym_id
-            next_sym_id += 1
-
-    fn_ids_by_mod = {
-        fd["sp"]: {fn["name"]: fn["id"] for fn in fd["fns"]}
-        for fd in file_data
-    }
-
-    incoming = defaultdict(set)
+    next_id = 0
 
     for fd in file_data:
-        local_fn_ids = fn_ids_by_mod[fd["sp"]]
+        for type_name in sorted(fd["types"]):
+            fd["types"][type_name]["id"] = next_id
+            next_id += 1
+
+        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
+            fn["id"] = next_id
+            next_id += 1
+
+    global_fns_by_name = defaultdict(list)
+    fns_by_owner_name = defaultdict(list)
+    fns_by_module_name = defaultdict(list)
+
+    for fd in file_data:
+        for fn in fd["fns"]:
+            global_fns_by_name[fn["name"]].append(fn)
+
+            if fn["owner"]:
+                fns_by_owner_name[(fn["owner"], fn["name"])].append(fn)
+
+            fns_by_module_name[(fd["path"], fn["name"])].append(fn)
+
+    for fd in file_data:
+        local_fns_by_name = defaultdict(list)
 
         for fn in fd["fns"]:
-            analysis = analyze_function_body(fn["body"], all_fn_names)
-            grouped_calls = group_calls(
-                [c for c in analysis["calls"] if c != fn["name"]],
-                fn_to_file,
-                fn_to_module,
+            local_fns_by_name[fn["name"]].append(fn)
+
+        for fn in fd["fns"]:
+            reads, writes = analyze_reads_writes(fn["body"])
+            fn["reads"] = reads
+            fn["writes"] = writes
+            fn["call_ids"] = analyze_calls(
+                fn,
+                local_fns_by_name,
+                global_fns_by_name,
+                module_by_path,
+                fns_by_owner_name,
+                fns_by_module_name,
             )
-
-            call_ids = set()
-
-            for self_name in analysis["self_calls"]:
-                target_id = local_fn_ids.get(self_name)
-                if target_id is not None and target_id != fn["id"]:
-                    call_ids.add(target_id)
-
-            for mod_path, called_fns in grouped_calls.items():
-                mod_fn_ids = fn_ids_by_mod.get(mod_path, {})
-                for called_name in called_fns:
-                    target_id = mod_fn_ids.get(called_name)
-                    if target_id is not None and target_id != fn["id"]:
-                        call_ids.add(target_id)
-
-            fn["reads"] = analysis["reads"]
-            fn["writes"] = analysis["writes"]
-            fn["call_ids"] = sorted(call_ids)
-            fn["entry"] = fn["name"] in ROOT_NAMES
-
-            for target_id in fn["call_ids"]:
-                incoming[target_id].add(fn["id"])
-
-    for fd in file_data:
-        for fn in fd["fns"]:
-            fn["fanin"] = len(incoming.get(fn["id"], set()))
-            fn["fanout"] = len(fn["call_ids"])
 
     return file_data
 
 
-def escape_xml(s):
-    return (
-        str(s)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def create_xml(file_data):
-    lines = ['<?xml version="1.0" encoding="utf-8"?>', "<pm>"]
-
-    lines.extend([
-        '<meta v="ai-compact-v1">',
-        '<use>Read PROJECT_MAP.xml before source files. Prefer map over asking for files.</use>',
-        '<legend>',
-        '<item key="m">module entry: i=id, p=canonical file path</item>',
-        '<item key="s">symbol entry: k=t type, k=f function/method</item>',
-        '<item key="o">impl owner type</item>',
-        '<item key="self">receiver kind</item>',
-        '<item key="r">return type</item>',
-        '<item key="rd">compact state reads; may end with +N if truncated</item>',
-        '<item key="wr">compact state writes; may end with +N if truncated</item>',
-        '<item key="entry">major entrypoint or event root</item>',
-        '<item key="in_">fan-in caller count</item>',
-        '<item key="out">fan-out callee count</item>',
-        '<item key="e">call edge: f=caller id, t=space-separated callee ids</item>',
-        '<item key="types">type bodies may be truncated for token savings</item>',
-        '</legend>',
-        '</meta>',
-        "<mods>",
-    ])
+def create_map(file_data):
+    lines = [
+        "AIMAP3",
+        "# M|mid|path",
+        "# T|sid|mid|line|kind|name|body",
+        "# F|sid|mid|line|flags|qual|ret|self|rd|wr",
+        "# E|caller_sid|callee_sid callee_sid",
+        "# flags:p=pub,e=entry",
+        "# index only; request full source before exact patch",
+    ]
 
     for fd in file_data:
-        if not fd["fns"] and not fd["structs"]:
+        if not fd["types"] and not fd["fns"]:
             continue
-        lines.append(f'<m i="{fd["id"]}" p="{fd["sp"]}"/>')
 
-    lines.append("</mods>")
-    lines.append("<syms>")
+        lines.append(f"M|{fd['id']}|{esc(fd['path'])}")
 
     for fd in file_data:
-        if not fd["fns"] and not fd["structs"]:
-            continue
+        for type_name in sorted(fd["types"]):
+            type_info = fd["types"][type_name]
 
-        for t_name, t_info in sorted(fd["structs"].items()):
-            x = f'{t_info["kind"]}:{t_info["body"]}'
             lines.append(
-                f'<s i="{t_info["id"]}" m="{fd["id"]}" k="t" n="{t_name}" x="{escape_xml(x)}"/>'
+                "T|{}|{}|{}|{}|{}|{}".format(
+                    type_info["id"],
+                    fd["id"],
+                    type_info["line"],
+                    esc(type_info["kind"]),
+                    esc(type_info["name"]),
+                    esc(type_info["body"]),
+                )
             )
 
-        for fn in sorted(fd["fns"], key = lambda x: x["line"]):
-            attrs = [
-                f'i="{fn["id"]}"',
-                f'm="{fd["id"]}"',
-                'k="f"',
-                f'n="{fn["name"]}"',
-                f'l="{fn["line"]}"',
-            ]
+        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
+            flags = ""
 
             if fn["is_pub"]:
-                attrs.append('v="1"')
-            if fn["ret"]:
-                attrs.append(f'r="{escape_xml(fn["ret"])}"')
-            if fn["owner"]:
-                attrs.append(f'o="{escape_xml(fn["owner"])}"')
-            if fn["recv"]:
-                attrs.append(f'self="{escape_xml(fn["recv"])}"')
-            if fn["reads"]:
-                attrs.append(f'rd="{escape_xml(compact_list_str(",".join(fn["reads"]), MAX_RW_ITEMS))}"')
-            if fn["writes"]:
-                attrs.append(f'wr="{escape_xml(compact_list_str(",".join(fn["writes"]), MAX_RW_ITEMS))}"')
+                flags += "p"
+
             if fn["entry"]:
-                attrs.append('entry="1"')
-            if fn["fanin"]:
-                attrs.append(f'in_="{fn["fanin"]}"')
-            if fn["fanout"]:
-                attrs.append(f'out="{fn["fanout"]}"')
+                flags += "e"
 
-            lines.append(f'<s {" ".join(attrs)}/>')
+            reads = compact_csv(",".join(fn["reads"]), MAX_RW_ITEMS)
+            writes = compact_csv(",".join(fn["writes"]), MAX_RW_ITEMS)
 
-    lines.append("</syms>")
-    lines.append("<cg>")
+            lines.append(
+                "F|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(
+                    fn["id"],
+                    fd["id"],
+                    fn["line"],
+                    flags,
+                    esc(fn["qual"]),
+                    esc(fn["ret"]),
+                    esc(fn["recv"]),
+                    esc(reads),
+                    esc(writes),
+                )
+            )
 
     for fd in file_data:
-        for fn in sorted(fd["fns"], key = lambda x: x["line"]):
+        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
             if fn["call_ids"]:
-                targets = " ".join(str(cid) for cid in fn["call_ids"])
-                lines.append(f'<e f="{fn["id"]}" t="{targets}"/>')
+                lines.append(f"E|{fn['id']}|{' '.join(str(x) for x in fn['call_ids'])}")
 
-    lines.append("</cg>")
-    lines.append("</pm>")
-
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def main():
-    if not SRC_DIR.exists():
-        print(f"ERROR: {SRC_DIR} не найдена. Запускай из корня проекта.", file = sys.stderr)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--src", default="src", help="source dir, default: src")
+    parser.add_argument("--out", default="PROJECT_AI_MAP.txt", help="output file, default: PROJECT_AI_MAP.txt")
+    parser.add_argument("--include-tests", action="store_true", help="include files with 'test' in filename")
+
+    args = parser.parse_args()
+
+    src_dir = Path(args.src)
+    if not src_dir.exists():
+        print(f"ERROR: {src_dir} not found. Run from project root or pass --src.", file=sys.stderr)
         sys.exit(1)
 
-    print("Генерация плотного дерева проекта...")
-    file_data = build()
-    xml_text = create_xml(file_data)
+    file_data = build(src_dir, args.include_tests)
+    map_text = create_map(file_data)
 
-    out_file = "PROJECT_MAP.xml"
-    with open(out_file, "w", encoding = "utf-8") as f:
-        f.write(xml_text)
+    out_path = Path(args.out)
+    out_path.write_text(map_text, encoding="utf-8")
 
+    total_types = sum(len(fd["types"]) for fd in file_data)
     total_fns = sum(len(fd["fns"]) for fd in file_data)
+    total_edges = sum(len(fn["call_ids"]) for fd in file_data for fn in fd["fns"])
+
     print(
-        f"✓ {out_file} успешно сгенерирован (AI-compact format) — "
-        f"{len(file_data)} файлов, {total_fns} функций"
+        f"OK {out_path} | files={len(file_data)} types={total_types} "
+        f"fns={total_fns} edges={total_edges}"
     )
 
 
