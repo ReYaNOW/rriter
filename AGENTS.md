@@ -85,7 +85,7 @@ If no direct write access:
 
 ### Strict exact-substring parser format
 
-Use this only when the user explicitly needs exact-substring parser patches.
+Use this only when the user explicitly needs exact-substring parser patches and you do not have options to directly change files or send in diff format.
 
 ````text
 1) path/to/file.rs
