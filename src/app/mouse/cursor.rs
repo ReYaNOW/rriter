@@ -385,7 +385,7 @@ impl App {
                             x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
                         }
 
-                        let Some((hit_start_byte, hit_end_byte, type_target)) =
+                                                let Some((_, _, type_target)) =
                             diagnostic_hover_byte_range_on_line(
                                 &self.editor,
                                 line,
@@ -396,43 +396,24 @@ impl App {
                             continue;
                         };
 
-                        let mut hit_x_start_px = x_start_px;
-                        let mut hit_x_end_px = x_end_px;
-                        let mut hit_cur_x = 0.0f32;
-                        let mut hit_start_found = false;
-                        let mut hit_end_found = false;
-                        self.editor
-                            .utf16_col_to_byte_advance(line, |ch, _utf16_before, pos| {
-                                if !hit_start_found && pos >= hit_start_byte {
-                                    hit_x_start_px = hit_cur_x;
-                                    hit_start_found = true;
-                                }
-                                if !hit_end_found && pos >= hit_end_byte {
-                                    hit_x_end_px = hit_cur_x;
-                                    hit_end_found = true;
-                                }
-                                hit_cur_x += if ch == '\t' {
-                                    self.renderer.as_mut().unwrap().char_advance(' ') * 4.0
-                                } else {
-                                    self.renderer.as_mut().unwrap().char_advance(ch)
-                                };
-                            });
-                        if !hit_start_found {
-                            hit_x_start_px = hit_cur_x;
-                        }
-                        if !hit_end_found {
-                            hit_x_end_px = hit_cur_x.max(hit_x_start_px + avg_adv * 4.0);
-                        }
+                        let x_start = left_padding + x_start_px - render_scroll_x;
+                        let x_end = left_padding + x_end_px - render_scroll_x;
+                        let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
 
-                        let hit_x_start = left_padding + hit_x_start_px - render_scroll_x;
-                        let hit_x_end = left_padding + hit_x_end_px - render_scroll_x;
-                        let hit_w = (hit_x_end - hit_x_start).max(avg_adv / 2.0);
-
-                        if px < hit_x_start || px > hit_x_start + hit_w {
+                        if px < x_start || px > x_start + squiggle_w {
                             continue;
                         }
 
-                        diag_hover_byte = Some(type_target);
+                        let byte_under_cursor = self.renderer.as_mut().unwrap().get_byte_at_xy(
+                            &self.editor,
+                            px,
+                            py + render_scroll_y,
+                        );
+                        if let Some(normalized) = normalize_hover_byte(&self.editor, byte_under_cursor) {
+                            diag_hover_byte = Some(normalized);
+                        } else {
+                            diag_hover_byte = Some(type_target);
+                        }
                         break 'diag_scan;
                     }
                 }

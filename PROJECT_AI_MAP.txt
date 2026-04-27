@@ -130,568 +130,569 @@ F|79|12|199|p|HoverState.put_type_popup_after_draw||||max_scroll=,popup=,rect=
 F|80|12|215|p|HoverState.should_show_stale_popup_while_target_loads|bool|&self|byte_offset,popup,stale_combined_popup|
 F|81|12|227|p|HoverState.begin_type_hover_transition|bool|&mut self|hovered_diags_cache|byte_offset=,definition_request_id=,pending_popup=,popup=,popup_diag_type_target=,rect=,request_id=,selecting=,selection_anchor=,selection_cursor=,stale_combined_popup=,stale_hovered_diags_cache.clear(),+1
 F|82|12|256|p|HoverState.record_hovered_diagnostic|Option<usize>|&mut self|stale_combined_popup|hovered_diags_cache.push()
-F|83|12|284|p|HoverState.diagnostic_popup_cache|&[HoveredDiagnostic]|&self|hovered_diags_cache,stale_combined_popup,stale_hovered_diags_cache|
-F|84|12|292|p|HoverState.diagnostic_popup_cache_is_empty|bool|&self||
-F|85|12|296|p|HoverState.has_active_combined_type_popup|bool|&self|popup|
-F|86|12|304|p|HoverState.combined_type_target|Option<usize>|&self|diag_rect,hovered_diag_type_target,hovered_diags_cache,popup,popup_diag_type_target|
-F|87|12|316|p|HoverState.update_hovered_diag_type_target_for_frame||&mut self|stale_combined_popup|hovered_diag_type_target=
-F|88|12|322|p|HoverState.effective_hovered_diag_type_target|Option<usize>|&self|stale_combined_popup|
-F|89|12|330|p|HoverState.mark_type_popup_drawn||&mut self|stale_combined_popup|popup_diag_type_target=
-F|90|12|340|p|HoverState.finish_stale_combined_transition||&mut self|diag_scroll|diag_anim_progress=,diag_hover_ready_after_stale=,diag_href=,diag_max_scroll=,diag_rect=,diag_selecting=,diag_selection_anchor=,diag_selection_cursor=,diag_text.clear(),hovered_diag_type_target=,hovered_diags.clear(),hovered_diags_cache.clear(),+3
-F|91|12|362|p|HoverState.should_keep_popup_through_empty_space|bool|&self|definition_request_id,pending_popup,popup,popup_diag_type_target,request_id,stale_combined_popup|
-F|92|12|371|p|HoverState.keep_active_combined_popup_on_empty_space|bool|&mut self|popup|byte_offset=,request_id=,timer=
-F|93|12|383|p|HoverState.clear_type_popup_transition_markers||&mut self||diag_hover_ready_after_stale=,popup_diag_type_target=,stale_combined_popup=,stale_hovered_diags_cache.clear()
-F|94|12|390|p|HoverState.popup_or_bridge_contains|(bool, bool)|&self|diag_rect,popup,rect|
-F|95|12|455||hover_visibility_linter_error_only||||
-F|96|12|471||hover_visibility_type_only||||
-F|97|12|487||hover_visibility_combined||||
-F|98|12|503||hover_visibility_during_transition||||
-F|99|12|519||hover_visibility_waits_for_matching_type_before_showing_combined_type||||
-F|100|12|540||hover_animation_progress_uses_shared_slightly_slower_curve||||
-F|101|12|551||hover_animation_progress_snap_delta_is_subpixel_for_large_popup||||
-F|102|12|558||hover_visibility_combines_offsets_inside_same_identifier||||
-F|103|12|588||hover_state_resets_all_diagnostic_popup_fields||||
-F|104|12|632||diagnostic_hover_timer_resets_when_hovered_diagnostic_changes||||
-F|105|12|646||diagnostic_hover_timer_keeps_ticking_during_type_popup_transition||||
-F|106|12|658||pending_linter_popup_hide_does_not_reset_hover_timer_or_cache||||
-F|107|12|699||keyword_linter_popup_becomes_visible_after_delay_without_type_target||||
-F|108|12|724||type_popup_draw_flow_does_not_hold_hover_state_borrow||||
-F|109|12|763||stale_type_popup_stays_visible_while_new_target_loads||||
-F|110|12|789||stale_type_popup_stays_visible_when_cursor_moves_to_whitespace||||
-F|111|12|812||combined_popup_stays_visible_while_next_word_loads||||
-F|112|12|856||combined_popup_stays_visible_when_diag_rect_was_cleared_before_transition||||
-F|113|12|895||combined_popup_stays_visible_when_only_diag_cache_survived||||
-F|114|12|934||type_only_popup_stays_visible_while_next_word_loads||||
-F|115|12|960||stale_visibility_can_still_show_existing_combined_popup||||
-F|116|12|980||stale_combined_popup_freezes_diagnostic_target_during_new_hover||||
-F|117|12|993||active_combined_popup_keeps_target_during_whitespace_frame||||
-F|118|12|1021||non_stale_frame_accepts_new_diagnostic_target||||
-F|119|12|1032||mark_type_popup_drawn_tracks_combined_target_only||||
-F|120|12|1080||stale_transition_completion_keeps_diagnostic_timer_ready_for_new_popup||||
-F|121|12|1111||empty_space_keeps_popup_while_hover_transition_is_pending||||
-F|122|12|1163||empty_space_keeps_active_combined_popup_without_pending_request||||
-F|123|12|1190||stale_combined_popup_uses_frozen_diagnostics_not_live_cache||||
-F|124|12|1223||stale_combined_popup_ignores_new_hovered_diagnostic_until_new_popup_ready||||
-F|125|12|1251||active_combined_popup_does_not_collect_different_target_diagnostic||||
-F|126|12|1278||stale_completion_clears_frozen_diagnostics_before_handlers_popup||||
-F|127|12|1305||hover_response_preserves_pending_diagnostic_context_for_combined_popup||||
-F|128|12|1321||diagnostic_hover_range_expands_when_target_is_string_prefix||||
-F|129|12|1338||hover_visibility_shows_only_one_popup_during_conflict||||
-F|130|12|1356||hover_state_bridge_keeps_diagnostic_and_type_as_one_popup_area||||
-F|131|12|1388||hover_byte_ignores_whitespace_next_to_identifier||||
-F|132|12|1405||hover_byte_ignores_python_keywords_so_diagnostics_can_show||||
-F|133|12|1416||diagnostic_hover_range_expands_to_whole_f_string_literal||||
-F|134|12|1441||diagnostic_hover_target_is_stable_for_expanded_f_string_literal||||
-F|135|12|1459||diagnostic_hover_range_does_not_create_type_target_for_keyword||||
-F|136|12|1467||hover_bridge_reaches_full_source_line_when_popup_is_above||||
-F|137|12|1486||hover_bridge_handles_popup_shifted_away_from_anchor||||
-F|138|12|1505||hover_bridge_keeps_popup_when_moving_up_from_token_anchor||||
-F|139|12|1524||hover_bridge_does_not_capture_next_line_when_popup_is_above||||
-F|140|12|1543||hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways||||
-F|141|12|1564||global_test_hover_token_bounds||||
-F|142|12|1579||global_test_hover_identifier_pipeline_end_to_end||||
-F|143|12|1606||global_test_hover_f_string_pipeline_end_to_end||||
-F|144|12|1630||global_test_hover_popup_state_end_to_end_without_glow||||
-F|145|12|1677||global_test_normalize_hover_byte||||
-F|146|12|1693||global_test_is_python_hover_keyword||||
-F|147|12|1702||global_test_is_hover_target_byte||||
-F|148|12|1715||global_test_hover_state_machine||||
-F|149|12|1761|p|advance_hover_anim_progress|f32|||
-F|150|12|1774|p|compute_hover_visibility|(bool, bool, bool)|||
-F|151|12|1801|p|compute_hover_visibility_from_matches|(bool, bool, bool)|||
-F|152|12|1854||diagnostic_hover_target_byte_on_line|Option<usize>|||
-F|153|12|1864|p|clear_hover_popup|bool|||
-F|154|12|1892||is_hover_target_byte|bool|||
-F|155|12|1900||is_python_hover_keyword|bool|||
-F|156|12|1941||hover_token_text|Option<String>|||
-F|157|12|1947|p|diagnostic_hover_byte_range_on_line|Option<(usize, usize, usize)>|||
-F|158|12|2073|p|diagnostic_hover_range_on_line|Option<(u32, u32, usize)>|||
-F|159|12|2108|p|normalize_hover_byte|Option<usize>|||
-F|160|12|2124|p|hover_token_bounds|(usize, usize)|||
-F|161|12|2204|p|hover_bytes_share_token|bool|||
-F|162|12|2217|p|hover_anchor_for_byte|(f32, f32)|||
-F|163|12|2278|p|is_in_hover_popup_or_bridge|bool|||
-F|164|12|2340||hover_popup_byte_at|usize|||
-T|165|13|7|struct|Cell|c: char,fg: u8,bg: u8
-T|166|13|23|struct|TermGrid|scrollback: std::collections::VecDeque<Vec<Cell>>,lines: std::collections::VecDeque<Vec<Cell>>,alt_lines: Option<std::collections::VecDeque<Vec<Cell>>>,alt_saved_cursor: Option<(usize,usize)>,is_alt: bool,cols: usize,visible_rows: usize,cur_x: usize,cur_y: usize,+17
-T|167|13|775|struct|Terminal|grid: Arc<Mutex<TermGrid>>,writer: Arc<Mutex<Box<dyn Write + Send>>>,master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,scroll_y: crate::scroll::ScrollState,title: String
-F|168|13|14||Cell.default|Self|||
-F|169|13|48|p|TermGrid.new|Self|||
-F|170|13|78|p|TermGrid.resize||&mut self|alt_lines,alt_saved_cursor,is_alt,saved_cursor|cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=
-F|171|13|207|p|TermGrid.put_char||&mut self|cols,cur_bg,cur_fg,lines,visible_rows|cur_x=,cur_y=
-F|172|13|227|p|TermGrid.newline||&mut self|scroll_region,visible_rows|cur_y=
-F|173|13|238|p|TermGrid.scroll_region_up||&mut self|cols,is_alt,scroll_region,visible_rows|dirty=,lines.insert(),pool.push(),scrollback.push_back()
-F|174|13|281|p|TermGrid.scroll_region_down||&mut self|cols,scroll_region|dirty=,lines.insert(),lines.remove(),pool.push()
-F|175|13|303|p|TermGrid.get_selection_text|String|&self|cols,lines,scrollback,selection|
-F|176|13|361||terminal_grid_print_scroll_resize_and_selection_end_to_end||||
-F|177|13|389||TermGrid.print||&mut self||
-F|178|13|392||TermGrid.execute||&mut self||cur_x=
-F|179|13|406||TermGrid.hook||&mut self||
-F|180|13|407||TermGrid.put||&mut self||
-F|181|13|408||TermGrid.unhook||&mut self||
-F|182|13|409||TermGrid.osc_dispatch||&mut self|reply_tx|
-F|183|13|420||TermGrid.esc_dispatch||&mut self||cur_x=,cur_y=,saved_cursor=
-F|184|13|432||TermGrid.csi_dispatch||&mut self|cols,reply_tx,visible_rows|alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6
-F|185|13|785|p|Terminal.spawn|Self|||
-F|186|13|890|p|Terminal.resize_pty||&self|master_pty|
-F|187|14|9|p|App.handle_ui_click||&mut self|clipboard,file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,+2|base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12
-T|188|15|288|struct|App|pending_key_log: Option<KeyLog>,gl_config: Option<glutin::config::Config>,gl_context: Option<PossiblyCurrentContext>,gl_surface: Option<Surface<WindowSurface>>,window: Option<std::sync::Arc<Window>>,dialog_window: Option<std::sync::Arc<Window>>,dialog_gl_surface: Option<Surface<WindowSurface>>,settings_scroll: crate::scroll::ScrollState,tab_scroll: crate::scroll::ScrollState,renderer: Option<Renderer>,+85
-T|189|15|25|struct|EditorTab|editor: crate::editor::Editor,file_path: Option<PathBuf>,base_title: String,file_extension: String,scroll_y: crate::scroll::ScrollState,scroll_x: crate::scroll::ScrollState,spans: Vec<crate::highlighter::ColorSpan>,completions: Vec<crate::highlighter::CompletionItem>,foldable_ranges: Vec<(usize,usize,+10
-T|190|15|134|struct|IdePanelState|slots: Vec<PanelSlot>,left_width: f32,bottom_height: f32,drag: Option<PanelDragState>,is_resizing_left: bool,is_resizing_bottom: bool,file_tree_nodes: Vec<crate::app::file_tree::FileNode>,file_tree_expanded: FxHashSet<std::path::PathBuf>,explorer_scroll: crate::scroll::ScrollState,file_tree_hovered_idx: Option<usize>,+31
-T|191|15|281|struct|KeyLog|key: String,t0: std::time::Instant,t_highlight: Option<std::time::Instant>,t_render: Option<std::time::Instant>
-T|192|15|107|enum|LspActionItem|CodeAction(crate::lsp::CodeAction),AddNoqa { codes: Vec<String>
-T|193|15|122|struct|LspActionsMenu|cursor_line: u32,items: Vec<LspActionItem>,selected: usize,menu_x: f32,menu_y: f32,pending_request_id: Option<i32>
-T|194|15|91|struct|PanelDragState|panel_id: PanelId,start_y: f32,current_y: f32,threshold_passed: bool
-T|195|15|78|enum|PanelGroup|Top,Bottom
-T|196|15|51|enum|PanelId|Explorer,Terminal,Problems,LspServers
-T|197|15|84|struct|PanelSlot|id: PanelId,group: PanelGroup,open: bool
-T|198|15|44|enum|PendingAction|Quit,OpenFile,CloseFile
-T|199|15|99|struct|TabDragState|start_idx: usize,start_x: f32,current_x: f32,threshold_passed: bool
-F|200|15|59|p|PanelId.label|&'static str|self||
-F|201|15|67|p|PanelId.icon|crate::widgets::IconType|self||
-F|202|15|173||IdePanelState.default|Self|||
-F|203|15|235|p|IdePanelState.any_top_open|bool|&self|slots|
-F|204|15|240|p|IdePanelState.any_bottom_open|bool|&self|slots|
-F|205|15|245|p|IdePanelState.toggle||&mut self|slots|
-F|206|15|250|p|IdePanelState.is_open|bool|&self|slots|
-F|207|15|260||fuzzy_match|Option<Vec<usize>>|||
-F|208|15|408|p|App.enter_ide_mode||&mut self|editor,file_extension,highlighter,ide_workspaces,window|active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()
-F|209|15|513|p|App.save_tabs_state||&mut self|active_tab,is_ide_mode,tabs|
-F|210|15|522|p|App.sync_active_tab||&mut self|active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1|
-F|211|15|569|p|App.switch_to_tab||&mut self|base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window|active_tab=,autocomplete_active=,show_welcome=
-F|212|15|624|p|App.open_new_tab||&mut self|highlighter,is_ide_mode,window|active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()
-F|213|15|715|p|App.close_tab_at||&mut self|base_title,editor,file_path,is_ide_mode,window|active_tab=,autocomplete_active=,show_welcome=,tabs.remove()
-F|214|15|749|p|App.open_file_in_tab||&mut self||
-F|215|15|753|p|App.open_file_in_tab_bg||&mut self||
-F|216|15|757|p|App.open_file_in_tab_internal||&mut self|active_tab,editor,file_path,is_ide_mode,tabs|
-F|217|15|793|p|App.ensure_cursor_visible||||
-F|218|15|832|p|App.get_current_word_prefix|String|&self|editor|
-F|219|15|852|p|App.update_autocomplete||&mut self|autocomplete_scroll,editor,highlighter|autocomplete_active=,autocomplete_anim_progress=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=
-F|220|15|931|p|App.ensure_autocomplete_visible||&mut self|autocomplete_options,autocomplete_scroll,autocomplete_selected_idx|
-F|221|15|961|p|App.apply_autocomplete||&mut self|autocomplete_options,autocomplete_scroll,base_title,editor,highlighter,window|autocomplete_active=,autocomplete_selected_idx=
-F|222|15|995|p|App.update_terminal_search||&mut self|ide_panel|
-F|223|15|1040|p|App.jump_to_terminal_search_result||&mut self|ide_panel,renderer|
-F|224|15|1076|p|App.update_search||&mut self|editor,search_case_sensitive,search_editor|search_current_idx=,search_results.clear(),search_results.push()
-F|225|15|1132|p|App.jump_to_search_result||&mut self|editor,renderer,scroll_y,search_current_idx,search_results,window|
-F|226|15|1158|p|App.update_window_title||||
-F|227|15|1167|p|App.show_action_dialog||&mut self|gl_config,scroll_x,scroll_y|dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=
-F|228|15|1209|p|App.close_dialog||&mut self|window|dialog_gl_surface=,dialog_window=
-F|229|15|1217|p|App.close_current_file||&mut self|active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()
-F|230|15|1263|p|App.trigger_file_picker||&mut self||open_file_rx=
-F|231|15|1272|p|App.trigger_folder_picker||&mut self||open_folder_rx=
-F|232|15|1283|p|App.trigger_save_as_picker||&mut self||save_file_rx=
-F|233|15|1295|p|App.save_current_file|bool|&mut self|editor,file_path|
-F|234|15|1334|p|App.add_recent_file||&mut self||recent_files.insert(),recent_files.retain(),recent_files.truncate()
-F|235|15|1343|p|App.apply_highlight_results||&mut self|editor,file_extension,highlighter|is_highlighted_once=
-F|236|15|1378|p|App.load_file_internal||&mut self|highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=
-F|237|15|1464|p|App.check_external_changes||&mut self|tabs,window|
-F|238|15|1504||panel_state_toggle_and_group_queries_end_to_end||||
-F|239|15|1525||fuzzy_match_preserves_target_indices_case_insensitively||||
-F|240|15|1532||panel_metadata_maps_to_labels_and_icons||||
-T|241|16|69|enum|EditOp|Insert { offset: usize,text: String
-T|242|16|98|struct|Editor|data: Vec<u8>,gap_start: usize,gap_end: usize,cursor: usize,selection_anchor: Option<usize>,version: u64,line_offsets: Vec<usize>,longest_line_idx: usize,history: VecDeque<HistoryStep>,redo_stack: VecDeque<HistoryStep>,+17
-T|243|16|10|struct|HashSource|(&'a [u64])
-T|244|16|86|struct|HistoryStep|op: EditOp,cursor_before: usize,cursor_after: usize
-T|245|16|63|enum|LineModState|ModifiedUnsaved,ModifiedSaved
-T|246|16|92|enum|UndoRedoDelta|Insert(usize,usize,String),Delete(usize,usize),Replace(usize,usize,String,String)
-F|247|16|16||tokenize|Self::Tokenizer|&self||
-F|248|16|20||estimate_tokens|u32|&self||
-F|249|16|25||get_diff_info|(Vec<bool>, Vec<bool>)|||
-F|250|16|45||is_delimiter|bool|||
-F|251|16|52||char_class|u8|||
-F|252|16|130|p|Editor.new|Self|||
-F|253|16|159|p|Editor.shift_folds_insert||&mut self|foldable_ranges_bytes|folded_start_bytes=
-F|254|16|182|p|Editor.shift_folds_delete||&mut self|foldable_ranges_bytes|folded_start_bytes=
-F|255|16|211|p|Editor.rebuild_line_offsets||&mut self|foldable_ranges_bytes|foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=
-F|256|16|281||Editor.get_line_hashes|Vec<u64>|&self||
-F|257|16|304|p|Editor.ensure_indent_cache_updated||&mut self|version|indent_cache.clear(),last_indent_version=
-F|258|16|376|p|Editor.get_cached_indent_levels|&[u8]|&self|indent_cache|
-F|259|16|380|p|Editor.backspace|Option<(usize, usize)>|&mut self|gap_end,gap_start,version|cursor=,selection_anchor=,sync_edits.push()
-F|260|16|453|p|Editor.set_original_text||&mut self||original_hashes=,saved_hashes=
-F|261|16|459|p|Editor.mark_saved||&mut self||saved_hashes=
-F|262|16|464|p|Editor.is_dirty|bool|&self|is_dirty|
-F|263|16|468|p|Editor.get_line_modification_state|Option<LineModState>|&self|line_states|
-F|264|16|472|p|Editor.update_modifications||&mut self|original_hashes,saved_hashes|deleted_gaps=,is_dirty=,line_states=
-F|265|16|543|p|Editor.clear_history||&mut self||history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()
-F|266|16|551||Editor.push_history||&mut self|history_size,is_working_history|history.push_back(),redo_stack.clear()
-F|267|16|635|p|Editor.undo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()
-F|268|16|693|p|Editor.redo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()
-F|269|16|751|p|Editor.text_parts|(&str, &str)|&self|data,gap_end,gap_start|
-F|270|16|759|p|Editor.get_full_text|String|&self||
-F|271|16|767||Editor.move_gap||&mut self|data,gap_end,gap_start|
-F|272|16|786||Editor.insert_str_internal|usize|&mut self|cursor,gap_start|data=,gap_end=,sync_edits.push()
-F|273|16|810|p|Editor.replace_range|(usize, usize, String)|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
-F|274|16|857|p|Editor.insert_str|(Option<(usize, usize)>, usize)|&mut self|cursor,version|selection_anchor=
-F|275|16|884|p|Editor.delete_selection|Option<(usize, usize)>|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
-F|276|16|922|p|Editor.delete_forward|Option<(usize, usize)>|&mut self|cursor,gap_end,version|sync_edits.push()
-F|277|16|958|p|Editor.delete_word_backward|Option<(usize, usize)>|&mut self|cursor|selection_anchor=
-F|278|16|991|p|Editor.delete_word_forward|Option<(usize, usize)>|&mut self||cursor=,selection_anchor=
-F|279|16|1025|p|Editor.get_auto_indent|String|&self|cursor|
-F|280|16|1061||editor_edit_history_dirty_state_end_to_end||||
-F|281|16|1086||editor_navigation_selection_indent_and_utf8_end_to_end||||
-F|282|16|1104||editor_fold_visibility_and_offsets_end_to_end||||
-F|283|17|4|p|Editor.select_expand||&mut self||cursor=,selection_anchor=
-F|284|17|130|p|Editor.select_word||&mut self||cursor=,selection_anchor=
-F|285|17|147|p|Editor.select_line||&mut self||cursor=,selection_anchor=
-F|286|17|162|p|Editor.is_char_boundary|bool|||
-F|287|17|170|p|Editor.byte_at|u8|&self|data,gap_end,gap_start|
-F|288|17|178|p|Editor.len|usize|&self|data,gap_end,gap_start|
-F|289|17|186|p|Editor.utf16_col_to_byte_advance||&self|line_offsets|
-F|290|17|223|p|Editor.get_selection|Option<String>|&self|cursor,selection_anchor|
-F|291|17|237|p|Editor.get_visible_lines_count|usize|&self|foldable_lines,folded_lines,line_offsets|
-F|292|17|257|p|Editor.select_all||&mut self||cursor=,selection_anchor=
-F|293|17|262||Editor.handle_selection||&mut self|cursor|selection_anchor=
-F|294|17|271|p|Editor.snap_cursor_out_of_fold||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|295|17|311|p|Editor.move_left||&mut self||cursor=
-F|296|17|324|p|Editor.move_right||&mut self||cursor=
-F|297|17|337|p|Editor.move_word_left||&mut self||cursor=
-F|298|17|360|p|Editor.move_word_right||&mut self||cursor=
-F|299|17|383|p|Editor.move_home||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|300|17|423|p|Editor.move_end||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|301|17|463|p|Editor.move_start_of_file||&mut self||cursor=
-F|302|17|468|p|Editor.move_end_of_file||&mut self||cursor=
-F|303|17|473|p|Editor.move_up||&mut self||cursor=
-F|304|17|479|p|Editor.move_down||&mut self||cursor=
-F|305|17|485|p|Editor.set_cursor_at_pos||&mut self||cursor=,selection_anchor=
-F|306|17|500|p|Editor.move_page_up||&mut self||cursor=
-F|307|17|506|p|Editor.move_page_down||&mut self||cursor=
-T|308|18|14|struct|ColorSpan|start: usize,end: usize,color: [f32; 4]
-T|309|18|79|struct|CompletionItem|word: String,kind: SymbolKind,scope_start: usize,scope_end: usize
-T|310|18|106|struct|Highlighter|tx: Sender<HighlighterMessage>,rx: Receiver<( u64,Vec<ColorSpan>,Vec<CompletionItem>,Vec<(usize,usize,bool,bool)>,Vec<(usize,usize)>,+10
-T|311|18|92|enum|HighlighterMessage|Reset { version: u64,text: String,ext: String
-T|312|18|135|struct|Scope|start: usize,end: usize,params: HashSet<String>
-T|313|18|69|enum|SymbolKind|Variable,Function,Class,Parameter,Keyword,Unknown
-T|314|18|87|enum|SyncEdit|Insert { offset: usize,text: String
-F|315|18|20|p|flatten_color_spans_prefer_specific|Vec<ColorSpan>|||
-F|316|18|141||get_point|tree_sitter::Point|||
-F|317|18|154||resolve_color|[f32; 4]|||
-F|318|18|235|p|Highlighter.new|Self|||
-F|319|19|4|p|Highlighter.reset||&self||
-F|320|19|10|p|Highlighter.apply_edits||&self|tx|
-F|321|19|27|p|Highlighter.poll|bool|&mut self|rx|completions=,current_version=,foldable_ranges=,spans=,syntax_errors=
-F|322|19|48|p|Highlighter.wait_for_first_result|bool|&mut self|rx|completions=,current_version=,foldable_ranges=,spans=,syntax_errors=
-F|323|19|77|p|Highlighter.shift_insert||&mut self||spans.extend(),spans.push(),spans.retain(),spans=
-F|324|19|174|p|Highlighter.shift_delete||&mut self||spans.retain()
-F|325|19|191|p|get_bracket_color|[f32; 4]|||
-F|326|19|205|p|flatten_spans|Vec<ColorSpan>|||
-F|327|19|332||highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end||||
-F|328|19|352||highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans||||
-T|329|21|25|enum|HoverLineKind|Text,Code,Separator,Header1,Header2
-F|330|21|33|p|normalize_inline_rst_code|(String, Vec<(usize, usize)>)|||
-F|331|21|58|p|normalize_rst_roles|(String, Vec<(usize, usize)>)|||
-F|332|21|100|p|flatten_rst_roles_and_code|String|||
-F|333|21|148|p|parse_param_line|Option<(String, String, String)>|||
-F|334|21|168||split_inline_python_after_colon|Option<(String, String)>|||
-F|335|21|188||normalize_coroutine_signature_line|String|||
-F|336|21|210|p|normalize_python_hover_doc|(String, Vec<HoverLineKind>, Vec<(usize, usize)>)|||
-F|337|21|618|p|ts_capture_color|Option<[f32; 4]>|||
-F|338|21|634|p|push_python_ts_spans||||
-F|339|21|687|p|highlight_python_hover_doc|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
-F|340|21|1020||force_color_on_ranges||||
-F|341|21|1062||color_keyword_args_orange||||
-T|342|22|733|enum|HoverLineKindPublic|Text,Code,Separator,Header1,Header2
-F|343|22|3|p|highlight_hover_text|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
-F|344|22|123||preprocess_hover_text|String|||
-F|345|22|140||looks_like_python_hover|bool|||
-F|346|22|171||looks_like_python_code_line|bool|||
-F|347|22|197||looks_like_type_expr_line|bool|||
-F|348|22|217||looks_like_simple_type_name_line|bool|||
-F|349|22|238||add_doc_arg_name_spans||||
-F|350|22|279||sanitize_hover_type_expr|String|||
-F|351|22|297||sanitize_module_path|String|||
-F|352|22|309||normalize_class_object_repr|Option<(Option<String>, String)>|||
-F|353|22|334||normalize_module_object_repr|Option<String>|||
-F|354|22|350||normalize_bound_method_signature|Option<String>|||
-F|355|22|406||add_bound_method_signature_spans|bool|||
-F|356|22|476||add_self_param_span_for_signature||||
-F|357|22|500||add_param_name_spans_for_signature||||
-F|358|22|540||add_class_keyword_spans_for_signature||||
-F|359|22|575||add_type_bracket_neutral_spans_for_signature||||
-F|360|22|595||add_type_expr_spans_for_line||||
-F|361|22|635||normalize_hover_text|(String, Vec<(usize, usize)>)|||
-F|362|22|697||wrap_signature_after_first_param|String|||
-F|363|22|721||normalize_asynccontextmanager_signature_line|Option<String>|||
-F|364|22|752||rendered_color_at|[f32; 4]|||
-F|365|22|764||variable_header_highlights_name_pink||||
-F|366|22|782||uses_python_hover_pipeline_for_builtin_signatures||||
-F|367|22|802||plain_bound_method_prose_stays_uncolored||||
-F|368|22|839||inline_for_fragment_becomes_separate_code_line||||
-F|369|22|849||rich_rst_docstring_path_is_preserved||||
-F|370|22|868||bound_method_signature_line_is_highlighted_but_prose_stays_plain||||
-F|371|22|888||coroutine_return_bound_method_becomes_async_def||||
-F|372|22|895||coroutine_return_signature_becomes_async_def||||
-F|373|22|911||long_bound_method_signature_is_normalized_and_highlighted||||
-F|374|22|938||class_object_repr_is_normalized_and_highlighted||||
-F|375|22|960||qualified_class_object_repr_prepends_module_path||||
-F|376|22|978||backticked_qualified_class_repr_prepends_module_path||||
-F|377|22|988||generic_type_line_gets_cyan_types_and_white_brackets||||
-F|378|22|1019||literal_type_line_is_highlighted||||
-F|379|22|1041||assignment_line_is_highlighted_in_hover_text||||
-F|380|22|1054||module_object_repr_is_normalized_to_module_header||||
-F|381|22|1061||site_packages_and_init_are_removed_from_module_and_class_repr||||
-F|382|22|1072||builtin_dict_class_hover_is_normalized_without_angle_brackets||||
-F|383|22|1085||builtin_str_heading_line_is_highlighted_as_type||||
-F|384|22|1100||builtin_any_heading_line_is_highlighted_as_type||||
-F|385|22|1115||header_with_inline_code_preserves_correct_spans_without_byte_shift_panic||||
-F|386|22|1122||class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args||||
-F|387|22|1156||class_signature_is_highlighted||||
-F|388|22|1172||litestar_giant_class_hover_signature_and_args_doc_are_parsed||||
-F|389|22|1387||litestar_hover_hidden_chars_do_not_shift_rendered_arg_colors||||
-F|390|22|1420||double_backticks_are_stripped_and_highlighted_as_inline_code||||
-F|391|22|1449||asynccontextmanager_one_line_signature_is_wrapped_and_highlighted||||
-T|392|23|148|struct|CodeAction|title: String,kind: Option<String>,edit: Option<WorkspaceEdit>,code: Option<String>
-T|393|23|111|enum|LspEvent|Log { name: &'static str,message: String
-T|394|23|95|struct|TextChange|start_line: u32,start_col: u32,end_line: u32,end_col: u32,new_text: String
-T|395|23|105|struct|WorkspaceEdit|changes: HashMap<PathBuf,Vec<TextChange>>
-F|396|23|9|p|highlight_diagnostic_message|Vec<crate::highlighter::ColorSpan>|||
-F|397|23|236|p|offset_to_lsp_pos|(u32, u32)|||
-F|398|23|256|p|json_escape|String|||
-F|399|23|275|p|path_to_uri|String|||
-F|400|23|289|p|uri_to_path|PathBuf|||
-F|401|23|300|p|make_initialize|Vec<u8>|||
-F|402|23|331|p|make_initialized|Vec<u8>|||
-F|403|23|335|p|make_did_open|Vec<u8>|||
-F|404|23|346|p|make_did_change_full|Vec<u8>|||
-F|405|23|356|p|make_did_close|Vec<u8>|||
-F|406|23|364|p|make_code_action|Vec<u8>|||
-F|407|23|391|p|make_hover|Vec<u8>|||
-F|408|23|398|p|make_definition|Vec<u8>|||
-F|409|23|405|p|make_shutdown|Vec<u8>|||
-F|410|23|409|p|make_exit|Vec<u8>|||
-F|411|23|415|p|write_frame|bool|||
-F|412|23|427|p|parse_diagnostic_value|Option<Diagnostic>|||
-F|413|23|534|p|parse_text_edit_value|Option<TextChange>|||
-F|414|23|559|p|parse_workspace_edit_value|WorkspaceEdit|||
-F|415|23|595|p|parse_hover_value|Option<String>|||
-F|416|23|623|p|parse_definition_path|Option<PathBuf>|||
-F|417|23|640|p|parse_code_action_value|Option<CodeAction>|||
-F|418|23|675|p|dispatch_frame||||
-F|419|23|872||lsp_protocol_encodes_positions_paths_and_requests_end_to_end||||
-F|420|23|895||lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions||||
-F|421|23|975||lsp_dispatch_routes_pending_responses_end_to_end||||
-T|422|24|70|enum|DiagSeverity|Error,Warning,Info,Hint
-T|423|24|84|struct|Diagnostic|start_line: u32,start_col: u32,end_line: u32,end_col: u32,severity: DiagSeverity,code: Option<String>,code_href: Option<String>,message: String,source: Option<String>,quickfixes: Vec<QuickFix>,+2
-T|424|24|56|struct|LogEntry|text: String,spans: Vec<crate::highlighter::ColorSpan>,folds: Vec<(usize,usize)>
-T|425|24|682|struct|LspManager|python: Option<LspProcess>,ty_process: Option<LspProcess>,workspaces: Vec<PathBuf>,diagnostics: HashMap<PathBuf,Vec<Diagnostic>>,instant_diagnostics: HashMap<PathBuf,(i32,Vec<Diagnostic>)>,merged_instant_diagnostics: HashMap<PathBuf,(i32,+13
-T|426|24|488|struct|LspProcess|cmd_tx: Sender<Cmd>,event_rx: Receiver<LspEvent>,current_uri: Option<String>,def: &'static LspServerDef,open_file_data: Option<(String,String)>,workspace_scanned: bool
-T|427|24|63|struct|LspServerInfo|name: &'static str,status: LspServerStatus,logs: Vec<LogEntry>
-T|428|24|48|enum|LspServerStatus|Starting,Running,Crashed,Disabled
-T|429|24|232|struct|OpenFile|uri: String,lang: &'static str,version: i32,text: String
-T|430|24|78|struct|QuickFix|title: String,edits: Vec<TextChange>
-T|431|24|103|struct|SpawnedProcess|child: Child,out_tx: Sender<Vec<u8>>
-F|432|24|41||next_id|i32|||
-F|433|24|108||spawn_server|Option<SpawnedProcess>|||
-F|434|24|239||send_and_log|Result<(), mpsc::SendError<Vec<u8>>>|||
-F|435|24|273||run_supervisor||||
-F|436|24|498||LspProcess.start|Self|||
-F|437|24|519|p|LspProcess.notify_open||&mut self|cmd_tx,def|current_uri=,open_file_data=,workspace_scanned=
-F|438|24|563|p|LspProcess.restart||&mut self|cmd_tx|
-F|439|24|569|p|LspProcess.notify_change||&mut self|cmd_tx|current_uri=
-F|440|24|579|p|LspProcess.request_hover|i32|&mut self|cmd_tx|
-F|441|24|586|p|LspProcess.request_definition|i32|&mut self|cmd_tx|
-F|442|24|594|p|LspProcess.notify_close||&mut self|cmd_tx|current_uri=
-F|443|24|602|p|LspProcess.request_code_actions|i32|&mut self|cmd_tx|
-F|444|24|632|p|LspProcess.poll||&self|event_rx|
-F|445|24|641|p|LspProcess.shutdown||self|cmd_tx|
-F|446|24|648||encode_diagnostics_json|String|||
-F|447|24|704|p|LspManager.new|Self|||
-F|448|24|725||LspManager.ensure_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_process=,ty_status=
-F|449|24|737|p|LspManager.restart_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_process=,ty_status=
-F|450|24|755|p|LspManager.disable_python||&mut self|python,ty_process|diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_instant_diagnostics.clear(),ty_status=
-F|451|24|774|p|LspManager.enable_python||&mut self|current_path,workspaces|python=,python_disabled=,python_status=,ty_process=,ty_status=
-F|452|24|797|p|LspManager.servers_info|Vec<LspServerInfo>|&self|python_status,ty_status|
-F|453|24|823||LspManager.process_for_ext|Option<&mut LspProcess>|&mut self|python|
-F|454|24|834|p|LspManager.notify_open||&mut self|python,ty_process,workspaces|current_path=,suppress_diagnostics=
-F|455|24|857|p|LspManager.notify_change||&mut self|python,ty_process,workspaces|last_change=,suppress_diagnostics=
-F|456|24|878|p|LspManager.request_hover|Option<i32>|&mut self|ty_process,workspaces|
-F|457|24|899|p|LspManager.request_definition|Option<i32>|&mut self|ty_process,workspaces|
-F|458|24|921|p|LspManager.notify_close||&mut self|python,ty_process,workspaces|
-F|459|24|940|p|LspManager.request_code_actions|Option<i32>|&mut self|workspaces|
-F|460|24|972|p|LspManager.poll|Vec<LspEvent>|&mut self|instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_instant_diagnostics,ty_process|diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=
-F|461|24|1104|p|LspManager.get_diagnostics|&[Diagnostic]|&self|diagnostics,workspaces|
-F|462|24|1118|p|LspManager.get_instant_diagnostics_with_version|(i32, &[Diagnostic])|&self|merged_instant_diagnostics,workspaces|
-F|463|24|1133|p|LspManager.diagnostics_for_line|Vec<&Diagnostic>|&self||
-F|464|24|1141|p|LspManager.request_fix_all|Option<i32>|&mut self|workspaces|
-F|465|24|1165|p|LspManager.request_organize_imports|Option<i32>|&mut self|workspaces|
-F|466|24|1190|p|LspManager.shutdown||mut self|python,ty_process|python_disabled=
-F|467|24|1205|p|lsp_pos_to_offset|usize|||
-F|468|24|1231|p|format_and_highlight_json|( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )|||
-F|469|24|1343||lsp_position_and_log_formatting_end_to_end||||
-T|470|25|25|struct|Config|window_width: f64,window_height: f64,maximized: bool,ide_workspaces: Vec<std::path::PathBuf>,ide_ignore_patterns: Vec<String>,enable_telemetry: bool
-F|471|25|35||Config.default|Self|||
-F|472|25|47|p|load_recent_files|Vec<PathBuf>|||
-F|473|25|63|p|save_recent_files||||
-F|474|25|77|p|load_open_tabs|(Vec<Option<PathBuf>>, usize)|||
-F|475|25|104|p|save_open_tabs||||
-F|476|25|126|p|save_panel_state||||
-F|477|25|156|p|load_panel_state|crate::app::IdePanelState|||
-F|478|25|210|p|save_config||||
-F|479|25|235||load_config|Config|||
-F|480|25|308||get_kde_color|Option<[f32; 4]>|||
-F|481|25|330||load_dracula|Theme|||
-F|482|25|349|e|main||||
-F|483|25|355||mallopt|i32; } mallopt(-8, 2); } let args: Vec<String> = env::args().collect(); let run_ide_on_startup = args.iter().any(\pa\p a == "--ide" \p\p a == "ide"); let has_file_arg = args.iter().skip(1).any(\pa\p *a != "--ide" && *a != "ide"); let mut initial_text = String::new(); let mut title = "Безымянный".to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg|||
-F|484|26|3|p|get_params_query|Option<&'static str>|||
-F|485|26|82|p|get_injection_query|Option<&'static str>|||
-F|486|26|131|p|get_folding_query|Option<&'static str>|||
-F|487|26|336|p|get_ts_config|Option<(tree_sitter::Language, Vec<&'static str>)>|||
-F|488|26|930||test_all_tree_sitter_queries_are_valid||||
-F|489|27|6|p|Renderer.update_cache||&mut self|height,left_padding,line_height,scale_factor,width|last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()
-F|490|27|213|p|Renderer.get_cursor_xy|(f32, f32)|&mut self|baseline_offset,last_scroll_x,left_padding,line_height,scale_factor|
-F|491|27|350|p|Renderer.get_byte_at_xy|usize|&mut self|last_scroll_x,left_padding,line_height|
-F|492|27|450|p|Renderer.measure_width|f32|&mut self||
-F|493|27|476|p|Renderer.get_max_scroll|f32|&mut self|line_height|
-F|494|27|483|p|Renderer.flush||&mut self|gl,height,program,vbo,width|vertices.clear()
-F|495|27|525|p|Renderer.push_vertical_gradient||&mut self|vertices|
-F|496|27|573|p|Renderer.push_horizontal_gradient||&mut self|vertices|
-F|497|27|621|p|Renderer.draw_string||&mut self||
-F|498|27|637|p|Renderer.draw_string_scaled||&mut self||
-F|499|27|660|p|Renderer.draw_string_mono_scaled||&mut self||
-F|500|27|683|p|Renderer.measure_mono_width|f32|&mut self||
-F|501|27|694|p|Renderer.push_rounded_rect||&mut self|vertices|
-F|502|28|6|p|Renderer.draw_lsp_servers_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|
-F|503|28|785|p|Renderer.draw_lsp_actions_menu|bool|&mut self|height,last_mouse_x,last_mouse_y,scale_factor,theme,width|
-F|504|29|6|p|Renderer.draw_minimap||&mut self|line_height,minimap_width,theme,vertices,width|
-F|505|30|8|p|Renderer.draw_search_panel|bool||gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width|last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=
-F|506|31|6|p|Renderer.get_faq_max_scroll|f32|&mut self|scale_factor|
-F|507|31|31|p|Renderer.draw_settings|u8|&mut self|gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width|
-F|508|32|7|p|Renderer.draw_sticky_lines|Vec<(usize, usize)>||baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width|sticky_scroll_rects.clear(),sticky_scroll_rects.push()
-F|509|33|6|p|Renderer.draw_tab_bar|Option<(std::path::PathBuf, f32, f32)>|&mut self|gl,height,hide_popups_until_mouse_move,theme|max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=
-F|510|33|416|p|Renderer.draw_tab_tooltip||&mut self|theme,width|
-F|511|34|7|p|Renderer.draw_terminal_panel||&mut self|baseline_offset,gl,height,line_height,theme,vertices|
-T|512|35|6|struct|DiagChar|x: f32,y: f32,w: f32,h: f32,byte_offset: usize
-F|513|35|19|p|compute_hover_y_position|f32|||
-F|514|35|51|p|compute_animated_scissor|(f32, f32, f32, f32)|||
-F|515|35|68||smooth_hover_anim_progress|f32|||
-F|516|35|73||compute_hover_scrollbar_alpha|f32|||
-F|517|35|78||smooth_hover_width_progress|f32|||
-F|518|35|86||smooth_hover_height_progress|f32|||
-F|519|35|90||compute_hover_popup_anim_rect|(f32, f32, f32, f32)|||
-F|520|35|127|p|compute_animated_popup_frame|(f32, f32, f32, f32)|||
-F|521|35|139||compute_combined_popup_frame|(f32, f32, f32, f32)|||
-F|522|35|152||compute_combined_separator_visible_rect|Option<(f32, f32)>|||
-F|523|35|175||compute_hover_scissor_rect|(f32, f32, f32, f32)|||
-F|524|35|191||compute_hover_frame_content_rect|(f32, f32, f32, f32)|||
-F|525|35|207|p|compute_hover_content_scissor|(f32, f32, f32, f32)|||
-F|526|35|233|p|compute_diagnostic_layout|(f32, f32)|||
-F|527|35|267|p|diag_popup_byte_at|usize|||
-F|528|35|305||Renderer.push_hover_popup_frame||&mut self|theme|
-F|529|35|340|p|Renderer.draw_diagnostic_popup||&mut self|gl,height,scale_factor,theme,width|
-F|530|35|852|p|Renderer.build_hover_popup_layout|crate::app::mouse::HoverLayoutCache||scale_factor|
-F|531|35|1016|p|Renderer.draw_hover_popup|(f32, f32, f32, f32, f32)||gl,height,line_height,phys_to_visual,scale_factor,theme,width|
-F|532|35|1382||test_hover_y_position_fits_above||||
-F|533|35|1390||test_hover_y_position_fallback_below||||
-F|534|35|1399||test_hover_y_position_clamped_top_when_both_fail_but_above_is_better||||
-F|535|35|1409||test_hover_y_position_forced_below_when_both_fail_but_below_is_better||||
-F|536|35|1419||test_diagnostic_layout_end_to_end_fits_above||||
-F|537|35|1427||test_diagnostic_layout_end_to_end_shifts_x_when_out_of_bounds||||
-F|538|35|1434||test_diagnostic_layout_end_to_end_considers_hover_anchor_x||||
-F|539|35|1450||test_diagnostic_layout_end_to_end_forces_below_when_y_too_small||||
-F|540|35|1457||test_animated_scissor_keeps_nearest_corner_fixed||||
-F|541|35|1476||test_animated_scissor_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor||||
-F|542|35|1492||test_animated_scissor_is_full_popup_at_progress_one||||
-F|543|35|1506||test_animated_scissor_is_zero_at_progress_zero||||
-F|544|35|1520||test_animated_popup_frame_keeps_nearest_corner_fixed||||
-F|545|35|1536||test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor||||
-F|546|35|1552||test_popup_above_cursor_expands_bottom_to_top||||
-F|547|35|1567||test_combined_popup_above_cursor_expands_bottom_to_top||||
-F|548|35|1583||test_combined_popup_below_cursor_expands_top_to_bottom||||
-F|549|35|1596||test_popup_below_cursor_expands_top_to_bottom||||
-F|550|35|1608||test_animated_popup_frame_is_target_at_progress_one||||
-F|551|35|1619||test_animated_popup_frame_is_visible_before_reaching_target||||
-F|552|35|1632||test_animated_popup_frame_uses_settings_style_smooth_progress||||
-F|553|35|1646||test_wide_popup_right_edge_settles_before_final_frames||||
-F|554|35|1658||test_combined_separator_waits_until_frame_reaches_it||||
-F|555|35|1667||test_combined_separator_clips_to_animated_frame_width||||
-F|556|35|1676||test_combined_separator_reaches_full_width_with_frame||||
-F|557|35|1685||test_combined_diagnostic_background_does_not_cover_moving_top_border||||
-F|558|35|1715||test_hover_frame_content_rect_insets_bottom_border||||
-F|559|35|1722||test_hover_type_content_scissor_does_not_cover_bottom_border||||
-F|560|35|1737||test_animated_popup_frame_near_done_snap_is_invisible_with_smooth_progress||||
-F|561|35|1749||test_hover_scrollbar_alpha_waits_until_popup_is_nearly_open||||
-F|562|35|1755||test_hover_scrollbar_alpha_fades_smoothly_near_end||||
-F|563|35|1763||test_hover_scrollbar_alpha_is_full_at_end||||
-F|564|35|1769||test_attached_hover_content_scissor_uses_shared_combined_animation||||
-F|565|35|1785||test_attached_hover_content_scissor_above_cursor_expands_bottom_to_top||||
-F|566|35|1801||test_detached_hover_content_scissor_keeps_popup_animation||||
-F|567|36|4|p|Renderer.draw_problems_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|scratch_buffer=
-F|568|37|9|p|Renderer.draw_icon||&mut self|gl,texture|
-F|569|37|21|p|Renderer.draw_atlas_icon||&mut self|gl,icons,texture|
-F|570|37|44|p|Renderer.draw_file_icon||&mut self|gl,texture|file_icon_cache.insert()
-F|571|37|144|p|Renderer.draw_autocomplete|(f32, f32, f32, f32)||gl,height,scale_factor,theme|
-F|572|37|373|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mouse_y,scale_factor,theme|
-F|573|37|485|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
-F|574|37|729|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
-F|575|37|794|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
-T|576|38|51|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
-T|577|38|24|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
-F|578|38|35||Telemetry.default|Self|||
-F|579|38|58|p|Renderer.draw|(bool, Vec<(usize, usize)>)||baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,program,scale_factor,texture,theme,+3|fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),hide_popups_until_mouse_move=,identical_words_cache.clear(),identical_words_cache.push(),last_cursor_for_popups=,last_draw_instant=,last_editor_version_for_scroll_x=,last_editor_version_for_typing=,+13
-T|580|39|78|struct|FontData|source: FontSource,index: u32
-T|581|39|67|enum|FontSource|Static(&'static [u8]),LoadedMmap(std::sync::Arc<memmap2::Mmap>),LoadedVec(std::sync::Arc<Vec<u8>>),Lazy( std::path::PathBuf,std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>,()>>>>,)
-T|582|39|39|struct|GlyphInfo|u: f32,v: f32,uw: f32,vh: f32,width: f32,height: f32,offset_x: f32,offset_y: f32,advance: f32,is_emoji: f32
-T|583|39|138|struct|Renderer|gl: glow::Context,program: glow::Program,vao: glow::VertexArray,vbo: glow::Buffer,texture: glow::Texture,vertices: Vec<Vertex>,fonts: Vec<FontData>,ui_fonts: Vec<FontData>,scale_context: ScaleContext,glyphs: HashMap<char,+63
-T|584|39|11|struct|Theme|bg: [f32; 4],fg: [f32; 4],sel: [f32; 4],minimap_bg: [f32; 4],line_num: [f32; 4],minimap_cursor: [f32; 4],modified_unsaved: [f32; 4],modified_saved: [f32; 4],diag_warn: [f32; 4],diag_error: [f32; 4],+1
-T|585|39|27|struct|Vertex|pos: [f32; 2],uv: [f32; 2],color: [f32; 4],mode: f32,sdf_params: [f32; 3]
-T|586|39|55|struct|VisualLine|byte_idx: usize,physical_line: usize,is_soft_wrap: bool,whitespace_px_width: f32,text_px_width: f32,y_offset: f32,is_folded: bool,fold_suffix: [char; 4],fold_suffix_len: u8
-F|587|39|84|p|FontData.new_lazy|Self|||
-F|588|39|94|p|FontData.new_static|Self|||
-F|589|39|101|p|FontData.ensure_loaded||&mut self||source=
-F|590|39|128|p|FontData.data_slice|&[u8]|&self|source|
-F|591|39|216|p|Renderer.new|Self|||
-F|592|39|529|p|Renderer.get_custom_svg_glyph|Option<GlyphInfo>|&mut self|atlas_y,font_size,gl,texture|atlas_x=,max_row_h=
-F|593|39|596|p|Renderer.get_glyph|Option<GlyphInfo>|&mut self|font_size,fonts,gl,texture|atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()
-F|594|39|769|p|Renderer.get_ui_glyph|Option<GlyphInfo>|&mut self|font_size,gl,texture,ui_fonts|atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()
-F|595|39|941|p|Renderer.resize||&mut self|gl|height=,width=
-F|596|39|951|p|Renderer.measure_ui_width|f32|&mut self||
-F|597|39|964|p|Renderer.char_advance|f32|&mut self|ascii_advances|
-F|598|39|981|p|Renderer.push_quad||&mut self|vertices|
-F|599|39|1033|p|Renderer.load_builtin_icons||&mut self|gl,texture|icons.insert()
-F|600|39|1216|p|Renderer.push_squiggle||&mut self|scale_factor,vertices|
-F|601|39|1269|p|Renderer.push_rect||&mut self||
-F|602|39|1273|p|Renderer.push_rounded_rect_gradient||&mut self|vertices|
-T|603|40|2|struct|ScrollState|current: f32,target: f32,velocity: f32,anim_speed: f32,is_dragging: bool,drag_offset: f32
-F|604|40|12|p|ScrollState.new|Self|||
-F|605|40|23|p|ScrollState.update|bool|&mut self|anim_speed,target|current=,velocity=
-F|606|40|48|p|ScrollState.clamp_target||&mut self||target=
-F|607|40|52|p|ScrollState.clamp_current||&mut self||current=
-F|608|40|56|p|ScrollState.scroll_by||&mut self|target|
-F|609|40|60|p|ScrollState.set_target||&mut self||target=
-F|610|40|64|p|ScrollState.stop_anim||&mut self||current=,target=,velocity=
-F|611|40|76||scroll_state_clamps_animates_and_stops_end_to_end||||
-T|612|41|96|enum|UiElement|Button { id: UiId,x: f32,y: f32,w: f32,h: f32
-T|613|41|8|enum|UiId|WelcomeNewFile,WelcomeOpenFile,WelcomeIdeMode,WelcomeRecentFile(usize),DialogSave,DialogDiscard,DialogCancel,SettingsTab(usize),SettingsIdeAddWorkspace,SettingsIdeRemoveWorkspace(usize),+54
-T|614|41|169|struct|UiRegistry|elements: Vec<UiElement>,hovered: Option<UiId>,wants_pointer: bool,wants_text: bool,overlay_mark: usize
-F|615|41|131|p|UiElement.contains|bool|&self||
-F|616|41|158|p|UiElement.id|UiId|&self||
-F|617|41|182|p|UiRegistry.new|Self|||
-F|618|41|193|p|UiRegistry.clear||&mut self||elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text=
-F|619|41|203|p|UiRegistry.mark_overlay_start||&mut self|elements|overlay_mark=
-F|620|41|209|p|UiRegistry.find_overlay_at|Option<UiId>|&self|elements,overlay_mark|
-F|621|41|218|p|UiRegistry.register_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|622|41|246|p|UiRegistry.register_icon_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|623|41|275|p|UiRegistry.register_text_input|bool|&mut self||elements.push(),hovered=,wants_text=
-F|624|41|298|p|UiRegistry.register_blocker|bool|&mut self||elements.push()
-F|625|41|315|p|UiRegistry.register_rect|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|626|41|337|p|UiRegistry.find_at|Option<UiId>|&self|elements|
-F|627|41|347|p|UiRegistry.hovered|Option<UiId>|&self|hovered|
-F|628|41|354|p|UiRegistry.reset_cursor_state||&mut self||wants_pointer=,wants_text=
-F|629|41|360|p|UiRegistry.wants_pointer|bool|&self|wants_pointer|
-F|630|41|365|p|UiRegistry.wants_text|bool|&self|wants_text|
-F|631|41|370|p|UiRegistry.cursor_code|u8|&self|wants_pointer,wants_text|
-F|632|41|386||ui_registry_hit_testing_overlay_and_cursor_state_end_to_end||||
-F|633|41|415||ui_element_icon_active_square_uses_fitts_law_hitbox||||
-T|634|42|22|struct|Button|x: f32,y: f32,w: f32,h: f32,text: String,icon: Option<IconType>,text_scale: f32,icon_size: f32
-T|635|42|107|struct|IconButton|x: f32,y: f32,size: f32,icon: Option<IconType>,is_active: bool,icon_size: Option<f32>,active_square_width: Option<f32>,custom_color: Option<[f32; 4]>
-T|636|42|4|enum|IconType|Save,Discard,Cancel,Warning,CaseMatch,Up,Down,Close,Plus,Terminal,+5
-F|637|42|34|p|Button.is_hovered|bool|&self|h,w,x,y|
-F|638|42|38|p|Button.render|bool|&self|h,icon,icon_size,text,text_scale,w,x,y|
-F|639|42|119|p|IconButton.is_hovered|bool|&self|active_square_width,size,x,y|
-F|640|42|128|p|IconButton.render|bool|&self|active_square_width,custom_color,icon,icon_size,is_active,size,x,y|
-F|641|42|220|p|get_welcome_buttons|(Button, Button, Button)|||
-F|642|42|273|p|get_dialog_buttons|(Button, Button, Button)|||
-F|643|42|345||widget_hitboxes_cover_regular_and_sidebar_buttons||||
-E|0|1 3 5 9 11 13 27 28 149 162 185 226
+F|83|12|290|p|HoverState.diagnostic_popup_cache|&[HoveredDiagnostic]|&self|hovered_diags_cache,stale_combined_popup,stale_hovered_diags_cache|
+F|84|12|298|p|HoverState.diagnostic_popup_cache_is_empty|bool|&self||
+F|85|12|302|p|HoverState.has_active_combined_type_popup|bool|&self|popup|
+F|86|12|310|p|HoverState.combined_type_target|Option<usize>|&self|diag_rect,hovered_diag_type_target,hovered_diags_cache,popup,popup_diag_type_target|
+F|87|12|322|p|HoverState.update_hovered_diag_type_target_for_frame||&mut self|stale_combined_popup|hovered_diag_type_target=
+F|88|12|328|p|HoverState.effective_hovered_diag_type_target|Option<usize>|&self|stale_combined_popup|
+F|89|12|336|p|HoverState.mark_type_popup_drawn||&mut self|stale_combined_popup|popup_diag_type_target=
+F|90|12|346|p|HoverState.finish_stale_combined_transition||&mut self|diag_scroll|diag_anim_progress=,diag_hover_ready_after_stale=,diag_href=,diag_max_scroll=,diag_rect=,diag_selecting=,diag_selection_anchor=,diag_selection_cursor=,diag_text.clear(),hovered_diag_type_target=,hovered_diags.clear(),hovered_diags_cache.clear(),+3
+F|91|12|368|p|HoverState.should_keep_popup_through_empty_space|bool|&self|definition_request_id,pending_popup,popup,popup_diag_type_target,request_id,stale_combined_popup|
+F|92|12|377|p|HoverState.keep_active_combined_popup_on_empty_space|bool|&mut self|popup|byte_offset=,request_id=,timer=
+F|93|12|389|p|HoverState.clear_type_popup_transition_markers||&mut self||diag_hover_ready_after_stale=,popup_diag_type_target=,stale_combined_popup=,stale_hovered_diags_cache.clear()
+F|94|12|396|p|HoverState.popup_or_bridge_contains|(bool, bool)|&self|diag_rect,popup,rect|
+F|95|12|461||hover_visibility_linter_error_only||||
+F|96|12|477||hover_visibility_type_only||||
+F|97|12|493||hover_visibility_combined||||
+F|98|12|509||hover_visibility_during_transition||||
+F|99|12|525||hover_visibility_waits_for_matching_type_before_showing_combined_type||||
+F|100|12|546||hover_animation_progress_uses_shared_slightly_slower_curve||||
+F|101|12|557||hover_animation_progress_snap_delta_is_subpixel_for_large_popup||||
+F|102|12|564||hover_visibility_combines_offsets_inside_same_identifier||||
+F|103|12|594||hover_state_resets_all_diagnostic_popup_fields||||
+F|104|12|638||diagnostic_hover_timer_resets_when_hovered_diagnostic_changes||||
+F|105|12|652||diagnostic_hover_timer_keeps_ticking_during_type_popup_transition||||
+F|106|12|664||pending_linter_popup_hide_does_not_reset_hover_timer_or_cache||||
+F|107|12|705||keyword_linter_popup_becomes_visible_after_delay_without_type_target||||
+F|108|12|730||type_popup_draw_flow_does_not_hold_hover_state_borrow||||
+F|109|12|769||stale_type_popup_stays_visible_while_new_target_loads||||
+F|110|12|795||stale_type_popup_stays_visible_when_cursor_moves_to_whitespace||||
+F|111|12|818||combined_popup_stays_visible_while_next_word_loads||||
+F|112|12|862||combined_popup_stays_visible_when_diag_rect_was_cleared_before_transition||||
+F|113|12|901||combined_popup_stays_visible_when_only_diag_cache_survived||||
+F|114|12|940||type_only_popup_stays_visible_while_next_word_loads||||
+F|115|12|966||stale_visibility_can_still_show_existing_combined_popup||||
+F|116|12|986||stale_combined_popup_freezes_diagnostic_target_during_new_hover||||
+F|117|12|999||active_combined_popup_keeps_target_during_whitespace_frame||||
+F|118|12|1027||non_stale_frame_accepts_new_diagnostic_target||||
+F|119|12|1038||mark_type_popup_drawn_tracks_combined_target_only||||
+F|120|12|1086||stale_transition_completion_keeps_diagnostic_timer_ready_for_new_popup||||
+F|121|12|1117||empty_space_keeps_popup_while_hover_transition_is_pending||||
+F|122|12|1169||empty_space_keeps_active_combined_popup_without_pending_request||||
+F|123|12|1196||stale_combined_popup_uses_frozen_diagnostics_not_live_cache||||
+F|124|12|1229||stale_combined_popup_ignores_new_hovered_diagnostic_until_new_popup_ready||||
+F|125|12|1257||active_combined_popup_switches_target_for_same_diagnostic||||
+F|126|12|1283||active_combined_popup_does_not_collect_different_target_diagnostic||||
+F|127|12|1310||stale_completion_clears_frozen_diagnostics_before_handlers_popup||||
+F|128|12|1337||hover_response_preserves_pending_diagnostic_context_for_combined_popup||||
+F|129|12|1353||diagnostic_hover_range_expands_when_target_is_string_prefix||||
+F|130|12|1370||hover_visibility_shows_only_one_popup_during_conflict||||
+F|131|12|1388||hover_state_bridge_keeps_diagnostic_and_type_as_one_popup_area||||
+F|132|12|1420||hover_byte_ignores_whitespace_next_to_identifier||||
+F|133|12|1437||hover_byte_ignores_python_keywords_so_diagnostics_can_show||||
+F|134|12|1448||diagnostic_hover_range_expands_to_whole_f_string_literal||||
+F|135|12|1473||diagnostic_hover_target_is_stable_for_expanded_f_string_literal||||
+F|136|12|1491||diagnostic_hover_range_does_not_create_type_target_for_keyword||||
+F|137|12|1499||hover_bridge_reaches_full_source_line_when_popup_is_above||||
+F|138|12|1518||hover_bridge_handles_popup_shifted_away_from_anchor||||
+F|139|12|1537||hover_bridge_keeps_popup_when_moving_up_from_token_anchor||||
+F|140|12|1556||hover_bridge_does_not_capture_next_line_when_popup_is_above||||
+F|141|12|1575||hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways||||
+F|142|12|1596||global_test_hover_token_bounds||||
+F|143|12|1611||global_test_hover_identifier_pipeline_end_to_end||||
+F|144|12|1638||global_test_hover_f_string_pipeline_end_to_end||||
+F|145|12|1662||global_test_hover_popup_state_end_to_end_without_glow||||
+F|146|12|1709||global_test_normalize_hover_byte||||
+F|147|12|1725||global_test_is_python_hover_keyword||||
+F|148|12|1734||global_test_is_hover_target_byte||||
+F|149|12|1747||global_test_hover_state_machine||||
+F|150|12|1793|p|advance_hover_anim_progress|f32|||
+F|151|12|1806|p|compute_hover_visibility|(bool, bool, bool)|||
+F|152|12|1833|p|compute_hover_visibility_from_matches|(bool, bool, bool)|||
+F|153|12|1886||diagnostic_hover_target_byte_on_line|Option<usize>|||
+F|154|12|1896|p|clear_hover_popup|bool|||
+F|155|12|1924||is_hover_target_byte|bool|||
+F|156|12|1932||is_python_hover_keyword|bool|||
+F|157|12|1973||hover_token_text|Option<String>|||
+F|158|12|1979|p|diagnostic_hover_byte_range_on_line|Option<(usize, usize, usize)>|||
+F|159|12|2105|p|diagnostic_hover_range_on_line|Option<(u32, u32, usize)>|||
+F|160|12|2140|p|normalize_hover_byte|Option<usize>|||
+F|161|12|2156|p|hover_token_bounds|(usize, usize)|||
+F|162|12|2236|p|hover_bytes_share_token|bool|||
+F|163|12|2249|p|hover_anchor_for_byte|(f32, f32)|||
+F|164|12|2310|p|is_in_hover_popup_or_bridge|bool|||
+F|165|12|2372||hover_popup_byte_at|usize|||
+T|166|13|7|struct|Cell|c: char,fg: u8,bg: u8
+T|167|13|23|struct|TermGrid|scrollback: std::collections::VecDeque<Vec<Cell>>,lines: std::collections::VecDeque<Vec<Cell>>,alt_lines: Option<std::collections::VecDeque<Vec<Cell>>>,alt_saved_cursor: Option<(usize,usize)>,is_alt: bool,cols: usize,visible_rows: usize,cur_x: usize,cur_y: usize,+17
+T|168|13|775|struct|Terminal|grid: Arc<Mutex<TermGrid>>,writer: Arc<Mutex<Box<dyn Write + Send>>>,master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,scroll_y: crate::scroll::ScrollState,title: String
+F|169|13|14||Cell.default|Self|||
+F|170|13|48|p|TermGrid.new|Self|||
+F|171|13|78|p|TermGrid.resize||&mut self|alt_lines,alt_saved_cursor,is_alt,saved_cursor|cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=
+F|172|13|207|p|TermGrid.put_char||&mut self|cols,cur_bg,cur_fg,lines,visible_rows|cur_x=,cur_y=
+F|173|13|227|p|TermGrid.newline||&mut self|scroll_region,visible_rows|cur_y=
+F|174|13|238|p|TermGrid.scroll_region_up||&mut self|cols,is_alt,scroll_region,visible_rows|dirty=,lines.insert(),pool.push(),scrollback.push_back()
+F|175|13|281|p|TermGrid.scroll_region_down||&mut self|cols,scroll_region|dirty=,lines.insert(),lines.remove(),pool.push()
+F|176|13|303|p|TermGrid.get_selection_text|String|&self|cols,lines,scrollback,selection|
+F|177|13|361||terminal_grid_print_scroll_resize_and_selection_end_to_end||||
+F|178|13|389||TermGrid.print||&mut self||
+F|179|13|392||TermGrid.execute||&mut self||cur_x=
+F|180|13|406||TermGrid.hook||&mut self||
+F|181|13|407||TermGrid.put||&mut self||
+F|182|13|408||TermGrid.unhook||&mut self||
+F|183|13|409||TermGrid.osc_dispatch||&mut self|reply_tx|
+F|184|13|420||TermGrid.esc_dispatch||&mut self||cur_x=,cur_y=,saved_cursor=
+F|185|13|432||TermGrid.csi_dispatch||&mut self|cols,reply_tx,visible_rows|alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6
+F|186|13|785|p|Terminal.spawn|Self|||
+F|187|13|890|p|Terminal.resize_pty||&self|master_pty|
+F|188|14|9|p|App.handle_ui_click||&mut self|clipboard,file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,+2|base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12
+T|189|15|288|struct|App|pending_key_log: Option<KeyLog>,gl_config: Option<glutin::config::Config>,gl_context: Option<PossiblyCurrentContext>,gl_surface: Option<Surface<WindowSurface>>,window: Option<std::sync::Arc<Window>>,dialog_window: Option<std::sync::Arc<Window>>,dialog_gl_surface: Option<Surface<WindowSurface>>,settings_scroll: crate::scroll::ScrollState,tab_scroll: crate::scroll::ScrollState,renderer: Option<Renderer>,+85
+T|190|15|25|struct|EditorTab|editor: crate::editor::Editor,file_path: Option<PathBuf>,base_title: String,file_extension: String,scroll_y: crate::scroll::ScrollState,scroll_x: crate::scroll::ScrollState,spans: Vec<crate::highlighter::ColorSpan>,completions: Vec<crate::highlighter::CompletionItem>,foldable_ranges: Vec<(usize,usize,+10
+T|191|15|134|struct|IdePanelState|slots: Vec<PanelSlot>,left_width: f32,bottom_height: f32,drag: Option<PanelDragState>,is_resizing_left: bool,is_resizing_bottom: bool,file_tree_nodes: Vec<crate::app::file_tree::FileNode>,file_tree_expanded: FxHashSet<std::path::PathBuf>,explorer_scroll: crate::scroll::ScrollState,file_tree_hovered_idx: Option<usize>,+31
+T|192|15|281|struct|KeyLog|key: String,t0: std::time::Instant,t_highlight: Option<std::time::Instant>,t_render: Option<std::time::Instant>
+T|193|15|107|enum|LspActionItem|CodeAction(crate::lsp::CodeAction),AddNoqa { codes: Vec<String>
+T|194|15|122|struct|LspActionsMenu|cursor_line: u32,items: Vec<LspActionItem>,selected: usize,menu_x: f32,menu_y: f32,pending_request_id: Option<i32>
+T|195|15|91|struct|PanelDragState|panel_id: PanelId,start_y: f32,current_y: f32,threshold_passed: bool
+T|196|15|78|enum|PanelGroup|Top,Bottom
+T|197|15|51|enum|PanelId|Explorer,Terminal,Problems,LspServers
+T|198|15|84|struct|PanelSlot|id: PanelId,group: PanelGroup,open: bool
+T|199|15|44|enum|PendingAction|Quit,OpenFile,CloseFile
+T|200|15|99|struct|TabDragState|start_idx: usize,start_x: f32,current_x: f32,threshold_passed: bool
+F|201|15|59|p|PanelId.label|&'static str|self||
+F|202|15|67|p|PanelId.icon|crate::widgets::IconType|self||
+F|203|15|173||IdePanelState.default|Self|||
+F|204|15|235|p|IdePanelState.any_top_open|bool|&self|slots|
+F|205|15|240|p|IdePanelState.any_bottom_open|bool|&self|slots|
+F|206|15|245|p|IdePanelState.toggle||&mut self|slots|
+F|207|15|250|p|IdePanelState.is_open|bool|&self|slots|
+F|208|15|260||fuzzy_match|Option<Vec<usize>>|||
+F|209|15|408|p|App.enter_ide_mode||&mut self|editor,file_extension,highlighter,ide_workspaces,window|active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()
+F|210|15|513|p|App.save_tabs_state||&mut self|active_tab,is_ide_mode,tabs|
+F|211|15|522|p|App.sync_active_tab||&mut self|active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1|
+F|212|15|569|p|App.switch_to_tab||&mut self|base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window|active_tab=,autocomplete_active=,show_welcome=
+F|213|15|624|p|App.open_new_tab||&mut self|highlighter,is_ide_mode,window|active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()
+F|214|15|715|p|App.close_tab_at||&mut self|base_title,editor,file_path,is_ide_mode,window|active_tab=,autocomplete_active=,show_welcome=,tabs.remove()
+F|215|15|749|p|App.open_file_in_tab||&mut self||
+F|216|15|753|p|App.open_file_in_tab_bg||&mut self||
+F|217|15|757|p|App.open_file_in_tab_internal||&mut self|active_tab,editor,file_path,is_ide_mode,tabs|
+F|218|15|793|p|App.ensure_cursor_visible||||
+F|219|15|832|p|App.get_current_word_prefix|String|&self|editor|
+F|220|15|852|p|App.update_autocomplete||&mut self|autocomplete_scroll,editor,highlighter|autocomplete_active=,autocomplete_anim_progress=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=
+F|221|15|931|p|App.ensure_autocomplete_visible||&mut self|autocomplete_options,autocomplete_scroll,autocomplete_selected_idx|
+F|222|15|961|p|App.apply_autocomplete||&mut self|autocomplete_options,autocomplete_scroll,base_title,editor,highlighter,window|autocomplete_active=,autocomplete_selected_idx=
+F|223|15|995|p|App.update_terminal_search||&mut self|ide_panel|
+F|224|15|1040|p|App.jump_to_terminal_search_result||&mut self|ide_panel,renderer|
+F|225|15|1076|p|App.update_search||&mut self|editor,search_case_sensitive,search_editor|search_current_idx=,search_results.clear(),search_results.push()
+F|226|15|1132|p|App.jump_to_search_result||&mut self|editor,renderer,scroll_y,search_current_idx,search_results,window|
+F|227|15|1158|p|App.update_window_title||||
+F|228|15|1167|p|App.show_action_dialog||&mut self|gl_config,scroll_x,scroll_y|dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=
+F|229|15|1209|p|App.close_dialog||&mut self|window|dialog_gl_surface=,dialog_window=
+F|230|15|1217|p|App.close_current_file||&mut self|active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()
+F|231|15|1263|p|App.trigger_file_picker||&mut self||open_file_rx=
+F|232|15|1272|p|App.trigger_folder_picker||&mut self||open_folder_rx=
+F|233|15|1283|p|App.trigger_save_as_picker||&mut self||save_file_rx=
+F|234|15|1295|p|App.save_current_file|bool|&mut self|editor,file_path|
+F|235|15|1334|p|App.add_recent_file||&mut self||recent_files.insert(),recent_files.retain(),recent_files.truncate()
+F|236|15|1343|p|App.apply_highlight_results||&mut self|editor,file_extension,highlighter|is_highlighted_once=
+F|237|15|1378|p|App.load_file_internal||&mut self|highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=
+F|238|15|1464|p|App.check_external_changes||&mut self|tabs,window|
+F|239|15|1504||panel_state_toggle_and_group_queries_end_to_end||||
+F|240|15|1525||fuzzy_match_preserves_target_indices_case_insensitively||||
+F|241|15|1532||panel_metadata_maps_to_labels_and_icons||||
+T|242|16|69|enum|EditOp|Insert { offset: usize,text: String
+T|243|16|98|struct|Editor|data: Vec<u8>,gap_start: usize,gap_end: usize,cursor: usize,selection_anchor: Option<usize>,version: u64,line_offsets: Vec<usize>,longest_line_idx: usize,history: VecDeque<HistoryStep>,redo_stack: VecDeque<HistoryStep>,+17
+T|244|16|10|struct|HashSource|(&'a [u64])
+T|245|16|86|struct|HistoryStep|op: EditOp,cursor_before: usize,cursor_after: usize
+T|246|16|63|enum|LineModState|ModifiedUnsaved,ModifiedSaved
+T|247|16|92|enum|UndoRedoDelta|Insert(usize,usize,String),Delete(usize,usize),Replace(usize,usize,String,String)
+F|248|16|16||tokenize|Self::Tokenizer|&self||
+F|249|16|20||estimate_tokens|u32|&self||
+F|250|16|25||get_diff_info|(Vec<bool>, Vec<bool>)|||
+F|251|16|45||is_delimiter|bool|||
+F|252|16|52||char_class|u8|||
+F|253|16|130|p|Editor.new|Self|||
+F|254|16|159|p|Editor.shift_folds_insert||&mut self|foldable_ranges_bytes|folded_start_bytes=
+F|255|16|182|p|Editor.shift_folds_delete||&mut self|foldable_ranges_bytes|folded_start_bytes=
+F|256|16|211|p|Editor.rebuild_line_offsets||&mut self|foldable_ranges_bytes|foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=
+F|257|16|281||Editor.get_line_hashes|Vec<u64>|&self||
+F|258|16|304|p|Editor.ensure_indent_cache_updated||&mut self|version|indent_cache.clear(),last_indent_version=
+F|259|16|376|p|Editor.get_cached_indent_levels|&[u8]|&self|indent_cache|
+F|260|16|380|p|Editor.backspace|Option<(usize, usize)>|&mut self|gap_end,gap_start,version|cursor=,selection_anchor=,sync_edits.push()
+F|261|16|453|p|Editor.set_original_text||&mut self||original_hashes=,saved_hashes=
+F|262|16|459|p|Editor.mark_saved||&mut self||saved_hashes=
+F|263|16|464|p|Editor.is_dirty|bool|&self|is_dirty|
+F|264|16|468|p|Editor.get_line_modification_state|Option<LineModState>|&self|line_states|
+F|265|16|472|p|Editor.update_modifications||&mut self|original_hashes,saved_hashes|deleted_gaps=,is_dirty=,line_states=
+F|266|16|543|p|Editor.clear_history||&mut self||history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()
+F|267|16|551||Editor.push_history||&mut self|history_size,is_working_history|history.push_back(),redo_stack.clear()
+F|268|16|635|p|Editor.undo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()
+F|269|16|693|p|Editor.redo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()
+F|270|16|751|p|Editor.text_parts|(&str, &str)|&self|data,gap_end,gap_start|
+F|271|16|759|p|Editor.get_full_text|String|&self||
+F|272|16|767||Editor.move_gap||&mut self|data,gap_end,gap_start|
+F|273|16|786||Editor.insert_str_internal|usize|&mut self|cursor,gap_start|data=,gap_end=,sync_edits.push()
+F|274|16|810|p|Editor.replace_range|(usize, usize, String)|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
+F|275|16|857|p|Editor.insert_str|(Option<(usize, usize)>, usize)|&mut self|cursor,version|selection_anchor=
+F|276|16|884|p|Editor.delete_selection|Option<(usize, usize)>|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
+F|277|16|922|p|Editor.delete_forward|Option<(usize, usize)>|&mut self|cursor,gap_end,version|sync_edits.push()
+F|278|16|958|p|Editor.delete_word_backward|Option<(usize, usize)>|&mut self|cursor|selection_anchor=
+F|279|16|991|p|Editor.delete_word_forward|Option<(usize, usize)>|&mut self||cursor=,selection_anchor=
+F|280|16|1025|p|Editor.get_auto_indent|String|&self|cursor|
+F|281|16|1061||editor_edit_history_dirty_state_end_to_end||||
+F|282|16|1086||editor_navigation_selection_indent_and_utf8_end_to_end||||
+F|283|16|1104||editor_fold_visibility_and_offsets_end_to_end||||
+F|284|17|4|p|Editor.select_expand||&mut self||cursor=,selection_anchor=
+F|285|17|130|p|Editor.select_word||&mut self||cursor=,selection_anchor=
+F|286|17|147|p|Editor.select_line||&mut self||cursor=,selection_anchor=
+F|287|17|162|p|Editor.is_char_boundary|bool|||
+F|288|17|170|p|Editor.byte_at|u8|&self|data,gap_end,gap_start|
+F|289|17|178|p|Editor.len|usize|&self|data,gap_end,gap_start|
+F|290|17|186|p|Editor.utf16_col_to_byte_advance||&self|line_offsets|
+F|291|17|223|p|Editor.get_selection|Option<String>|&self|cursor,selection_anchor|
+F|292|17|237|p|Editor.get_visible_lines_count|usize|&self|foldable_lines,folded_lines,line_offsets|
+F|293|17|257|p|Editor.select_all||&mut self||cursor=,selection_anchor=
+F|294|17|262||Editor.handle_selection||&mut self|cursor|selection_anchor=
+F|295|17|271|p|Editor.snap_cursor_out_of_fold||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
+F|296|17|311|p|Editor.move_left||&mut self||cursor=
+F|297|17|324|p|Editor.move_right||&mut self||cursor=
+F|298|17|337|p|Editor.move_word_left||&mut self||cursor=
+F|299|17|360|p|Editor.move_word_right||&mut self||cursor=
+F|300|17|383|p|Editor.move_home||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
+F|301|17|423|p|Editor.move_end||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
+F|302|17|463|p|Editor.move_start_of_file||&mut self||cursor=
+F|303|17|468|p|Editor.move_end_of_file||&mut self||cursor=
+F|304|17|473|p|Editor.move_up||&mut self||cursor=
+F|305|17|479|p|Editor.move_down||&mut self||cursor=
+F|306|17|485|p|Editor.set_cursor_at_pos||&mut self||cursor=,selection_anchor=
+F|307|17|500|p|Editor.move_page_up||&mut self||cursor=
+F|308|17|506|p|Editor.move_page_down||&mut self||cursor=
+T|309|18|14|struct|ColorSpan|start: usize,end: usize,color: [f32; 4]
+T|310|18|79|struct|CompletionItem|word: String,kind: SymbolKind,scope_start: usize,scope_end: usize
+T|311|18|106|struct|Highlighter|tx: Sender<HighlighterMessage>,rx: Receiver<( u64,Vec<ColorSpan>,Vec<CompletionItem>,Vec<(usize,usize,bool,bool)>,Vec<(usize,usize)>,+10
+T|312|18|92|enum|HighlighterMessage|Reset { version: u64,text: String,ext: String
+T|313|18|135|struct|Scope|start: usize,end: usize,params: HashSet<String>
+T|314|18|69|enum|SymbolKind|Variable,Function,Class,Parameter,Keyword,Unknown
+T|315|18|87|enum|SyncEdit|Insert { offset: usize,text: String
+F|316|18|20|p|flatten_color_spans_prefer_specific|Vec<ColorSpan>|||
+F|317|18|141||get_point|tree_sitter::Point|||
+F|318|18|154||resolve_color|[f32; 4]|||
+F|319|18|235|p|Highlighter.new|Self|||
+F|320|19|4|p|Highlighter.reset||&self||
+F|321|19|10|p|Highlighter.apply_edits||&self|tx|
+F|322|19|27|p|Highlighter.poll|bool|&mut self|rx|completions=,current_version=,foldable_ranges=,spans=,syntax_errors=
+F|323|19|48|p|Highlighter.wait_for_first_result|bool|&mut self|rx|completions=,current_version=,foldable_ranges=,spans=,syntax_errors=
+F|324|19|77|p|Highlighter.shift_insert||&mut self||spans.extend(),spans.push(),spans.retain(),spans=
+F|325|19|174|p|Highlighter.shift_delete||&mut self||spans.retain()
+F|326|19|191|p|get_bracket_color|[f32; 4]|||
+F|327|19|205|p|flatten_spans|Vec<ColorSpan>|||
+F|328|19|332||highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end||||
+F|329|19|352||highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans||||
+T|330|21|25|enum|HoverLineKind|Text,Code,Separator,Header1,Header2
+F|331|21|33|p|normalize_inline_rst_code|(String, Vec<(usize, usize)>)|||
+F|332|21|58|p|normalize_rst_roles|(String, Vec<(usize, usize)>)|||
+F|333|21|100|p|flatten_rst_roles_and_code|String|||
+F|334|21|148|p|parse_param_line|Option<(String, String, String)>|||
+F|335|21|168||split_inline_python_after_colon|Option<(String, String)>|||
+F|336|21|188||normalize_coroutine_signature_line|String|||
+F|337|21|210|p|normalize_python_hover_doc|(String, Vec<HoverLineKind>, Vec<(usize, usize)>)|||
+F|338|21|618|p|ts_capture_color|Option<[f32; 4]>|||
+F|339|21|634|p|push_python_ts_spans||||
+F|340|21|687|p|highlight_python_hover_doc|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
+F|341|21|1020||force_color_on_ranges||||
+F|342|21|1062||color_keyword_args_orange||||
+T|343|22|733|enum|HoverLineKindPublic|Text,Code,Separator,Header1,Header2
+F|344|22|3|p|highlight_hover_text|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
+F|345|22|123||preprocess_hover_text|String|||
+F|346|22|140||looks_like_python_hover|bool|||
+F|347|22|171||looks_like_python_code_line|bool|||
+F|348|22|197||looks_like_type_expr_line|bool|||
+F|349|22|217||looks_like_simple_type_name_line|bool|||
+F|350|22|238||add_doc_arg_name_spans||||
+F|351|22|279||sanitize_hover_type_expr|String|||
+F|352|22|297||sanitize_module_path|String|||
+F|353|22|309||normalize_class_object_repr|Option<(Option<String>, String)>|||
+F|354|22|334||normalize_module_object_repr|Option<String>|||
+F|355|22|350||normalize_bound_method_signature|Option<String>|||
+F|356|22|406||add_bound_method_signature_spans|bool|||
+F|357|22|476||add_self_param_span_for_signature||||
+F|358|22|500||add_param_name_spans_for_signature||||
+F|359|22|540||add_class_keyword_spans_for_signature||||
+F|360|22|575||add_type_bracket_neutral_spans_for_signature||||
+F|361|22|595||add_type_expr_spans_for_line||||
+F|362|22|635||normalize_hover_text|(String, Vec<(usize, usize)>)|||
+F|363|22|697||wrap_signature_after_first_param|String|||
+F|364|22|721||normalize_asynccontextmanager_signature_line|Option<String>|||
+F|365|22|752||rendered_color_at|[f32; 4]|||
+F|366|22|764||variable_header_highlights_name_pink||||
+F|367|22|782||uses_python_hover_pipeline_for_builtin_signatures||||
+F|368|22|802||plain_bound_method_prose_stays_uncolored||||
+F|369|22|839||inline_for_fragment_becomes_separate_code_line||||
+F|370|22|849||rich_rst_docstring_path_is_preserved||||
+F|371|22|868||bound_method_signature_line_is_highlighted_but_prose_stays_plain||||
+F|372|22|888||coroutine_return_bound_method_becomes_async_def||||
+F|373|22|895||coroutine_return_signature_becomes_async_def||||
+F|374|22|911||long_bound_method_signature_is_normalized_and_highlighted||||
+F|375|22|938||class_object_repr_is_normalized_and_highlighted||||
+F|376|22|960||qualified_class_object_repr_prepends_module_path||||
+F|377|22|978||backticked_qualified_class_repr_prepends_module_path||||
+F|378|22|988||generic_type_line_gets_cyan_types_and_white_brackets||||
+F|379|22|1019||literal_type_line_is_highlighted||||
+F|380|22|1041||assignment_line_is_highlighted_in_hover_text||||
+F|381|22|1054||module_object_repr_is_normalized_to_module_header||||
+F|382|22|1061||site_packages_and_init_are_removed_from_module_and_class_repr||||
+F|383|22|1072||builtin_dict_class_hover_is_normalized_without_angle_brackets||||
+F|384|22|1085||builtin_str_heading_line_is_highlighted_as_type||||
+F|385|22|1100||builtin_any_heading_line_is_highlighted_as_type||||
+F|386|22|1115||header_with_inline_code_preserves_correct_spans_without_byte_shift_panic||||
+F|387|22|1122||class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args||||
+F|388|22|1156||class_signature_is_highlighted||||
+F|389|22|1172||litestar_giant_class_hover_signature_and_args_doc_are_parsed||||
+F|390|22|1387||litestar_hover_hidden_chars_do_not_shift_rendered_arg_colors||||
+F|391|22|1420||double_backticks_are_stripped_and_highlighted_as_inline_code||||
+F|392|22|1449||asynccontextmanager_one_line_signature_is_wrapped_and_highlighted||||
+T|393|23|148|struct|CodeAction|title: String,kind: Option<String>,edit: Option<WorkspaceEdit>,code: Option<String>
+T|394|23|111|enum|LspEvent|Log { name: &'static str,message: String
+T|395|23|95|struct|TextChange|start_line: u32,start_col: u32,end_line: u32,end_col: u32,new_text: String
+T|396|23|105|struct|WorkspaceEdit|changes: HashMap<PathBuf,Vec<TextChange>>
+F|397|23|9|p|highlight_diagnostic_message|Vec<crate::highlighter::ColorSpan>|||
+F|398|23|236|p|offset_to_lsp_pos|(u32, u32)|||
+F|399|23|256|p|json_escape|String|||
+F|400|23|275|p|path_to_uri|String|||
+F|401|23|289|p|uri_to_path|PathBuf|||
+F|402|23|300|p|make_initialize|Vec<u8>|||
+F|403|23|331|p|make_initialized|Vec<u8>|||
+F|404|23|335|p|make_did_open|Vec<u8>|||
+F|405|23|346|p|make_did_change_full|Vec<u8>|||
+F|406|23|356|p|make_did_close|Vec<u8>|||
+F|407|23|364|p|make_code_action|Vec<u8>|||
+F|408|23|391|p|make_hover|Vec<u8>|||
+F|409|23|398|p|make_definition|Vec<u8>|||
+F|410|23|405|p|make_shutdown|Vec<u8>|||
+F|411|23|409|p|make_exit|Vec<u8>|||
+F|412|23|415|p|write_frame|bool|||
+F|413|23|427|p|parse_diagnostic_value|Option<Diagnostic>|||
+F|414|23|534|p|parse_text_edit_value|Option<TextChange>|||
+F|415|23|559|p|parse_workspace_edit_value|WorkspaceEdit|||
+F|416|23|595|p|parse_hover_value|Option<String>|||
+F|417|23|623|p|parse_definition_path|Option<PathBuf>|||
+F|418|23|640|p|parse_code_action_value|Option<CodeAction>|||
+F|419|23|675|p|dispatch_frame||||
+F|420|23|872||lsp_protocol_encodes_positions_paths_and_requests_end_to_end||||
+F|421|23|895||lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions||||
+F|422|23|975||lsp_dispatch_routes_pending_responses_end_to_end||||
+T|423|24|70|enum|DiagSeverity|Error,Warning,Info,Hint
+T|424|24|84|struct|Diagnostic|start_line: u32,start_col: u32,end_line: u32,end_col: u32,severity: DiagSeverity,code: Option<String>,code_href: Option<String>,message: String,source: Option<String>,quickfixes: Vec<QuickFix>,+2
+T|425|24|56|struct|LogEntry|text: String,spans: Vec<crate::highlighter::ColorSpan>,folds: Vec<(usize,usize)>
+T|426|24|682|struct|LspManager|python: Option<LspProcess>,ty_process: Option<LspProcess>,workspaces: Vec<PathBuf>,diagnostics: HashMap<PathBuf,Vec<Diagnostic>>,instant_diagnostics: HashMap<PathBuf,(i32,Vec<Diagnostic>)>,merged_instant_diagnostics: HashMap<PathBuf,(i32,+13
+T|427|24|488|struct|LspProcess|cmd_tx: Sender<Cmd>,event_rx: Receiver<LspEvent>,current_uri: Option<String>,def: &'static LspServerDef,open_file_data: Option<(String,String)>,workspace_scanned: bool
+T|428|24|63|struct|LspServerInfo|name: &'static str,status: LspServerStatus,logs: Vec<LogEntry>
+T|429|24|48|enum|LspServerStatus|Starting,Running,Crashed,Disabled
+T|430|24|232|struct|OpenFile|uri: String,lang: &'static str,version: i32,text: String
+T|431|24|78|struct|QuickFix|title: String,edits: Vec<TextChange>
+T|432|24|103|struct|SpawnedProcess|child: Child,out_tx: Sender<Vec<u8>>
+F|433|24|41||next_id|i32|||
+F|434|24|108||spawn_server|Option<SpawnedProcess>|||
+F|435|24|239||send_and_log|Result<(), mpsc::SendError<Vec<u8>>>|||
+F|436|24|273||run_supervisor||||
+F|437|24|498||LspProcess.start|Self|||
+F|438|24|519|p|LspProcess.notify_open||&mut self|cmd_tx,def|current_uri=,open_file_data=,workspace_scanned=
+F|439|24|563|p|LspProcess.restart||&mut self|cmd_tx|
+F|440|24|569|p|LspProcess.notify_change||&mut self|cmd_tx|current_uri=
+F|441|24|579|p|LspProcess.request_hover|i32|&mut self|cmd_tx|
+F|442|24|586|p|LspProcess.request_definition|i32|&mut self|cmd_tx|
+F|443|24|594|p|LspProcess.notify_close||&mut self|cmd_tx|current_uri=
+F|444|24|602|p|LspProcess.request_code_actions|i32|&mut self|cmd_tx|
+F|445|24|632|p|LspProcess.poll||&self|event_rx|
+F|446|24|641|p|LspProcess.shutdown||self|cmd_tx|
+F|447|24|648||encode_diagnostics_json|String|||
+F|448|24|704|p|LspManager.new|Self|||
+F|449|24|725||LspManager.ensure_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_process=,ty_status=
+F|450|24|737|p|LspManager.restart_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_process=,ty_status=
+F|451|24|755|p|LspManager.disable_python||&mut self|python,ty_process|diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_instant_diagnostics.clear(),ty_status=
+F|452|24|774|p|LspManager.enable_python||&mut self|current_path,workspaces|python=,python_disabled=,python_status=,ty_process=,ty_status=
+F|453|24|797|p|LspManager.servers_info|Vec<LspServerInfo>|&self|python_status,ty_status|
+F|454|24|823||LspManager.process_for_ext|Option<&mut LspProcess>|&mut self|python|
+F|455|24|834|p|LspManager.notify_open||&mut self|python,ty_process,workspaces|current_path=,suppress_diagnostics=
+F|456|24|857|p|LspManager.notify_change||&mut self|python,ty_process,workspaces|last_change=,suppress_diagnostics=
+F|457|24|878|p|LspManager.request_hover|Option<i32>|&mut self|ty_process,workspaces|
+F|458|24|899|p|LspManager.request_definition|Option<i32>|&mut self|ty_process,workspaces|
+F|459|24|921|p|LspManager.notify_close||&mut self|python,ty_process,workspaces|
+F|460|24|940|p|LspManager.request_code_actions|Option<i32>|&mut self|workspaces|
+F|461|24|972|p|LspManager.poll|Vec<LspEvent>|&mut self|instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_instant_diagnostics,ty_process|diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=
+F|462|24|1104|p|LspManager.get_diagnostics|&[Diagnostic]|&self|diagnostics,workspaces|
+F|463|24|1118|p|LspManager.get_instant_diagnostics_with_version|(i32, &[Diagnostic])|&self|merged_instant_diagnostics,workspaces|
+F|464|24|1133|p|LspManager.diagnostics_for_line|Vec<&Diagnostic>|&self||
+F|465|24|1141|p|LspManager.request_fix_all|Option<i32>|&mut self|workspaces|
+F|466|24|1165|p|LspManager.request_organize_imports|Option<i32>|&mut self|workspaces|
+F|467|24|1190|p|LspManager.shutdown||mut self|python,ty_process|python_disabled=
+F|468|24|1205|p|lsp_pos_to_offset|usize|||
+F|469|24|1231|p|format_and_highlight_json|( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize)>, )|||
+F|470|24|1343||lsp_position_and_log_formatting_end_to_end||||
+T|471|25|25|struct|Config|window_width: f64,window_height: f64,maximized: bool,ide_workspaces: Vec<std::path::PathBuf>,ide_ignore_patterns: Vec<String>,enable_telemetry: bool
+F|472|25|35||Config.default|Self|||
+F|473|25|47|p|load_recent_files|Vec<PathBuf>|||
+F|474|25|63|p|save_recent_files||||
+F|475|25|77|p|load_open_tabs|(Vec<Option<PathBuf>>, usize)|||
+F|476|25|104|p|save_open_tabs||||
+F|477|25|126|p|save_panel_state||||
+F|478|25|156|p|load_panel_state|crate::app::IdePanelState|||
+F|479|25|210|p|save_config||||
+F|480|25|235||load_config|Config|||
+F|481|25|308||get_kde_color|Option<[f32; 4]>|||
+F|482|25|330||load_dracula|Theme|||
+F|483|25|349|e|main||||
+F|484|25|355||mallopt|i32; } mallopt(-8, 2); } let args: Vec<String> = env::args().collect(); let run_ide_on_startup = args.iter().any(\pa\p a == "--ide" \p\p a == "ide"); let has_file_arg = args.iter().skip(1).any(\pa\p *a != "--ide" && *a != "ide"); let mut initial_text = String::new(); let mut title = "Безымянный".to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg|||
+F|485|26|3|p|get_params_query|Option<&'static str>|||
+F|486|26|82|p|get_injection_query|Option<&'static str>|||
+F|487|26|131|p|get_folding_query|Option<&'static str>|||
+F|488|26|336|p|get_ts_config|Option<(tree_sitter::Language, Vec<&'static str>)>|||
+F|489|26|930||test_all_tree_sitter_queries_are_valid||||
+F|490|27|6|p|Renderer.update_cache||&mut self|height,left_padding,line_height,scale_factor,width|last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()
+F|491|27|213|p|Renderer.get_cursor_xy|(f32, f32)|&mut self|baseline_offset,last_scroll_x,left_padding,line_height,scale_factor|
+F|492|27|350|p|Renderer.get_byte_at_xy|usize|&mut self|last_scroll_x,left_padding,line_height|
+F|493|27|450|p|Renderer.measure_width|f32|&mut self||
+F|494|27|476|p|Renderer.get_max_scroll|f32|&mut self|line_height|
+F|495|27|483|p|Renderer.flush||&mut self|gl,height,program,vbo,width|vertices.clear()
+F|496|27|525|p|Renderer.push_vertical_gradient||&mut self|vertices|
+F|497|27|573|p|Renderer.push_horizontal_gradient||&mut self|vertices|
+F|498|27|621|p|Renderer.draw_string||&mut self||
+F|499|27|637|p|Renderer.draw_string_scaled||&mut self||
+F|500|27|660|p|Renderer.draw_string_mono_scaled||&mut self||
+F|501|27|683|p|Renderer.measure_mono_width|f32|&mut self||
+F|502|27|694|p|Renderer.push_rounded_rect||&mut self|vertices|
+F|503|28|6|p|Renderer.draw_lsp_servers_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|
+F|504|28|785|p|Renderer.draw_lsp_actions_menu|bool|&mut self|height,last_mouse_x,last_mouse_y,scale_factor,theme,width|
+F|505|29|6|p|Renderer.draw_minimap||&mut self|line_height,minimap_width,theme,vertices,width|
+F|506|30|8|p|Renderer.draw_search_panel|bool||gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width|last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=
+F|507|31|6|p|Renderer.get_faq_max_scroll|f32|&mut self|scale_factor|
+F|508|31|31|p|Renderer.draw_settings|u8|&mut self|gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width|
+F|509|32|7|p|Renderer.draw_sticky_lines|Vec<(usize, usize)>||baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width|sticky_scroll_rects.clear(),sticky_scroll_rects.push()
+F|510|33|6|p|Renderer.draw_tab_bar|Option<(std::path::PathBuf, f32, f32)>|&mut self|gl,height,hide_popups_until_mouse_move,theme|max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=
+F|511|33|416|p|Renderer.draw_tab_tooltip||&mut self|theme,width|
+F|512|34|7|p|Renderer.draw_terminal_panel||&mut self|baseline_offset,gl,height,line_height,theme,vertices|
+T|513|35|6|struct|DiagChar|x: f32,y: f32,w: f32,h: f32,byte_offset: usize
+F|514|35|19|p|compute_hover_y_position|f32|||
+F|515|35|51|p|compute_animated_scissor|(f32, f32, f32, f32)|||
+F|516|35|68||smooth_hover_anim_progress|f32|||
+F|517|35|73||compute_hover_scrollbar_alpha|f32|||
+F|518|35|78||smooth_hover_width_progress|f32|||
+F|519|35|86||smooth_hover_height_progress|f32|||
+F|520|35|90||compute_hover_popup_anim_rect|(f32, f32, f32, f32)|||
+F|521|35|127|p|compute_animated_popup_frame|(f32, f32, f32, f32)|||
+F|522|35|139||compute_combined_popup_frame|(f32, f32, f32, f32)|||
+F|523|35|152||compute_combined_separator_visible_rect|Option<(f32, f32)>|||
+F|524|35|175||compute_hover_scissor_rect|(f32, f32, f32, f32)|||
+F|525|35|191||compute_hover_frame_content_rect|(f32, f32, f32, f32)|||
+F|526|35|207|p|compute_hover_content_scissor|(f32, f32, f32, f32)|||
+F|527|35|233|p|compute_diagnostic_layout|(f32, f32)|||
+F|528|35|267|p|diag_popup_byte_at|usize|||
+F|529|35|305||Renderer.push_hover_popup_frame||&mut self|theme|
+F|530|35|340|p|Renderer.draw_diagnostic_popup||&mut self|gl,height,scale_factor,theme,width|
+F|531|35|852|p|Renderer.build_hover_popup_layout|crate::app::mouse::HoverLayoutCache||scale_factor|
+F|532|35|1016|p|Renderer.draw_hover_popup|(f32, f32, f32, f32, f32)||gl,height,line_height,phys_to_visual,scale_factor,theme,width|
+F|533|35|1382||test_hover_y_position_fits_above||||
+F|534|35|1390||test_hover_y_position_fallback_below||||
+F|535|35|1399||test_hover_y_position_clamped_top_when_both_fail_but_above_is_better||||
+F|536|35|1409||test_hover_y_position_forced_below_when_both_fail_but_below_is_better||||
+F|537|35|1419||test_diagnostic_layout_end_to_end_fits_above||||
+F|538|35|1427||test_diagnostic_layout_end_to_end_shifts_x_when_out_of_bounds||||
+F|539|35|1434||test_diagnostic_layout_end_to_end_considers_hover_anchor_x||||
+F|540|35|1450||test_diagnostic_layout_end_to_end_forces_below_when_y_too_small||||
+F|541|35|1457||test_animated_scissor_keeps_nearest_corner_fixed||||
+F|542|35|1476||test_animated_scissor_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor||||
+F|543|35|1492||test_animated_scissor_is_full_popup_at_progress_one||||
+F|544|35|1506||test_animated_scissor_is_zero_at_progress_zero||||
+F|545|35|1520||test_animated_popup_frame_keeps_nearest_corner_fixed||||
+F|546|35|1536||test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor||||
+F|547|35|1552||test_popup_above_cursor_expands_bottom_to_top||||
+F|548|35|1567||test_combined_popup_above_cursor_expands_bottom_to_top||||
+F|549|35|1583||test_combined_popup_below_cursor_expands_top_to_bottom||||
+F|550|35|1596||test_popup_below_cursor_expands_top_to_bottom||||
+F|551|35|1608||test_animated_popup_frame_is_target_at_progress_one||||
+F|552|35|1619||test_animated_popup_frame_is_visible_before_reaching_target||||
+F|553|35|1632||test_animated_popup_frame_uses_settings_style_smooth_progress||||
+F|554|35|1646||test_wide_popup_right_edge_settles_before_final_frames||||
+F|555|35|1658||test_combined_separator_waits_until_frame_reaches_it||||
+F|556|35|1667||test_combined_separator_clips_to_animated_frame_width||||
+F|557|35|1676||test_combined_separator_reaches_full_width_with_frame||||
+F|558|35|1685||test_combined_diagnostic_background_does_not_cover_moving_top_border||||
+F|559|35|1715||test_hover_frame_content_rect_insets_bottom_border||||
+F|560|35|1722||test_hover_type_content_scissor_does_not_cover_bottom_border||||
+F|561|35|1737||test_animated_popup_frame_near_done_snap_is_invisible_with_smooth_progress||||
+F|562|35|1749||test_hover_scrollbar_alpha_waits_until_popup_is_nearly_open||||
+F|563|35|1755||test_hover_scrollbar_alpha_fades_smoothly_near_end||||
+F|564|35|1763||test_hover_scrollbar_alpha_is_full_at_end||||
+F|565|35|1769||test_attached_hover_content_scissor_uses_shared_combined_animation||||
+F|566|35|1785||test_attached_hover_content_scissor_above_cursor_expands_bottom_to_top||||
+F|567|35|1801||test_detached_hover_content_scissor_keeps_popup_animation||||
+F|568|36|4|p|Renderer.draw_problems_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|scratch_buffer=
+F|569|37|9|p|Renderer.draw_icon||&mut self|gl,texture|
+F|570|37|21|p|Renderer.draw_atlas_icon||&mut self|gl,icons,texture|
+F|571|37|44|p|Renderer.draw_file_icon||&mut self|gl,texture|file_icon_cache.insert()
+F|572|37|144|p|Renderer.draw_autocomplete|(f32, f32, f32, f32)||gl,height,scale_factor,theme|
+F|573|37|373|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mouse_y,scale_factor,theme|
+F|574|37|485|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
+F|575|37|729|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
+F|576|37|794|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
+T|577|38|51|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
+T|578|38|24|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
+F|579|38|35||Telemetry.default|Self|||
+F|580|38|58|p|Renderer.draw|(bool, Vec<(usize, usize)>)||baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,program,scale_factor,texture,theme,+3|fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),hide_popups_until_mouse_move=,identical_words_cache.clear(),identical_words_cache.push(),last_cursor_for_popups=,last_draw_instant=,last_editor_version_for_scroll_x=,last_editor_version_for_typing=,+13
+T|581|39|78|struct|FontData|source: FontSource,index: u32
+T|582|39|67|enum|FontSource|Static(&'static [u8]),LoadedMmap(std::sync::Arc<memmap2::Mmap>),LoadedVec(std::sync::Arc<Vec<u8>>),Lazy( std::path::PathBuf,std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>,()>>>>,)
+T|583|39|39|struct|GlyphInfo|u: f32,v: f32,uw: f32,vh: f32,width: f32,height: f32,offset_x: f32,offset_y: f32,advance: f32,is_emoji: f32
+T|584|39|138|struct|Renderer|gl: glow::Context,program: glow::Program,vao: glow::VertexArray,vbo: glow::Buffer,texture: glow::Texture,vertices: Vec<Vertex>,fonts: Vec<FontData>,ui_fonts: Vec<FontData>,scale_context: ScaleContext,glyphs: HashMap<char,+63
+T|585|39|11|struct|Theme|bg: [f32; 4],fg: [f32; 4],sel: [f32; 4],minimap_bg: [f32; 4],line_num: [f32; 4],minimap_cursor: [f32; 4],modified_unsaved: [f32; 4],modified_saved: [f32; 4],diag_warn: [f32; 4],diag_error: [f32; 4],+1
+T|586|39|27|struct|Vertex|pos: [f32; 2],uv: [f32; 2],color: [f32; 4],mode: f32,sdf_params: [f32; 3]
+T|587|39|55|struct|VisualLine|byte_idx: usize,physical_line: usize,is_soft_wrap: bool,whitespace_px_width: f32,text_px_width: f32,y_offset: f32,is_folded: bool,fold_suffix: [char; 4],fold_suffix_len: u8
+F|588|39|84|p|FontData.new_lazy|Self|||
+F|589|39|94|p|FontData.new_static|Self|||
+F|590|39|101|p|FontData.ensure_loaded||&mut self||source=
+F|591|39|128|p|FontData.data_slice|&[u8]|&self|source|
+F|592|39|216|p|Renderer.new|Self|||
+F|593|39|529|p|Renderer.get_custom_svg_glyph|Option<GlyphInfo>|&mut self|atlas_y,font_size,gl,texture|atlas_x=,max_row_h=
+F|594|39|596|p|Renderer.get_glyph|Option<GlyphInfo>|&mut self|font_size,fonts,gl,texture|atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()
+F|595|39|769|p|Renderer.get_ui_glyph|Option<GlyphInfo>|&mut self|font_size,gl,texture,ui_fonts|atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()
+F|596|39|941|p|Renderer.resize||&mut self|gl|height=,width=
+F|597|39|951|p|Renderer.measure_ui_width|f32|&mut self||
+F|598|39|964|p|Renderer.char_advance|f32|&mut self|ascii_advances|
+F|599|39|981|p|Renderer.push_quad||&mut self|vertices|
+F|600|39|1033|p|Renderer.load_builtin_icons||&mut self|gl,texture|icons.insert()
+F|601|39|1216|p|Renderer.push_squiggle||&mut self|scale_factor,vertices|
+F|602|39|1269|p|Renderer.push_rect||&mut self||
+F|603|39|1273|p|Renderer.push_rounded_rect_gradient||&mut self|vertices|
+T|604|40|2|struct|ScrollState|current: f32,target: f32,velocity: f32,anim_speed: f32,is_dragging: bool,drag_offset: f32
+F|605|40|12|p|ScrollState.new|Self|||
+F|606|40|23|p|ScrollState.update|bool|&mut self|anim_speed,target|current=,velocity=
+F|607|40|48|p|ScrollState.clamp_target||&mut self||target=
+F|608|40|52|p|ScrollState.clamp_current||&mut self||current=
+F|609|40|56|p|ScrollState.scroll_by||&mut self|target|
+F|610|40|60|p|ScrollState.set_target||&mut self||target=
+F|611|40|64|p|ScrollState.stop_anim||&mut self||current=,target=,velocity=
+F|612|40|76||scroll_state_clamps_animates_and_stops_end_to_end||||
+T|613|41|96|enum|UiElement|Button { id: UiId,x: f32,y: f32,w: f32,h: f32
+T|614|41|8|enum|UiId|WelcomeNewFile,WelcomeOpenFile,WelcomeIdeMode,WelcomeRecentFile(usize),DialogSave,DialogDiscard,DialogCancel,SettingsTab(usize),SettingsIdeAddWorkspace,SettingsIdeRemoveWorkspace(usize),+54
+T|615|41|169|struct|UiRegistry|elements: Vec<UiElement>,hovered: Option<UiId>,wants_pointer: bool,wants_text: bool,overlay_mark: usize
+F|616|41|131|p|UiElement.contains|bool|&self||
+F|617|41|158|p|UiElement.id|UiId|&self||
+F|618|41|182|p|UiRegistry.new|Self|||
+F|619|41|193|p|UiRegistry.clear||&mut self||elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text=
+F|620|41|203|p|UiRegistry.mark_overlay_start||&mut self|elements|overlay_mark=
+F|621|41|209|p|UiRegistry.find_overlay_at|Option<UiId>|&self|elements,overlay_mark|
+F|622|41|218|p|UiRegistry.register_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|623|41|246|p|UiRegistry.register_icon_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|624|41|275|p|UiRegistry.register_text_input|bool|&mut self||elements.push(),hovered=,wants_text=
+F|625|41|298|p|UiRegistry.register_blocker|bool|&mut self||elements.push()
+F|626|41|315|p|UiRegistry.register_rect|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|627|41|337|p|UiRegistry.find_at|Option<UiId>|&self|elements|
+F|628|41|347|p|UiRegistry.hovered|Option<UiId>|&self|hovered|
+F|629|41|354|p|UiRegistry.reset_cursor_state||&mut self||wants_pointer=,wants_text=
+F|630|41|360|p|UiRegistry.wants_pointer|bool|&self|wants_pointer|
+F|631|41|365|p|UiRegistry.wants_text|bool|&self|wants_text|
+F|632|41|370|p|UiRegistry.cursor_code|u8|&self|wants_pointer,wants_text|
+F|633|41|386||ui_registry_hit_testing_overlay_and_cursor_state_end_to_end||||
+F|634|41|415||ui_element_icon_active_square_uses_fitts_law_hitbox||||
+T|635|42|22|struct|Button|x: f32,y: f32,w: f32,h: f32,text: String,icon: Option<IconType>,text_scale: f32,icon_size: f32
+T|636|42|107|struct|IconButton|x: f32,y: f32,size: f32,icon: Option<IconType>,is_active: bool,icon_size: Option<f32>,active_square_width: Option<f32>,custom_color: Option<[f32; 4]>
+T|637|42|4|enum|IconType|Save,Discard,Cancel,Warning,CaseMatch,Up,Down,Close,Plus,Terminal,+5
+F|638|42|34|p|Button.is_hovered|bool|&self|h,w,x,y|
+F|639|42|38|p|Button.render|bool|&self|h,icon,icon_size,text,text_scale,w,x,y|
+F|640|42|119|p|IconButton.is_hovered|bool|&self|active_square_width,size,x,y|
+F|641|42|128|p|IconButton.render|bool|&self|active_square_width,custom_color,icon,icon_size,is_active,size,x,y|
+F|642|42|220|p|get_welcome_buttons|(Button, Button, Button)|||
+F|643|42|273|p|get_dialog_buttons|(Button, Button, Button)|||
+F|644|42|345||widget_hitboxes_cover_regular_and_sidebar_buttons||||
+E|0|1 3 5 9 11 13 27 28 150 163 186 227
 E|1|2
 E|3|41
 E|5|4 6 7 8 10 13 14
@@ -711,8 +712,8 @@ E|24|1
 E|25|1
 E|26|5
 E|27|28
-E|30|226
-E|31|29 55 67 68 69 226 227 228 229 230 233 642
+E|30|227
+E|31|29 55 67 68 69 227 228 229 230 231 234 643
 E|32|0
 E|37|34 36
 E|38|35 36
@@ -721,22 +722,22 @@ E|43|34 35 40 42
 E|44|41 43
 E|46|44
 E|48|45
-E|49|46 214
+E|49|46 215
 E|52|40
 E|53|43 51
-E|54|63 64 209 210 213 217 219 220 221 224 225 226 227 229 230 233
-E|55|46 54 56 57 58 153 185 228
-E|56|222 223
-E|57|222 223
-E|58|224 225
+E|54|63 64 210 211 214 218 220 221 222 225 226 227 228 230 231 234
+E|55|46 54 56 57 58 154 186 229
+E|56|223 224
+E|57|223 224
+E|58|225 226
 E|60|61
 E|61|62
 E|64|65 66
-E|65|226
-E|66|226 467
-E|67|50 59 60 61 62 153 157 159 160 163 164
-E|68|46 65 66 153 164 187 209 210 221
-E|69|59 60 61 62 153
+E|65|227
+E|66|227 468
+E|67|50 59 60 61 62 154 158 160 161 164 165
+E|68|46 65 66 154 165 188 210 211 222
+E|69|59 60 61 62 154
 E|81|86
 E|82|86 88
 E|84|83
@@ -745,269 +746,269 @@ E|87|85
 E|88|85 86
 E|89|85
 E|92|86
-E|94|163
-E|95|150
-E|96|150
-E|97|150
-E|98|150
-E|99|150
-E|100|149
-E|101|149
-E|102|151 161
-E|107|150
-E|112|150
-E|113|150
-E|115|151
-E|128|157
-E|129|150
-E|131|159
-E|132|159
-E|133|157 158 159
-E|134|152
-E|135|158
-E|136|163
-E|137|163
-E|138|163
-E|139|163
-E|140|163
-E|141|160
-E|142|156 157 159 160
-E|143|156 157 159 160
-E|144|150
-E|145|159
-E|146|155
-E|147|154
-E|150|151
-E|152|157
-E|156|160
-E|157|154 159
-E|158|157
-E|159|154 156
-E|160|154
-E|161|160
-E|162|160
-E|171|172
+E|94|164
+E|95|151
+E|96|151
+E|97|151
+E|98|151
+E|99|151
+E|100|150
+E|101|150
+E|102|152 162
+E|107|151
+E|112|151
+E|113|151
+E|115|152
+E|129|158
+E|130|151
+E|132|160
+E|133|160
+E|134|158 159 160
+E|135|153
+E|136|159
+E|137|164
+E|138|164
+E|139|164
+E|140|164
+E|141|164
+E|142|161
+E|143|157 158 160 161
+E|144|157 158 160 161
+E|145|151
+E|146|160
+E|147|156
+E|148|155
+E|151|152
+E|153|158
+E|157|161
+E|158|155 160
+E|159|158
+E|160|155 157
+E|161|155
+E|162|161
+E|163|161
 E|172|173
-E|177|171
-E|178|171 172
-E|184|173 174
-E|187|46 48 49 153 185 208 211 212 213 214 217 222 223 224 225 226 230 231 232 467
-E|208|34 46 48 185 211 212 215 226 235
-E|209|210
-E|210|34
-E|211|209 210 226
-E|212|209 210 226 229
-E|213|209 210 226 229
-E|214|216
-E|215|216
-E|216|211 212 236
-E|219|207 218
-E|221|218 226
-E|229|209 213 226
-E|233|209 232
-E|236|209 226 234 235
-E|237|210
-E|239|207
-E|255|269
-E|256|269
-E|257|269
-E|259|254 264 266 271 275 286 287
-E|260|256 264
-E|261|256 264
-E|264|249 255 256
-E|265|264
-E|267|253 254 264 271 272
-E|268|253 254 264 271 272
-E|270|269
-E|272|253 271
-E|273|254 264 266 271 272 287
-E|274|264 266 272 275
-E|275|254 264 266 271 287
-E|276|254 264 266 271 275 286 287
-E|277|250 275 287
-E|278|250 275 287
-E|279|287
-E|283|251 287
-E|284|250 287
-E|285|287
-E|286|287
-E|289|287
-E|290|287
-E|294|300
-E|295|286 293 294
-E|296|286 293 294
-E|297|251 287 293 294
-E|298|251 287 293 294
-E|299|287 293
-E|300|287 293
-E|301|293
-E|302|293
-E|303|293
-E|304|293
-E|306|293
-E|307|293
-E|318|316 317 326 484 485 486 487
-E|322|321
-E|326|325
+E|173|174
+E|178|172
+E|179|172 173
+E|185|174 175
+E|188|46 48 49 154 186 209 212 213 214 215 218 223 224 225 226 227 231 232 233 468
+E|209|34 46 48 186 212 213 216 227 236
+E|210|211
+E|211|34
+E|212|210 211 227
+E|213|210 211 227 230
+E|214|210 211 227 230
+E|215|217
+E|216|217
+E|217|212 213 237
+E|220|208 219
+E|222|219 227
+E|230|210 214 227
+E|234|210 233
+E|237|210 227 235 236
+E|238|211
+E|240|208
+E|256|270
+E|257|270
+E|258|270
+E|260|255 265 267 272 276 287 288
+E|261|257 265
+E|262|257 265
+E|265|250 256 257
+E|266|265
+E|268|254 255 265 272 273
+E|269|254 255 265 272 273
+E|271|270
+E|273|254 272
+E|274|255 265 267 272 273 288
+E|275|265 267 273 276
+E|276|255 265 267 272 288
+E|277|255 265 267 272 276 287 288
+E|278|251 276 288
+E|279|251 276 288
+E|280|288
+E|284|252 288
+E|285|251 288
+E|286|288
+E|287|288
+E|290|288
+E|291|288
+E|295|301
+E|296|287 294 295
+E|297|287 294 295
+E|298|252 288 294 295
+E|299|252 288 294 295
+E|300|288 294
+E|301|288 294
+E|302|294
+E|303|294
+E|304|294
+E|305|294
+E|307|294
+E|308|294
+E|319|317 318 327 485 486 487 488
+E|323|322
 E|327|326
-E|328|326
-E|336|330 331 332 333 334 335
-E|338|337
-E|339|336 338 340 341
-E|343|315 338 339 344 345 346 347 348 349 355 356 357 358 359 360 361
-E|344|363
-E|352|351
-E|353|351
-E|354|350
-E|361|330 352 353 354 363
-E|363|362
-E|365|343
-E|366|343
-E|367|343
-E|368|343
-E|369|343
-E|370|343
-E|371|343
-E|372|343
-E|373|343
-E|374|343
-E|375|343
-E|376|343
-E|377|343
-E|378|343
-E|379|343
-E|380|343
-E|381|343
-E|382|343
-E|383|343
-E|384|343
-E|385|343
-E|386|343
-E|387|343
-E|388|343 364
-E|389|343 364
-E|390|343
-E|391|343
-E|401|398 399
-E|403|398
-E|404|398
-E|405|398
-E|406|398
-E|407|398
-E|408|398
-E|412|413
-E|414|400
-E|416|400
-E|418|400 412 414 415 416
-E|419|397 399 400 403 407
-E|420|412 414 415 417
-E|421|418
-E|433|411 418
-E|435|401 402 403 404 405 406 407 408 409 410 432 433 434
-E|436|435
-E|437|399
-E|439|399
-E|440|399 432
-E|441|399 432
-E|442|399
-E|443|399 432 446
-E|446|398
-E|448|436
-E|449|436
-E|451|436
-E|453|448
-E|454|448
-E|455|448
-E|459|453
-E|460|468
-E|463|461
-E|464|399 432 453
-E|465|399 432 453
-E|468|486 487
-E|469|467 468
-E|479|478
-E|481|480
-E|482|472 473 479 481 483
-E|483|473
-E|488|484 485 486 487
-E|489|596 597
-E|490|492 596 597
-E|491|597
-E|492|597
-E|497|593 598
-E|498|594 598
-E|499|593 598
-E|500|597
-E|502|492 494 498 501 593 596 597 598
-E|503|494 498 501 596 601
-E|504|494 601
-E|505|494 499 501 594 598 601
-E|507|494 498 501 506 569 594 596 598 601 602
-E|508|494 495 498 593 596 597 598 601
-E|509|34 494 496 498 501 569 570 596 601
-E|510|498 501 596
-E|511|494 498 499 501 569 594 596 597 598 601
-E|514|519
-E|517|515
-E|518|515
-E|519|517 518
-E|520|519
+E|328|327
+E|329|327
+E|337|331 332 333 334 335 336
+E|339|338
+E|340|337 339 341 342
+E|344|316 339 340 345 346 347 348 349 350 356 357 358 359 360 361 362
+E|345|364
+E|353|352
+E|354|352
+E|355|351
+E|362|331 353 354 355 364
+E|364|363
+E|366|344
+E|367|344
+E|368|344
+E|369|344
+E|370|344
+E|371|344
+E|372|344
+E|373|344
+E|374|344
+E|375|344
+E|376|344
+E|377|344
+E|378|344
+E|379|344
+E|380|344
+E|381|344
+E|382|344
+E|383|344
+E|384|344
+E|385|344
+E|386|344
+E|387|344
+E|388|344
+E|389|344 365
+E|390|344 365
+E|391|344
+E|392|344
+E|402|399 400
+E|404|399
+E|405|399
+E|406|399
+E|407|399
+E|408|399
+E|409|399
+E|413|414
+E|415|401
+E|417|401
+E|419|401 413 415 416 417
+E|420|398 400 401 404 408
+E|421|413 415 416 418
+E|422|419
+E|434|412 419
+E|436|402 403 404 405 406 407 408 409 410 411 433 434 435
+E|437|436
+E|438|400
+E|440|400
+E|441|400 433
+E|442|400 433
+E|443|400
+E|444|400 433 447
+E|447|399
+E|449|437
+E|450|437
+E|452|437
+E|454|449
+E|455|449
+E|456|449
+E|460|454
+E|461|469
+E|464|462
+E|465|400 433 454
+E|466|400 433 454
+E|469|487 488
+E|470|468 469
+E|480|479
+E|482|481
+E|483|473 474 480 482 484
+E|484|474
+E|489|485 486 487 488
+E|490|597 598
+E|491|493 597 598
+E|492|598
+E|493|598
+E|498|594 599
+E|499|595 599
+E|500|594 599
+E|501|598
+E|503|493 495 499 502 594 597 598 599
+E|504|495 499 502 597 602
+E|505|495 602
+E|506|495 500 502 595 599 602
+E|508|495 499 502 507 570 595 597 599 602 603
+E|509|495 496 499 594 597 598 599 602
+E|510|34 495 497 499 502 570 571 597 602
+E|511|499 502 597
+E|512|495 499 500 502 570 595 597 598 599 602
+E|515|520
+E|518|516
+E|519|516
+E|520|518 519
 E|521|520
-E|525|514
-E|526|513
-E|528|501
-E|529|494 499 500 501 514 521 522 523 526 528 569 597 601
-E|530|596 597
-E|531|494 499 501 513 516 520 523 524 525 528 530 570 594 597 598 601
-E|532|513
-E|533|513
-E|534|513
-E|535|513
-E|536|526
-E|537|526
-E|538|526
-E|539|526
-E|540|514 517 518
-E|541|514 517 518
-E|542|514
-E|543|514
-E|544|517 518 520
-E|545|517 518 520
-E|546|520
+E|522|521
+E|526|515
+E|527|514
+E|529|502
+E|530|495 500 501 502 515 522 523 524 527 529 570 598 602
+E|531|597 598
+E|532|495 500 502 514 517 521 524 525 526 529 531 571 595 598 599 602
+E|533|514
+E|534|514
+E|535|514
+E|536|514
+E|537|527
+E|538|527
+E|539|527
+E|540|527
+E|541|515 518 519
+E|542|515 518 519
+E|543|515
+E|544|515
+E|545|518 519 521
+E|546|518 519 521
 E|547|521
-E|548|521
-E|549|520
-E|550|520
-E|551|520
-E|552|515 518 520
-E|553|520
-E|554|522
-E|555|522
-E|556|522
-E|557|514 521 523
-E|558|524
-E|559|523 524
-E|560|520
-E|561|516
-E|562|516
-E|563|516
-E|564|518 525
-E|565|525
-E|566|514 525
-E|567|494 498 501 569 596 601
-E|568|494 598
-E|569|494 598
-E|570|41 494 598
-E|571|492 494 498 501 593 598
-E|572|494 495 498 501 569 642
-E|573|494 495 498 501 568 596 601 641
-E|574|493 601
-E|575|494 498 596 601
-E|579|151 157 161 489 492 494 497 498 499 500 501 502 504 505 508 509 510 511 529 530 531 567 570 573 574 575 593 596 597 598 600 601
-E|591|587 588
-E|593|592
-E|594|592
-E|596|594
-E|597|593
-E|601|598
-E|640|637 639
+E|548|522
+E|549|522
+E|550|521
+E|551|521
+E|552|521
+E|553|516 519 521
+E|554|521
+E|555|523
+E|556|523
+E|557|523
+E|558|515 522 524
+E|559|525
+E|560|524 525
+E|561|521
+E|562|517
+E|563|517
+E|564|517
+E|565|519 526
+E|566|526
+E|567|515 526
+E|568|495 499 502 570 597 602
+E|569|495 599
+E|570|495 599
+E|571|41 495 599
+E|572|493 495 499 502 594 599
+E|573|495 496 499 502 570 643
+E|574|495 496 499 502 569 597 602 642
+E|575|494 602
+E|576|495 499 597 602
+E|580|152 158 162 490 493 495 498 499 500 501 502 503 505 506 509 510 511 512 530 531 532 568 571 574 575 576 594 597 598 599 601 602
+E|592|588 589
+E|594|593
+E|595|593
+E|597|595
+E|598|594
+E|602|599
+E|641|638 640

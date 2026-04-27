@@ -253,7 +253,7 @@ impl HoverState {
         !keep_visible_popup
     }
 
-    pub fn record_hovered_diagnostic(
+        pub fn record_hovered_diagnostic(
         &mut self,
         diagnostic: HoveredDiagnostic,
         type_target: Option<usize>,
@@ -268,7 +268,13 @@ impl HoverState {
                 .is_some_and(|popup| popup.byte_offset == active_target)
                 && type_target != Some(active_target)
             {
-                return Some(active_target);
+                let is_same_diagnostic = self
+                    .hovered_diags_cache
+                    .iter()
+                    .any(|existing| existing.0 == diagnostic.0);
+                if !is_same_diagnostic {
+                    return Some(active_target);
+                }
             }
         }
         if !self
@@ -1245,6 +1251,32 @@ mod tests {
         assert_eq!(target, Some(3717));
         assert_eq!(state.hovered_diags_cache, vec![(0, 10.0, 20.0, 42.0, 60.0)]);
         assert_eq!(state.diagnostic_popup_cache(), &[(0, 10.0, 20.0, 42.0, 60.0)]);
+    }
+
+        #[test]
+    fn active_combined_popup_switches_target_for_same_diagnostic() {
+        let mut state = HoverState::default();
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "combined".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 100,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.popup_diag_type_target = Some(100);
+        state.hovered_diags_cache.push((0, 10.0, 20.0, 42.0, 60.0));
+
+        let target = state.record_hovered_diagnostic((0, 10.0, 20.0, 42.0, 60.0), Some(200));
+
+        assert_eq!(target, Some(200));
+        assert_eq!(state.hovered_diags_cache, vec![(0, 10.0, 20.0, 42.0, 60.0)]);
     }
 
     #[test]
