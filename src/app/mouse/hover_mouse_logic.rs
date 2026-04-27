@@ -495,37 +495,82 @@ pub fn hover_anchor_for_byte(
         token_end += 1;
     }
 
-    if token_start > token_end || line_start > token_start {
+        if token_start > token_end || line_start > token_start {
         return (renderer.last_mouse_x, renderer.last_mouse_y);
     }
 
-    let mut prefix_w = 0.0;
-    if let Some(prefix) = text.get(line_start..token_start) {
-        for c in prefix.chars() {
-            if c != '\n' && c != '\u{FE0F}' && c != '\u{200D}' {
-                prefix_w += renderer.char_advance(c);
-            }
-        }
-    }
-
-    let mut token_w = 0.0;
-    if let Some(token) = text.get(token_start..token_end) {
-        for c in token.chars() {
-            if c != '\n' && c != '\u{FE0F}' && c != '\u{200D}' {
-                token_w += renderer.char_advance(c);
-            }
-        }
-    }
+    let target_w = compute_hover_x_offset(
+        &text,
+        line_start,
+        token_start,
+        token_end,
+        byte_offset,
+        |c| renderer.char_advance(c),
+    );
 
     let vis_line_idx = renderer
         .phys_to_visual
         .get(phys_line)
         .copied()
         .unwrap_or(phys_line) as f32;
-    let x = renderer.left_padding - renderer.last_scroll_x + prefix_w + token_w * 0.5;
+    let x = renderer.left_padding - renderer.last_scroll_x + target_w;
     let y = (vis_line_idx * renderer.line_height) - render_scroll_y + renderer.line_height * 0.5;
 
     (x, y)
+}
+
+pub(crate) fn compute_hover_x_offset<F>(
+    text: &str,
+    line_start: usize,
+    token_start: usize,
+    token_end: usize,
+    byte_offset: usize,
+    mut char_advance: F,
+) -> f32
+where
+    F: FnMut(char) -> f32,
+{
+    let mut target_byte = byte_offset.clamp(token_start, token_end);
+    while target_byte > token_start && !text.is_char_boundary(target_byte) {
+        target_byte -= 1;
+    }
+
+    let mut target_w = 0.0;
+    if let Some(prefix) = text.get(line_start..target_byte) {
+        for c in prefix.chars() {
+            if c != '\n' && c != '\u{FE0F}' && c != '\u{200D}' {
+                target_w += char_advance(c);
+            }
+        }
+    }
+    target_w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_hover_x_offset_uses_exact_byte_for_anchor() {
+        let text = "    add_default_users_and_roles_session";
+        let line_start = 0;
+        let token_start = 4;
+        let token_end = text.len();
+
+        let advance = |_c: char| 10.0;
+
+        // Hovering over 'd' in "default" (index 8)
+        let w1 = compute_hover_x_offset(text, line_start, token_start, token_end, 8, advance);
+        assert_eq!(w1, 80.0);
+
+        // Hovering over 's' in "session" (index 28)
+        let w2 = compute_hover_x_offset(text, line_start, token_start, token_end, 28, advance);
+        assert_eq!(w2, 280.0);
+
+        // Hovering exactly at token start
+        let w3 = compute_hover_x_offset(text, line_start, token_start, token_end, 4, advance);
+        assert_eq!(w3, 40.0);
+    }
 }
 
 pub(crate) fn hover_popup_byte_at(
