@@ -126,6 +126,7 @@ impl HoverState {
         self.popup_diag_type_target = None;
         self.stale_combined_popup = false;
         self.diag_hover_ready_after_stale = false;
+        self.diag_anim_progress = 0.0;
         self.diag_selection_anchor = None;
         self.diag_selection_cursor = None;
         self.diag_selecting = false;
@@ -141,6 +142,7 @@ impl HoverState {
         self.diag_scroll.target = 0.0;
         self.diag_scroll.current = 0.0;
         self.diag_max_scroll = 0.0;
+        self.diag_anim_progress = 0.0;
         self.diag_selection_anchor = None;
         self.diag_selection_cursor = None;
         self.diag_selecting = false;
@@ -342,6 +344,7 @@ impl HoverState {
             self.diag_scroll.target = 0.0;
             self.diag_scroll.current = 0.0;
             self.diag_max_scroll = 0.0;
+            self.diag_anim_progress = 0.0;
             self.hovered_diags.clear();
             self.hovered_diags_cache.clear();
             self.stale_hovered_diags_cache.clear();
@@ -440,8 +443,9 @@ impl HoverState {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_hover_visibility, compute_hover_visibility_from_matches,
-        diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+        advance_hover_anim_progress, compute_hover_visibility,
+        compute_hover_visibility_from_matches, diagnostic_hover_byte_range_on_line,
+        diagnostic_hover_range_on_line,
         diagnostic_hover_target_byte_on_line, hover_bytes_share_token, hover_token_bounds,
         hover_token_text, is_hover_target_byte, is_in_hover_popup_or_bridge,
         is_python_hover_keyword, normalize_hover_byte, HoverState,
@@ -533,6 +537,16 @@ mod tests {
     }
 
     #[test]
+    fn hover_animation_progress_uses_shared_slightly_slower_curve() {
+        let next = advance_hover_anim_progress(0.0, 0.016);
+
+        assert!((next - 0.192).abs() < 0.0001);
+        assert!(next < 0.24);
+        assert_eq!(advance_hover_anim_progress(0.995, 0.016), 1.0);
+        assert_eq!(advance_hover_anim_progress(1.0, 0.016), 1.0);
+    }
+
+    #[test]
     fn hover_visibility_combines_offsets_inside_same_identifier() {
         let mut editor = crate::editor::Editor::new(128);
         editor.insert_str("    handlers\n");
@@ -577,6 +591,7 @@ mod tests {
         state.popup_diag_type_target = Some(99);
         state.stale_combined_popup = true;
         state.diag_hover_ready_after_stale = true;
+        state.diag_anim_progress = 1.0;
         state.diag_selection_anchor = Some(1);
         state.diag_selection_cursor = Some(3);
         state.diag_selecting = true;
@@ -597,6 +612,7 @@ mod tests {
         assert!(state.popup_diag_type_target.is_none());
         assert!(!state.stale_combined_popup);
         assert!(!state.diag_hover_ready_after_stale);
+        assert_eq!(state.diag_anim_progress, 0.0);
         assert!(state.diag_selection_anchor.is_none());
         assert!(state.diag_selection_cursor.is_none());
         assert!(!state.diag_selecting);
@@ -643,6 +659,7 @@ mod tests {
         state
             .hovered_diags_cache
             .push((3, 100.0, 200.0, 220.0, 140.0));
+        state.diag_anim_progress = 0.7;
         state.diag_selection_anchor = Some(1);
         state.diag_selection_cursor = Some(2);
         state.diag_selecting = true;
@@ -662,6 +679,7 @@ mod tests {
             state.hovered_diags_cache,
             vec![(3, 100.0, 200.0, 220.0, 140.0)]
         );
+        assert_eq!(state.diag_anim_progress, 0.0);
         assert!(state.diag_selection_anchor.is_none());
         assert!(state.diag_selection_cursor.is_none());
         assert!(!state.diag_selecting);
@@ -1061,6 +1079,7 @@ mod tests {
         state.hovered_diag_type_target = Some(3717);
         state.diag_hover_timer_idx = Some(0);
         state.diag_hover_timer = 0.2;
+        state.diag_anim_progress = 1.0;
         state.diag_text.push_str("old diagnostic");
 
         state.finish_stale_combined_transition();
@@ -1072,6 +1091,7 @@ mod tests {
         assert!(state.hovered_diags_cache.is_empty());
         assert!(state.hovered_diag_type_target.is_none());
         assert!(state.diag_text.is_empty());
+        assert_eq!(state.diag_anim_progress, 0.0);
         assert!(state.diag_hover_ready_after_stale);
         assert!(state.advance_diagnostic_hover_timer(Some(1), true, false, 0.0));
         assert_eq!(state.diag_hover_timer_idx, Some(1));
@@ -1727,6 +1747,19 @@ thread_local! {
 }
 
 pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
+pub const HOVER_POPUP_ANIM_SPEED: f32 = 12.0;
+
+pub fn advance_hover_anim_progress(progress: f32, dt: f32) -> f32 {
+    if progress >= 1.0 {
+        return 1.0;
+    }
+    let next = progress + (1.0 - progress) * HOVER_POPUP_ANIM_SPEED * dt;
+    if next > 0.99 {
+        1.0
+    } else {
+        next
+    }
+}
 
 #[allow(dead_code)]
 pub fn compute_hover_visibility(

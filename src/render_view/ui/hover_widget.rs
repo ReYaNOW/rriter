@@ -61,13 +61,39 @@ pub fn compute_animated_scissor(
     let target_y = by - 4.0;
     let target_w = box_w + 8.0;
     let target_h = box_h + 8.0;
-    
+
     let anim_sc_x = mx + (target_x - mx) * anim_progress;
     let anim_sc_y = my + (target_y - my) * anim_progress;
     let anim_sc_w = target_w * anim_progress;
     let anim_sc_h = target_h * anim_progress;
-    
+
     (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h)
+}
+
+pub fn compute_hover_content_scissor(
+    mx: f32,
+    my: f32,
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    anim_progress: f32,
+    attached_diag: Option<(f32, f32, f32, f32)>,
+    attached_anim_progress: f32,
+) -> (f32, f32, f32, f32) {
+    if let Some((diag_x, diag_y, diag_w, diag_h)) = attached_diag {
+        compute_animated_scissor(
+            mx,
+            my,
+            diag_x,
+            diag_y,
+            box_w.max(diag_w),
+            diag_h + box_h,
+            attached_anim_progress,
+        )
+    } else {
+        compute_animated_scissor(mx, my, bx, by, box_w, box_h, anim_progress)
+    }
 }
 
 pub fn compute_diagnostic_layout(
@@ -908,8 +934,21 @@ impl Renderer {
         let scroll_y = popup.scroll.current;
 
         let anim_progress = popup.anim_progress;
-        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_animated_scissor(
-            mx, my, bx, by, box_w, box_h, anim_progress,
+        let attached_anim_progress = if attached_diag.is_some() {
+            crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress)
+        } else {
+            anim_progress
+        };
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_hover_content_scissor(
+            mx,
+            my,
+            bx,
+            by,
+            box_w,
+            box_h,
+            anim_progress,
+            attached_diag,
+            attached_anim_progress,
         );
 
         let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
@@ -1288,5 +1327,40 @@ mod tests {
         assert_eq!(sc_y, 20.0);
         assert_eq!(sc_w, 0.0);
         assert_eq!(sc_h, 0.0);
+    }
+
+    #[test]
+    fn test_attached_hover_content_scissor_uses_shared_combined_animation() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_hover_content_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.25,
+            Some((90.0, 70.0, 60.0, 30.0)),
+            0.5,
+        );
+        assert_eq!(sc_x, 48.0);
+        assert_eq!(sc_y, 43.0);
+        assert_eq!(sc_w, 34.0);
+        assert_eq!(sc_h, 44.0);
+    }
+
+    #[test]
+    fn test_detached_hover_content_scissor_keeps_popup_animation() {
+        let direct = compute_animated_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.25,
+        );
+        let content = compute_hover_content_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.25,
+            None,
+            1.0,
+        );
+        assert_eq!(content, direct);
     }
 }

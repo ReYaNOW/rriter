@@ -238,18 +238,14 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut s = state.borrow_mut();
         if s.diag_rect.is_some() && s.diag_anim_progress < 1.0 {
-            s.diag_anim_progress += (1.0 - s.diag_anim_progress) * 15.0 * dt;
-            if s.diag_anim_progress > 0.99 {
-                s.diag_anim_progress = 1.0;
-            }
+            s.diag_anim_progress =
+                crate::app::mouse::advance_hover_anim_progress(s.diag_anim_progress, dt);
             needs_redraw = true;
         }
         if let Some(ref mut p) = s.popup {
             if p.anim_progress < 1.0 {
-                p.anim_progress += (1.0 - p.anim_progress) * 15.0 * dt;
-                if p.anim_progress > 0.99 {
-                    p.anim_progress = 1.0;
-                }
+                p.anim_progress =
+                    crate::app::mouse::advance_hover_anim_progress(p.anim_progress, dt);
                 needs_redraw = true;
             }
         }
