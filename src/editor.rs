@@ -1115,4 +1115,54 @@ mod tests {
         editor.snap_cursor_out_of_fold(0);
         assert_eq!(editor.cursor, editor.line_offsets[3]);
     }
+
+    #[test]
+    fn editor_navigation_expand_home_end_folds_and_utf16_edges() {
+        let mut editor = Editor::new(128);
+        editor.insert_str("let value = call(\"hello\", [one, two]);\nnext 😀 line\n");
+        let text = editor.get_full_text();
+
+        editor.cursor = text.find("value").unwrap() + 2;
+        editor.select_expand();
+        assert_eq!(editor.get_selection().as_deref(), Some("value"));
+        editor.select_expand();
+        assert_eq!(editor.get_selection().as_deref(), Some("let value = call(\"hello\", [one, two]);"));
+
+        editor.cursor = text.find("hello").unwrap() + 1;
+        editor.selection_anchor = None;
+        editor.select_expand();
+        assert_eq!(editor.get_selection().as_deref(), Some("hello"));
+        editor.select_expand();
+        assert_eq!(editor.get_selection().as_deref(), Some("\"hello\""));
+
+        editor.cursor = text.find("one").unwrap();
+        editor.selection_anchor = Some(text.find("two").unwrap() + 3);
+        editor.select_expand();
+        assert_eq!(editor.get_selection().as_deref(), Some("[one, two]"));
+
+        editor.cursor = text.find("next").unwrap() + 2;
+        editor.selection_anchor = None;
+        editor.move_home(true);
+        assert_eq!(editor.selection_anchor, Some(text.find("next").unwrap() + 2));
+        assert_eq!(editor.cursor, text.find("next").unwrap());
+        editor.move_end(false);
+        assert!(editor.selection_anchor.is_none());
+        assert_eq!(editor.cursor, text.trim_end().len());
+
+        let mut seen = Vec::new();
+        editor.utf16_col_to_byte_advance(1, |ch, col, byte| seen.push((ch, col, byte)));
+        let emoji = seen.iter().find(|(ch, _, _)| *ch == '😀').unwrap();
+        assert_eq!(emoji.1, 5);
+        assert_eq!(seen.iter().find(|(ch, _, _)| *ch == 'l').unwrap().1, 8);
+
+        editor.foldable_lines.insert(0, 1);
+        editor.folded_lines.insert(0);
+        editor.cursor = editor.line_offsets[1] + 4;
+        editor.snap_cursor_out_of_fold(editor.len());
+        assert_eq!(editor.cursor, editor.line_offsets[2].saturating_sub(1));
+
+        editor.cursor = editor.line_offsets[1] + 4;
+        editor.snap_cursor_out_of_fold(0);
+        assert_eq!(editor.cursor, editor.line_offsets[2]);
+    }
 }

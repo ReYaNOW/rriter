@@ -1259,3 +1259,99 @@ impl Highlighter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn wait(highlighter: &mut Highlighter, version: u64) {
+        assert!(
+            highlighter.wait_for_first_result(version, Duration::from_secs(2)),
+            "highlighter did not produce version {version}"
+        );
+        assert_eq!(highlighter.current_version, version);
+    }
+
+    #[test]
+    fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
+        let mut highlighter = Highlighter::new();
+
+        highlighter.reset(
+            1,
+            "def greet(name):\n    return f'hi {name}'\n".to_string(),
+            "py".to_string(),
+        );
+        wait(&mut highlighter, 1);
+        assert!(highlighter.spans.iter().any(|span| span.color == DRACULA_PINK));
+        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+        assert!(highlighter.completions.iter().any(|item| item.word == "name"));
+
+        highlighter.apply_edits(
+            2,
+            vec![SyncEdit::Insert {
+                offset: 0,
+                text: "# comment\n".to_string(),
+            }],
+            Some(0),
+            Some(10),
+        );
+        wait(&mut highlighter, 2);
+        assert!(highlighter.spans.iter().any(|span| span.color == DRACULA_COMMENT));
+
+        let cases = [
+            (
+                "rs",
+                "fn main() { let value = Some(1); println!(\"{}\", value); }\n",
+                "println!",
+            ),
+            ("dart", "void main() { print('hi'); }\n", "Widget"),
+            ("js", "function run(value) { console.log(value); }\n", "Promise"),
+            ("cpp", "int main() { printf(\"hi\"); return 0; }\n", "printf"),
+            ("makefile", "all:\n\tcc main.c\n", "if"),
+        ];
+
+        for (idx, (ext, text, builtin)) in cases.iter().enumerate() {
+            let version = 10 + idx as u64;
+            highlighter.reset(version, (*text).to_string(), (*ext).to_string());
+            wait(&mut highlighter, version);
+            assert!(
+                highlighter
+                    .completions
+                    .iter()
+                    .any(|item| item.word == *builtin),
+                "missing builtin {builtin} for {ext}"
+            );
+        }
+    }
+
+    #[test]
+    fn highlighter_thread_handles_shebang_log_and_invalid_incremental_edit() {
+        let mut highlighter = Highlighter::new();
+
+        highlighter.reset(
+            1,
+            "#!/usr/bin/env python\nprint(None)\n".to_string(),
+            String::new(),
+        );
+        wait(&mut highlighter, 1);
+        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+
+        highlighter.reset(2, "plain log text\n".to_string(), "log".to_string());
+        wait(&mut highlighter, 2);
+        assert_eq!(highlighter.spans.len(), 1);
+        assert_eq!(highlighter.spans[0].color, DRACULA_FG);
+
+        highlighter.apply_edits(
+            3,
+            vec![SyncEdit::Delete {
+                offset: 100,
+                len: 4,
+            }],
+            Some(100),
+            Some(104),
+        );
+        wait(&mut highlighter, 3);
+        assert!(highlighter.syntax_errors.is_empty());
+    }
+}

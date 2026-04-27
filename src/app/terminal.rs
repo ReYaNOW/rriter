@@ -357,6 +357,17 @@ impl TermGrid {
 mod tests {
     use super::*;
 
+    fn feed(grid: &mut TermGrid, bytes: &[u8]) {
+        let mut parser = Parser::new();
+        parser.advance(grid, bytes);
+    }
+
+    fn set_line(grid: &mut TermGrid, row: usize, text: &str) {
+        for (x, ch) in text.chars().enumerate() {
+            grid.lines[row][x].c = ch;
+        }
+    }
+
     #[test]
     fn terminal_grid_print_scroll_resize_and_selection_end_to_end() {
         let mut grid = TermGrid::new(4, 2);
@@ -382,6 +393,86 @@ mod tests {
         assert_eq!(grid.cols, 6);
         assert_eq!(grid.visible_rows, 3);
         assert!(grid.lines.iter().all(|line| line.len() == 6));
+    }
+
+    #[test]
+    fn terminal_csi_cursor_modes_colors_and_replies_end_to_end() {
+        let mut grid = TermGrid::new(8, 3);
+        let (tx, rx) = std::sync::mpsc::channel();
+        grid.reply_tx = Some(tx);
+
+        feed(
+            &mut grid,
+            b"abc\x1b[2D!\x1b[s\x1b[3;8H?\x1b[u\x1b[31;44;1mX\x1b[22mY\x1b[38;5;200;48;5;17mZ",
+        );
+
+        assert_eq!(grid.lines[0][0].c, 'a');
+        assert_eq!(grid.lines[0][1].c, '!');
+        assert_eq!(grid.lines[2][7].c, '?');
+        assert_eq!((grid.lines[0][2].c, grid.lines[0][2].fg, grid.lines[0][2].bg), ('X', 9, 4));
+        assert_eq!((grid.lines[0][3].c, grid.lines[0][3].fg, grid.lines[0][3].bg), ('Y', 1, 4));
+        assert_eq!((grid.lines[0][4].c, grid.lines[0][4].fg, grid.lines[0][4].bg), ('Z', 200, 17));
+
+        feed(&mut grid, b"\x1b[?25l\x1b[?1h\x1b[?1000h");
+        assert!(!grid.cursor_visible);
+        assert!(grid.app_cursor_keys);
+        assert!(grid.mouse_tracking);
+
+        feed(&mut grid, b"\x1b[6n\x1b[c\x1b]10;?\x1b\\");
+        let reply_pos = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
+        let reply_device = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
+        let reply_color = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
+        assert!(String::from_utf8(reply_pos).unwrap().starts_with("\x1B[1;6R"));
+        assert_eq!(reply_device, b"\x1B[?62c");
+        assert_eq!(reply_color, b"\x1B]10;rgb:ffff/ffff/ffff\x1B\\");
+
+        feed(&mut grid, b"\x1b[?1049hALT\x1b[?1049l");
+        assert!(!grid.is_alt);
+        assert!(grid.alt_lines.is_none());
+        assert_eq!(grid.lines[0][0].c, 'a');
+    }
+
+    #[test]
+    fn terminal_csi_erases_scroll_region_and_line_mutation_end_to_end() {
+        let mut grid = TermGrid::new(5, 4);
+        set_line(&mut grid, 0, "abcde");
+        set_line(&mut grid, 1, "fghij");
+        set_line(&mut grid, 2, "klmno");
+        set_line(&mut grid, 3, "pqrst");
+
+        feed(&mut grid, b"\x1b[2;2H\x1b[K");
+        assert_eq!(grid.lines[1][0].c, 'f');
+        assert_eq!(grid.lines[1][1].c, ' ');
+
+        feed(&mut grid, b"\x1b[1;3H\x1b[1K");
+        assert_eq!(grid.lines[0][0].c, ' ');
+        assert_eq!(grid.lines[0][3].c, 'd');
+
+        feed(&mut grid, b"\x1b[2J");
+        assert!(grid
+            .lines
+            .iter()
+            .flat_map(|line| line.iter())
+            .all(|cell| cell.c == ' '));
+
+        set_line(&mut grid, 0, "11111");
+        set_line(&mut grid, 1, "22222");
+        set_line(&mut grid, 2, "33333");
+        set_line(&mut grid, 3, "44444");
+        feed(&mut grid, b"\x1b[2;3r\x1b[2;1H\x1b[LAAAAA\x1b[2;1H\x1b[M");
+        assert_eq!(grid.scroll_region, (1, 2));
+        assert_eq!(grid.cur_y, 1);
+
+        feed(&mut grid, b"\x1b[1;1H12345\x1b[1;3H\x1b[2P");
+        let top: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        assert_eq!(top, "125  ");
+
+        feed(&mut grid, b"\x1b[1;1Habcde\x1b[1;2H\x1b[3X");
+        let top: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        assert_eq!(top, "a   e");
+
+        feed(&mut grid, b"\x1b[3J");
+        assert!(grid.scrollback.is_empty());
     }
 }
 
@@ -781,6 +872,7 @@ pub struct Terminal {
     pub title: String,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Terminal {
     pub fn spawn(window: Option<std::sync::Arc<winit::window::Window>>) -> Self {
         let pty_system = NativePtySystem::default();

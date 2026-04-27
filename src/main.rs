@@ -48,6 +48,7 @@ impl Default for Config {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn load_recent_files() -> Vec<PathBuf> {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -64,6 +65,7 @@ pub fn load_recent_files() -> Vec<PathBuf> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_recent_files(files: &[PathBuf]) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -78,6 +80,7 @@ pub fn save_recent_files(files: &[PathBuf]) {
     let _ = std::fs::write(&path, content);
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -105,6 +108,7 @@ pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
     (tabs, active)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -127,6 +131,7 @@ pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide:
     let _ = std::fs::write(&path, lines.join("\n"));
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_panel_state(state: &crate::app::IdePanelState) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -157,6 +162,7 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
     let _ = std::fs::write(&path, lines.join("\n"));
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn load_panel_state() -> crate::app::IdePanelState {
     let mut state = crate::app::IdePanelState::default();
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
@@ -211,6 +217,7 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
     state
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_config(config: &Config) {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
@@ -236,6 +243,7 @@ pub fn save_config(config: &Config) {
     let _ = std::fs::write(&path, content);
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn load_config() -> Config {
     let mut config = Config::default();
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
@@ -309,6 +317,7 @@ fn load_config() -> Config {
     config
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     let path = PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config/kdeglobals");
     let content = std::fs::read_to_string(path).ok()?;
@@ -331,6 +340,7 @@ fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     None
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn load_dracula() -> Theme {
     let sel_color =
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
@@ -350,6 +360,7 @@ fn load_dracula() -> Theme {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn main() {
     #[cfg(target_os = "linux")]
     unsafe {

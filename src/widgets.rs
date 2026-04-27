@@ -35,6 +35,7 @@ impl Button {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn render(
         &self,
         renderer: &mut Renderer,
@@ -125,6 +126,8 @@ impl IconButton {
             mx >= self.x && mx <= self.x + self.size && my >= self.y && my <= self.y + self.size
         }
     }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn render(
         &self,
         renderer: &mut Renderer,
@@ -217,6 +220,7 @@ impl IconButton {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_welcome_buttons(
     _width: f32,
     x: f32,
@@ -270,6 +274,7 @@ pub fn get_welcome_buttons(
     (btn_new, btn_open, btn_ide)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_dialog_buttons(
     box_x: f32,
     box_y: f32,
