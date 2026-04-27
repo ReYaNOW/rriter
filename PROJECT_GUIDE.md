@@ -58,6 +58,9 @@ Important ideas:
 * Text, rectangles, SDF rounded rects, noise, icons are pushed into renderer buffers.
 * Hot draw path must avoid large allocations.
 * `render_view.rs` is frame orchestrator.
+* `render_view/editor_text_layer.rs` owns visible editor glyph/background/cursor draw loops.
+* `render_view/ide_panels.rs` owns IDE sidebar, explorer panel, and bottom panel shells.
+* `render_view/hover_overlays.rs` owns LSP squiggle hover collection and hover overlay draw routing.
 * Specialized modules render text, tabs, minimap, terminal, panels, dialogs.
 
 ### Syntax highlighting
@@ -88,6 +91,7 @@ Files:
 
 ```text
 src/app.rs
+src/app/app_state.rs
 src/app/events.rs
 src/app/events/*
 src/app/keyboard.rs
@@ -99,6 +103,7 @@ src/app/mouse/*
 Input is split by behavior:
 
 * Window events and frame tick.
+* Shared app state lives in `app_state.rs`; behavior impls stay in `app.rs` and submodules.
 * Keyboard routing.
 * Mouse press/release.
 * Cursor movement.
@@ -207,14 +212,14 @@ make fast
 
 Use `make test` when tests matter.
 
-#### `gen_project_ai_map.py`
+#### `scripts/gen_project_map.py`
 
 Generates `PROJECT_AI_MAP.txt`.
 
 Use after source layout changes:
 
 ```bash
-python3 gen_project_ai_map.py
+make api-map
 ```
 
 #### `PROJECT_AI_MAP.txt`
@@ -243,11 +248,17 @@ Use when task touches startup, window creation, GL context setup, or global app 
 
 ### `src/app.rs`
 
-Main `App` state.
+Main `App` behavior impls and app-level editor/workspace operations.
 
-Likely owns editor state, panels, UI state, LSP state, terminal state, file tree state, hover state, settings, dialogs, and input-related fields.
+Use when changing tab/file/search/autocomplete behavior that crosses app state and subsystems.
 
-Use when change touches shared application state.
+### `src/app/app_state.rs`
+
+Main `App` state and app-owned structs.
+
+Owns editor state, panel state, UI state, LSP menu state, terminal/search state, file tree state, settings, dialogs, and tab metadata.
+
+Use when adding/removing persistent app fields or panel/tab state types. Keep behavior in `app.rs` or targeted submodules.
 
 ### `src/app/events.rs`
 
@@ -319,6 +330,22 @@ Use when keystrokes modify text or editor state.
 Mouse module router.
 
 Use when mouse routing across submodules changes.
+
+### `src/app/mouse/hover_state_core.rs`
+
+Hover popup/state structs and hover bridge geometry.
+
+Use when popup lifetime, combined diagnostic/type hover state, or bridge hit-testing changes.
+
+### `src/app/mouse/hover_mouse_logic.rs`
+
+Hover token normalization, diagnostic hover byte ranges, shared hover visibility helpers, and hover selection byte hit-testing.
+
+Use when hover targets, f-string/string expansion, or popup visibility rules change.
+
+### `src/app/mouse/hover_mouse_tests.rs`
+
+Tests for hover state and hover targeting. Do not delete during refactors.
 
 ### `src/app/mouse/input.rs`
 
@@ -469,6 +496,43 @@ Use when changing overall draw order, layer ordering, viewport/projection behavi
 
 Hot path.
 
+### `src/render_view/editor_text_layer.rs`
+
+Visible editor text layer renderer.
+
+Responsibilities:
+
+* Indent guides.
+* Selection/search/identical-word/bracket backgrounds.
+* Glyph draw loop for visible visual lines.
+* Fold dots and cursor draw.
+
+Hot path. Keep allocation-light.
+
+### `src/render_view/ide_panels.rs`
+
+IDE chrome/panel shell rendering.
+
+Responsibilities:
+
+* Left sidebar buttons.
+* Top panel shell and explorer tree rows.
+* Bottom panel shell and dispatch to terminal/problems/LSP panels.
+
+Use when panel chrome or explorer row rendering changes.
+
+### `src/render_view/hover_overlays.rs`
+
+Hover overlay orchestration.
+
+Responsibilities:
+
+* LSP squiggle drawing and diagnostic hover collection.
+* Diagnostic/type hover visibility routing.
+* Dispatch to diagnostic popup and type hover popup rendering.
+
+Use when hover overlay ordering or diagnostic/type popup interaction changes.
+
 ### `src/render_view/core_text.rs`
 
 Core editor text rendering.
@@ -603,7 +667,7 @@ Prefer `ui_system.rs` + `app/ui_handlers.rs` for new buttons.
 
 General UI rendering module. Use specialized modules first if task clearly belongs elsewhere.
 
-### `src/render_view/ui/hover_popup.rs`
+### `src/render_view/ui/hover_widget.rs`
 
 Hover popup layout and rendering.
 
@@ -615,6 +679,10 @@ Responsibilities:
 * Scroll hitbox.
 
 Use when hover popup display/selection changes.
+
+### `src/render_view/ui/hover_widget_tests.rs`
+
+Hover widget geometry and animation tests. Do not delete during refactors.
 
 ### `src/render_view/ui/problems_panel.rs`
 

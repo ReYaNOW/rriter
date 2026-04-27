@@ -385,14 +385,12 @@ impl App {
                             x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
                         }
 
-                                                let Some((_, _, type_target)) =
-                            diagnostic_hover_byte_range_on_line(
-                                &self.editor,
-                                line,
-                                start_col,
-                                end_col,
-                            )
-                        else {
+                        let Some((_, _, type_target)) = diagnostic_hover_byte_range_on_line(
+                            &self.editor,
+                            line,
+                            start_col,
+                            end_col,
+                        ) else {
                             continue;
                         };
 
@@ -409,7 +407,9 @@ impl App {
                             px,
                             py + render_scroll_y,
                         );
-                        if let Some(normalized) = normalize_hover_byte(&self.editor, byte_under_cursor) {
+                        if let Some(normalized) =
+                            normalize_hover_byte(&self.editor, byte_under_cursor)
+                        {
                             diag_hover_byte = Some(normalized);
                         } else {
                             diag_hover_byte = Some(type_target);

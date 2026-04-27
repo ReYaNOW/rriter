@@ -62,8 +62,7 @@ pub fn normalize_rst_roles(line: &str) -> (String, Vec<(usize, usize)>) {
     while i < line.len() {
         let rest = &line[i..];
         let role_prefix = [
-            ":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`",
-            ":data:`",
+            ":meth:`", ":func:`", ":class:`", ":exc:`", ":attr:`", ":obj:`", ":mod:`", ":data:`",
         ]
         .iter()
         .find(|p| rest.starts_with(**p))

@@ -1,0 +1,611 @@
+use crate::renderer::Renderer;
+use crate::widgets::IconButton;
+use glow::HasContext;
+
+impl Renderer {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_ide_side_panels(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp_has_diagnostics: bool,
+        s: f32,
+        mx: f32,
+        my: f32,
+        real_height: f32,
+        panel_left_w: f32,
+        is_ui_disabled: bool,
+    ) {
+        let sb_w = 48.0 * s;
+
+        // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
+        self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
+
+        let btn_size = sb_w;
+        let btn_gap = 0.0;
+        let btn_x = 0.0;
+        let top_start_y = 0.0;
+
+        let mut top_idx = 0usize;
+        let mut bottom_idx = 0usize;
+
+        let lsp_has_issues = lsp.map_or(false, |l| {
+            l.diagnostics.values().any(|diags| {
+                diags.iter().any(|d| {
+                    d.severity == crate::lsp::DiagSeverity::Error
+                        || d.severity == crate::lsp::DiagSeverity::Warning
+                })
+            })
+        });
+
+        for slot in &ide_panel.slots {
+            let is_dragging_this = ide_panel
+                .drag
+                .as_ref()
+                .map(|d| d.panel_id == slot.id && d.threshold_passed)
+                .unwrap_or(false);
+            if is_dragging_this {
+                if slot.group == crate::app::PanelGroup::Top {
+                    top_idx += 1;
+                } else {
+                    bottom_idx += 1;
+                }
+                continue;
+            }
+
+            let btn_y = if slot.group == crate::app::PanelGroup::Top {
+                let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
+                top_idx += 1;
+                y
+            } else {
+                // Кнопки нижней группы фиксированы у дна окна, независимо от панели
+                let y = real_height - btn_size - bottom_idx as f32 * btn_size;
+                bottom_idx += 1;
+                y
+            };
+
+            let custom_color = if slot.id == crate::app::PanelId::Problems {
+                if lsp_has_issues {
+                    Some([1.0, 0.8, 0.1, 1.0])
+                } else {
+                    Some([0.69, 0.745, 0.773, 1.0])
+                }
+            } else {
+                None
+            };
+
+            let btn = IconButton {
+                x: btn_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(slot.id.icon()),
+                is_active: slot.open,
+                icon_size: Some(36.0 * s),
+                active_square_width: Some(sb_w),
+                custom_color,
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::SidebarSlot(slot.id),
+                &btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
+
+        // Призрак перетаскиваемой кнопки + разделитель
+        if let Some(drag) = &ide_panel.drag {
+            if drag.threshold_passed {
+                if let Some(slot) = ide_panel.slots.iter().find(|sl| sl.id == drag.panel_id) {
+                    let ghost_y =
+                        (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
+                    let ghost_color = if slot.id == crate::app::PanelId::Problems {
+                        if lsp_has_issues {
+                            Some([1.0, 0.8, 0.1, 1.0])
+                        } else {
+                            Some([0.69, 0.745, 0.773, 1.0])
+                        }
+                    } else {
+                        None
+                    };
+                    let ghost = IconButton {
+                        x: btn_x,
+                        y: ghost_y,
+                        size: btn_size,
+                        icon: Some(slot.id.icon()),
+                        is_active: false,
+                        icon_size: Some(36.0 * s),
+                        active_square_width: None,
+                        custom_color: ghost_color,
+                    };
+                    ghost.render(self, -1.0, -1.0, s, false);
+                }
+                // Горизонтальный разделитель посередине сайдбара
+                let sep_y = (real_height / 2.0).round();
+                self.push_rect(
+                    2.0 * s,
+                    sep_y - 1.0,
+                    sb_w - 4.0 * s,
+                    2.0,
+                    [0.60, 0.35, 0.85, 0.9],
+                );
+            }
+        }
+
+        // Левая панель (для групп Top)
+        if panel_left_w > 0.0 {
+            let panel_x = sb_w;
+            let panel_bg = [
+                0.129, // #21
+                0.133, // #22
+                0.173, // #2c
+                1.0,
+            ];
+            // Левая панель не заходит под нижнюю — используем editor_height
+            self.push_rect(panel_x, 0.0, panel_left_w, real_height, panel_bg);
+            self.push_rect(
+                panel_x + panel_left_w - 1.0,
+                0.0,
+                1.0,
+                real_height,
+                [1.0, 1.0, 1.0, 0.12],
+            );
+            // Тонкая линия-разделитель между левой панелью и зоной номеров строк (аналог Indent Guide)
+            let sep_x = (panel_x + panel_left_w).round();
+            self.push_rect(
+                sep_x,
+                0.0,
+                1.0,
+                real_height,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
+            );
+
+            let title_h = 32.0 * s;
+            let title_bg = [
+                (self.theme.bg[0] + 0.07).min(1.0),
+                (self.theme.bg[1] + 0.07).min(1.0),
+                (self.theme.bg[2] + 0.08).min(1.0),
+                1.0,
+            ];
+            self.push_rect(panel_x, 0.0, panel_left_w, title_h, title_bg);
+
+            let open_top_count = ide_panel
+                .slots
+                .iter()
+                .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                .count();
+
+            if open_top_count == 1 {
+                let slot = ide_panel
+                    .slots
+                    .iter()
+                    .find(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                    .unwrap();
+                let label = slot.id.label();
+                self.draw_string_scaled(
+                    label,
+                    panel_x + 12.0 * s,
+                    title_h / 2.0 + 6.0 * s,
+                    self.theme.fg,
+                    0.9,
+                );
+            } else {
+                let mut tx = panel_x + 6.0 * s;
+                for (i, slot) in ide_panel
+                    .slots
+                    .iter()
+                    .filter(|sl| sl.group == crate::app::PanelGroup::Top && sl.open)
+                    .enumerate()
+                {
+                    let label = slot.id.label();
+                    let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
+                    if i == 0 {
+                        let act_bg = [
+                            (self.theme.bg[0] + 0.12).min(1.0),
+                            (self.theme.bg[1] + 0.12).min(1.0),
+                            (self.theme.bg[2] + 0.13).min(1.0),
+                            1.0,
+                        ];
+                        self.push_rect(tx, 0.0, tw, title_h, act_bg);
+                        self.push_rect(tx, title_h - 2.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+                    }
+                    self.draw_string_scaled(
+                        label,
+                        tx + 10.0 * s,
+                        title_h / 2.0 + 6.0 * s,
+                        self.theme.fg,
+                        0.85,
+                    );
+                    tx += tw;
+                }
+            }
+
+            // (Ручка ресайза была здесь, перенесена в конец блока левой панели)
+
+            // --- LSP серверы ---
+            if ide_panel.is_open(crate::app::PanelId::LspServers) {
+                let is_top = ide_panel.slots.iter().any(|s| {
+                    s.id == crate::app::PanelId::LspServers
+                        && s.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    self.draw_lsp_servers_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        real_height - title_h,
+                        s,
+                        ide_panel,
+                        lsp_has_diagnostics,
+                        ui_registry,
+                    );
+                }
+            }
+
+            // --- Дерево файлов проводника ---
+            if ide_panel.is_open(crate::app::PanelId::Explorer) {
+                self.flush();
+                unsafe {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    self.gl.scissor(
+                        panel_x as i32,
+                        0,
+                        panel_left_w as i32,
+                        (real_height - title_h) as i32,
+                    );
+                }
+
+                let row_h = 28.0 * s;
+                let indent_w = 18.0 * s;
+                let scroll = ide_panel.explorer_scroll.current.round();
+                let content_h = real_height - title_h;
+                let total_nodes = ide_panel.file_tree_nodes.len();
+
+                let tree_text_scale = 17.0 / 18.0;
+                if total_nodes == 0 {
+                    let hint = "Нет папок в проекте";
+                    let tw = self.measure_ui_width(hint, tree_text_scale);
+                    let tx = panel_x + (panel_left_w - tw) / 2.0;
+                    self.draw_string_scaled(
+                        hint,
+                        tx,
+                        title_h + 30.0 * s,
+                        [0.45, 0.45, 0.45, 1.0],
+                        tree_text_scale,
+                    );
+                } else {
+                    let first_vis = (scroll / row_h).floor() as usize;
+                    let last_vis =
+                        (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+
+                    for i in first_vis..last_vis {
+                        let node = &ide_panel.file_tree_nodes[i];
+                        let row_y = title_h + i as f32 * row_h - scroll;
+
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::FileTreeNode(i),
+                            panel_x,
+                            row_y,
+                            panel_left_w,
+                            row_h,
+                            mx,
+                            my,
+                        );
+
+                        let is_hovered = ide_panel.file_tree_hovered_idx == Some(i)
+                            || ui_registry.hovered()
+                                == Some(crate::ui_system::UiId::FileTreeNode(i));
+
+                        if is_hovered && !is_ui_disabled {
+                            self.push_rect(
+                                panel_x,
+                                row_y,
+                                panel_left_w,
+                                row_h,
+                                [1.0, 1.0, 1.0, 0.06],
+                            );
+                        }
+
+                        let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                        let mut has_error = false;
+                        let mut has_warn = false;
+                        if !node.is_ignored {
+                            if let Some(l) = lsp {
+                                for (p, diags) in &l.diagnostics {
+                                    if !diags.is_empty() && p.starts_with(&node.path) {
+                                        for d in diags {
+                                            if d.severity == crate::lsp::DiagSeverity::Error {
+                                                has_error = true;
+                                                break;
+                                            } else if d.severity
+                                                == crate::lsp::DiagSeverity::Warning
+                                            {
+                                                has_warn = true;
+                                            }
+                                        }
+                                        if has_error {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let text_y = row_y + row_h / 2.0 + 5.5 * s;
+                        let color: [f32; 4] = if node.is_ignored {
+                            [0.973, 0.584, 0.502, 0.8]
+                        } else if node.is_dir {
+                            [0.78, 0.68, 1.0, 1.0]
+                        } else {
+                            [0.651, 0.686, 0.918, 1.0]
+                        };
+
+                        let icon_size = 20.0 * s;
+                        let icon_y = row_y + (row_h - icon_size) / 2.0;
+
+                        if node.is_dir {
+                            // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
+                            let arrow_str = if node.is_expanded { "▼" } else { "▶" };
+                            let arrow_x = indent_x - 2.0 * s;
+                            let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
+                            let arrow_color = if node.is_ignored {
+                                [0.973, 0.584, 0.502, 0.6]
+                            } else {
+                                [0.78, 0.68, 1.0, 0.7]
+                            };
+                            self.draw_string_scaled(arrow_str, arrow_x, arrow_y, arrow_color, 1.0);
+                            // Иконка папки — правее стрелки
+                            let dir_icon_x = indent_x + 18.0 * s;
+                            self.draw_file_icon(node.icon_key, true, dir_icon_x, icon_y, icon_size);
+                            let text_x = dir_icon_x + icon_size + 4.0 * s;
+                            self.draw_string_scaled(
+                                &node.name,
+                                text_x,
+                                text_y,
+                                color,
+                                tree_text_scale,
+                            );
+                            if has_error || has_warn {
+                                let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
+                                let sq_color = if has_error {
+                                    self.theme.diag_error
+                                } else {
+                                    self.theme.diag_warn
+                                };
+                                self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                            }
+                        } else {
+                            let file_icon_x = indent_x + 10.0 * s;
+                            self.draw_file_icon(
+                                node.icon_key,
+                                false,
+                                file_icon_x,
+                                icon_y,
+                                icon_size,
+                            );
+                            let text_x = file_icon_x + icon_size + 4.0 * s;
+                            self.draw_string_scaled(
+                                &node.name,
+                                text_x,
+                                text_y,
+                                color,
+                                tree_text_scale,
+                            );
+                            if has_error || has_warn {
+                                let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
+                                let sq_color = if has_error {
+                                    self.theme.diag_error
+                                } else {
+                                    self.theme.diag_warn
+                                };
+                                self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                            }
+                        }
+                    }
+
+                    // Тонкий скроллбар
+                    let total_h = total_nodes as f32 * row_h;
+                    if total_h > content_h {
+                        let max_s = (total_h - content_h).max(1.0);
+                        let ratio = (scroll / max_s).clamp(0.0, 1.0);
+                        let thumb_h = (content_h / total_h * (content_h - 8.0 * s)).max(20.0 * s);
+                        let thumb_y = title_h + 4.0 * s + ratio * (content_h - 8.0 * s - thumb_h);
+                        self.push_rounded_rect(
+                            panel_x + panel_left_w - 5.0 * s,
+                            thumb_y,
+                            3.0 * s,
+                            thumb_h,
+                            1.5 * s,
+                            [1.0, 1.0, 1.0, 0.22],
+                        );
+                    }
+                }
+
+                self.flush();
+                unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
+                }
+            }
+
+            // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
+            // Не подсвечиваем, когда терминал в фокусе
+            let resize_x = panel_x + panel_left_w;
+            if !is_ui_disabled
+                && mx >= resize_x - 8.0 * s
+                && mx <= resize_x + 8.0 * s
+                && my >= 0.0
+                && my <= real_height
+            {
+                self.push_rect(
+                    resize_x - 2.0,
+                    0.0,
+                    2.0,
+                    real_height,
+                    [0.60, 0.35, 0.85, 0.4],
+                );
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_ide_bottom_panel(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp_has_diagnostics: bool,
+        s: f32,
+        mx: f32,
+        my: f32,
+        panel_bottom_h: f32,
+        is_ui_disabled: bool,
+    ) {
+        let sb_w = 48.0 * s;
+        let panel_x = sb_w;
+        let panel_y = self.height - panel_bottom_h;
+        let panel_w = self.width - panel_x;
+
+        let is_terminal = ide_panel.slots.iter().any(|sl| {
+            sl.group == crate::app::PanelGroup::Bottom
+                && sl.open
+                && sl.id == crate::app::PanelId::Terminal
+        });
+        // Прозрачность терминала (0.0 - полностью прозрачный, 1.0 - непрозрачный)
+        let panel_alpha = if is_terminal { 0.80 } else { 1.0 };
+
+        let panel_bg = [
+            0.129, // #21
+            0.133, // #22
+            0.173, // #2c
+            panel_alpha,
+        ];
+        // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
+        self.push_rect(
+            panel_x,
+            panel_y + 1.0,
+            panel_w,
+            panel_bottom_h - 1.0,
+            panel_bg,
+        );
+
+        // Непрозрачная панель полностью перехватывает мышь (курсор не меняется, клики не проваливаются)
+        if !is_terminal || is_ui_disabled {
+            let blocked = ui_registry.register_blocker(
+                crate::ui_system::UiId::BottomPanelBody,
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_bottom_h,
+                mx,
+                my,
+            );
+            if blocked {
+                ui_registry.reset_cursor_state();
+            }
+        }
+
+        let tab_h = 32.0 * s;
+        let tab_bar_bg = [
+            (self.theme.bg[0] + 0.07).min(1.0),
+            (self.theme.bg[1] + 0.07).min(1.0),
+            (self.theme.bg[2] + 0.08).min(1.0),
+            panel_alpha,
+        ];
+        self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
+
+        let mut tx = panel_x + 8.0 * s;
+        for (i, slot) in ide_panel
+            .slots
+            .iter()
+            .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+            .enumerate()
+        {
+            let label = slot.id.label();
+            let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
+            if i == 0 {
+                let act_bg = [
+                    (self.theme.bg[0] + 0.12).min(1.0),
+                    (self.theme.bg[1] + 0.12).min(1.0),
+                    (self.theme.bg[2] + 0.13).min(1.0),
+                    1.0,
+                ];
+                self.push_rect(tx, panel_y + 1.0, tw, tab_h, act_bg);
+                self.push_rect(tx, panel_y + tab_h - 1.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+            }
+            self.draw_string_scaled(
+                label,
+                tx + 10.0 * s,
+                panel_y + 1.0 + tab_h / 2.0 + 5.5 * s,
+                self.theme.fg,
+                0.9,
+            );
+            tx += tw;
+        }
+
+        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+        if my >= panel_y - 8.0 * s && my <= panel_y + 8.0 * s && mx >= panel_x {
+            self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
+        }
+
+        // Плейсхолдер контента
+        let content_y = panel_y + 1.0 + tab_h;
+        let content_h = panel_bottom_h - 1.0 - tab_h;
+        if content_h > 8.0 * s {
+            if let Some(slot) = ide_panel
+                .slots
+                .iter()
+                .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+            {
+                if slot.id == crate::app::PanelId::LspServers {
+                    self.draw_lsp_servers_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        ide_panel,
+                        lsp_has_diagnostics,
+                        ui_registry,
+                    );
+                } else if slot.id == crate::app::PanelId::Problems {
+                    self.draw_problems_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        lsp,
+                        ide_panel,
+                        ui_registry,
+                    );
+                } else if slot.id == crate::app::PanelId::Terminal {
+                    self.draw_terminal_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        mx,
+                        my,
+                    );
+                } else {
+                    let label = slot.id.label();
+                    let lw = self.measure_ui_width(label, 0.85);
+                    let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
+                    self.draw_string_scaled(
+                        label,
+                        panel_x + (panel_w - lw) / 2.0,
+                        content_y + content_h / 2.0 + 6.0 * s,
+                        col,
+                        0.85,
+                    );
+                }
+            }
+        }
+    }
+}

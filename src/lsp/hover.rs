@@ -240,7 +240,10 @@ fn add_doc_arg_name_spans(text: &str, spans: &mut Vec<crate::highlighter::ColorS
     let mut offset = 0usize;
     for line in text.split('\n') {
         let trimmed = line.trim();
-        if matches!(trimmed, "Args:" | "Arguments:" | "Keyword Args:" | "Parameters") {
+        if matches!(
+            trimmed,
+            "Args:" | "Arguments:" | "Keyword Args:" | "Parameters"
+        ) {
             in_args = true;
             offset += line.len() + 1;
             continue;
@@ -749,10 +752,7 @@ pub(crate) enum PendingRequestKind {
 mod tests {
     use super::{highlight_hover_text, HoverLineKindPublic};
 
-    fn rendered_color_at(
-        spans: &[crate::highlighter::ColorSpan],
-        offset: usize,
-    ) -> [f32; 4] {
+    fn rendered_color_at(spans: &[crate::highlighter::ColorSpan], offset: usize) -> [f32; 4] {
         spans
             .iter()
             .find(|span| offset >= span.start && offset < span.end)
