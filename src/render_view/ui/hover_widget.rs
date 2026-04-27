@@ -62,7 +62,7 @@ pub fn compute_animated_scissor(
     let target_w = box_w + 8.0;
     let target_h = box_h + 8.0;
 
-    compute_anchored_popup_rect(mx, my, target_x, target_y, target_w, target_h, anim_progress)
+    compute_hover_popup_anim_rect(mx, my, target_x, target_y, target_w, target_h, anim_progress)
 }
 
 fn smooth_hover_anim_progress(anim_progress: f32) -> f32 {
@@ -70,7 +70,24 @@ fn smooth_hover_anim_progress(anim_progress: f32) -> f32 {
     p * p * (3.0 - 2.0 * p)
 }
 
-fn compute_anchored_popup_rect(
+fn compute_hover_scrollbar_alpha(anim_progress: f32) -> f32 {
+    let p = ((anim_progress.clamp(0.0, 1.0) - 0.88) / 0.12).clamp(0.0, 1.0);
+    p * p * (3.0 - 2.0 * p)
+}
+
+fn smooth_hover_width_progress(anim_progress: f32, target_w: f32) -> f32 {
+    if target_w >= 320.0 {
+        smooth_hover_anim_progress((anim_progress / 0.94).clamp(0.0, 1.0))
+    } else {
+        smooth_hover_anim_progress(anim_progress)
+    }
+}
+
+fn smooth_hover_height_progress(anim_progress: f32) -> f32 {
+    smooth_hover_anim_progress((anim_progress / 0.94).clamp(0.0, 1.0))
+}
+
+fn compute_hover_popup_anim_rect(
     mx: f32,
     my: f32,
     target_x: f32,
@@ -82,10 +99,17 @@ fn compute_anchored_popup_rect(
     let right = target_x + target_w;
     let bottom = target_y + target_h;
     let anchor_left = (mx - target_x).abs() <= (mx - right).abs();
-    let anchor_top = (my - target_y).abs() <= (my - bottom).abs();
-    let visual_progress = smooth_hover_anim_progress(anim_progress);
-    let anim_w = target_w * visual_progress;
-    let anim_h = target_h * visual_progress;
+    let anchor_top = if my <= target_y {
+        true
+    } else if my >= bottom {
+        false
+    } else {
+        (my - target_y).abs() <= (my - bottom).abs()
+    };
+    let width_progress = smooth_hover_width_progress(anim_progress, target_w);
+    let height_progress = smooth_hover_height_progress(anim_progress);
+    let anim_w = target_w * width_progress;
+    let anim_h = target_h * height_progress;
     let anim_x = if anchor_left {
         target_x
     } else {
@@ -109,7 +133,75 @@ pub fn compute_animated_popup_frame(
     box_h: f32,
     anim_progress: f32,
 ) -> (f32, f32, f32, f32) {
-    compute_anchored_popup_rect(mx, my, bx, by, box_w, box_h, anim_progress)
+    compute_hover_popup_anim_rect(mx, my, bx, by, box_w, box_h, anim_progress)
+}
+
+fn compute_combined_popup_frame(
+    mx: f32,
+    my: f32,
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    anim_progress: f32,
+    _has_attached_hover: bool,
+) -> (f32, f32, f32, f32) {
+    compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress)
+}
+
+fn compute_combined_separator_visible_rect(
+    bx: f32,
+    sep_y: f32,
+    box_w: f32,
+    frame_x: f32,
+    frame_y: f32,
+    frame_w: f32,
+    frame_h: f32,
+) -> Option<(f32, f32)> {
+    if sep_y < frame_y || sep_y > frame_y + frame_h {
+        return None;
+    }
+
+    let x1 = bx.max(frame_x);
+    let x2 = (bx + box_w).min(frame_x + frame_w);
+    let w = x2 - x1;
+    if w <= 0.0 {
+        None
+    } else {
+        Some((x1, w))
+    }
+}
+
+fn compute_hover_scissor_rect(
+    anim_rect: (f32, f32, f32, f32),
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    min_y: Option<f32>,
+) -> (f32, f32, f32, f32) {
+    let (anim_x, anim_y, anim_w, anim_h) = anim_rect;
+    let cx1 = x.max(anim_x);
+    let cy1 = y.max(anim_y).max(min_y.unwrap_or(f32::NEG_INFINITY));
+    let cx2 = (x + w).min(anim_x + anim_w);
+    let cy2 = (y + h).min(anim_y + anim_h);
+    (cx1, cy1, (cx2 - cx1).max(0.0), (cy2 - cy1).max(0.0))
+}
+
+fn compute_hover_frame_content_rect(
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    border_px: f32,
+) -> (f32, f32, f32, f32) {
+    let inset = border_px.max(0.0);
+    (
+        bx + inset,
+        by + inset,
+        (box_w - inset * 2.0).max(0.0),
+        (box_h - inset * 2.0).max(0.0),
+    )
 }
 
 pub fn compute_hover_content_scissor(
@@ -210,6 +302,41 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
 }
 
 impl Renderer {
+    fn push_hover_popup_frame(
+        &mut self,
+        frame_x: f32,
+        frame_y: f32,
+        frame_w: f32,
+        frame_h: f32,
+        radius: f32,
+    ) {
+        if frame_w <= 0.0 || frame_h <= 0.0 {
+            return;
+        }
+
+        self.push_rounded_rect(
+            frame_x.round() - 1.0,
+            frame_y.round() - 1.0,
+            frame_w.round() + 2.0,
+            frame_h.round() + 2.0,
+            radius,
+            [0.4, 0.4, 0.45, 0.6],
+        );
+        self.push_rounded_rect(
+            frame_x.round(),
+            frame_y.round(),
+            frame_w.round(),
+            frame_h.round(),
+            radius,
+            [
+                self.theme.minimap_bg[0],
+                self.theme.minimap_bg[1],
+                self.theme.minimap_bg[2],
+                1.0,
+            ],
+        );
+    }
+
     pub fn draw_diagnostic_popup(
         &mut self,
         lsp_diagnostics: &[Diagnostic],
@@ -456,53 +583,53 @@ impl Renderer {
         }
 
         let anim_progress = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress);
-        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_animated_scissor(
-            mx, my, bx, by, box_w, combined_h, anim_progress,
-        );
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) =
+            compute_animated_scissor(mx, my, bx, by, box_w, combined_h, anim_progress);
 
-        let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
-            let cx1 = x.max(anim_sc_x);
-            let cy1 = y.max(anim_sc_y);
-            let cx2 = (x + w).min(anim_sc_x + anim_sc_w);
-            let cy2 = (y + h).min(anim_sc_y + anim_sc_h);
-            let cw = (cx2 - cx1).max(0.0);
-            let ch = (cy2 - cy1).max(0.0);
-            unsafe {
-                gl.enable(glow::SCISSOR_TEST);
-                let sy = (height - (cy1 + ch)).round() as i32;
-                gl.scissor(cx1.round() as i32, sy, cw.round() as i32, ch.round() as i32);
-            }
-        };
+        let apply_scissor =
+            |gl: &glow::Context,
+             height: f32,
+             x: f32,
+             y: f32,
+             w: f32,
+             h: f32,
+             min_y: Option<f32>| {
+                let (cx1, cy1, cw, ch) = compute_hover_scissor_rect(
+                    (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h),
+                    x,
+                    y,
+                    w,
+                    h,
+                    min_y,
+                );
+                unsafe {
+                    gl.enable(glow::SCISSOR_TEST);
+                    let sy = (height - (cy1 + ch)).round() as i32;
+                    gl.scissor(cx1.round() as i32, sy, cw.round() as i32, ch.round() as i32);
+                }
+            };
 
         self.flush();
         let (frame_x, frame_y, frame_w, frame_h) =
-            compute_animated_popup_frame(mx, my, bx, by, box_w, combined_h, anim_progress);
-        if frame_w > 0.0 && frame_h > 0.0 {
-            self.push_rounded_rect(
-                frame_x.round() - 1.0,
-                frame_y.round() - 1.0,
-                frame_w.round() + 2.0,
-                frame_h.round() + 2.0,
-                6.0 * s,
-                [0.4, 0.4, 0.45, 0.6],
+            compute_combined_popup_frame(
+                mx,
+                my,
+                bx,
+                by,
+                box_w,
+                combined_h,
+                anim_progress,
+                combined_hover_h > 0.0,
             );
-            self.push_rounded_rect(
-                frame_x.round(),
-                frame_y.round(),
-                frame_w.round(),
-                frame_h.round(),
-                6.0 * s,
-                [
-                    self.theme.minimap_bg[0],
-                    self.theme.minimap_bg[1],
-                    self.theme.minimap_bg[2],
-                    1.0,
-                ],
-            );
-        }
+        self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s);
 
         self.flush();
-        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h);
+        let bg_min_y = if combined_hover_h > 0.0 {
+            Some(frame_y)
+        } else {
+            None
+        };
+        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h, bg_min_y);
         self.push_rounded_rect(
             bx.round(),
             by.round(),
@@ -522,17 +649,22 @@ impl Renderer {
         }
 
         if combined_hover_h > 0.0 {
-            self.push_rect(
-                bx.round(),
-                (by + total_h).round(),
-                box_w.round(),
-                1.0_f32.max(s.round()),
-                [1.0, 1.0, 1.0, 0.10],
-            );
+            let sep_y = (by + total_h).round();
+            if let Some((sep_x, sep_w)) = compute_combined_separator_visible_rect(
+                bx, sep_y, box_w, frame_x, frame_y, frame_w, frame_h,
+            ) {
+                self.push_rect(
+                    sep_x.round(),
+                    sep_y,
+                    sep_w.round(),
+                    1.0_f32.max(s.round()),
+                    [1.0, 1.0, 1.0, 0.10],
+                );
+            }
         }
 
         self.flush();
-        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h);
+        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h, None);
 
         let mut current_y = by + pad - scroll_y;
 
@@ -996,12 +1128,14 @@ impl Renderer {
         );
 
         let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
-            let cx1 = x.max(anim_sc_x);
-            let cy1 = y.max(anim_sc_y);
-            let cx2 = (x + w).min(anim_sc_x + anim_sc_w);
-            let cy2 = (y + h).min(anim_sc_y + anim_sc_h);
-            let cw = (cx2 - cx1).max(0.0);
-            let ch = (cy2 - cy1).max(0.0);
+            let (cx1, cy1, cw, ch) = compute_hover_scissor_rect(
+                (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h),
+                x,
+                y,
+                w,
+                h,
+                None,
+            );
             unsafe {
                 gl.enable(glow::SCISSOR_TEST);
                 let sy = (height - (cy1 + ch)).round() as i32;
@@ -1013,33 +1147,25 @@ impl Renderer {
             self.flush();
             let (frame_x, frame_y, frame_w, frame_h) =
                 compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress);
-            if frame_w > 0.0 && frame_h > 0.0 {
-                self.push_rounded_rect(
-                    frame_x.round() - 1.0,
-                    frame_y.round() - 1.0,
-                    frame_w.round() + 2.0,
-                    frame_h.round() + 2.0,
-                    6.0 * s,
-                    [0.4, 0.4, 0.45, 0.6],
-                );
-                self.push_rounded_rect(
-                    frame_x.round(),
-                    frame_y.round(),
-                    frame_w.round(),
-                    frame_h.round(),
-                    6.0 * s,
-                    [
-                        self.theme.minimap_bg[0],
-                        self.theme.minimap_bg[1],
-                        self.theme.minimap_bg[2],
-                        1.0,
-                    ],
-                );
-            }
+            self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s);
         }
 
         self.flush();
-        apply_scissor(&self.gl, self.height, bx, by, box_w, box_h);
+        let content_rect = compute_hover_frame_content_rect(
+            bx,
+            by,
+            box_w,
+            box_h,
+            1.0_f32.max(s.round()),
+        );
+        apply_scissor(
+            &self.gl,
+            self.height,
+            content_rect.0,
+            content_rect.1,
+            content_rect.2,
+            content_rect.3,
+        );
 
         let mut current_top = by + pad - scroll_y;
         let selected = selection.filter(|(a, b)| a != b);
@@ -1215,7 +1341,8 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        if max_scroll > 0.0 {
+        let scrollbar_alpha = compute_hover_scrollbar_alpha(anim_progress);
+        if max_scroll > 0.0 && scrollbar_alpha > 0.0 {
             let track_h = box_h - 16.0 * s;
             let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);
             let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
@@ -1226,7 +1353,7 @@ impl Renderer {
                 4.0 * s,
                 thumb_h,
                 2.0 * s,
-                [1.0, 1.0, 1.0, 0.2],
+                [1.0, 1.0, 1.0, 0.2 * scrollbar_alpha],
             );
 
             ui_registry.register_rect(
@@ -1336,27 +1463,29 @@ mod tests {
         );
         // Cursor is at 10, 20. Popup is at 100, 100 with size 50, 50.
         // Target is 96, 96, 58, 58 (due to -4.0 margin and +8.0 size)
-        // Nearest target corner is top-left. It stays fixed while far edges expand.
-        // sc_w = 58 * 0.5 = 29.
-        // sc_h = 58 * 0.5 = 29.
+        // Popup is below cursor, so top-left stays fixed while far edges expand.
+        let expected_w = 58.0 * smooth_hover_width_progress(0.5, 58.0);
+        let expected_h = 58.0 * smooth_hover_height_progress(0.5);
         assert_eq!(sc_x, 96.0);
         assert_eq!(sc_y, 96.0);
-        assert_eq!(sc_w, 29.0);
-        assert_eq!(sc_h, 29.0);
+        assert!((sc_w - expected_w).abs() < 0.001);
+        assert!((sc_h - expected_h).abs() < 0.001);
     }
 
     #[test]
-    fn test_animated_scissor_keeps_bottom_right_corner_fixed() {
+    fn test_animated_scissor_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor() {
         let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
             200.0, 200.0,
             100.0, 100.0,
             50.0, 50.0,
             0.5,
         );
-        assert_eq!(sc_x, 125.0);
-        assert_eq!(sc_y, 125.0);
-        assert_eq!(sc_w, 29.0);
-        assert_eq!(sc_h, 29.0);
+        let expected_w = 58.0 * smooth_hover_width_progress(0.5, 58.0);
+        let expected_h = 58.0 * smooth_hover_height_progress(0.5);
+        assert!((sc_x + sc_w - 154.0).abs() < 0.001);
+        assert!((sc_y + sc_h - 154.0).abs() < 0.001);
+        assert!((sc_w - expected_w).abs() < 0.001);
+        assert!((sc_h - expected_h).abs() < 0.001);
     }
 
     #[test]
@@ -1395,24 +1524,84 @@ mod tests {
             50.0, 50.0,
             0.5,
         );
+        let expected_w = 50.0 * smooth_hover_width_progress(0.5, 50.0);
+        let expected_h = 50.0 * smooth_hover_height_progress(0.5);
         assert_eq!(frame_x, 100.0);
         assert_eq!(frame_y, 100.0);
-        assert_eq!(frame_w, 25.0);
-        assert_eq!(frame_h, 25.0);
+        assert!((frame_w - expected_w).abs() < 0.001);
+        assert!((frame_h - expected_h).abs() < 0.001);
     }
 
     #[test]
-    fn test_animated_popup_frame_keeps_bottom_right_corner_fixed() {
+    fn test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor() {
         let (frame_x, frame_y, frame_w, frame_h) = compute_animated_popup_frame(
             200.0, 200.0,
             100.0, 100.0,
             50.0, 50.0,
             0.5,
         );
-        assert_eq!(frame_x, 125.0);
-        assert_eq!(frame_y, 125.0);
-        assert_eq!(frame_w, 25.0);
-        assert_eq!(frame_h, 25.0);
+        let expected_w = 50.0 * smooth_hover_width_progress(0.5, 50.0);
+        let expected_h = 50.0 * smooth_hover_height_progress(0.5);
+        assert!((frame_x + frame_w - 150.0).abs() < 0.001);
+        assert!((frame_y + frame_h - 150.0).abs() < 0.001);
+        assert!((frame_w - expected_w).abs() < 0.001);
+        assert!((frame_h - expected_h).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_popup_above_cursor_expands_bottom_to_top() {
+        let (frame_x, frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            220.0, 520.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.25,
+        );
+        assert!((frame_y + frame_h - 400.0).abs() < 0.001);
+        assert!(frame_y > 100.0);
+        assert!(frame_h > 0.0);
+        assert!(frame_w > 0.0);
+        assert!(frame_x >= 100.0);
+    }
+
+    #[test]
+    fn test_combined_popup_above_cursor_expands_bottom_to_top() {
+        let (frame_x, frame_y, frame_w, frame_h) = compute_combined_popup_frame(
+            220.0, 520.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.25,
+            true,
+        );
+        assert!((frame_y + frame_h - 400.0).abs() < 0.001);
+        assert!(frame_y > 100.0);
+        assert!(frame_h > 0.0);
+        assert!(frame_w > 0.0);
+        assert!(frame_x >= 100.0);
+    }
+
+    #[test]
+    fn test_combined_popup_below_cursor_expands_top_to_bottom() {
+        let (_frame_x, frame_y, _frame_w, frame_h) = compute_combined_popup_frame(
+            220.0, 20.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.25,
+            true,
+        );
+        assert_eq!(frame_y, 100.0);
+        assert!(frame_y + frame_h < 400.0);
+    }
+
+    #[test]
+    fn test_popup_below_cursor_expands_top_to_bottom() {
+        let (_frame_x, frame_y, _frame_w, frame_h) = compute_animated_popup_frame(
+            220.0, 20.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.25,
+        );
+        assert_eq!(frame_y, 100.0);
+        assert!(frame_y + frame_h < 400.0);
     }
 
     #[test]
@@ -1447,8 +1636,101 @@ mod tests {
             500.0, 300.0,
             0.8,
         );
-        assert!((frame_w - 448.0).abs() < 0.001);
-        assert!((frame_h - 268.8).abs() < 0.001);
+        let expected_w = 500.0 * smooth_hover_anim_progress(0.8 / 0.94);
+        let expected_h = 300.0 * smooth_hover_height_progress(0.8);
+        assert!((frame_w - expected_w).abs() < 0.001);
+        assert!((frame_h - expected_h).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_wide_popup_right_edge_settles_before_final_frames() {
+        let (frame_x, _frame_y, frame_w, _frame_h) = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.94,
+        );
+        assert_eq!(frame_x, 100.0);
+        assert!((frame_x + frame_w - 600.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combined_separator_waits_until_frame_reaches_it() {
+        let visible = compute_combined_separator_visible_rect(
+            100.0, 180.0, 500.0,
+            100.0, 100.0, 500.0, 60.0,
+        );
+        assert_eq!(visible, None);
+    }
+
+    #[test]
+    fn test_combined_separator_clips_to_animated_frame_width() {
+        let visible = compute_combined_separator_visible_rect(
+            100.0, 180.0, 500.0,
+            100.0, 100.0, 260.0, 100.0,
+        );
+        assert_eq!(visible, Some((100.0, 260.0)));
+    }
+
+    #[test]
+    fn test_combined_separator_reaches_full_width_with_frame() {
+        let visible = compute_combined_separator_visible_rect(
+            100.0, 180.0, 500.0,
+            100.0, 100.0, 500.0, 300.0,
+        );
+        assert_eq!(visible, Some((100.0, 500.0)));
+    }
+
+    #[test]
+    fn test_combined_diagnostic_background_does_not_cover_moving_top_border() {
+        let (_frame_x, frame_y, _frame_w, frame_h) = compute_combined_popup_frame(
+            220.0, 520.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.65,
+            true,
+        );
+        assert!(frame_y > 100.0);
+        assert!((frame_y + frame_h - 400.0).abs() < 0.001);
+
+        let anim_scissor = compute_animated_scissor(
+            220.0, 520.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.65,
+        );
+        let (_bg_x, bg_y, _bg_w, bg_h) = compute_hover_scissor_rect(
+            anim_scissor,
+            100.0,
+            100.0,
+            500.0,
+            180.0,
+            Some(frame_y),
+        );
+        assert_eq!(bg_y, frame_y);
+        assert!(bg_h > 0.0);
+    }
+
+    #[test]
+    fn test_hover_frame_content_rect_insets_bottom_border() {
+        let content = compute_hover_frame_content_rect(100.0, 100.0, 500.0, 300.0, 1.0);
+        assert_eq!(content, (101.0, 101.0, 498.0, 298.0));
+        assert_eq!(content.1 + content.3, 399.0);
+    }
+
+    #[test]
+    fn test_hover_type_content_scissor_does_not_cover_bottom_border() {
+        let content = compute_hover_frame_content_rect(100.0, 100.0, 500.0, 300.0, 1.0);
+        let scissor = compute_hover_scissor_rect(
+            (96.0, 96.0, 508.0, 308.0),
+            content.0,
+            content.1,
+            content.2,
+            content.3,
+            None,
+        );
+        assert_eq!(scissor, content);
+        assert_eq!(scissor.1 + scissor.3, 399.0);
     }
 
     #[test]
@@ -1464,6 +1746,26 @@ mod tests {
     }
 
     #[test]
+    fn test_hover_scrollbar_alpha_waits_until_popup_is_nearly_open() {
+        assert_eq!(compute_hover_scrollbar_alpha(0.0), 0.0);
+        assert_eq!(compute_hover_scrollbar_alpha(0.88), 0.0);
+    }
+
+    #[test]
+    fn test_hover_scrollbar_alpha_fades_smoothly_near_end() {
+        let mid = compute_hover_scrollbar_alpha(0.94);
+        assert!((mid - 0.5).abs() < 0.001);
+        assert!(compute_hover_scrollbar_alpha(0.91) < mid);
+        assert!(compute_hover_scrollbar_alpha(0.97) > mid);
+    }
+
+    #[test]
+    fn test_hover_scrollbar_alpha_is_full_at_end() {
+        assert_eq!(compute_hover_scrollbar_alpha(1.0), 1.0);
+        assert_eq!(compute_hover_scrollbar_alpha(1.5), 1.0);
+    }
+
+    #[test]
     fn test_attached_hover_content_scissor_uses_shared_combined_animation() {
         let (sc_x, sc_y, sc_w, sc_h) = compute_hover_content_scissor(
             10.0, 20.0,
@@ -1476,7 +1778,23 @@ mod tests {
         assert_eq!(sc_x, 86.0);
         assert_eq!(sc_y, 66.0);
         assert_eq!(sc_w, 34.0);
-        assert_eq!(sc_h, 44.0);
+        assert!((sc_h - 88.0 * smooth_hover_height_progress(0.5)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_attached_hover_content_scissor_above_cursor_expands_bottom_to_top() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_hover_content_scissor(
+            200.0, 300.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.25,
+            Some((90.0, 70.0, 60.0, 30.0)),
+            0.5,
+        );
+        assert!((sc_x + sc_w - 154.0).abs() < 0.001);
+        assert!((sc_y + sc_h - 154.0).abs() < 0.001);
+        assert!(sc_y > 66.0);
+        assert!(sc_h > 0.0);
     }
 
     #[test]
