@@ -65,6 +65,11 @@ pub fn compute_animated_scissor(
     compute_anchored_popup_rect(mx, my, target_x, target_y, target_w, target_h, anim_progress)
 }
 
+fn smooth_hover_anim_progress(anim_progress: f32) -> f32 {
+    let p = anim_progress.clamp(0.0, 1.0);
+    p * p * (3.0 - 2.0 * p)
+}
+
 fn compute_anchored_popup_rect(
     mx: f32,
     my: f32,
@@ -78,8 +83,9 @@ fn compute_anchored_popup_rect(
     let bottom = target_y + target_h;
     let anchor_left = (mx - target_x).abs() <= (mx - right).abs();
     let anchor_top = (my - target_y).abs() <= (my - bottom).abs();
-    let anim_w = target_w * anim_progress;
-    let anim_h = target_h * anim_progress;
+    let visual_progress = smooth_hover_anim_progress(anim_progress);
+    let anim_w = target_w * visual_progress;
+    let anim_h = target_h * visual_progress;
     let anim_x = if anchor_left {
         target_x
     } else {
@@ -1431,6 +1437,30 @@ mod tests {
         assert!(frame_w > 0.0);
         assert!(frame_h > 0.0);
         assert_eq!(frame_x, 100.0);
+    }
+
+    #[test]
+    fn test_animated_popup_frame_uses_settings_style_smooth_progress() {
+        let (_frame_x, _frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.8,
+        );
+        assert!((frame_w - 448.0).abs() < 0.001);
+        assert!((frame_h - 268.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_animated_popup_frame_near_done_snap_is_invisible_with_smooth_progress() {
+        let (_frame_x, _frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            500.0, 300.0,
+            0.9995,
+        );
+        assert!((500.0 - frame_w) < 0.001);
+        assert!((300.0 - frame_h) < 0.001);
     }
 
     #[test]

@@ -540,10 +540,18 @@ mod tests {
     fn hover_animation_progress_uses_shared_slightly_slower_curve() {
         let next = advance_hover_anim_progress(0.0, 0.016);
 
-        assert!((next - 0.192).abs() < 0.0001);
-        assert!(next < 0.24);
-        assert_eq!(advance_hover_anim_progress(0.995, 0.016), 1.0);
+        assert!((next - 0.128).abs() < 0.0001);
+        assert!(next < 0.192);
+        assert!(advance_hover_anim_progress(0.995, 0.016) < 1.0);
+        assert_eq!(advance_hover_anim_progress(0.9995, 0.016), 1.0);
         assert_eq!(advance_hover_anim_progress(1.0, 0.016), 1.0);
+    }
+
+    #[test]
+    fn hover_animation_progress_snap_delta_is_subpixel_for_large_popup() {
+        let progress = advance_hover_anim_progress(0.9995, 0.016);
+        assert_eq!(progress, 1.0);
+        assert!((1.0 - 0.9995) * 500.0 < 0.26);
     }
 
     #[test]
@@ -1747,14 +1755,15 @@ thread_local! {
 }
 
 pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
-pub const HOVER_POPUP_ANIM_SPEED: f32 = 12.0;
+pub const HOVER_POPUP_ANIM_SPEED: f32 = 8.0;
+pub const HOVER_POPUP_ANIM_SNAP_EPS: f32 = 0.0005;
 
 pub fn advance_hover_anim_progress(progress: f32, dt: f32) -> f32 {
     if progress >= 1.0 {
         return 1.0;
     }
     let next = progress + (1.0 - progress) * HOVER_POPUP_ANIM_SPEED * dt;
-    if next > 0.99 {
+    if 1.0 - next <= HOVER_POPUP_ANIM_SNAP_EPS {
         1.0
     } else {
         next
