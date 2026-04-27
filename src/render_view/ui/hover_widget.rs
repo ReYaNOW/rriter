@@ -62,12 +62,48 @@ pub fn compute_animated_scissor(
     let target_w = box_w + 8.0;
     let target_h = box_h + 8.0;
 
-    let anim_sc_x = mx + (target_x - mx) * anim_progress;
-    let anim_sc_y = my + (target_y - my) * anim_progress;
-    let anim_sc_w = target_w * anim_progress;
-    let anim_sc_h = target_h * anim_progress;
+    compute_anchored_popup_rect(mx, my, target_x, target_y, target_w, target_h, anim_progress)
+}
 
-    (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h)
+fn compute_anchored_popup_rect(
+    mx: f32,
+    my: f32,
+    target_x: f32,
+    target_y: f32,
+    target_w: f32,
+    target_h: f32,
+    anim_progress: f32,
+) -> (f32, f32, f32, f32) {
+    let right = target_x + target_w;
+    let bottom = target_y + target_h;
+    let anchor_left = (mx - target_x).abs() <= (mx - right).abs();
+    let anchor_top = (my - target_y).abs() <= (my - bottom).abs();
+    let anim_w = target_w * anim_progress;
+    let anim_h = target_h * anim_progress;
+    let anim_x = if anchor_left {
+        target_x
+    } else {
+        right - anim_w
+    };
+    let anim_y = if anchor_top {
+        target_y
+    } else {
+        bottom - anim_h
+    };
+
+    (anim_x, anim_y, anim_w, anim_h)
+}
+
+pub fn compute_animated_popup_frame(
+    mx: f32,
+    my: f32,
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    anim_progress: f32,
+) -> (f32, f32, f32, f32) {
+    compute_anchored_popup_rect(mx, my, bx, by, box_w, box_h, anim_progress)
 }
 
 pub fn compute_hover_content_scissor(
@@ -433,29 +469,31 @@ impl Renderer {
         };
 
         self.flush();
-        apply_scissor(&self.gl, self.height, bx - 100.0, by - 100.0, box_w + 200.0, combined_h + 200.0);
-
-        self.push_rounded_rect(
-            bx.round() - 1.0,
-            by.round() - 1.0,
-            box_w.round() + 2.0,
-            combined_h.round() + 2.0,
-            6.0 * s,
-            [0.4, 0.4, 0.45, 0.6],
-        );
-        self.push_rounded_rect(
-            bx.round(),
-            by.round(),
-            box_w.round(),
-            combined_h.round(),
-            6.0 * s,
-            [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                1.0,
-            ],
-        );
+        let (frame_x, frame_y, frame_w, frame_h) =
+            compute_animated_popup_frame(mx, my, bx, by, box_w, combined_h, anim_progress);
+        if frame_w > 0.0 && frame_h > 0.0 {
+            self.push_rounded_rect(
+                frame_x.round() - 1.0,
+                frame_y.round() - 1.0,
+                frame_w.round() + 2.0,
+                frame_h.round() + 2.0,
+                6.0 * s,
+                [0.4, 0.4, 0.45, 0.6],
+            );
+            self.push_rounded_rect(
+                frame_x.round(),
+                frame_y.round(),
+                frame_w.round(),
+                frame_h.round(),
+                6.0 * s,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            );
+        }
 
         self.flush();
         apply_scissor(&self.gl, self.height, bx, by, box_w, total_h);
@@ -967,29 +1005,31 @@ impl Renderer {
 
         if attached_diag.is_none() {
             self.flush();
-            apply_scissor(&self.gl, self.height, bx - 100.0, by - 100.0, box_w + 200.0, box_h + 200.0);
-
-            self.push_rounded_rect(
-                bx.round() - 1.0,
-                by.round() - 1.0,
-                box_w.round() + 2.0,
-                box_h.round() + 2.0,
-                6.0 * s,
-                [0.4, 0.4, 0.45, 0.6],
-            );
-            self.push_rounded_rect(
-                bx.round(),
-                by.round(),
-                box_w.round(),
-                box_h.round(),
-                6.0 * s,
-                [
-                    self.theme.minimap_bg[0],
-                    self.theme.minimap_bg[1],
-                    self.theme.minimap_bg[2],
-                    1.0,
-                ],
-            );
+            let (frame_x, frame_y, frame_w, frame_h) =
+                compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress);
+            if frame_w > 0.0 && frame_h > 0.0 {
+                self.push_rounded_rect(
+                    frame_x.round() - 1.0,
+                    frame_y.round() - 1.0,
+                    frame_w.round() + 2.0,
+                    frame_h.round() + 2.0,
+                    6.0 * s,
+                    [0.4, 0.4, 0.45, 0.6],
+                );
+                self.push_rounded_rect(
+                    frame_x.round(),
+                    frame_y.round(),
+                    frame_w.round(),
+                    frame_h.round(),
+                    6.0 * s,
+                    [
+                        self.theme.minimap_bg[0],
+                        self.theme.minimap_bg[1],
+                        self.theme.minimap_bg[2],
+                        1.0,
+                    ],
+                );
+            }
         }
 
         self.flush();
@@ -1281,7 +1321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_animated_scissor_expands_from_cursor_to_farthest_corner() {
+    fn test_animated_scissor_keeps_nearest_corner_fixed() {
         let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
             10.0, 20.0,
             100.0, 100.0,
@@ -1290,13 +1330,25 @@ mod tests {
         );
         // Cursor is at 10, 20. Popup is at 100, 100 with size 50, 50.
         // Target is 96, 96, 58, 58 (due to -4.0 margin and +8.0 size)
-        // At progress 0.5, it interpolates the origin and width/height.
-        // sc_x = 10 + (96 - 10) * 0.5 = 53.
-        // sc_y = 20 + (96 - 20) * 0.5 = 58.
+        // Nearest target corner is top-left. It stays fixed while far edges expand.
         // sc_w = 58 * 0.5 = 29.
         // sc_h = 58 * 0.5 = 29.
-        assert_eq!(sc_x, 53.0);
-        assert_eq!(sc_y, 58.0);
+        assert_eq!(sc_x, 96.0);
+        assert_eq!(sc_y, 96.0);
+        assert_eq!(sc_w, 29.0);
+        assert_eq!(sc_h, 29.0);
+    }
+
+    #[test]
+    fn test_animated_scissor_keeps_bottom_right_corner_fixed() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
+            200.0, 200.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.5,
+        );
+        assert_eq!(sc_x, 125.0);
+        assert_eq!(sc_y, 125.0);
         assert_eq!(sc_w, 29.0);
         assert_eq!(sc_h, 29.0);
     }
@@ -1323,10 +1375,62 @@ mod tests {
             50.0, 50.0,
             0.0,
         );
-        assert_eq!(sc_x, 10.0);
-        assert_eq!(sc_y, 20.0);
+        assert_eq!(sc_x, 96.0);
+        assert_eq!(sc_y, 96.0);
         assert_eq!(sc_w, 0.0);
         assert_eq!(sc_h, 0.0);
+    }
+
+    #[test]
+    fn test_animated_popup_frame_keeps_nearest_corner_fixed() {
+        let (frame_x, frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.5,
+        );
+        assert_eq!(frame_x, 100.0);
+        assert_eq!(frame_y, 100.0);
+        assert_eq!(frame_w, 25.0);
+        assert_eq!(frame_h, 25.0);
+    }
+
+    #[test]
+    fn test_animated_popup_frame_keeps_bottom_right_corner_fixed() {
+        let (frame_x, frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            200.0, 200.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.5,
+        );
+        assert_eq!(frame_x, 125.0);
+        assert_eq!(frame_y, 125.0);
+        assert_eq!(frame_w, 25.0);
+        assert_eq!(frame_h, 25.0);
+    }
+
+    #[test]
+    fn test_animated_popup_frame_is_target_at_progress_one() {
+        let frame = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            1.0,
+        );
+        assert_eq!(frame, (100.0, 100.0, 50.0, 50.0));
+    }
+
+    #[test]
+    fn test_animated_popup_frame_is_visible_before_reaching_target() {
+        let (frame_x, _frame_y, frame_w, frame_h) = compute_animated_popup_frame(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.2,
+        );
+        assert!(frame_w > 0.0);
+        assert!(frame_h > 0.0);
+        assert_eq!(frame_x, 100.0);
     }
 
     #[test]
@@ -1339,8 +1443,8 @@ mod tests {
             Some((90.0, 70.0, 60.0, 30.0)),
             0.5,
         );
-        assert_eq!(sc_x, 48.0);
-        assert_eq!(sc_y, 43.0);
+        assert_eq!(sc_x, 86.0);
+        assert_eq!(sc_y, 66.0);
         assert_eq!(sc_w, 34.0);
         assert_eq!(sc_h, 44.0);
     }
