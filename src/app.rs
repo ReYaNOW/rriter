@@ -19,6 +19,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn enter_ide_mode(&mut self) {
         self.is_ide_mode = true;

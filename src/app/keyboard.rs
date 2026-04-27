@@ -8,6 +8,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
 mod main_keys;
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();

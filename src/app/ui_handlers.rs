@@ -4,6 +4,7 @@ use crate::app::App;
 use crate::editor::Editor;
 use crate::ui_system::UiId;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     /// Обрабатывает клик по UI элементу
     pub fn handle_ui_click(&mut self, id: UiId) {

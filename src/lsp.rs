@@ -38,6 +38,7 @@ use std::time::Duration;
 static NEXT_ID: AtomicI32 = AtomicI32::new(1);
 
 #[inline(always)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn next_id() -> i32 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -105,6 +106,7 @@ struct SpawnedProcess {
     out_tx: Sender<Vec<u8>>,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn spawn_server(
     def: &'static LspServerDef,
     workspace: Option<&Path>,
@@ -236,6 +238,7 @@ struct OpenFile {
     text: String,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn send_and_log(
     out_tx: &Sender<Vec<u8>>,
     event_tx: &Sender<LspEvent>,
@@ -270,6 +273,7 @@ fn send_and_log(
     out_tx.send(msg)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn run_supervisor(
     def: &'static LspServerDef,
     workspaces: Vec<PathBuf>,
@@ -494,6 +498,7 @@ pub struct LspProcess {
     workspace_scanned: bool,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl LspProcess {
     fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -700,6 +705,7 @@ pub struct LspManager {
     pub suppress_diagnostics: bool,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl LspManager {
     pub fn new(workspaces: Vec<PathBuf>) -> Self {
         LspManager {

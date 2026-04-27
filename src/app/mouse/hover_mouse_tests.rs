@@ -1,10 +1,11 @@
 mod tests {
     use super::super::{
-        advance_hover_anim_progress, compute_hover_visibility,
+        advance_hover_anim_progress, clear_hover_popup, compute_hover_visibility,
         compute_hover_visibility_from_matches, diagnostic_hover_byte_range_on_line,
         diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
         hover_bytes_share_token, hover_token_bounds, hover_token_text, is_hover_target_byte,
         is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte, HoverState,
+        HOVER_STATE,
     };
 
     #[test]
@@ -68,6 +69,42 @@ mod tests {
         );
         assert!(!show_err);
         assert!(!show_type);
+        assert!(!show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_stale_combined_keeps_old_popup_when_cursor_moves() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility_from_matches(
+            true,  // is_error_hovered
+            false, // error_timer_ready
+            true,  // has_type_popup
+            true,  // diagnostic_needs_type
+            true,  // type_matches_diag
+            false, // hover_matches_diag
+            false, // type_matches_hover
+            true,  // stale_combined_popup
+        );
+
+        assert!(show_err);
+        assert!(show_type);
+        assert!(show_comb);
+    }
+
+    #[test]
+    fn hover_visibility_keeps_old_type_popup_without_diagnostic_match() {
+        let (show_err, show_type, show_comb) = compute_hover_visibility_from_matches(
+            true,  // is_error_hovered
+            true,  // error_timer_ready
+            true,  // has_type_popup
+            true,  // diagnostic_needs_type
+            false, // type_matches_diag
+            false, // hover_matches_diag
+            true,  // type_matches_hover
+            false, // stale_combined_popup
+        );
+
+        assert!(!show_err);
+        assert!(show_type);
         assert!(!show_comb);
     }
 
@@ -182,6 +219,47 @@ mod tests {
         assert!(!state.diag_selecting);
         assert!(state.diag_text.is_empty());
         assert!(state.diag_href.is_none());
+    }
+
+    #[test]
+    fn clear_hover_popup_reports_and_resets_thread_local_state() {
+        assert!(!clear_hover_popup(None));
+
+        HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.request_id = Some(11);
+            state.definition_request_id = Some(12);
+            state.byte_offset = Some(9);
+            state.rect = Some((1.0, 2.0, 3.0, 4.0));
+            state.diag_rect = Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0));
+            state.max_scroll = 20.0;
+            state.selection_anchor = Some(1);
+            state.selection_cursor = Some(2);
+            state.selecting = true;
+            state.diag_selection_anchor = Some(3);
+            state.diag_selection_cursor = Some(4);
+            state.diag_selecting = true;
+            state.diag_text.push_str("diag");
+        });
+
+        assert!(clear_hover_popup(None));
+
+        HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            assert!(state.request_id.is_none());
+            assert!(state.definition_request_id.is_none());
+            assert!(state.byte_offset.is_none());
+            assert!(state.rect.is_none());
+            assert!(state.diag_rect.is_none());
+            assert_eq!(state.max_scroll, 0.0);
+            assert!(state.selection_anchor.is_none());
+            assert!(state.selection_cursor.is_none());
+            assert!(!state.selecting);
+            assert!(state.diag_selection_anchor.is_none());
+            assert!(state.diag_selection_cursor.is_none());
+            assert!(!state.diag_selecting);
+            assert!(state.diag_text.is_empty());
+        });
     }
 
     #[test]
@@ -1071,6 +1149,53 @@ mod tests {
         editor.insert_str("else:\n");
 
         assert_eq!(diagnostic_hover_range_on_line(&editor, 0, 0, 4), None);
+    }
+
+    #[test]
+    fn diagnostic_hover_range_returns_none_for_missing_line_or_empty_span() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("value = 1\n");
+
+        assert_eq!(diagnostic_hover_byte_range_on_line(&editor, 5, 0, 4), None);
+        assert_eq!(diagnostic_hover_byte_range_on_line(&editor, 0, 6, 6), None);
+        assert_eq!(diagnostic_hover_range_on_line(&editor, 5, 0, 4), None);
+    }
+
+    #[test]
+    fn diagnostic_hover_range_handles_utf16_columns_and_line_end_fallback() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("emoji_😀 = value\n");
+        let text = editor.get_full_text();
+        let value = text.find("value").unwrap();
+        let value_col = text[..value].encode_utf16().count() as u32;
+
+        let range = diagnostic_hover_range_on_line(&editor, 0, value_col, value_col + 40).unwrap();
+        let byte_range =
+            diagnostic_hover_byte_range_on_line(&editor, 0, value_col, value_col + 40).unwrap();
+
+        assert_eq!(&text[byte_range.0..byte_range.1], "value");
+        assert_eq!(range.0, value_col);
+        assert_eq!(range.2, value);
+    }
+
+    #[test]
+    fn hover_token_bounds_handles_empty_and_escaped_string_literal() {
+        let editor = crate::editor::Editor::new(8);
+        assert_eq!(hover_token_bounds(&editor, 99), (0, 0));
+        assert_eq!(hover_token_text(&editor, 0).as_deref(), Some(""));
+
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("value = r'can\\'t stop'\n");
+        let text = editor.get_full_text();
+        let escaped = text.find("stop").unwrap();
+        let (start, end) = hover_token_bounds(&editor, escaped);
+
+        assert_eq!(&text[start..end], "r'can\\'t stop'");
+        assert!(hover_bytes_share_token(
+            &editor,
+            Some(text.find("can").unwrap()),
+            Some(escaped)
+        ));
     }
 
     #[test]

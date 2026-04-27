@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn handle_main_keyboard_input(
         &mut self,

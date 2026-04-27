@@ -197,6 +197,16 @@ pub(crate) fn hover_token_text(
     text.get(start..end).map(|s| s.to_string())
 }
 
+fn is_escaped_quote(bytes: &[u8], quote_pos: usize) -> bool {
+    let mut slash_count = 0;
+    let mut pos = quote_pos;
+    while pos > 0 && bytes[pos - 1] == b'\\' {
+        slash_count += 1;
+        pos -= 1;
+    }
+    slash_count % 2 == 1
+}
+
 pub(crate) fn diagnostic_hover_byte_range_on_line(
     editor: &crate::editor::Editor,
     line: usize,
@@ -394,18 +404,22 @@ pub(crate) fn hover_token_bounds(
             .unwrap_or(bytes.len());
 
         let mut quote_pos = None;
-        if matches!(bytes[idx], b'\'' | b'"') {
+        if matches!(bytes[idx], b'\'' | b'"') && !is_escaped_quote(bytes, idx) {
             quote_pos = Some(idx);
         } else {
             let mut pos = idx;
             while pos > line_start {
                 pos -= 1;
-                if matches!(bytes[pos], b'\'' | b'"') {
+                if matches!(bytes[pos], b'\'' | b'"') && !is_escaped_quote(bytes, pos) {
                     quote_pos = Some(pos);
                     break;
                 }
             }
-            if quote_pos.is_none() && idx + 1 < line_end && matches!(bytes[idx + 1], b'\'' | b'"') {
+            if quote_pos.is_none()
+                && idx + 1 < line_end
+                && matches!(bytes[idx + 1], b'\'' | b'"')
+                && !is_escaped_quote(bytes, idx + 1)
+            {
                 quote_pos = Some(idx + 1);
             }
         }
@@ -414,9 +428,7 @@ pub(crate) fn hover_token_bounds(
             let quote = bytes[quote_start];
             let mut quote_end = quote_start + 1;
             while quote_end < line_end {
-                if bytes[quote_end] == quote
-                    && bytes.get(quote_end.saturating_sub(1)) != Some(&b'\\')
-                {
+                if bytes[quote_end] == quote && !is_escaped_quote(bytes, quote_end) {
                     break;
                 }
                 quote_end += 1;

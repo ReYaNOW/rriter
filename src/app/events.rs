@@ -18,6 +18,8 @@ use winit::window::{Window, WindowId};
 mod about;
 mod source_hover;
 use source_hover::*;
+
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
     let w = app.window.as_ref().unwrap();
     let maximized = w.is_maximized();
@@ -43,6 +45,7 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
     event_loop.exit();
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {

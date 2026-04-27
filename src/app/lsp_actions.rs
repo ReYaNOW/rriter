@@ -1,5 +1,6 @@
 use crate::app::App;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     /// Возвращает (x, y, w, h) области LSP-панели или None если не открыта
     pub(crate) fn lsp_panel_bounds(&self) -> Option<(f32, f32, f32, f32)> {

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;

@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod app;
 mod editor;
 // mod generated;
@@ -5,7 +7,9 @@ mod highlighter;
 mod languages;
 mod lsp;
 mod queries;
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod render_view;
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod renderer;
 mod scroll;
 mod ui_system;

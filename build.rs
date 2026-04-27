@@ -183,6 +183,8 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
 }
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(coverage_nightly)");
+
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let base = Path::new(&manifest);
 

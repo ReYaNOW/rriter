@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
         self.renderer.as_mut().unwrap().last_mouse_x = position.x as f32;

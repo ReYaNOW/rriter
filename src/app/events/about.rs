@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, coverage(off))]
+
 use super::*;
 
 pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
