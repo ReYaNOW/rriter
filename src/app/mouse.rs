@@ -18,6 +18,7 @@ pub struct HoverPopup {
     pub anchor_y: f32,
     pub offset_x: Option<f32>,
     pub offset_y: Option<f32>,
+    pub anim_progress: f32,
     pub scroll: crate::scroll::ScrollState,
     pub layout_cache: Option<HoverLayoutCache>,
 }
@@ -69,6 +70,7 @@ pub struct HoverState {
     pub popup_diag_type_target: Option<usize>,
     pub stale_combined_popup: bool,
     pub diag_hover_ready_after_stale: bool,
+    pub diag_anim_progress: f32,
     pub diag_text: String,
     pub diag_href: Option<String>,
 }
@@ -102,6 +104,7 @@ impl Default for HoverState {
             popup_diag_type_target: None,
             stale_combined_popup: false,
             diag_hover_ready_after_stale: false,
+            diag_anim_progress: 0.0,
             diag_text: String::new(),
             diag_href: None,
         }
@@ -197,6 +200,11 @@ impl HoverState {
         rect: Option<(f32, f32, f32, f32)>,
         max_scroll: f32,
     ) {
+        if popup.is_none() {
+            if let Some(p) = self.popup.as_mut() {
+                p.anim_progress = 0.0;
+            }
+        }
         self.popup = popup;
         self.rect = rect;
         self.max_scroll = max_scroll;
@@ -699,6 +707,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -737,6 +746,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -762,6 +772,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -784,6 +795,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -827,6 +839,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: Some(20.0),
             offset_y: Some(-80.0),
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -865,6 +878,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: Some(20.0),
             offset_y: Some(-80.0),
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -903,6 +917,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -961,6 +976,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: Some(20.0),
             offset_y: Some(-80.0),
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -999,6 +1015,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1023,6 +1040,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1077,6 +1095,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1101,6 +1120,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1124,6 +1144,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1150,6 +1171,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: Some(20.0),
             offset_y: Some(-80.0),
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1182,6 +1204,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1209,6 +1232,7 @@ mod tests {
             anchor_y: 120.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1315,6 +1339,7 @@ mod tests {
             anchor_y: 305.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
@@ -1593,6 +1618,7 @@ mod tests {
             anchor_y: 64.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         };
@@ -1679,6 +1705,7 @@ mod tests {
             anchor_y: 20.0,
             offset_x: None,
             offset_y: None,
+            anim_progress: 0.0,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         };

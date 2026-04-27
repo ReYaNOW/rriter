@@ -235,6 +235,26 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        if s.diag_rect.is_some() && s.diag_anim_progress < 1.0 {
+            s.diag_anim_progress += (1.0 - s.diag_anim_progress) * 15.0 * dt;
+            if s.diag_anim_progress > 0.99 {
+                s.diag_anim_progress = 1.0;
+            }
+            needs_redraw = true;
+        }
+        if let Some(ref mut p) = s.popup {
+            if p.anim_progress < 1.0 {
+                p.anim_progress += (1.0 - p.anim_progress) * 15.0 * dt;
+                if p.anim_progress > 0.99 {
+                    p.anim_progress = 1.0;
+                }
+                needs_redraw = true;
+            }
+        }
+    });
+
     let s = app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
     let window_height = app.window.as_ref().unwrap().inner_size().height as f32;
     let h = (700.0_f32 * s).min(window_height - 40.0 * s);
@@ -582,7 +602,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 anchor_x,
                                 anchor_y,
                                 offset_x: None,
-                                offset_y: None,
+                                offset_y: None, anim_progress: 0.0,
                                 scroll: crate::scroll::ScrollState::new(15.0),
                                 layout_cache: None,
                             };

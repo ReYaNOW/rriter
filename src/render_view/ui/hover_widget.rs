@@ -48,6 +48,28 @@ pub fn compute_hover_y_position(
     target_by
 }
 
+pub fn compute_animated_scissor(
+    mx: f32,
+    my: f32,
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    anim_progress: f32,
+) -> (f32, f32, f32, f32) {
+    let target_x = bx - 4.0;
+    let target_y = by - 4.0;
+    let target_w = box_w + 8.0;
+    let target_h = box_h + 8.0;
+    
+    let anim_sc_x = mx + (target_x - mx) * anim_progress;
+    let anim_sc_y = my + (target_y - my) * anim_progress;
+    let anim_sc_w = target_w * anim_progress;
+    let anim_sc_h = target_h * anim_progress;
+    
+    (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h)
+}
+
 pub fn compute_diagnostic_layout(
     first_line_y_top: f32,
     line_height: f32,
@@ -365,6 +387,28 @@ impl Renderer {
             ui_registry.reset_cursor_state();
         }
 
+        let anim_progress = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress);
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_animated_scissor(
+            mx, my, bx, by, box_w, combined_h, anim_progress,
+        );
+
+        let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
+            let cx1 = x.max(anim_sc_x);
+            let cy1 = y.max(anim_sc_y);
+            let cx2 = (x + w).min(anim_sc_x + anim_sc_w);
+            let cy2 = (y + h).min(anim_sc_y + anim_sc_h);
+            let cw = (cx2 - cx1).max(0.0);
+            let ch = (cy2 - cy1).max(0.0);
+            unsafe {
+                gl.enable(glow::SCISSOR_TEST);
+                let sy = (height - (cy1 + ch)).round() as i32;
+                gl.scissor(cx1.round() as i32, sy, cw.round() as i32, ch.round() as i32);
+            }
+        };
+
+        self.flush();
+        apply_scissor(&self.gl, self.height, bx - 100.0, by - 100.0, box_w + 200.0, combined_h + 200.0);
+
         self.push_rounded_rect(
             bx.round() - 1.0,
             by.round() - 1.0,
@@ -388,16 +432,7 @@ impl Renderer {
         );
 
         self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (by + total_h)).round() as i32;
-            self.gl.scissor(
-                bx.round() as i32,
-                sy,
-                box_w.round() as i32,
-                total_h.round() as i32,
-            );
-        }
+        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h);
         self.push_rounded_rect(
             bx.round(),
             by.round(),
@@ -427,16 +462,7 @@ impl Renderer {
         }
 
         self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (by + total_h)).round() as i32;
-            self.gl.scissor(
-                bx.round() as i32,
-                sy,
-                box_w.round() as i32,
-                total_h.round() as i32,
-            );
-        }
+        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h);
 
         let mut current_y = by + pad - scroll_y;
 
@@ -881,7 +907,29 @@ impl Renderer {
         let max_scroll = (layout.total_text_h + pad * 2.0 - box_h).max(0.0);
         let scroll_y = popup.scroll.current;
 
+        let anim_progress = popup.anim_progress;
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_animated_scissor(
+            mx, my, bx, by, box_w, box_h, anim_progress,
+        );
+
+        let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
+            let cx1 = x.max(anim_sc_x);
+            let cy1 = y.max(anim_sc_y);
+            let cx2 = (x + w).min(anim_sc_x + anim_sc_w);
+            let cy2 = (y + h).min(anim_sc_y + anim_sc_h);
+            let cw = (cx2 - cx1).max(0.0);
+            let ch = (cy2 - cy1).max(0.0);
+            unsafe {
+                gl.enable(glow::SCISSOR_TEST);
+                let sy = (height - (cy1 + ch)).round() as i32;
+                gl.scissor(cx1.round() as i32, sy, cw.round() as i32, ch.round() as i32);
+            }
+        };
+
         if attached_diag.is_none() {
+            self.flush();
+            apply_scissor(&self.gl, self.height, bx - 100.0, by - 100.0, box_w + 200.0, box_h + 200.0);
+
             self.push_rounded_rect(
                 bx.round() - 1.0,
                 by.round() - 1.0,
@@ -906,16 +954,7 @@ impl Renderer {
         }
 
         self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (by + box_h)).round() as i32;
-            self.gl.scissor(
-                bx.round() as i32,
-                sy,
-                box_w.round() as i32,
-                box_h.round() as i32,
-            );
-        }
+        apply_scissor(&self.gl, self.height, bx, by, box_w, box_h);
 
         let mut current_top = by + pad - scroll_y;
         let selected = selection.filter(|(a, b)| a != b);
@@ -1200,5 +1239,54 @@ mod tests {
         let (_bx, by) =
             compute_diagnostic_layout(40.0, 20.0, 200.0, 100.0, 1000.0, 1000.0, 1.0, 100.0, None);
         assert_eq!(by, 68.0); // Не влезло сверху (40-100-8 < 40). Идет вниз: 40 + 20 + 8 = 68
+    }
+
+    #[test]
+    fn test_animated_scissor_expands_from_cursor_to_farthest_corner() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.5,
+        );
+        // Cursor is at 10, 20. Popup is at 100, 100 with size 50, 50.
+        // Target is 96, 96, 58, 58 (due to -4.0 margin and +8.0 size)
+        // At progress 0.5, it interpolates the origin and width/height.
+        // sc_x = 10 + (96 - 10) * 0.5 = 53.
+        // sc_y = 20 + (96 - 20) * 0.5 = 58.
+        // sc_w = 58 * 0.5 = 29.
+        // sc_h = 58 * 0.5 = 29.
+        assert_eq!(sc_x, 53.0);
+        assert_eq!(sc_y, 58.0);
+        assert_eq!(sc_w, 29.0);
+        assert_eq!(sc_h, 29.0);
+    }
+
+    #[test]
+    fn test_animated_scissor_is_full_popup_at_progress_one() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            1.0,
+        );
+        assert_eq!(sc_x, 96.0);
+        assert_eq!(sc_y, 96.0);
+        assert_eq!(sc_w, 58.0);
+        assert_eq!(sc_h, 58.0);
+    }
+
+    #[test]
+    fn test_animated_scissor_is_zero_at_progress_zero() {
+        let (sc_x, sc_y, sc_w, sc_h) = compute_animated_scissor(
+            10.0, 20.0,
+            100.0, 100.0,
+            50.0, 50.0,
+            0.0,
+        );
+        assert_eq!(sc_x, 10.0);
+        assert_eq!(sc_y, 20.0);
+        assert_eq!(sc_w, 0.0);
+        assert_eq!(sc_h, 0.0);
     }
 }
