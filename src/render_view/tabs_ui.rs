@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_tab_bar(
         &mut self,

@@ -1,7 +1,102 @@
 use super::*;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+type Rect = (f32, f32, f32, f32);
+
+fn union_rect(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(r), None) | (None, Some(r)) => Some(r),
+        (Some(r1), Some(r2)) => {
+            let x_min = r1.0.min(r2.0);
+            let y_min = r1.1.min(r2.1);
+            let x_max = (r1.0 + r1.2).max(r2.0 + r2.2);
+            let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
+            Some((x_min, y_min, x_max - x_min, y_max - y_min))
+        }
+    }
+}
+
+fn point_in_padded_rect(mx: f32, my: f32, rect: Rect, pad: f32) -> bool {
+    mx >= rect.0 - pad
+        && mx <= rect.0 + rect.2 + pad
+        && my >= rect.1 - pad
+        && my <= rect.1 + rect.3 + pad
+}
+
+fn terminal_mouse_button_code(button: winit::event::MouseButton) -> u8 {
+    match button {
+        winit::event::MouseButton::Left => 0,
+        winit::event::MouseButton::Middle => 1,
+        winit::event::MouseButton::Right => 2,
+        _ => 0,
+    }
+}
+
+fn terminal_mouse_cell_x(mx: f32, panel_x: f32, char_w: f32) -> usize {
+    ((mx - panel_x).max(0.0) / char_w).floor() as usize + 1
+}
+
+fn terminal_mouse_cell_y(
+    my: f32,
+    term_content_y: f32,
+    term_content_h: f32,
+    scroll_offset: f32,
+    char_h: f32,
+    scale: f32,
+    visible_rows: usize,
+) -> usize {
+    let offset_from_bottom =
+        (term_content_y + term_content_h - 8.0 * scale - my + scroll_offset) / char_h;
+    visible_rows
+        .saturating_sub(1)
+        .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
+        + 1
+}
+
+fn terminal_mouse_sgr_sequence(
+    btn_code: u8,
+    cell_x: usize,
+    cell_y: usize,
+    is_pressed: bool,
+) -> String {
+    let end_char = if is_pressed { 'M' } else { 'm' };
+    format!("\x1b[<{};{};{}{}", btn_code, cell_x, cell_y, end_char)
+}
+
+fn autocomplete_scroll_click_target(
+    mouse_y: f32,
+    rect_y: f32,
+    rect_h: f32,
+    current_scroll: f32,
+    total_items: usize,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    let step = 36.0 * scale;
+    let total_items = total_items as f32;
+    let visible_items = total_items.min(7.0);
+    let total_h = total_items * step + 16.0 * scale;
+    if total_h <= rect_h {
+        return None;
+    }
+
+    let max_scroll = ((total_items - visible_items) * step).max(0.0);
+    let scroll_ratio = (current_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
+    let track_h = rect_h - 8.0 * scale;
+    let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
+    let thumb_start_y = rect_y + 4.0 * scale + scroll_ratio * (track_h - thumb_h);
+
+    if mouse_y >= thumb_start_y && mouse_y <= thumb_start_y + thumb_h {
+        Some((mouse_y - thumb_start_y, current_scroll))
+    } else {
+        let drag_offset = thumb_h / 2.0;
+        let new_ratio =
+            (mouse_y - rect_y - 4.0 * scale - drag_offset) / (track_h - thumb_h).max(1.0);
+        Some((drag_offset, (new_ratio * max_scroll).clamp(0.0, max_scroll)))
+    }
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_input(
         &mut self,
         _event_loop: &ActiveEventLoop,
@@ -11,29 +106,17 @@ impl App {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
-            let mut in_hover_popup = false;
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
             let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
             let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
-
-            if type_rect.is_some() || diag_rect.is_some() {
-                let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
-                if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
-                    let x_min = r1.0.min(r2.0);
-                    let y_min = r1.1.min(r2.1);
-                    let x_max = (r1.0 + r1.2).max(r2.0 + r2.2);
-                    let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
-                    union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
-                }
-                let pad = 24.0 * self.renderer.as_ref().unwrap().scale_factor;
-                if mx >= union_rect.0 - pad
-                    && mx <= union_rect.0 + union_rect.2 + pad
-                    && my >= union_rect.1 - pad
-                    && my <= union_rect.1 + union_rect.3 + pad
-                {
-                    in_hover_popup = true;
-                }
-            }
+            let in_hover_popup = union_rect(diag_rect, type_rect).is_some_and(|rect| {
+                point_in_padded_rect(
+                    mx,
+                    my,
+                    rect,
+                    24.0 * self.renderer.as_ref().unwrap().scale_factor,
+                )
+            });
 
             if !in_hover_popup {
                 clear_hover_popup(self.renderer.as_mut());
@@ -53,12 +136,7 @@ impl App {
                     }
                 }
                 if tracking {
-                    let btn_code = match button {
-                        winit::event::MouseButton::Left => 0,
-                        winit::event::MouseButton::Middle => 1,
-                        winit::event::MouseButton::Right => 2,
-                        _ => 0,
-                    };
+                    let btn_code = terminal_mouse_button_code(button);
                     let is_pressed = state == ElementState::Pressed;
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let panel_x = 48.0 * s + 10.0 * s;
@@ -74,8 +152,7 @@ impl App {
                     let term_content_y = content_y + 32.0 * s;
                     let term_content_h = content_h - 32.0 * s;
 
-                    let mut cell_x = ((mx - panel_x).max(0.0) / char_w).floor() as usize;
-                    cell_x += 1;
+                    let cell_x = terminal_mouse_cell_x(mx, panel_x, char_w);
 
                     let mut is_drag = false;
                     let mut cell_y = 1;
@@ -97,14 +174,15 @@ impl App {
                         } else {
                             term.scroll_y.current.min(max_scroll).round()
                         };
-                        let offset_from_bottom = (term_content_y + term_content_h - 8.0 * s - my
-                            + scroll_offset)
-                            / char_h;
-                        let visible_row_0_based = grid
-                            .visible_rows
-                            .saturating_sub(1)
-                            .saturating_sub(offset_from_bottom.max(0.0).floor() as usize);
-                        cell_y = visible_row_0_based + 1;
+                        cell_y = terminal_mouse_cell_y(
+                            my,
+                            term_content_y,
+                            term_content_h,
+                            scroll_offset,
+                            char_h,
+                            s,
+                            grid.visible_rows,
+                        );
 
                         if is_pressed {
                             grid.selection = None;
@@ -116,8 +194,7 @@ impl App {
                     }
 
                     if !is_drag {
-                        let end_char = if is_pressed { 'M' } else { 'm' };
-                        let seq = format!("\x1b[<{};{};{}{}", btn_code, cell_x, cell_y, end_char);
+                        let seq = terminal_mouse_sgr_sequence(btn_code, cell_x, cell_y, is_pressed);
                         if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                             if let Ok(mut w) = term.writer.lock() {
                                 let _ = w.write_all(seq.as_bytes());
@@ -864,36 +941,23 @@ impl App {
                         && last_mouse_y <= ry + rh
                     {
                         let scroll_x = rx + rw - 14.0 * s;
-                        let step = 36.0 * s;
-                        let total_items = self.autocomplete_options.len() as f32;
-                        let visible_items = total_items.min(7.0);
-                        let total_h = total_items * step + 16.0 * s;
 
-                        if last_mouse_x >= scroll_x && total_h > rh {
-                            self.autocomplete_scroll.is_dragging = true;
-                            let max_scroll = ((total_items - visible_items) * step).max(0.0);
-                            let scroll_ratio = (self.autocomplete_scroll.current
-                                / max_scroll.max(1.0))
-                            .clamp(0.0, 1.0);
-
-                            let track_h = rh - 8.0 * s;
-                            let thumb_h = (rh / total_h * track_h).max(20.0 * s);
-                            let thumb_start_y = ry + 4.0 * s + scroll_ratio * (track_h - thumb_h);
-
-                            if last_mouse_y >= thumb_start_y
-                                && last_mouse_y <= thumb_start_y + thumb_h
-                            {
-                                self.autocomplete_scroll.drag_offset = last_mouse_y - thumb_start_y;
-                            } else {
-                                self.autocomplete_scroll.anim_speed = 15.0;
-                                self.autocomplete_scroll.drag_offset = thumb_h / 2.0;
-                                let new_ratio = (last_mouse_y
-                                    - ry
-                                    - 4.0 * s
-                                    - self.autocomplete_scroll.drag_offset)
-                                    / (track_h - thumb_h).max(1.0);
-                                self.autocomplete_scroll.target =
-                                    (new_ratio * max_scroll).clamp(0.0, max_scroll);
+                        if last_mouse_x >= scroll_x {
+                            if let Some((drag_offset, target)) = autocomplete_scroll_click_target(
+                                last_mouse_y,
+                                ry,
+                                rh,
+                                self.autocomplete_scroll.current,
+                                self.autocomplete_options.len(),
+                                s,
+                            ) {
+                                self.autocomplete_scroll.is_dragging = true;
+                                self.autocomplete_scroll.drag_offset = drag_offset;
+                                if (target - self.autocomplete_scroll.current).abs() > f32::EPSILON
+                                {
+                                    self.autocomplete_scroll.anim_speed = 15.0;
+                                    self.autocomplete_scroll.target = target;
+                                }
                             }
                         } else if let Some(idx) = self.autocomplete_hovered_idx {
                             self.autocomplete_selected_idx = idx;
@@ -912,5 +976,79 @@ impl App {
             self.last_action = Instant::now();
         }
         self.window.as_ref().unwrap().request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hover_rect_helpers_union_and_padding_are_inclusive() {
+        assert_eq!(union_rect(None, None), None);
+        assert_eq!(
+            union_rect(Some((1.0, 2.0, 3.0, 4.0)), None),
+            Some((1.0, 2.0, 3.0, 4.0)),
+        );
+        assert_eq!(
+            union_rect(
+                Some((10.0, 10.0, 20.0, 20.0)),
+                Some((25.0, 5.0, 20.0, 10.0)),
+            ),
+            Some((10.0, 5.0, 35.0, 25.0)),
+        );
+        assert!(point_in_padded_rect(
+            8.0,
+            8.0,
+            (10.0, 10.0, 20.0, 20.0),
+            2.0,
+        ));
+        assert!(!point_in_padded_rect(
+            7.9,
+            8.0,
+            (10.0, 10.0, 20.0, 20.0),
+            2.0,
+        ));
+    }
+
+    #[test]
+    fn terminal_mouse_helpers_match_sgr_protocol_edges() {
+        assert_eq!(
+            terminal_mouse_button_code(winit::event::MouseButton::Left),
+            0,
+        );
+        assert_eq!(
+            terminal_mouse_button_code(winit::event::MouseButton::Middle),
+            1,
+        );
+        assert_eq!(
+            terminal_mouse_button_code(winit::event::MouseButton::Right),
+            2,
+        );
+        assert_eq!(terminal_mouse_cell_x(0.0, 50.0, 10.0), 1);
+        assert_eq!(terminal_mouse_cell_x(75.0, 50.0, 10.0), 3);
+        assert_eq!(
+            terminal_mouse_cell_y(172.0, 100.0, 100.0, 0.0, 20.0, 1.0, 5),
+            4,
+        );
+        assert_eq!(terminal_mouse_sgr_sequence(0, 3, 4, true), "\x1b[<0;3;4M",);
+        assert_eq!(terminal_mouse_sgr_sequence(2, 1, 1, false), "\x1b[<2;1;1m",);
+    }
+
+    #[test]
+    fn autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer() {
+        assert_eq!(
+            autocomplete_scroll_click_target(20.0, 10.0, 200.0, 0.0, 3, 1.0),
+            None,
+        );
+
+        let (drag_offset, target) =
+            autocomplete_scroll_click_target(20.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
+        assert!(drag_offset >= 0.0);
+        assert_eq!(target, 0.0);
+
+        let (_, paged_target) =
+            autocomplete_scroll_click_target(140.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
+        assert!(paged_target > 0.0);
     }
 }

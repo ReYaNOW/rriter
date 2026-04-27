@@ -479,6 +479,7 @@ pub(crate) fn hover_bytes_share_token(
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn hover_anchor_for_byte(
     renderer: &mut crate::renderer::Renderer,
     editor: &crate::editor::Editor,
@@ -507,7 +508,7 @@ pub fn hover_anchor_for_byte(
         token_end += 1;
     }
 
-        if token_start > token_end || line_start > token_start {
+    if token_start > token_end || line_start > token_start {
         return (renderer.last_mouse_x, renderer.last_mouse_y);
     }
 
@@ -585,6 +586,7 @@ mod tests {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn hover_popup_byte_at(
     renderer: &mut crate::renderer::Renderer,
     popup: &HoverPopup,

@@ -3,6 +3,7 @@ use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_terminal_panel(
         &mut self,

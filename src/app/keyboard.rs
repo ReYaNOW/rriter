@@ -8,8 +8,76 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
 mod main_keys;
-#[cfg_attr(coverage_nightly, coverage(off))]
+
+fn terminal_key_sequence(
+    physical_key: PhysicalKey,
+    logical_text: Option<&str>,
+    ctrl: bool,
+    alt: bool,
+    super_key: bool,
+    is_alt: bool,
+) -> Option<Vec<u8>> {
+    let bytes: Option<&'static [u8]> = match physical_key {
+        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => Some(b"\r"),
+        PhysicalKey::Code(KeyCode::Backspace) => Some(b"\x08"),
+        PhysicalKey::Code(KeyCode::Tab) => Some(b"\t"),
+        PhysicalKey::Code(KeyCode::F1) => Some(b"\x1bOP"),
+        PhysicalKey::Code(KeyCode::F2) => Some(b"\x1bOQ"),
+        PhysicalKey::Code(KeyCode::F3) => Some(b"\x1bOR"),
+        PhysicalKey::Code(KeyCode::F4) => Some(b"\x1bOS"),
+        PhysicalKey::Code(KeyCode::F5) => Some(b"\x1b[15~"),
+        PhysicalKey::Code(KeyCode::F6) => Some(b"\x1b[17~"),
+        PhysicalKey::Code(KeyCode::F7) => Some(b"\x1b[18~"),
+        PhysicalKey::Code(KeyCode::F8) => Some(b"\x1b[19~"),
+        PhysicalKey::Code(KeyCode::F9) => Some(b"\x1b[20~"),
+        PhysicalKey::Code(KeyCode::F10) => Some(b"\x1b[21~"),
+        PhysicalKey::Code(KeyCode::F11) => Some(b"\x1b[23~"),
+        PhysicalKey::Code(KeyCode::F12) => Some(b"\x1b[24~"),
+        PhysicalKey::Code(KeyCode::ArrowUp) => Some(if is_alt { b"\x1bOA" } else { b"\x1b[A" }),
+        PhysicalKey::Code(KeyCode::ArrowDown) => Some(if is_alt { b"\x1bOB" } else { b"\x1b[B" }),
+        PhysicalKey::Code(KeyCode::ArrowLeft) => Some(if is_alt { b"\x1bOD" } else { b"\x1b[D" }),
+        PhysicalKey::Code(KeyCode::ArrowRight) => Some(if is_alt { b"\x1bOC" } else { b"\x1b[C" }),
+        PhysicalKey::Code(KeyCode::Escape) => Some(b"\x1b"),
+        PhysicalKey::Code(KeyCode::KeyA) if ctrl => Some(b"\x01"),
+        PhysicalKey::Code(KeyCode::KeyB) if ctrl => Some(b"\x02"),
+        PhysicalKey::Code(KeyCode::KeyC) if ctrl => Some(b"\x03"),
+        PhysicalKey::Code(KeyCode::KeyD) if ctrl => Some(b"\x04"),
+        PhysicalKey::Code(KeyCode::KeyE) if ctrl => Some(b"\x05"),
+        PhysicalKey::Code(KeyCode::KeyG) if ctrl => Some(b"\x07"),
+        PhysicalKey::Code(KeyCode::KeyH) if ctrl => Some(b"\x08"),
+        PhysicalKey::Code(KeyCode::KeyI) if ctrl => Some(b"\x09"),
+        PhysicalKey::Code(KeyCode::KeyJ) if ctrl => Some(b"\x0a"),
+        PhysicalKey::Code(KeyCode::KeyK) if ctrl => Some(b"\x0b"),
+        PhysicalKey::Code(KeyCode::KeyL) if ctrl => Some(b"\x0c"),
+        PhysicalKey::Code(KeyCode::KeyM) if ctrl => Some(b"\x0d"),
+        PhysicalKey::Code(KeyCode::KeyN) if ctrl => Some(b"\x0e"),
+        PhysicalKey::Code(KeyCode::KeyO) if ctrl => Some(b"\x0f"),
+        PhysicalKey::Code(KeyCode::KeyP) if ctrl => Some(b"\x10"),
+        PhysicalKey::Code(KeyCode::KeyQ) if ctrl => Some(b"\x11"),
+        PhysicalKey::Code(KeyCode::KeyR) if ctrl => Some(b"\x12"),
+        PhysicalKey::Code(KeyCode::KeyS) if ctrl => Some(b"\x13"),
+        PhysicalKey::Code(KeyCode::KeyT) if ctrl => Some(b"\x14"),
+        PhysicalKey::Code(KeyCode::KeyU) if ctrl => Some(b"\x15"),
+        PhysicalKey::Code(KeyCode::KeyW) if ctrl => Some(b"\x17"),
+        PhysicalKey::Code(KeyCode::KeyX) if ctrl => Some(b"\x18"),
+        PhysicalKey::Code(KeyCode::KeyY) if ctrl => Some(b"\x19"),
+        PhysicalKey::Code(KeyCode::KeyZ) if ctrl => Some(b"\x1a"),
+        _ => None,
+    };
+
+    if let Some(bytes) = bytes {
+        return Some(bytes.to_vec());
+    }
+
+    if !ctrl && !alt && !super_key {
+        return logical_text.map(|txt| txt.as_bytes().to_vec());
+    }
+
+    None
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
 
@@ -90,151 +158,34 @@ impl App {
                                 }
                             }
 
-                            let _ = self.clipboard.set_text(res.trim_end().to_string());
+                            if let Some(clipboard) = self.clipboard.as_mut() {
+                                let _ = clipboard.set_text(res.trim_end().to_string());
+                            }
                             grid.selection = None;
                         } else {
                             let _ = w.write_all(b"\x03");
                         }
                     }
                     PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                        if let Ok(text) = self.clipboard.get_text() {
+                        if let Some(text) = self
+                            .clipboard
+                            .as_mut()
+                            .and_then(|clipboard| clipboard.get_text().ok())
+                        {
                             let _ = w.write_all(text.as_bytes());
                         }
                     }
-                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-                        let _ = w.write_all(b"\r");
-                    }
-                    PhysicalKey::Code(KeyCode::Backspace) => {
-                        let _ = w.write_all(b"\x08");
-                    }
-                    PhysicalKey::Code(KeyCode::Tab) => {
-                        let _ = w.write_all(b"\t");
-                    }
-                    PhysicalKey::Code(KeyCode::F1) => {
-                        let _ = w.write_all(b"\x1bOP");
-                    }
-                    PhysicalKey::Code(KeyCode::F2) => {
-                        let _ = w.write_all(b"\x1bOQ");
-                    }
-                    PhysicalKey::Code(KeyCode::F3) => {
-                        let _ = w.write_all(b"\x1bOR");
-                    }
-                    PhysicalKey::Code(KeyCode::F4) => {
-                        let _ = w.write_all(b"\x1bOS");
-                    }
-                    PhysicalKey::Code(KeyCode::F5) => {
-                        let _ = w.write_all(b"\x1b[15~");
-                    }
-                    PhysicalKey::Code(KeyCode::F6) => {
-                        let _ = w.write_all(b"\x1b[17~");
-                    }
-                    PhysicalKey::Code(KeyCode::F7) => {
-                        let _ = w.write_all(b"\x1b[18~");
-                    }
-                    PhysicalKey::Code(KeyCode::F8) => {
-                        let _ = w.write_all(b"\x1b[19~");
-                    }
-                    PhysicalKey::Code(KeyCode::F9) => {
-                        let _ = w.write_all(b"\x1b[20~");
-                    }
-                    PhysicalKey::Code(KeyCode::F10) => {
-                        let _ = w.write_all(b"\x1b[21~");
-                    }
-                    PhysicalKey::Code(KeyCode::F11) => {
-                        let _ = w.write_all(b"\x1b[23~");
-                    }
-                    PhysicalKey::Code(KeyCode::F12) => {
-                        let _ = w.write_all(b"\x1b[24~");
-                    }
-                    PhysicalKey::Code(KeyCode::ArrowUp) => {
-                        let _ = w.write_all(if grid.is_alt { b"\x1bOA" } else { b"\x1b[A" });
-                    }
-                    PhysicalKey::Code(KeyCode::ArrowDown) => {
-                        let _ = w.write_all(if grid.is_alt { b"\x1bOB" } else { b"\x1b[B" });
-                    }
-                    PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                        let _ = w.write_all(if grid.is_alt { b"\x1bOD" } else { b"\x1b[D" });
-                    }
-                    PhysicalKey::Code(KeyCode::ArrowRight) => {
-                        let _ = w.write_all(if grid.is_alt { b"\x1bOC" } else { b"\x1b[C" });
-                    }
-                    PhysicalKey::Code(KeyCode::Escape) => {
-                        let _ = w.write_all(b"\x1b");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
-                        let _ = w.write_all(b"\x01");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyB) if ctrl => {
-                        let _ = w.write_all(b"\x02");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyD) if ctrl => {
-                        let _ = w.write_all(b"\x04");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyE) if ctrl => {
-                        let _ = w.write_all(b"\x05");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyG) if ctrl => {
-                        let _ = w.write_all(b"\x07");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyH) if ctrl => {
-                        let _ = w.write_all(b"\x08");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyI) if ctrl => {
-                        let _ = w.write_all(b"\x09");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyJ) if ctrl => {
-                        let _ = w.write_all(b"\x0a");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyK) if ctrl => {
-                        let _ = w.write_all(b"\x0b");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyL) if ctrl => {
-                        let _ = w.write_all(b"\x0c");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyM) if ctrl => {
-                        let _ = w.write_all(b"\x0d");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyN) if ctrl => {
-                        let _ = w.write_all(b"\x0e");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
-                        let _ = w.write_all(b"\x0f");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyP) if ctrl => {
-                        let _ = w.write_all(b"\x10");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
-                        let _ = w.write_all(b"\x11");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyR) if ctrl => {
-                        let _ = w.write_all(b"\x12");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyS) if ctrl => {
-                        let _ = w.write_all(b"\x13");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyT) if ctrl => {
-                        let _ = w.write_all(b"\x14");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyU) if ctrl => {
-                        let _ = w.write_all(b"\x15");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
-                        let _ = w.write_all(b"\x17");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
-                        let _ = w.write_all(b"\x18");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyY) if ctrl => {
-                        let _ = w.write_all(b"\x19");
-                    }
-                    PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
-                        let _ = w.write_all(b"\x1a");
-                    }
                     _ => {
-                        if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
-                            if let Some(txt) = key_event.logical_key.to_text() {
-                                let _ = w.write_all(txt.as_bytes());
-                            }
+                        let is_alt_mode = grid.is_alt;
+                        if let Some(bytes) = terminal_key_sequence(
+                            key_event.physical_key,
+                            key_event.logical_key.to_text(),
+                            ctrl,
+                            self.modifiers.alt_key(),
+                            self.modifiers.super_key(),
+                            is_alt_mode,
+                        ) {
+                            let _ = w.write_all(&bytes);
                         }
                     }
                 }
@@ -245,6 +196,7 @@ impl App {
         self.window.as_ref().unwrap().request_redraw();
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == winit::event::ElementState::Pressed {
             let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
@@ -328,18 +280,18 @@ impl App {
                 }
                 PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                     if let Some(text) = self.ide_panel.term_search_editor.get_selection() {
-                        let _ = self.clipboard.set_text(text);
+                        self.set_clipboard_text(text);
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                     if let Some(text) = self.ide_panel.term_search_editor.get_selection() {
-                        let _ = self.clipboard.set_text(text);
+                        self.set_clipboard_text(text);
                         self.ide_panel.term_search_editor.delete_selection();
                         is_edit = true;
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                    if let Ok(text) = self.clipboard.get_text() {
+                    if let Some(text) = self.get_clipboard_text() {
                         self.ide_panel.term_search_editor.insert_str(&text);
                         is_edit = true;
                     }
@@ -376,6 +328,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == ElementState::Pressed {
             let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
@@ -455,18 +408,18 @@ impl App {
                 }
                 PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                     if let Some(text) = self.search_editor.get_selection() {
-                        let _ = self.clipboard.set_text(text);
+                        self.set_clipboard_text(text);
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                     if let Some(text) = self.search_editor.get_selection() {
-                        let _ = self.clipboard.set_text(text);
+                        self.set_clipboard_text(text);
                         self.search_editor.delete_selection();
                         is_edit = true;
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                    if let Ok(text) = self.clipboard.get_text() {
+                    if let Some(text) = self.get_clipboard_text() {
                         self.search_editor.insert_str(&text);
                         is_edit = true;
                     }
@@ -501,5 +454,171 @@ impl App {
             self.last_action = Instant::now();
             self.window.as_ref().unwrap().request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seq(code: KeyCode, ctrl: bool, alt: bool, super_key: bool, is_alt: bool) -> Option<Vec<u8>> {
+        terminal_key_sequence(PhysicalKey::Code(code), None, ctrl, alt, super_key, is_alt)
+    }
+
+    #[test]
+    fn terminal_key_sequence_covers_basic_control_and_text_input() {
+        assert_eq!(
+            seq(KeyCode::Enter, false, false, false, false),
+            Some(b"\r".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::NumpadEnter, false, false, false, false),
+            Some(b"\r".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::Backspace, false, false, false, false),
+            Some(b"\x08".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::Tab, false, false, false, false),
+            Some(b"\t".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::Escape, false, false, false, false),
+            Some(b"\x1b".to_vec())
+        );
+
+        assert_eq!(
+            terminal_key_sequence(
+                PhysicalKey::Code(KeyCode::KeyA),
+                Some("a"),
+                false,
+                false,
+                false,
+                false,
+            ),
+            Some(b"a".to_vec())
+        );
+        assert_eq!(
+            terminal_key_sequence(
+                PhysicalKey::Code(KeyCode::KeyA),
+                Some("a"),
+                false,
+                true,
+                false,
+                false,
+            ),
+            None
+        );
+        assert_eq!(
+            terminal_key_sequence(
+                PhysicalKey::Code(KeyCode::KeyA),
+                Some("a"),
+                false,
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_key_sequence_covers_function_keys() {
+        let cases = [
+            (KeyCode::F1, b"\x1bOP".as_slice()),
+            (KeyCode::F2, b"\x1bOQ".as_slice()),
+            (KeyCode::F3, b"\x1bOR".as_slice()),
+            (KeyCode::F4, b"\x1bOS".as_slice()),
+            (KeyCode::F5, b"\x1b[15~".as_slice()),
+            (KeyCode::F6, b"\x1b[17~".as_slice()),
+            (KeyCode::F7, b"\x1b[18~".as_slice()),
+            (KeyCode::F8, b"\x1b[19~".as_slice()),
+            (KeyCode::F9, b"\x1b[20~".as_slice()),
+            (KeyCode::F10, b"\x1b[21~".as_slice()),
+            (KeyCode::F11, b"\x1b[23~".as_slice()),
+            (KeyCode::F12, b"\x1b[24~".as_slice()),
+        ];
+
+        for (key, expected) in cases {
+            assert_eq!(
+                seq(key, false, false, false, false),
+                Some(expected.to_vec())
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_key_sequence_covers_arrows_in_normal_and_alt_modes() {
+        assert_eq!(
+            seq(KeyCode::ArrowUp, false, false, false, false),
+            Some(b"\x1b[A".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowDown, false, false, false, false),
+            Some(b"\x1b[B".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowLeft, false, false, false, false),
+            Some(b"\x1b[D".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowRight, false, false, false, false),
+            Some(b"\x1b[C".to_vec())
+        );
+
+        assert_eq!(
+            seq(KeyCode::ArrowUp, false, false, false, true),
+            Some(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowDown, false, false, false, true),
+            Some(b"\x1bOB".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowLeft, false, false, false, true),
+            Some(b"\x1bOD".to_vec())
+        );
+        assert_eq!(
+            seq(KeyCode::ArrowRight, false, false, false, true),
+            Some(b"\x1bOC".to_vec())
+        );
+    }
+
+    #[test]
+    fn terminal_key_sequence_covers_ctrl_letter_bytes() {
+        let cases = [
+            (KeyCode::KeyA, 0x01),
+            (KeyCode::KeyB, 0x02),
+            (KeyCode::KeyC, 0x03),
+            (KeyCode::KeyD, 0x04),
+            (KeyCode::KeyE, 0x05),
+            (KeyCode::KeyG, 0x07),
+            (KeyCode::KeyH, 0x08),
+            (KeyCode::KeyI, 0x09),
+            (KeyCode::KeyJ, 0x0a),
+            (KeyCode::KeyK, 0x0b),
+            (KeyCode::KeyL, 0x0c),
+            (KeyCode::KeyM, 0x0d),
+            (KeyCode::KeyN, 0x0e),
+            (KeyCode::KeyO, 0x0f),
+            (KeyCode::KeyP, 0x10),
+            (KeyCode::KeyQ, 0x11),
+            (KeyCode::KeyR, 0x12),
+            (KeyCode::KeyS, 0x13),
+            (KeyCode::KeyT, 0x14),
+            (KeyCode::KeyU, 0x15),
+            (KeyCode::KeyW, 0x17),
+            (KeyCode::KeyX, 0x18),
+            (KeyCode::KeyY, 0x19),
+            (KeyCode::KeyZ, 0x1a),
+        ];
+
+        for (key, byte) in cases {
+            assert_eq!(seq(key, true, false, false, false), Some(vec![byte]));
+        }
+
+        assert_eq!(seq(KeyCode::KeyF, true, false, false, false), None);
+        assert_eq!(seq(KeyCode::KeyV, true, false, false, false), None);
     }
 }

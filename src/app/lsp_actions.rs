@@ -1,8 +1,42 @@
 use crate::app::App;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn build_noqa_comment(existing_noqa: Option<&str>, codes: &[String]) -> String {
+    let prefix = if existing_noqa.is_some() {
+        "# noqa"
+    } else {
+        "  # noqa"
+    };
+
+    if codes.is_empty() {
+        return prefix.to_string();
+    }
+
+    let mut merged = if let Some(old_noqa) = existing_noqa {
+        if let Some(colon) = old_noqa.find(": ") {
+            old_noqa[colon + 2..]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    for code in codes {
+        if !merged.contains(code) {
+            merged.push(code.clone());
+        }
+    }
+
+    format!("{}: {}", prefix, merged.join(", "))
+}
+
 impl App {
     /// Возвращает (x, y, w, h) области LSP-панели или None если не открыта
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn lsp_panel_bounds(&self) -> Option<(f32, f32, f32, f32)> {
         let s = self.renderer.as_ref()?.scale_factor;
         let is_top = self.ide_panel.slots.iter().any(|sl| {
@@ -96,6 +130,7 @@ impl App {
     }
 
     /// Открывает меню быстрых действий LSP для текущей строки
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn open_lsp_actions_menu(&mut self) {
         if !self.is_ide_mode || self.show_welcome {
             return;
@@ -224,7 +259,9 @@ impl App {
             }
         }
 
-        self.window.as_ref().unwrap().request_redraw();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 
     /// Вставляет/обновляет # noqa комментарий на указанной строке
@@ -258,27 +295,7 @@ impl App {
         if let Some(noqa_pos_in_line) = line_text.find("# noqa") {
             let noqa_byte_start = line_start + noqa_pos_in_line;
             let old_noqa_str = &line_text[noqa_pos_in_line..];
-            let new_noqa = if codes.is_empty() {
-                "# noqa".to_string()
-            } else {
-                let existing = if let Some(colon) = old_noqa_str.find(": ") {
-                    old_noqa_str[colon + 2..]
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
-
-                let mut merged = existing.clone();
-                for code in codes {
-                    if !merged.contains(code) {
-                        merged.push(code.clone());
-                    }
-                }
-                format!("# noqa: {}", merged.join(", "))
-            };
+            let new_noqa = build_noqa_comment(Some(old_noqa_str), codes);
 
             let (off, len, _) = self
                 .editor
@@ -288,11 +305,7 @@ impl App {
                 .shift_insert(off, new_noqa.len(), Some(&new_noqa));
         } else {
             // Нет noqa — добавляем в конец строки
-            let noqa = if codes.is_empty() {
-                "  # noqa".to_string()
-            } else {
-                format!("  # noqa: {}", codes.join(", "))
-            };
+            let noqa = build_noqa_comment(None, codes);
             let (off, len, _) = self.editor.replace_range(actual_end, actual_end, &noqa);
             self.highlighter.shift_delete(off, len);
             self.highlighter.shift_insert(off, noqa.len(), Some(&noqa));
@@ -313,11 +326,9 @@ impl App {
                 .apply_edits(self.editor.version, edits, None, None);
         }
 
-        App::update_window_title(
-            self.window.as_ref().unwrap(),
-            &self.base_title,
-            self.editor.is_dirty(),
-        );
+        if let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+        }
     }
 
     pub(crate) fn apply_workspace_edit(
@@ -403,12 +414,49 @@ impl App {
                         .apply_edits(self.editor.version, edits, None, None);
                 }
 
-                App::update_window_title(
-                    self.window.as_ref().unwrap(),
-                    &self.base_title,
-                    self.editor.is_dirty(),
-                );
+                if let Some(window) = self.window.as_ref() {
+                    App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn codes(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn build_noqa_comment_creates_plain_and_code_comments() {
+        assert_eq!(build_noqa_comment(None, &[]), "  # noqa");
+        assert_eq!(
+            build_noqa_comment(None, &codes(&["F401"])),
+            "  # noqa: F401"
+        );
+        assert_eq!(
+            build_noqa_comment(None, &codes(&["F401", "E501"])),
+            "  # noqa: F401, E501"
+        );
+    }
+
+    #[test]
+    fn build_noqa_comment_merges_existing_codes_without_duplicates() {
+        assert_eq!(
+            build_noqa_comment(Some("# noqa: F401, E501"), &codes(&["F401", "UP001"])),
+            "# noqa: F401, E501, UP001"
+        );
+        assert_eq!(
+            build_noqa_comment(Some("# noqa"), &codes(&["F401"])),
+            "# noqa: F401"
+        );
+        assert_eq!(
+            build_noqa_comment(Some("# noqa: "), &codes(&["F401"])),
+            "# noqa: F401"
+        );
+        assert_eq!(build_noqa_comment(Some("# noqa: F401"), &[]), "# noqa");
     }
 }

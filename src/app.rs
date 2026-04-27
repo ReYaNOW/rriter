@@ -19,8 +19,20 @@ use winit::event_loop::ActiveEventLoop;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn set_clipboard_text(&mut self, text: impl Into<String>) {
+        if let Some(clipboard) = self.clipboard.as_mut() {
+            let _ = clipboard.set_text(text.into());
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn get_clipboard_text(&mut self) -> Option<String> {
+        self.clipboard.as_mut()?.get_text().ok()
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn enter_ide_mode(&mut self) {
         self.is_ide_mode = true;
 
@@ -370,6 +382,7 @@ impl App {
         self.open_file_in_tab_internal(path, add_to_history, false);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn open_file_in_tab_internal(
         &mut self,
         path: PathBuf,
@@ -653,6 +666,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn jump_to_terminal_search_result(&mut self) {
         if let Some(idx) = self.ide_panel.term_search_current_idx {
             if let Some(&(sx, sy, ex, ey)) = self.ide_panel.term_search_results.get(idx) {
@@ -745,6 +759,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn jump_to_search_result(&mut self) {
         if let Some(idx) = self.search_current_idx {
             if let Some(&(start, end)) = self.search_results.get(idx) {
@@ -771,6 +786,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn update_window_title(window: &Window, base_title: &str, is_dirty: bool) {
         let title = if is_dirty {
             format!("{} * — RRiter", base_title)
@@ -780,6 +796,7 @@ impl App {
         window.set_title(&title);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         self.is_dragging = false;
         self.scroll_y.is_dragging = false;
@@ -822,6 +839,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn close_dialog(&mut self) {
         self.dialog_window = None;
         self.dialog_gl_surface = None;
@@ -876,6 +894,7 @@ impl App {
         self.save_tabs_state();
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_file_picker(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
@@ -885,6 +904,7 @@ impl App {
         });
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_folder_picker(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
@@ -896,6 +916,7 @@ impl App {
         });
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_save_as_picker(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
@@ -1109,5 +1130,841 @@ impl App {
                 w.request_redraw();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod app_behavior_tests {
+    use super::*;
+    use arboard::Clipboard;
+    use std::time::Instant;
+
+    fn test_theme() -> crate::renderer::Theme {
+        crate::renderer::Theme {
+            bg: [0.156, 0.164, 0.211, 1.0],
+            fg: [0.972, 0.972, 0.949, 1.0],
+            sel: [0.55, 0.55, 0.55, 1.0],
+            minimap_bg: [0.129, 0.133, 0.172, 1.0],
+            line_num: [0.384, 0.447, 0.643, 1.0],
+            minimap_cursor: [0.55, 0.55, 0.55, 1.0],
+            modified_unsaved: [1.0, 0.474, 0.776, 1.0],
+            modified_saved: [0.313, 0.980, 0.482, 1.0],
+            diag_warn: [0.945, 0.980, 0.549, 1.0],
+            diag_error: [1.0, 0.333, 0.333, 1.0],
+            unused: [0.48, 0.48, 0.48, 0.6],
+        }
+    }
+
+    fn editor_with(text: &str) -> Editor {
+        let mut editor = Editor::new(text.len() + 64);
+        let _ = editor.insert_str(text);
+        editor.cursor = text.len();
+        editor.clear_history();
+        editor.set_original_text();
+        editor.sync_edits.clear();
+        editor
+    }
+
+    fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
+        EditorTab {
+            editor: editor_with(text),
+            file_path: path.map(PathBuf::from),
+            base_title: title.to_string(),
+            file_extension: path
+                .and_then(|p| std::path::Path::new(p).extension())
+                .map(|ext| ext.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: false,
+            icon_key: "default_file",
+            syntax_errors: Vec::new(),
+        }
+    }
+
+    fn test_app() -> Option<App> {
+        let now = Instant::now();
+        Some(App {
+            pending_key_log: None,
+            gl_config: None,
+            gl_context: None,
+            gl_surface: None,
+            window: None,
+            dialog_window: None,
+            dialog_gl_surface: None,
+            settings_scroll: crate::scroll::ScrollState::new(15.0),
+            tab_scroll: crate::scroll::ScrollState::new(15.0),
+            renderer: None,
+            editor: Editor::new(128),
+            clipboard: Clipboard::new().ok(),
+            theme: test_theme(),
+            base_title: "Безымянный".to_string(),
+            file_path: None,
+            file_extension: String::new(),
+            highlighter: crate::highlighter::Highlighter::new(),
+            last_sent_version: u64::MAX,
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            last_frame: now,
+            last_action: now,
+            last_blink_state: true,
+            modifiers: winit::keyboard::ModifiersState::empty(),
+            is_dragging: false,
+            is_focused: true,
+            current_cursor: winit::window::CursorIcon::Default,
+            show_fps: false,
+            window_width: 1000.0,
+            window_height: 800.0,
+            last_resize_time: None,
+            last_click_time: now,
+            click_count: 0,
+            last_click_pos: (0.0, 0.0),
+            pending_action: PendingAction::Quit,
+            open_file_rx: None,
+            save_file_rx: None,
+            show_welcome: true,
+            recent_files: Vec::new(),
+            is_ide_mode: false,
+            ide_workspaces: Vec::new(),
+            ide_ignore_patterns: Vec::new(),
+            settings_ignore_editor: Editor::new(128),
+            settings_ignore_focused: false,
+            settings_ignore_scroll_x: 0.0,
+            is_dragging_settings_ignore: false,
+            open_folder_rx: None,
+            show_search: false,
+            search_anim_y: -120.0,
+            search_editor: Editor::new(256),
+            search_focused: false,
+            search_case_sensitive: false,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_dragging_search: false,
+            is_dragging_lsp_log: false,
+            faq_editor: Editor::new(128),
+            is_ready: false,
+            is_highlighted_once: false,
+            tried_maximize: false,
+            should_maximize: false,
+            autocomplete_active: false,
+            autocomplete_options: Vec::new(),
+            autocomplete_selected_idx: 0,
+            autocomplete_anim_progress: 0.0,
+            autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
+            autocomplete_hovered_idx: None,
+            autocomplete_rect: None,
+            current_sticky_lines: Vec::new(),
+            target_sticky_lines: Vec::new(),
+            sticky_anim_progress: 1.0,
+            sticky_anim_is_adding: false,
+            show_settings: false,
+            settings_anim_progress: 0.0,
+            settings_y: 10000.0,
+            settings_tab: 0,
+            settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
+            ide_panel: IdePanelState::default(),
+            file_tree_rx: None,
+            file_tree_notify_rx: None,
+            lsp: None,
+            lsp_actions_menu: None,
+            pending_fix_all_id: None,
+            ui_registry: crate::ui_system::UiRegistry::new(),
+            tabs: Vec::new(),
+            active_tab: 0,
+            run_ide_on_startup: false,
+        })
+    }
+
+    fn completion(
+        word: &str,
+        kind: SymbolKind,
+        scope_start: usize,
+        scope_end: usize,
+    ) -> CompletionItem {
+        CompletionItem {
+            word: word.to_string(),
+            kind,
+            scope_start,
+            scope_end,
+        }
+    }
+
+    #[test]
+    fn search_update_finds_nearest_match_preserves_previous_and_honors_case() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("alpha beta\nAlpha beta\nbeta tail");
+        app.editor.cursor = 18;
+        app.search_editor = editor_with("beta");
+
+        app.update_search();
+        assert_eq!(app.search_results.len(), 3);
+        assert_eq!(app.search_current_idx, Some(1));
+
+        let previous = app.search_current_idx;
+        app.update_search();
+        assert_eq!(app.search_current_idx, previous);
+
+        app.search_case_sensitive = true;
+        app.search_editor = editor_with("Alpha");
+        app.update_search();
+        assert_eq!(app.search_results, vec![(11, 16)]);
+        assert_eq!(app.search_current_idx, Some(0));
+
+        app.search_editor = Editor::new(32);
+        app.update_search();
+        assert!(app.search_results.is_empty());
+        assert_eq!(app.search_current_idx, None);
+    }
+
+    #[test]
+    fn autocomplete_filters_scores_scrolls_and_applies_selected_completion() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("pri");
+        app.editor.cursor = 3;
+        app.highlighter.completions = vec![
+            completion("print", SymbolKind::Function, 0, 100),
+            completion("private_value", SymbolKind::Variable, 0, 100),
+            completion("printf", SymbolKind::Function, 10, 20),
+            completion("pri", SymbolKind::Variable, 0, 100),
+        ];
+
+        app.update_autocomplete();
+        assert!(app.autocomplete_active);
+        assert_eq!(app.autocomplete_selected_idx, 0);
+        assert_eq!(app.autocomplete_options.len(), 2);
+        assert_eq!(app.autocomplete_options[0].0.word, "private_value");
+        assert_eq!(app.autocomplete_options[1].0.word, "print");
+
+        app.autocomplete_selected_idx = 1;
+        app.autocomplete_scroll.target = 200.0;
+        app.ensure_autocomplete_visible();
+        assert!(app.autocomplete_scroll.target <= 36.0);
+
+        app.apply_autocomplete();
+        assert_eq!(app.editor.get_full_text(), "print");
+        assert!(!app.autocomplete_active);
+        assert_eq!(app.autocomplete_selected_idx, 0);
+        assert_eq!(app.autocomplete_scroll.target, 0.0);
+    }
+
+    #[test]
+    fn tab_sync_swaps_editor_metadata_and_current_icon() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("live");
+        app.base_title = "live.rs".to_string();
+        app.file_path = Some(PathBuf::from("/tmp/live.rs"));
+        app.file_extension = "rs".to_string();
+        app.search_results = vec![(0, 1)];
+        app.search_current_idx = Some(0);
+        app.last_sent_version = 7;
+        app.is_highlighted_once = true;
+
+        app.tabs
+            .push(tab_with("other.py", Some("/tmp/other.py"), "tab text"));
+        app.active_tab = 0;
+
+        app.sync_active_tab();
+
+        assert_eq!(app.editor.get_full_text(), "tab text");
+        assert_eq!(app.base_title, "other.py");
+        assert_eq!(app.file_extension, "py");
+        assert_eq!(app.tabs[0].editor.get_full_text(), "live");
+        assert_eq!(app.tabs[0].base_title, "live.rs");
+        assert_eq!(app.tabs[0].search_results, vec![(0, 1)]);
+        assert_eq!(app.tabs[0].search_current_idx, Some(0));
+        assert_eq!(app.tabs[0].last_sent_version, 7);
+        assert!(app.tabs[0].is_highlighted_once);
+        assert_ne!(app.tabs[0].icon_key, "default_file");
+    }
+
+    #[test]
+    fn close_current_file_resets_editor_search_scroll_and_welcome_state() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("dirty text");
+        app.file_path = Some(PathBuf::from("/tmp/current.py"));
+        app.base_title = "current.py".to_string();
+        app.file_extension = "py".to_string();
+        app.search_results = vec![(0, 5)];
+        app.search_current_idx = Some(0);
+        app.show_search = true;
+        app.autocomplete_active = true;
+        app.show_welcome = false;
+        app.scroll_y.current = 123.0;
+        app.scroll_y.target = 456.0;
+        app.scroll_x.current = 12.0;
+        app.scroll_x.target = 34.0;
+
+        app.close_current_file();
+
+        assert_eq!(app.base_title, "Добро пожаловать");
+        assert!(app.file_path.is_none());
+        assert_eq!(app.file_extension, "");
+        assert_eq!(app.editor.get_full_text(), "");
+        assert!(app.search_results.is_empty());
+        assert_eq!(app.search_current_idx, None);
+        assert!(!app.show_search);
+        assert!(!app.autocomplete_active);
+        assert!(app.show_welcome);
+        assert_eq!(app.scroll_y.current, 0.0);
+        assert_eq!(app.scroll_x.target, 0.0);
+    }
+
+    #[test]
+    fn file_loading_saving_and_missing_file_cleanup_update_state_without_window() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-app-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("demo.py");
+        std::fs::write(&path, "print('hi')\n").unwrap();
+
+        app.load_file_internal(path.clone(), false, false);
+        assert_eq!(app.file_path.as_ref(), Some(&path));
+        assert_eq!(app.base_title, "demo.py");
+        assert_eq!(app.file_extension, "py");
+        assert_eq!(app.editor.get_full_text(), "print('hi')\n");
+        assert!(!app.show_welcome);
+        assert_eq!(app.scroll_y.current, 0.0);
+        assert_eq!(app.last_sent_version, u64::MAX);
+
+        app.editor = editor_with("print('bye')\n");
+        app.file_path = Some(path.clone());
+        assert!(app.save_current_file());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "print('bye')\n");
+        assert!(!app.editor.is_dirty());
+
+        let missing = dir.join("missing.py");
+        app.recent_files = vec![missing.clone(), path.clone()];
+        app.load_file_internal(missing.clone(), false, false);
+        assert_eq!(app.recent_files, vec![path.clone()]);
+
+        std::fs::remove_file(path).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn highlight_results_update_fold_maps_and_autofold_once() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("fn main() {\n  if true {\n    println!(\"x\");\n  }\n}\n");
+        app.file_extension = "rs".to_string();
+        let text = app.editor.get_full_text();
+        let block_start = text.find("fn main").unwrap();
+        let block_end = text.rfind('}').unwrap();
+        app.highlighter.foldable_ranges = vec![(block_start, block_end, true, true)];
+
+        app.apply_highlight_results();
+
+        assert!(app.is_highlighted_once);
+        assert_eq!(app.editor.foldable_ranges_bytes.len(), 1);
+        assert!(app.editor.foldable_lines.contains_key(&0));
+        assert!(app.editor.folded_lines.contains(&0));
+        assert!(app.editor.folded_start_bytes.contains(&0));
+
+        app.editor.folded_lines.clear();
+        app.highlighter.foldable_ranges = vec![(block_start, block_end, true, false)];
+        app.apply_highlight_results();
+        assert!(app.editor.folded_lines.is_empty());
+    }
+
+    #[test]
+    fn check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-tabs-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let clean_path = dir.join("clean.txt");
+        let dirty_path = dir.join("dirty.txt");
+        std::fs::write(&clean_path, "new clean\n").unwrap();
+        std::fs::write(&dirty_path, "disk dirty\n").unwrap();
+
+        let mut clean_tab = tab_with(
+            "clean.txt",
+            Some(clean_path.to_str().unwrap()),
+            "old clean\n",
+        );
+        clean_tab.editor.set_original_text();
+        let mut dirty_tab = tab_with(
+            "dirty.txt",
+            Some(dirty_path.to_str().unwrap()),
+            "old dirty\n",
+        );
+        let _ = dirty_tab.editor.insert_str("local change");
+        app.tabs = vec![clean_tab, dirty_tab];
+        app.active_tab = 0;
+        app.editor = Editor::new(32);
+        app.base_title = "scratch".to_string();
+        app.sync_active_tab();
+
+        app.check_external_changes();
+        app.sync_active_tab();
+
+        let clean = app
+            .tabs
+            .iter()
+            .find(|tab| tab.file_path.as_ref() == Some(&clean_path))
+            .unwrap();
+        let dirty = app
+            .tabs
+            .iter()
+            .find(|tab| tab.file_path.as_ref() == Some(&dirty_path))
+            .unwrap();
+        assert_eq!(clean.editor.get_full_text(), "new clean\n");
+        assert!(clean.spans.is_empty());
+        assert!(!clean.is_highlighted_once);
+        assert!(dirty.editor.get_full_text().contains("local change"));
+
+        std::fs::remove_file(clean_path).ok();
+        std::fs::remove_file(dirty_path).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn app_tabs_recent_files_search_jump_and_autocomplete_empty_paths() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        app.open_new_tab();
+        assert!(app.tabs.is_empty());
+        assert!(app.show_welcome);
+        assert_eq!(app.base_title, "Добро пожаловать");
+
+        app.is_ide_mode = true;
+        app.open_new_tab();
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.active_tab, 0);
+        assert_eq!(app.base_title, "Безымянный");
+        assert!(!app.show_welcome);
+
+        app.editor = editor_with("first tab");
+        app.base_title = "first.py".to_string();
+        app.file_extension = "py".to_string();
+        app.file_path = Some(PathBuf::from("/tmp/first.py"));
+        app.open_new_tab();
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.active_tab, 1);
+        assert_eq!(app.editor.get_full_text(), "");
+        assert_eq!(app.base_title, "Безымянный");
+
+        app.close_tab_at(0);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.active_tab, 0);
+
+        for idx in 0..12 {
+            app.add_recent_file(PathBuf::from(format!("/tmp/recent-{idx}.py")));
+        }
+        app.add_recent_file(PathBuf::from("/tmp/recent-5.py"));
+        assert_eq!(app.recent_files.len(), 10);
+        assert_eq!(app.recent_files[0], PathBuf::from("/tmp/recent-5.py"));
+        assert_eq!(
+            app.recent_files
+                .iter()
+                .filter(|p| **p == PathBuf::from("/tmp/recent-5.py"))
+                .count(),
+            1
+        );
+
+        app.editor = editor_with("one two one");
+        app.search_editor = editor_with("one");
+        app.update_search();
+        assert_eq!(app.search_results, vec![(0, 3), (8, 11)]);
+        app.search_current_idx = Some(1);
+        app.jump_to_search_result();
+        assert_eq!(app.editor.selection_anchor, Some(8));
+        assert_eq!(app.editor.cursor, 11);
+
+        app.editor = editor_with("pri.");
+        app.editor.cursor = 4;
+        assert_eq!(app.get_current_word_prefix(), "");
+        app.update_autocomplete();
+        assert!(!app.autocomplete_active);
+        assert!(app.autocomplete_options.is_empty());
+
+        app.editor = editor_with("pr");
+        app.highlighter.completions = vec![
+            completion("print", SymbolKind::Function, 0, 10),
+            completion("private", SymbolKind::Variable, 0, 100),
+            completion("property", SymbolKind::Class, 0, 100),
+            completion("pr", SymbolKind::Keyword, 0, 100),
+        ];
+        app.update_autocomplete();
+        assert!(app.autocomplete_active);
+        assert_eq!(app.autocomplete_options.len(), 3);
+        assert_eq!(app.autocomplete_options[0].0.word, "private");
+        assert_eq!(app.autocomplete_options[1].0.word, "print");
+        assert_eq!(app.autocomplete_options[2].0.word, "property");
+    }
+
+    #[test]
+    fn ide_mode_startup_tab_and_tab_close_paths_are_headless_safe() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        app.show_welcome = true;
+        app.base_title = "Добро пожаловать".to_string();
+        app.editor = editor_with("startup buffer");
+        app.file_extension = "txt".to_string();
+
+        app.enter_ide_mode();
+        assert!(app.is_ide_mode);
+        assert!(!app.show_welcome);
+        assert_eq!(app.base_title, "Безымянный");
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.active_tab, 0);
+        assert!(app.lsp.is_some());
+        assert!(app.tabs[0].file_path.is_none());
+
+        app.editor = editor_with("active");
+        app.base_title = "active.rs".to_string();
+        app.file_extension = "rs".to_string();
+        app.tabs
+            .push(tab_with("other.py", Some("/tmp/other.py"), "other"));
+        app.active_tab = 0;
+
+        app.close_tab_at(0);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.active_tab, 0);
+        assert_eq!(app.editor.get_full_text(), "other");
+        assert_eq!(app.base_title, "other.py");
+
+        app.close_tab_at(99);
+        assert!(app.show_welcome);
+        assert_eq!(app.base_title, "Добро пожаловать");
+    }
+
+    #[test]
+    fn open_file_in_tab_reuses_existing_tabs_and_loads_into_empty_slot() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-open-tab-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("first.py");
+        let second = dir.join("second.txt");
+        std::fs::write(&first, "first\n").unwrap();
+        std::fs::write(&second, "second\n").unwrap();
+
+        app.is_ide_mode = true;
+        app.tabs.push(tab_with(
+            "first.py",
+            Some(first.to_str().unwrap()),
+            "cached first\n",
+        ));
+        app.tabs.push(tab_with("scratch", None, ""));
+        app.active_tab = 1;
+        app.editor = Editor::new(32);
+        app.base_title = "scratch".to_string();
+
+        app.open_file_in_tab_bg(first.clone(), false);
+        assert_eq!(app.active_tab, 1);
+        assert_eq!(app.editor.get_full_text(), "");
+
+        app.open_file_in_tab(first.clone(), false);
+        assert_eq!(app.active_tab, 0);
+        assert_eq!(app.editor.get_full_text(), "cached first\n");
+
+        app.switch_to_tab(1);
+        app.open_file_in_tab(second.clone(), false);
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.file_path.as_ref(), Some(&second));
+        assert_eq!(app.editor.get_full_text(), "second\n");
+
+        std::fs::remove_file(first).ok();
+        std::fs::remove_file(second).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn highlight_thresholds_and_prefix_edges_cover_non_default_paths() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        app.editor = editor_with("root:\n  a: 1\n  b: 2\n");
+        app.file_extension = "yaml".to_string();
+        let end = app.editor.len();
+        app.highlighter.foldable_ranges = vec![(0, end, true, false)];
+        app.apply_highlight_results();
+        assert!(app.editor.foldable_lines.contains_key(&0));
+        assert!(app.editor.folded_lines.is_empty());
+
+        app.editor = editor_with("obj.attr\nsnake_case");
+        app.editor.cursor = app.editor.len();
+        assert_eq!(app.get_current_word_prefix(), "snake_case");
+        app.editor.cursor = 3;
+        assert_eq!(app.get_current_word_prefix(), "obj");
+    }
+
+    #[test]
+    fn lsp_actions_noqa_workspace_edit_and_panel_log_sizes_headless() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        let path = PathBuf::from("/tmp/main.py");
+        app.file_path = Some(path.clone());
+        app.file_extension = "py".to_string();
+        app.base_title = "main.py".to_string();
+        app.editor = editor_with("x = 1\nvalue = 2  # noqa: E501\n");
+
+        app.insert_noqa_comment(0, &["F401".to_string(), "E501".to_string()]);
+        assert!(app
+            .editor
+            .get_full_text()
+            .starts_with("x = 1  # noqa: F401, E501\n"));
+
+        app.insert_noqa_comment(1, &["F821".to_string(), "E501".to_string()]);
+        assert!(app
+            .editor
+            .get_full_text()
+            .contains("value = 2  # noqa: E501, F821"));
+
+        app.insert_noqa_comment(1, &[]);
+        assert!(app.editor.get_full_text().contains("value = 2  # noqa\n"));
+
+        app.editor = editor_with("abc\ndef\nghi\n");
+        app.editor.cursor = 5;
+        app.editor.selection_anchor = Some(1);
+
+        let mut changes = std::collections::HashMap::new();
+        changes.insert(
+            path.clone(),
+            vec![
+                crate::lsp::TextChange {
+                    start_line: 1,
+                    start_col: 0,
+                    end_line: 1,
+                    end_col: 3,
+                    new_text: "DEF".to_string(),
+                },
+                crate::lsp::TextChange {
+                    start_line: 0,
+                    start_col: 1,
+                    end_line: 0,
+                    end_col: 2,
+                    new_text: "B".to_string(),
+                },
+            ],
+        );
+        app.apply_workspace_edit(&crate::lsp::WorkspaceEdit { changes }, true);
+        assert_eq!(app.editor.get_full_text(), "aBc\nDEF\nghi\n");
+        assert_eq!(app.editor.cursor, 5);
+        assert_eq!(app.editor.selection_anchor, Some(1));
+
+        let mut action_changes = std::collections::HashMap::new();
+        action_changes.insert(
+            path.clone(),
+            vec![crate::lsp::TextChange {
+                start_line: 2,
+                start_col: 0,
+                end_line: 2,
+                end_col: 3,
+                new_text: "GHI".to_string(),
+            }],
+        );
+        app.lsp_actions_menu = Some(LspActionsMenu {
+            cursor_line: 0,
+            items: vec![LspActionItem::CodeAction(crate::lsp::CodeAction {
+                title: "Upper".to_string(),
+                kind: Some("quickfix".to_string()),
+                edit: Some(crate::lsp::WorkspaceEdit {
+                    changes: action_changes,
+                }),
+                code: Some("T001".to_string()),
+            })],
+            selected: 0,
+            menu_x: 0.0,
+            menu_y: 0.0,
+            pending_request_id: None,
+        });
+        app.apply_selected_lsp_action();
+        assert_eq!(app.editor.get_full_text(), "aBc\nDEF\nGHI\n");
+
+        app.lsp_actions_menu = Some(LspActionsMenu {
+            cursor_line: 0,
+            items: vec![LspActionItem::AddNoqa {
+                codes: vec!["T002".to_string()],
+            }],
+            selected: 0,
+            menu_x: 0.0,
+            menu_y: 0.0,
+            pending_request_id: None,
+        });
+        app.apply_selected_lsp_action();
+        assert!(app
+            .editor
+            .get_full_text()
+            .starts_with("aBc  # noqa: T002\n"));
+
+        assert!(app.lsp_panel_bounds().is_none());
+
+        let info = crate::lsp::LspServerInfo {
+            name: "ruff",
+            status: crate::lsp::LspServerStatus::Running,
+            logs: Vec::new(),
+        };
+        app.ide_panel.lsp_servers = vec![info.clone()];
+        assert_eq!(app.lsp_server_logs_h(&info, 1.0), 0.0);
+
+        app.ide_panel.lsp_logs_expanded.insert("ruff".to_string());
+        let mut log_editor = editor_with("header\n  detail\nlast line\n");
+        log_editor.foldable_lines.insert(0, 1);
+        log_editor.folded_lines.insert(0);
+        app.ide_panel
+            .lsp_log_editors
+            .insert("ruff".to_string(), log_editor);
+
+        let (inner_h, inner_w) = app.lsp_server_inner_size(&info, 1.0);
+        assert!(inner_h >= 32.0);
+        assert!(inner_w > 0.0);
+        assert!(app.lsp_server_logs_h(&info, 1.0) >= 50.0);
+        assert!(app.lsp_panel_total_h(1.0) >= 210.0);
+    }
+
+    #[test]
+    fn ui_handlers_state_only_branches_work_without_window() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        app.handle_ui_click(crate::ui_system::UiId::HoverPopupScroll);
+        app.handle_ui_click(crate::ui_system::UiId::BottomPanelBody);
+
+        app.ide_panel.terminal_focused = true;
+        app.handle_ui_click(crate::ui_system::UiId::ResizeLeft);
+        app.handle_ui_click(crate::ui_system::UiId::ResizeBottom);
+        assert!(!app.ide_panel.is_resizing_left);
+        assert!(!app.ide_panel.is_resizing_bottom);
+
+        app.handle_ui_click(crate::ui_system::UiId::LspScrollY);
+        app.handle_ui_click(crate::ui_system::UiId::LspScrollX);
+        assert!(app.ide_panel.lsp_scroll_y.is_dragging);
+        assert!(app.ide_panel.lsp_scroll_x.is_dragging);
+
+        app.handle_ui_click(crate::ui_system::UiId::EditorScrollbarX);
+        assert!(app.scroll_x.is_dragging);
+
+        app.ide_panel.lsp_servers = vec![crate::lsp::LspServerInfo {
+            name: "ruff",
+            status: crate::lsp::LspServerStatus::Running,
+            logs: Vec::new(),
+        }];
+        app.handle_ui_click(crate::ui_system::UiId::LspLogScrollY(0));
+        app.handle_ui_click(crate::ui_system::UiId::LspLogScrollX(0));
+        assert!(app
+            .ide_panel
+            .lsp_logs_scroll_y
+            .get("ruff")
+            .is_some_and(|scroll| scroll.is_dragging));
+        assert!(app
+            .ide_panel
+            .lsp_logs_scroll_x
+            .get("ruff")
+            .is_some_and(|scroll| scroll.is_dragging));
+
+        app.ide_panel
+            .flat_diags
+            .push((PathBuf::from("/tmp/main.py"), 0));
+        app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));
+        assert!(app.ide_panel.problems_collapsed.is_empty());
+    }
+
+    #[test]
+    fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+
+        app.editor = editor_with("alpha beta alpha");
+        app.editor.cursor = 0;
+        app.search_editor = editor_with("alpha");
+        app.show_search = true;
+        app.search_focused = true;
+        app.update_search();
+        assert_eq!(app.search_current_idx, Some(0));
+
+        app.handle_ui_click(crate::ui_system::UiId::SearchNext);
+        assert_eq!(app.search_current_idx, Some(1));
+        assert_eq!(app.editor.selection_anchor, Some(11));
+        assert_eq!(app.editor.cursor, 16);
+
+        app.handle_ui_click(crate::ui_system::UiId::SearchPrev);
+        assert_eq!(app.search_current_idx, Some(0));
+        assert_eq!(app.editor.selection_anchor, Some(0));
+        assert_eq!(app.editor.cursor, 5);
+
+        app.handle_ui_click(crate::ui_system::UiId::SearchCaseToggle);
+        assert!(app.search_case_sensitive);
+        app.handle_ui_click(crate::ui_system::UiId::SearchClose);
+        assert!(!app.show_search);
+        assert!(!app.search_focused);
+        assert!(app.search_results.is_empty());
+        assert_eq!(app.search_current_idx, None);
+
+        let path = PathBuf::from("/tmp/main.py");
+        app.ide_panel.flat_diags.push((path.clone(), usize::MAX));
+        app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));
+        assert!(app.ide_panel.problems_collapsed.contains(&path));
+        app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));
+        assert!(!app.ide_panel.problems_collapsed.contains(&path));
+
+        app.handle_ui_click(crate::ui_system::UiId::ProblemsTab(2));
+        assert_eq!(app.ide_panel.problems_tab, 2);
+
+        app.ide_panel.lsp_servers = vec![crate::lsp::LspServerInfo {
+            name: "ruff",
+            status: crate::lsp::LspServerStatus::Running,
+            logs: Vec::new(),
+        }];
+        let mut log_editor = editor_with("line one\nline two\n");
+        log_editor.selection_anchor = Some(0);
+        app.ide_panel
+            .lsp_log_editors
+            .insert("ruff".to_string(), log_editor);
+
+        app.handle_ui_click(crate::ui_system::UiId::LspLogArea(0));
+        assert_eq!(app.ide_panel.lsp_logs_focused.as_deref(), Some("ruff"));
+        assert!(app.is_dragging_lsp_log);
+        assert_eq!(
+            app.ide_panel
+                .lsp_log_editors
+                .get("ruff")
+                .and_then(|ed| ed.selection_anchor),
+            None
+        );
     }
 }

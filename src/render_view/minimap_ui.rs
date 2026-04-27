@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::highlighter::ColorSpan;
 use crate::renderer::{Renderer, Vertex};
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_minimap(
         &mut self,

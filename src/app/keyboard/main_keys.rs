@@ -1,7 +1,52 @@
 use super::*;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn apply_terminal_alt_q_shortcut(
+    panels: &mut crate::app::IdePanelState,
+    shift: bool,
+    has_terminal: bool,
+) -> bool {
+    let is_open = panels.is_open(crate::app::PanelId::Terminal);
+
+    if shift {
+        if is_open {
+            if let Some(slot) = panels
+                .slots
+                .iter_mut()
+                .find(|s| s.id == crate::app::PanelId::Terminal)
+            {
+                slot.open = false;
+            }
+            panels.terminal_focused = false;
+            false
+        } else {
+            if let Some(slot) = panels
+                .slots
+                .iter_mut()
+                .find(|s| s.id == crate::app::PanelId::Terminal)
+            {
+                slot.open = true;
+            }
+            panels.terminal_focused = true;
+            !has_terminal
+        }
+    } else if !is_open {
+        if let Some(slot) = panels
+            .slots
+            .iter_mut()
+            .find(|s| s.id == crate::app::PanelId::Terminal)
+        {
+            slot.open = true;
+        }
+        panels.terminal_focused = true;
+        !has_terminal
+    } else {
+        panels.terminal_focused = !panels.terminal_focused;
+        false
+    }
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -12,57 +57,17 @@ impl App {
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)
         {
             if self.is_ide_mode {
-                let shift = self.modifiers.shift_key();
-                let is_open = self.ide_panel.is_open(crate::app::PanelId::Terminal);
-
-                if shift {
-                    if is_open {
-                        if let Some(slot) = self
-                            .ide_panel
-                            .slots
-                            .iter_mut()
-                            .find(|s| s.id == crate::app::PanelId::Terminal)
-                        {
-                            slot.open = false;
-                        }
-                        self.ide_panel.terminal_focused = false;
-                    } else {
-                        if let Some(slot) = self
-                            .ide_panel
-                            .slots
-                            .iter_mut()
-                            .find(|s| s.id == crate::app::PanelId::Terminal)
-                        {
-                            slot.open = true;
-                        }
-                        if self.ide_panel.terminals.is_empty() {
-                            self.ide_panel
-                                .terminals
-                                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                            self.ide_panel.active_terminal = 0;
-                        }
-                        self.ide_panel.terminal_focused = true;
-                    }
-                } else {
-                    if !is_open {
-                        if let Some(slot) = self
-                            .ide_panel
-                            .slots
-                            .iter_mut()
-                            .find(|s| s.id == crate::app::PanelId::Terminal)
-                        {
-                            slot.open = true;
-                        }
-                        if self.ide_panel.terminals.is_empty() {
-                            self.ide_panel
-                                .terminals
-                                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                            self.ide_panel.active_terminal = 0;
-                        }
-                        self.ide_panel.terminal_focused = true;
-                    } else {
-                        self.ide_panel.terminal_focused = !self.ide_panel.terminal_focused;
-                    }
+                let has_terminal = !self.ide_panel.terminals.is_empty();
+                let needs_terminal = apply_terminal_alt_q_shortcut(
+                    &mut self.ide_panel,
+                    self.modifiers.shift_key(),
+                    has_terminal,
+                );
+                if needs_terminal {
+                    self.ide_panel
+                        .terminals
+                        .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                    self.ide_panel.active_terminal = 0;
                 }
 
                 self.last_action = std::time::Instant::now();
@@ -137,20 +142,20 @@ impl App {
                     }
                     PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                         if let Some(text) = self.settings_ignore_editor.get_selection() {
-                            let _ = self.clipboard.set_text(text);
+                            self.set_clipboard_text(text);
                         }
                         return;
                     }
                     PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                         if let Some(text) = self.settings_ignore_editor.get_selection() {
-                            let _ = self.clipboard.set_text(text);
+                            self.set_clipboard_text(text);
                             self.settings_ignore_editor.delete_selection();
                             self.window.as_ref().unwrap().request_redraw();
                         }
                         return;
                     }
                     PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                        if let Ok(text) = self.clipboard.get_text() {
+                        if let Some(text) = self.get_clipboard_text() {
                             let clean = text.replace('\n', "").replace('\r', "");
                             if !clean.is_empty() {
                                 self.settings_ignore_editor.insert_str(&clean);
@@ -254,7 +259,7 @@ impl App {
                     match key_event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                             if let Some(text) = ed.get_selection() {
-                                let _ = self.clipboard.set_text(text);
+                                self.set_clipboard_text(text);
                             }
                             return;
                         }
@@ -304,5 +309,66 @@ impl App {
                 self.handle_editor_keyboard_input(event_loop, key_event);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn terminal_open(panels: &crate::app::IdePanelState) -> bool {
+        panels.is_open(crate::app::PanelId::Terminal)
+    }
+
+    #[test]
+    fn terminal_alt_q_opens_terminal_and_requests_spawn_when_missing() {
+        let mut panels = crate::app::IdePanelState::default();
+
+        let needs_spawn = apply_terminal_alt_q_shortcut(&mut panels, false, false);
+
+        assert!(needs_spawn);
+        assert!(terminal_open(&panels));
+        assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_alt_q_focuses_existing_closed_terminal_without_spawn() {
+        let mut panels = crate::app::IdePanelState::default();
+
+        let needs_spawn = apply_terminal_alt_q_shortcut(&mut panels, false, true);
+
+        assert!(!needs_spawn);
+        assert!(terminal_open(&panels));
+        assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_alt_q_toggles_focus_when_open() {
+        let mut panels = crate::app::IdePanelState::default();
+        panels.toggle(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+
+        assert!(!apply_terminal_alt_q_shortcut(&mut panels, false, true));
+        assert!(terminal_open(&panels));
+        assert!(!panels.terminal_focused);
+
+        assert!(!apply_terminal_alt_q_shortcut(&mut panels, false, true));
+        assert!(terminal_open(&panels));
+        assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_alt_shift_q_closes_or_opens_without_focus_toggle() {
+        let mut panels = crate::app::IdePanelState::default();
+        panels.toggle(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+
+        assert!(!apply_terminal_alt_q_shortcut(&mut panels, true, true));
+        assert!(!terminal_open(&panels));
+        assert!(!panels.terminal_focused);
+
+        assert!(apply_terminal_alt_q_shortcut(&mut panels, true, false));
+        assert!(terminal_open(&panels));
+        assert!(panels.terminal_focused);
     }
 }

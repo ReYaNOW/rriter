@@ -1,7 +1,85 @@
 use super::*;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn wheel_delta(delta: MouseScrollDelta, line_height: f32) -> (f32, f32) {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * line_height, -y * 4.0 * line_height),
+        MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
+    }
+}
+
+fn point_in_rect(mx: f32, my: f32, rect: (f32, f32, f32, f32)) -> bool {
+    mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3
+}
+
+fn panel_scroll_rect(
+    is_top: bool,
+    scale: f32,
+    sidebar_w: f32,
+    left_width: f32,
+    bottom_height: f32,
+    effective_bottom_height: f32,
+    window_width: f32,
+    window_height: f32,
+) -> (f32, f32, f32, f32) {
+    let title_h = 32.0 * scale;
+    if is_top {
+        (
+            sidebar_w,
+            title_h,
+            left_width * scale,
+            window_height - title_h - effective_bottom_height,
+        )
+    } else {
+        let tab_h = 32.0 * scale;
+        (
+            sidebar_w,
+            window_height - bottom_height + 1.0 + tab_h,
+            window_width - sidebar_w,
+            bottom_height - 1.0 - tab_h,
+        )
+    }
+}
+
+fn autocomplete_max_scroll(total_items: usize, scale: f32) -> f32 {
+    let step = 36.0 * scale;
+    let total_items = total_items as f32;
+    let visible_items = total_items.min(7.0);
+    ((total_items - visible_items) * step).max(0.0)
+}
+
+fn settings_ide_max_scroll(
+    workspace_count: usize,
+    ignore_chip_widths: impl IntoIterator<Item = f32>,
+    scale: f32,
+    window_height: f32,
+) -> f32 {
+    let ide_h = (700.0 * scale).min(window_height - 40.0 * scale);
+    let ih = ide_h - 35.0 * scale - 30.0 * scale;
+    let ide_content_area_h = ih - 52.0 * scale;
+
+    let workspace_h = workspace_count as f32 * 46.0 * scale + 126.0 * scale;
+    let chip_h = 28.0 * scale;
+    let chip_gap_y = 8.0 * scale;
+    let chip_gap_x = 8.0 * scale;
+    let max_row_w = 460.0 * scale;
+
+    let mut chip_rows = 1usize;
+    let mut cx = 0.0f32;
+    for cw in ignore_chip_widths {
+        if cx + cw > max_row_w && cx > 0.0 {
+            chip_rows += 1;
+            cx = 0.0;
+        }
+        cx += cw + chip_gap_x;
+    }
+
+    let ignore_h = 200.0 * scale + chip_rows as f32 * (chip_h + chip_gap_y);
+    let ide_total_h = workspace_h + ignore_h;
+    (ide_total_h - ide_content_area_h).max(0.0)
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
         let lh = self.renderer.as_ref().unwrap().line_height;
@@ -9,17 +87,14 @@ impl App {
         let shift = self.modifiers.shift_key();
 
         // Единая дельта как эталон для всех скролл-панелей в редакторе
-        let (dx, dy) = match delta {
-            MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * lh, -y * 4.0 * lh),
-            MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
-        };
+        let (dx, dy) = wheel_delta(delta, lh);
         let mut consumed_by_diag = false;
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(rect) = state.diag_rect {
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                if mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3 {
+                if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     state.diag_scroll.anim_speed = 7.0;
                     state.diag_scroll.scroll_by(dy);
                     let max_scroll = state.diag_max_scroll;
@@ -39,7 +114,7 @@ impl App {
             if let Some(rect) = state.rect {
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
-                if mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3 {
+                if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
                         popup.scroll.anim_speed = 7.0;
@@ -59,7 +134,6 @@ impl App {
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let sb_w = 48.0 * s;
-            let panel_left_w = self.ide_panel.left_width * s;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
@@ -80,25 +154,19 @@ impl App {
                 effective_bottom_h = 0.0;
             }
 
-            let (cx, cy, cw, ch) = if is_top {
-                (
-                    sb_w,
-                    title_h,
-                    panel_left_w,
-                    wh - title_h - effective_bottom_h,
-                )
-            } else {
-                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                let tab_h = 32.0 * s;
-                (
-                    sb_w,
-                    wh - panel_bottom_h + 1.0 + tab_h,
-                    ww - sb_w,
-                    panel_bottom_h - 1.0 - tab_h,
-                )
-            };
+            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+            let (cx, cy, cw, ch) = panel_scroll_rect(
+                is_top,
+                s,
+                sb_w,
+                self.ide_panel.left_width,
+                panel_bottom_h,
+                effective_bottom_h,
+                ww,
+                wh,
+            );
 
-            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
                 let row_h = 28.0 * s;
@@ -134,27 +202,19 @@ impl App {
                 effective_bottom_h = 0.0;
             }
 
-            let (cx, cy, cw, ch) = if is_top {
-                let panel_left_w = self.ide_panel.left_width * s;
-                let title_h = 32.0 * s;
-                (
-                    sb_w,
-                    title_h,
-                    panel_left_w,
-                    wh - title_h - effective_bottom_h,
-                )
-            } else {
-                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                let tab_h = 32.0 * s;
-                (
-                    sb_w,
-                    wh - panel_bottom_h + 1.0 + tab_h,
-                    ww - sb_w,
-                    panel_bottom_h - 1.0 - tab_h,
-                )
-            };
+            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+            let (cx, cy, cw, ch) = panel_scroll_rect(
+                is_top,
+                s,
+                sb_w,
+                self.ide_panel.left_width,
+                panel_bottom_h,
+                effective_bottom_h,
+                ww,
+                wh,
+            );
 
-            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
                 self.ide_panel.problems_scroll.scroll_by(dy);
                 let row_h = 24.0 * s;
@@ -190,27 +250,19 @@ impl App {
                 effective_bottom_h = 0.0;
             }
 
-            let (cx, cy, cw, ch) = if is_top {
-                let panel_left_w = self.ide_panel.left_width * s;
-                let title_h = 32.0 * s;
-                (
-                    sb_w,
-                    title_h,
-                    panel_left_w,
-                    wh - title_h - effective_bottom_h,
-                )
-            } else {
-                let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                let tab_h = 32.0 * s;
-                (
-                    sb_w,
-                    wh - panel_bottom_h + 1.0 + tab_h,
-                    ww - sb_w,
-                    panel_bottom_h - 1.0 - tab_h,
-                )
-            };
+            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+            let (cx, cy, cw, ch) = panel_scroll_rect(
+                is_top,
+                s,
+                sb_w,
+                self.ide_panel.left_width,
+                panel_bottom_h,
+                effective_bottom_h,
+                ww,
+                wh,
+            );
 
-            if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if self.ide_panel.terminal_focused {
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
@@ -277,7 +329,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             if let Some((cx, cy, cw, ch)) = self.lsp_panel_bounds() {
-                if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
+                if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                     let mut over_inner = false;
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let mut current_y = cy + 8.0 * s - scroll_y;
@@ -295,11 +347,7 @@ impl App {
                             let log_bg_w = cw - 48.0 * s;
                             let log_bg_h = logs_h - 18.0 * s;
 
-                            if mx >= log_bg_x
-                                && mx <= log_bg_x + log_bg_w
-                                && my >= log_bg_y
-                                && my <= log_bg_y + log_bg_h
-                            {
+                            if point_in_rect(mx, my, (log_bg_x, log_bg_y, log_bg_w, log_bg_h)) {
                                 let (inner_total_h, inner_max_w) =
                                     self.lsp_server_inner_size(info, s);
                                 let name = info.name.to_string();
@@ -363,13 +411,10 @@ impl App {
         if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+            if point_in_rect(mx, my, (rx, ry, rw, rh)) {
                 self.autocomplete_scroll.anim_speed = 7.0;
                 self.autocomplete_scroll.scroll_by(dy);
-                let step = 36.0 * s;
-                let total_items = self.autocomplete_options.len() as f32;
-                let visible_items = total_items.min(7.0);
-                let max_scroll = ((total_items - visible_items) * step).max(0.0);
+                let max_scroll = autocomplete_max_scroll(self.autocomplete_options.len(), s);
                 self.autocomplete_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -379,36 +424,17 @@ impl App {
         if self.show_settings && self.settings_tab == 0 {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let h = self.window.as_ref().unwrap().inner_size().height as f32;
-            let ide_h = (700.0 * s).min(h - 40.0 * s);
-            let ih = ide_h - 35.0 * s - 30.0 * s;
-            let ide_content_area_h = ih - 52.0 * s;
-
-            // Точный подсчёт высоты контента (как в draw_settings)
-            let workspace_h = self.ide_workspaces.len() as f32 * 46.0 * s + 126.0 * s;
-            let chip_h = 28.0 * s;
-            let chip_gap_y = 8.0 * s;
-            let chip_gap_x = 8.0 * s;
             let pad_x = 12.0 * s;
-            let max_row_w = 460.0 * s;
-            let chip_rows = if self.ide_ignore_patterns.is_empty() {
-                1usize
-            } else {
-                let mut rows = 1usize;
-                let mut cx = 0.0f32;
-                for p in &self.ide_ignore_patterns {
-                    let tw = self.renderer.as_mut().unwrap().measure_ui_width(p, 0.88);
-                    let cw = tw + pad_x * 2.0 + 22.0 * s;
-                    if cx + cw > max_row_w && cx > 0.0 {
-                        rows += 1;
-                        cx = 0.0;
-                    }
-                    cx += cw + chip_gap_x;
-                }
-                rows
-            };
-            let ignore_h = 200.0 * s + chip_rows as f32 * (chip_h + chip_gap_y);
-            let ide_total_h = workspace_h + ignore_h;
-            let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
+            let max_scroll = settings_ide_max_scroll(
+                self.ide_workspaces.len(),
+                self.ide_ignore_patterns.iter().map(|p| {
+                    self.renderer.as_mut().unwrap().measure_ui_width(p, 0.88)
+                        + pad_x * 2.0
+                        + 22.0 * s
+                }),
+                s,
+                h,
+            );
 
             if max_scroll > 0.0 {
                 self.settings_ide_scroll.anim_speed = 7.0;
@@ -487,5 +513,69 @@ impl App {
         self.scroll_x.clamp_target(0.0, max_scroll_x);
         self.scroll_x.target = self.scroll_x.target.round();
         self.window.as_ref().unwrap().request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wheel_delta_handles_line_and_pixel_units() {
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(2.0, -3.0), 10.0),
+            (-80.0, 120.0)
+        );
+        assert_eq!(
+            wheel_delta(
+                MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(12.5, -8.0)),
+                10.0,
+            ),
+            (-12.5, 8.0)
+        );
+    }
+
+    #[test]
+    fn point_in_rect_uses_inclusive_edges() {
+        let rect = (10.0, 20.0, 30.0, 40.0);
+        assert!(point_in_rect(10.0, 20.0, rect));
+        assert!(point_in_rect(40.0, 60.0, rect));
+        assert!(point_in_rect(25.0, 45.0, rect));
+        assert!(!point_in_rect(9.9, 45.0, rect));
+        assert!(!point_in_rect(25.0, 60.1, rect));
+    }
+
+    #[test]
+    fn panel_scroll_rect_covers_top_and_bottom_layouts() {
+        assert_eq!(
+            panel_scroll_rect(true, 2.0, 96.0, 240.0, 360.0, 0.0, 1600.0, 1000.0),
+            (96.0, 64.0, 480.0, 936.0)
+        );
+        assert_eq!(
+            panel_scroll_rect(false, 2.0, 96.0, 240.0, 360.0, 360.0, 1600.0, 1000.0),
+            (96.0, 705.0, 1504.0, 295.0)
+        );
+    }
+
+    #[test]
+    fn autocomplete_max_scroll_matches_visible_limit() {
+        assert_eq!(autocomplete_max_scroll(0, 1.0), 0.0);
+        assert_eq!(autocomplete_max_scroll(7, 1.0), 0.0);
+        assert_eq!(autocomplete_max_scroll(10, 1.0), 108.0);
+        assert_eq!(autocomplete_max_scroll(9, 2.0), 144.0);
+    }
+
+    #[test]
+    fn settings_ide_max_scroll_counts_chip_wrapping() {
+        assert_eq!(
+            settings_ide_max_scroll(0, std::iter::empty(), 1.0, 900.0),
+            0.0
+        );
+
+        let no_wrap = settings_ide_max_scroll(2, [100.0, 120.0], 1.0, 500.0);
+        let wrapped = settings_ide_max_scroll(2, [430.0, 120.0, 450.0], 1.0, 500.0);
+
+        assert!(no_wrap > 0.0);
+        assert!(wrapped > no_wrap);
     }
 }

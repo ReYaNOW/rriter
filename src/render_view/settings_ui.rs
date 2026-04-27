@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
         let scale = self.scale_factor;

@@ -1283,9 +1283,18 @@ mod tests {
             "py".to_string(),
         );
         wait(&mut highlighter, 1);
-        assert!(highlighter.spans.iter().any(|span| span.color == DRACULA_PINK));
-        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
-        assert!(highlighter.completions.iter().any(|item| item.word == "name"));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.color == DRACULA_PINK));
+        assert!(highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "print"));
+        assert!(highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "name"));
 
         highlighter.apply_edits(
             2,
@@ -1297,7 +1306,10 @@ mod tests {
             Some(10),
         );
         wait(&mut highlighter, 2);
-        assert!(highlighter.spans.iter().any(|span| span.color == DRACULA_COMMENT));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.color == DRACULA_COMMENT));
 
         let cases = [
             (
@@ -1306,8 +1318,16 @@ mod tests {
                 "println!",
             ),
             ("dart", "void main() { print('hi'); }\n", "Widget"),
-            ("js", "function run(value) { console.log(value); }\n", "Promise"),
-            ("cpp", "int main() { printf(\"hi\"); return 0; }\n", "printf"),
+            (
+                "js",
+                "function run(value) { console.log(value); }\n",
+                "Promise",
+            ),
+            (
+                "cpp",
+                "int main() { printf(\"hi\"); return 0; }\n",
+                "printf",
+            ),
             ("makefile", "all:\n\tcc main.c\n", "if"),
         ];
 
@@ -1335,7 +1355,10 @@ mod tests {
             String::new(),
         );
         wait(&mut highlighter, 1);
-        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+        assert!(highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "print"));
 
         highlighter.reset(2, "plain log text\n".to_string(), "log".to_string());
         wait(&mut highlighter, 2);

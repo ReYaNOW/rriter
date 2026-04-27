@@ -1,7 +1,68 @@
 use super::*;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutocompleteKeyAction {
+    None,
+    DismissAndContinue,
+    DismissAndConsume,
+    MoveDown,
+    MoveUp,
+    Apply,
+}
+
+fn autocomplete_key_action(physical_key: PhysicalKey) -> AutocompleteKeyAction {
+    match physical_key {
+        PhysicalKey::Code(KeyCode::Escape) => AutocompleteKeyAction::DismissAndConsume,
+        PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::ArrowRight) => {
+            AutocompleteKeyAction::DismissAndContinue
+        }
+        PhysicalKey::Code(KeyCode::ArrowDown) => AutocompleteKeyAction::MoveDown,
+        PhysicalKey::Code(KeyCode::ArrowUp) => AutocompleteKeyAction::MoveUp,
+        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+            AutocompleteKeyAction::Apply
+        }
+        _ => AutocompleteKeyAction::None,
+    }
+}
+
+fn sync_edit_line_range(
+    edits: &[crate::highlighter::SyncEdit],
+    line_offsets: &[usize],
+    text_len: usize,
+) -> (Option<usize>, Option<usize>) {
+    let edit_start_byte = edits.first().map(|edit| match edit {
+        crate::highlighter::SyncEdit::Insert { offset, .. } => *offset,
+        crate::highlighter::SyncEdit::Delete { offset, .. } => *offset,
+    });
+
+    let edit_end_byte = edits.last().map(|edit| match edit {
+        crate::highlighter::SyncEdit::Insert { offset, text } => offset + text.len(),
+        crate::highlighter::SyncEdit::Delete { offset, .. } => *offset,
+    });
+
+    let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) else {
+        return (None, None);
+    };
+
+    if line_offsets.is_empty() {
+        return (Some(0), Some(text_len));
+    }
+
+    let sl = line_offsets.partition_point(|&x| x <= sb).saturating_sub(1);
+    let el = line_offsets.partition_point(|&x| x <= eb).saturating_sub(1);
+
+    let line_start_byte = Some(line_offsets[sl.min(line_offsets.len() - 1)]);
+    let line_end_byte = if el + 1 < line_offsets.len() {
+        Some(line_offsets[el + 1])
+    } else {
+        Some(text_len)
+    };
+
+    (line_start_byte, line_end_byte)
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_editor_keyboard_input(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -46,25 +107,26 @@ impl App {
         }
 
         if self.autocomplete_active && !self.autocomplete_options.is_empty() {
-            match physical_key {
-                PhysicalKey::Code(KeyCode::Escape)
-                | PhysicalKey::Code(KeyCode::ArrowLeft)
-                | PhysicalKey::Code(KeyCode::ArrowRight) => {
+            match autocomplete_key_action(physical_key) {
+                AutocompleteKeyAction::DismissAndContinue => {
                     self.autocomplete_active = false;
                     self.autocomplete_selected_idx = 0;
                     self.window.as_ref().unwrap().request_redraw();
-                    if matches!(physical_key, PhysicalKey::Code(KeyCode::Escape)) {
-                        return;
-                    }
                 }
-                PhysicalKey::Code(KeyCode::ArrowDown) => {
+                AutocompleteKeyAction::DismissAndConsume => {
+                    self.autocomplete_active = false;
+                    self.autocomplete_selected_idx = 0;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                AutocompleteKeyAction::MoveDown => {
                     self.autocomplete_selected_idx =
                         (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
                     self.ensure_autocomplete_visible();
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-                PhysicalKey::Code(KeyCode::ArrowUp) => {
+                AutocompleteKeyAction::MoveUp => {
                     if self.autocomplete_selected_idx == 0 {
                         self.autocomplete_selected_idx = self.autocomplete_options.len() - 1;
                     } else {
@@ -74,7 +136,7 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+                AutocompleteKeyAction::Apply => {
                     self.apply_autocomplete();
                     let edits = std::mem::take(&mut self.editor.sync_edits);
                     if !edits.is_empty() {
@@ -92,7 +154,7 @@ impl App {
                     self.last_sent_version = self.editor.version;
                     return;
                 }
-                _ => {}
+                AutocompleteKeyAction::None => {}
             }
         }
 
@@ -432,7 +494,7 @@ impl App {
                             && popup.text.is_char_boundary(start)
                             && popup.text.is_char_boundary(end)
                         {
-                            let _ = self.clipboard.set_text(&popup.text[start..end]);
+                            self.set_clipboard_text(&popup.text[start..end]);
                             state.selection_anchor = None;
                             state.selection_cursor = None;
                             state.selecting = false;
@@ -460,14 +522,14 @@ impl App {
                             })
                         });
                         if let Some(text) = diag_copy {
-                            let _ = self.clipboard.set_text(text);
+                            self.set_clipboard_text(text);
                             copied = true;
                         }
                     }
                 }
                 if !copied {
                     if let Some(text) = self.editor.get_selection() {
-                        let _ = self.clipboard.set_text(text);
+                        self.set_clipboard_text(text);
                     }
                 }
                 if copied {
@@ -476,7 +538,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
                 if let Some(text) = self.editor.get_selection() {
-                    let _ = self.clipboard.set_text(text);
+                    self.set_clipboard_text(text);
                     if let Some((offset, len)) = self.editor.delete_selection() {
                         self.highlighter.shift_delete(offset, len);
                         is_edit = true;
@@ -485,7 +547,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                if let Ok(text) = self.clipboard.get_text() {
+                if let Some(text) = self.get_clipboard_text() {
                     let (del_info, ins_len) = self.editor.insert_str(&text);
                     if let Some((offset, len)) = del_info {
                         self.highlighter.shift_delete(offset, len);
@@ -591,48 +653,8 @@ impl App {
                             lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                         }
                     }
-                    let edit_start_byte = if let Some(edit) = edits.first() {
-                        match edit {
-                            crate::highlighter::SyncEdit::Insert { offset, .. } => Some(*offset),
-                            crate::highlighter::SyncEdit::Delete { offset, .. } => Some(*offset),
-                        }
-                    } else {
-                        None
-                    };
-
-                    let edit_end_byte = if let Some(edit) = edits.last() {
-                        match edit {
-                            crate::highlighter::SyncEdit::Insert { offset, text } => {
-                                Some(offset + text.len())
-                            }
-                            crate::highlighter::SyncEdit::Delete { offset, .. } => Some(*offset),
-                        }
-                    } else {
-                        None
-                    };
-
-                    let mut line_start_byte = None;
-                    let mut line_end_byte = None;
-
-                    if let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) {
-                        let sl = self
-                            .editor
-                            .line_offsets
-                            .partition_point(|&x| x <= sb)
-                            .saturating_sub(1);
-                        let el = self
-                            .editor
-                            .line_offsets
-                            .partition_point(|&x| x <= eb)
-                            .saturating_sub(1);
-
-                        line_start_byte = Some(self.editor.line_offsets[sl]);
-                        line_end_byte = if el + 1 < self.editor.line_offsets.len() {
-                            Some(self.editor.line_offsets[el + 1])
-                        } else {
-                            Some(self.editor.len())
-                        };
-                    }
+                    let (line_start_byte, line_end_byte) =
+                        sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
 
                     self.highlighter.apply_edits(
                         self.editor.version,
@@ -766,5 +788,86 @@ impl App {
 
         self.last_action = Instant::now();
         self.window.as_ref().unwrap().request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autocomplete_key_action_maps_navigation_and_apply_keys() {
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::Escape)),
+            AutocompleteKeyAction::DismissAndConsume
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::ArrowLeft)),
+            AutocompleteKeyAction::DismissAndContinue
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::ArrowRight)),
+            AutocompleteKeyAction::DismissAndContinue
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::ArrowDown)),
+            AutocompleteKeyAction::MoveDown
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::ArrowUp)),
+            AutocompleteKeyAction::MoveUp
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::Enter)),
+            AutocompleteKeyAction::Apply
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::Tab)),
+            AutocompleteKeyAction::Apply
+        );
+        assert_eq!(
+            autocomplete_key_action(PhysicalKey::Code(KeyCode::KeyA)),
+            AutocompleteKeyAction::None
+        );
+    }
+
+    #[test]
+    fn sync_edit_line_range_covers_insert_delete_empty_and_last_line() {
+        let lines = vec![0, 6, 12, 20];
+
+        assert_eq!(sync_edit_line_range(&[], &lines, 24), (None, None));
+
+        let edits = vec![crate::highlighter::SyncEdit::Insert {
+            offset: 7,
+            text: "abc".to_string(),
+        }];
+        assert_eq!(
+            sync_edit_line_range(&edits, &lines, 24),
+            (Some(6), Some(12))
+        );
+
+        let edits = vec![crate::highlighter::SyncEdit::Delete { offset: 18, len: 3 }];
+        assert_eq!(
+            sync_edit_line_range(&edits, &lines, 24),
+            (Some(12), Some(20))
+        );
+
+        let edits = vec![
+            crate::highlighter::SyncEdit::Insert {
+                offset: 2,
+                text: "x".to_string(),
+            },
+            crate::highlighter::SyncEdit::Delete { offset: 18, len: 2 },
+        ];
+        assert_eq!(
+            sync_edit_line_range(&edits, &lines, 24),
+            (Some(0), Some(20))
+        );
+
+        let edits = vec![crate::highlighter::SyncEdit::Insert {
+            offset: 3,
+            text: "x".to_string(),
+        }];
+        assert_eq!(sync_edit_line_range(&edits, &[], 9), (Some(0), Some(9)));
     }
 }

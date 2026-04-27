@@ -285,7 +285,7 @@ pub struct App {
     pub tab_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
     pub editor: Editor,
-    pub clipboard: Clipboard,
+    pub clipboard: Option<Clipboard>,
     pub theme: Theme,
     pub base_title: String,
     pub file_path: Option<PathBuf>,

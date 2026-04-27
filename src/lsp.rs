@@ -38,7 +38,6 @@ use std::time::Duration;
 static NEXT_ID: AtomicI32 = AtomicI32::new(1);
 
 #[inline(always)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn next_id() -> i32 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -238,7 +237,6 @@ struct OpenFile {
     text: String,
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn send_and_log(
     out_tx: &Sender<Vec<u8>>,
     event_tx: &Sender<LspEvent>,
@@ -498,8 +496,8 @@ pub struct LspProcess {
     workspace_scanned: bool,
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl LspProcess {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
@@ -521,6 +519,7 @@ impl LspProcess {
     }
 
     /// textDocument/didOpen
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn notify_open(
         &mut self,
         path: &PathBuf,
@@ -682,6 +681,44 @@ fn encode_diagnostics_json(diags: &[Diagnostic]) -> String {
     out
 }
 
+fn merged_diagnostics_for_path(
+    path: &Path,
+    ruff: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    ty: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+) -> (i32, Vec<Diagnostic>) {
+    let mut merged = Vec::new();
+    let mut max_v = 0;
+    if let Some((v, d)) = ruff.get(path) {
+        merged.extend(d.clone());
+        max_v = max_v.max(*v);
+    }
+    if let Some((v, d)) = ty.get(path) {
+        merged.extend(d.clone());
+        max_v = max_v.max(*v);
+    }
+    (max_v, merged)
+}
+
+fn merged_diagnostics_for_all_paths(
+    ruff: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    ty: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+) -> Vec<(PathBuf, Vec<Diagnostic>)> {
+    let mut paths = std::collections::HashSet::new();
+    for k in ruff.keys() {
+        paths.insert(k.clone());
+    }
+    for k in ty.keys() {
+        paths.insert(k.clone());
+    }
+
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let (_, merged) = merged_diagnostics_for_path(&path, ruff, ty);
+        out.push((path, merged));
+    }
+    out
+}
+
 // ── LspManager: главный фасад для App ─────────────────────────────────────────
 
 pub struct LspManager {
@@ -696,6 +733,7 @@ pub struct LspManager {
     pub dirty_diagnostics: bool,
     pub last_change: Option<std::time::Instant>,
     current_path: Option<PathBuf>,
+    current_python_file: Option<(PathBuf, String, i32)>,
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     pub ty_status: LspServerStatus,
@@ -705,7 +743,6 @@ pub struct LspManager {
     pub suppress_diagnostics: bool,
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl LspManager {
     pub fn new(workspaces: Vec<PathBuf>) -> Self {
         LspManager {
@@ -719,6 +756,7 @@ impl LspManager {
             dirty_diagnostics: false,
             last_change: None,
             current_path: None,
+            current_python_file: None,
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
             python_disabled: false,
@@ -783,19 +821,19 @@ impl LspManager {
         self.ty_status = LspServerStatus::Starting;
         self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
         self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
-        // Re-open current file if any
+        self.reopen_current_python_file();
+    }
+
+    fn reopen_current_python_file(&mut self) {
+        let Some((path, text, version)) = self.current_python_file.clone() else {
+            return;
+        };
         let ws = self.workspaces.first().cloned();
-        if let Some(path) = &self.current_path.clone() {
-            if let Some(proc) = &mut self.python {
-                if let Some((_, text)) = &proc.open_file_data.clone() {
-                    proc.notify_open(path, text, 1, ws.as_ref());
-                }
-            }
-            if let Some(proc) = &mut self.ty_process {
-                if let Some((_, text)) = &proc.open_file_data.clone() {
-                    proc.notify_open(path, text, 1, ws.as_ref());
-                }
-            }
+        if let Some(proc) = &mut self.python {
+            proc.notify_open(&path, &text, version, ws.as_ref());
+        }
+        if let Some(proc) = &mut self.ty_process {
+            proc.notify_open(&path, &text, version, ws.as_ref());
         }
     }
 
@@ -849,6 +887,7 @@ impl LspManager {
         self.current_path = Some(abs_path.clone());
         let ws = self.workspaces.first().cloned();
         if ext == "py" {
+            self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
             self.ensure_python();
             if let Some(proc) = &mut self.python {
                 proc.notify_open(&abs_path, text, version, ws.as_ref());
@@ -856,6 +895,8 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_open(&abs_path, text, version, ws.as_ref());
             }
+        } else {
+            self.current_python_file = None;
         }
     }
 
@@ -871,6 +912,8 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         if ext == "py" {
+            self.current_path = Some(abs_path.clone());
+            self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
             self.ensure_python();
             if let Some(proc) = &mut self.python {
                 proc.notify_change(&abs_path, text, version);
@@ -933,6 +976,13 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         if ext == "py" {
+            if self.current_path.as_ref() == Some(&abs_path) {
+                self.current_path = None;
+            }
+            if matches!(self.current_python_file.as_ref(), Some((path, _, _)) if path == &abs_path)
+            {
+                self.current_python_file = None;
+            }
             if let Some(proc) = &mut self.python {
                 proc.notify_close(&abs_path);
             }
@@ -1006,16 +1056,11 @@ impl LspManager {
                                 .insert(path.clone(), (v, items.clone()));
                         }
 
-                        let mut merged = Vec::new();
-                        let mut max_v = v;
-                        if let Some((v1, d)) = self.instant_diagnostics.get(path.as_path()) {
-                            merged.extend(d.clone());
-                            max_v = max_v.max(*v1);
-                        }
-                        if let Some((v2, d)) = self.ty_instant_diagnostics.get(path.as_path()) {
-                            merged.extend(d.clone());
-                            max_v = max_v.max(*v2);
-                        }
+                        let (max_v, merged) = merged_diagnostics_for_path(
+                            path,
+                            &self.instant_diagnostics,
+                            &self.ty_instant_diagnostics,
+                        );
                         self.merged_instant_diagnostics
                             .insert(path.clone(), (max_v, merged));
 
@@ -1058,23 +1103,11 @@ impl LspManager {
         if let Some(t) = self.last_change {
             if t.elapsed().as_secs_f32() >= 3.0 {
                 if self.dirty_diagnostics {
-                    let mut paths = std::collections::HashSet::new();
-                    for k in self.instant_diagnostics.keys() {
-                        paths.insert(k.as_path());
-                    }
-                    for k in self.ty_instant_diagnostics.keys() {
-                        paths.insert(k.as_path());
-                    }
-
-                    for path in paths {
-                        let mut merged = Vec::new();
-                        if let Some((_, d)) = self.instant_diagnostics.get(path) {
-                            merged.extend(d.iter().cloned());
-                        }
-                        if let Some((_, d)) = self.ty_instant_diagnostics.get(path) {
-                            merged.extend(d.iter().cloned());
-                        }
-                        self.diagnostics.insert(path.to_path_buf(), merged);
+                    for (path, merged) in merged_diagnostics_for_all_paths(
+                        &self.instant_diagnostics,
+                        &self.ty_instant_diagnostics,
+                    ) {
+                        self.diagnostics.insert(path, merged);
                     }
                     self.dirty_diagnostics = false;
                 }
@@ -1082,23 +1115,11 @@ impl LspManager {
             }
         } else {
             if self.dirty_diagnostics {
-                let mut paths = std::collections::HashSet::new();
-                for k in self.instant_diagnostics.keys() {
-                    paths.insert(k.as_path());
-                }
-                for k in self.ty_instant_diagnostics.keys() {
-                    paths.insert(k.as_path());
-                }
-
-                for path in paths {
-                    let mut merged = Vec::new();
-                    if let Some((_, d)) = self.instant_diagnostics.get(path) {
-                        merged.extend(d.iter().cloned());
-                    }
-                    if let Some((_, d)) = self.ty_instant_diagnostics.get(path) {
-                        merged.extend(d.iter().cloned());
-                    }
-                    self.diagnostics.insert(path.to_path_buf(), merged);
+                for (path, merged) in merged_diagnostics_for_all_paths(
+                    &self.instant_diagnostics,
+                    &self.ty_instant_diagnostics,
+                ) {
+                    self.diagnostics.insert(path, merged);
                 }
                 self.dirty_diagnostics = false;
             }
@@ -1345,6 +1366,56 @@ pub fn format_and_highlight_json(
 mod tests {
     use super::*;
 
+    fn test_process(def: &'static LspServerDef) -> (LspProcess, Receiver<Cmd>) {
+        let (proc, cmd_rx, _event_tx) = test_process_with_events(def);
+        (proc, cmd_rx)
+    }
+
+    fn test_process_with_events(
+        def: &'static LspServerDef,
+    ) -> (LspProcess, Receiver<Cmd>, Sender<LspEvent>) {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let proc = LspProcess {
+            cmd_tx,
+            event_rx,
+            current_uri: None,
+            def,
+            open_file_data: None,
+            workspace_scanned: true,
+        };
+        (proc, cmd_rx, event_tx)
+    }
+
+    fn open_cmd(rx: &Receiver<Cmd>) -> (String, &'static str, i32, String) {
+        match rx.try_recv().unwrap() {
+            Cmd::Open {
+                uri,
+                lang,
+                version,
+                text,
+            } => (uri, lang, version, text),
+            _ => panic!("expected open command"),
+        }
+    }
+
+    fn test_diag(message: &str, severity: DiagSeverity, code: Option<&str>) -> Diagnostic {
+        Diagnostic {
+            start_line: 1,
+            start_col: 2,
+            end_line: 1,
+            end_col: 8,
+            severity,
+            code: code.map(str::to_string),
+            code_href: None,
+            message: message.to_string(),
+            source: Some("ruff".to_string()),
+            quickfixes: Vec::new(),
+            tags: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+
     #[test]
     fn lsp_position_and_log_formatting_end_to_end() {
         let text = "one\nemoji 😀\nlast";
@@ -1362,5 +1433,570 @@ mod tests {
         assert!(folds
             .iter()
             .all(|(start, end)| start < end && *end <= pretty.len()));
+    }
+
+    #[test]
+    fn diagnostics_json_escapes_optional_fields_and_severity() {
+        let diags = vec![
+            test_diag("bad \"name\"\nline", DiagSeverity::Warning, Some("F401")),
+            Diagnostic {
+                source: None,
+                severity: DiagSeverity::Hint,
+                code: None,
+                ..test_diag("tab\tchar", DiagSeverity::Hint, None)
+            },
+        ];
+
+        let encoded = encode_diagnostics_json(&diags);
+        let parsed: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(parsed[0]["severity"], 2);
+        assert_eq!(parsed[0]["code"], "F401");
+        assert_eq!(parsed[0]["source"], "ruff");
+        assert_eq!(parsed[0]["message"], "bad \"name\"\nline");
+        assert_eq!(parsed[1]["severity"], 4);
+        assert!(parsed[1].get("code").is_none());
+        assert!(parsed[1].get("source").is_none());
+    }
+
+    #[test]
+    fn lsp_manager_keeps_and_reopens_saved_python_file_after_disable() {
+        let path = PathBuf::from("/tmp/current.py");
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp")]);
+        manager.current_path = Some(path.clone());
+        manager.current_python_file = Some((path.clone(), "print(2)\n".to_string(), 9));
+
+        manager.disable_python();
+        assert_eq!(manager.current_python_file.as_ref().unwrap().2, 9);
+        let (ruff, ruff_rx) = test_process(&RUFF_SERVER);
+        let (ty, ty_rx) = test_process(&TY_SERVER);
+        manager.python = Some(ruff);
+        manager.ty_process = Some(ty);
+        manager.reopen_current_python_file();
+        for cmd in [open_cmd(&ruff_rx), open_cmd(&ty_rx)] {
+            assert_eq!(cmd.0, path_to_uri(&path.to_string_lossy()));
+            assert_eq!(cmd.1, "python");
+            assert_eq!(cmd.2, 9);
+            assert_eq!(cmd.3, "print(2)\n");
+        }
+    }
+
+    #[test]
+    fn lsp_process_commands_update_local_state_and_send_expected_requests() {
+        let path = PathBuf::from("/tmp/pkg/main.py");
+        let (mut proc, rx) = test_process(&RUFF_SERVER);
+
+        proc.notify_open(&path, "print(1)\n", 3, None);
+        let opened = open_cmd(&rx);
+        assert_eq!(opened.0, path_to_uri(&path.to_string_lossy()));
+        assert_eq!(opened.1, "python");
+        assert_eq!(opened.2, 3);
+        assert_eq!(opened.3, "print(1)\n");
+        assert_eq!(proc.current_uri.as_deref(), Some(opened.0.as_str()));
+        assert_eq!(
+            proc.open_file_data.as_ref().map(|(_, text)| text.as_str()),
+            Some("print(1)\n")
+        );
+
+        proc.notify_change(&path, "print(2)\n", 4);
+        match rx.try_recv().unwrap() {
+            Cmd::Change { uri, version, text } => {
+                assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+                assert_eq!(version, 4);
+                assert_eq!(text, "print(2)\n");
+            }
+            _ => panic!("expected change command"),
+        }
+
+        let hover_id = proc.request_hover(&path, 5, 6);
+        match rx.try_recv().unwrap() {
+            Cmd::Hover { id, uri, line, col } => {
+                assert_eq!(id, hover_id);
+                assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+                assert_eq!((line, col), (5, 6));
+            }
+            _ => panic!("expected hover command"),
+        }
+
+        let def_id = proc.request_definition(&path, 7, 8);
+        match rx.try_recv().unwrap() {
+            Cmd::Definition { id, uri, line, col } => {
+                assert_eq!(id, def_id);
+                assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+                assert_eq!((line, col), (7, 8));
+            }
+            _ => panic!("expected definition command"),
+        }
+
+        let action_id = proc.request_code_actions(
+            &path,
+            1,
+            2,
+            3,
+            4,
+            &[test_diag("fix me", DiagSeverity::Warning, Some("F401"))],
+            Some(vec!["quickfix".to_string()]),
+        );
+        match rx.try_recv().unwrap() {
+            Cmd::CodeAction {
+                id,
+                uri,
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                diagnostics_json,
+                only,
+            } => {
+                assert_eq!(id, action_id);
+                assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+                assert_eq!((start_line, start_col, end_line, end_col), (1, 2, 3, 4));
+                assert!(diagnostics_json.contains("F401"));
+                assert_eq!(only, Some(vec!["quickfix".to_string()]));
+            }
+            _ => panic!("expected code action command"),
+        }
+
+        proc.notify_close(&path);
+        match rx.try_recv().unwrap() {
+            Cmd::Close { uri } => assert_eq!(uri, path_to_uri(&path.to_string_lossy())),
+            _ => panic!("expected close command"),
+        }
+        assert!(proc.current_uri.is_none());
+
+        proc.restart();
+        assert!(matches!(rx.try_recv().unwrap(), Cmd::Restart));
+        proc.shutdown();
+        assert!(matches!(rx.try_recv().unwrap(), Cmd::Shutdown));
+    }
+
+    #[test]
+    fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
+        let ws = PathBuf::from("/tmp/ws");
+        let rel = PathBuf::from("pkg/main.py");
+        let abs = ws.join(&rel);
+        let (ruff, ruff_rx) = test_process(&RUFF_SERVER);
+        let (ty, ty_rx) = test_process(&TY_SERVER);
+        let mut manager = LspManager::new(vec![ws.clone()]);
+        manager.python = Some(ruff);
+        manager.ty_process = Some(ty);
+
+        manager.notify_open(&rel, "py", "x = 1\n", 11);
+        assert_eq!(manager.current_path.as_ref(), Some(&abs));
+        assert_eq!(
+            manager
+                .current_python_file
+                .as_ref()
+                .map(|(p, text, v)| (p, text.as_str(), *v)),
+            Some((&abs, "x = 1\n", 11))
+        );
+        assert_eq!(open_cmd(&ruff_rx).2, 11);
+        assert_eq!(open_cmd(&ty_rx).2, 11);
+
+        manager.notify_change(&rel, "py", "x = 2\n", 12);
+        assert_eq!(
+            manager
+                .current_python_file
+                .as_ref()
+                .map(|(_, text, v)| (text.as_str(), *v)),
+            Some(("x = 2\n", 12))
+        );
+        assert!(matches!(
+            ruff_rx.try_recv().unwrap(),
+            Cmd::Change { version: 12, .. }
+        ));
+        assert!(matches!(
+            ty_rx.try_recv().unwrap(),
+            Cmd::Change { version: 12, .. }
+        ));
+
+        manager.notify_open(&PathBuf::from("notes.txt"), "txt", "plain", 1);
+        assert!(manager.current_python_file.is_none());
+
+        manager.current_python_file = Some((abs.clone(), "x = 3\n".to_string(), 13));
+        manager.current_path = Some(abs.clone());
+        manager.notify_close(&rel, "py");
+        assert!(manager.current_path.is_none());
+        assert!(manager.current_python_file.is_none());
+        assert!(matches!(ruff_rx.try_recv().unwrap(), Cmd::Close { .. }));
+        assert!(matches!(ty_rx.try_recv().unwrap(), Cmd::Close { .. }));
+    }
+
+    #[test]
+    fn lsp_manager_request_methods_use_existing_processes_without_spawning() {
+        let path = PathBuf::from("/tmp/ws/app.py");
+        let (ruff, ruff_rx) = test_process(&RUFF_SERVER);
+        let (ty, ty_rx) = test_process(&TY_SERVER);
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.python = Some(ruff);
+        manager.ty_process = Some(ty);
+
+        let hover_id = manager.request_hover(&path, "py", 1, 2).unwrap();
+        assert!(matches!(
+            ty_rx.try_recv().unwrap(),
+            Cmd::Hover { id, line: 1, col: 2, .. } if id == hover_id
+        ));
+
+        let def_id = manager.request_definition(&path, "py", 3, 4).unwrap();
+        assert!(matches!(
+            ty_rx.try_recv().unwrap(),
+            Cmd::Definition { id, line: 3, col: 4, .. } if id == def_id
+        ));
+
+        let action_id = manager
+            .request_code_actions(
+                &path,
+                "py",
+                2,
+                3,
+                4,
+                5,
+                &[test_diag("diag", DiagSeverity::Info, None)],
+                None,
+            )
+            .unwrap();
+        assert!(matches!(
+            ruff_rx.try_recv().unwrap(),
+            Cmd::CodeAction { id, start_line: 2, start_col: 3, end_line: 4, end_col: 5, .. } if id == action_id
+        ));
+
+        let fix_id = manager.request_fix_all(&path, "py").unwrap();
+        assert!(matches!(
+            ruff_rx.try_recv().unwrap(),
+            Cmd::CodeAction { id, only: Some(only), .. } if id == fix_id && only == vec!["source.fixAll".to_string()]
+        ));
+
+        let imports_id = manager.request_organize_imports(&path, "py").unwrap();
+        assert!(matches!(
+            ruff_rx.try_recv().unwrap(),
+            Cmd::CodeAction { id, only: Some(only), .. } if id == imports_id && only == vec!["source.organizeImports".to_string()]
+        ));
+
+        assert!(manager
+            .request_code_actions(&path, "txt", 0, 0, 0, 0, &[], None)
+            .is_none());
+    }
+
+    #[test]
+    fn lsp_manager_poll_merges_events_updates_status_and_keeps_bounded_logs() {
+        let path = PathBuf::from("/tmp/ws/app.py");
+        let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
+        let (ty, _ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.python = Some(ruff);
+        manager.ty_process = Some(ty);
+
+        ruff_tx
+            .send(LspEvent::StatusChanged {
+                name: RUFF_SERVER.program,
+                status: LspServerStatus::Running,
+            })
+            .unwrap();
+        ty_tx
+            .send(LspEvent::StatusChanged {
+                name: TY_SERVER.program,
+                status: LspServerStatus::Crashed,
+            })
+            .unwrap();
+        ruff_tx
+            .send(LspEvent::Diagnostics {
+                server_name: RUFF_SERVER.program,
+                path: path.clone(),
+                version: Some(2),
+                items: vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))],
+            })
+            .unwrap();
+        ty_tx
+            .send(LspEvent::Diagnostics {
+                server_name: TY_SERVER.program,
+                path: path.clone(),
+                version: Some(5),
+                items: vec![test_diag("ty", DiagSeverity::Warning, None)],
+            })
+            .unwrap();
+        ruff_tx
+            .send(LspEvent::Log {
+                name: RUFF_SERVER.program,
+                message: format!("{{\"big\":\"{}\"}}", "я".repeat(3000)),
+            })
+            .unwrap();
+
+        let events = manager.poll();
+        assert_eq!(events.len(), 5);
+        assert_eq!(manager.python_status, LspServerStatus::Running);
+        assert_eq!(manager.ty_status, LspServerStatus::Crashed);
+        assert!(!manager.dirty_diagnostics);
+
+        let diags = manager.get_diagnostics(&path);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].message, "ruff");
+        assert_eq!(diags[1].message, "ty");
+        let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
+        assert_eq!(version, 5);
+        assert_eq!(instant.len(), 2);
+        assert_eq!(manager.diagnostics_for_line(&path, 1).len(), 2);
+        assert!(manager.diagnostics_for_line(&path, 99).is_empty());
+
+        let logs = &manager.server_logs[RUFF_SERVER.program];
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].text.contains("TRUNCATED TO SAVE RAM"));
+        assert!(logs[0].text.is_char_boundary(logs[0].text.len()));
+
+        let info = manager.servers_info();
+        assert_eq!(info[0].name, RUFF_SERVER.program);
+        assert_eq!(info[0].status, LspServerStatus::Running);
+        assert_eq!(info[0].logs.len(), 1);
+        assert_eq!(info[1].status, LspServerStatus::Crashed);
+    }
+
+    #[test]
+    fn diagnostics_merge_combines_servers_and_tracks_max_version() {
+        let path = PathBuf::from("/tmp/main.py");
+        let only_ty = PathBuf::from("/tmp/ty_only.py");
+        let mut ruff = HashMap::new();
+        let mut ty = HashMap::new();
+        ruff.insert(
+            path.clone(),
+            (3, vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))]),
+        );
+        ty.insert(
+            path.clone(),
+            (7, vec![test_diag("ty", DiagSeverity::Info, None)]),
+        );
+        ty.insert(
+            only_ty.clone(),
+            (2, vec![test_diag("ty only", DiagSeverity::Warning, None)]),
+        );
+
+        let (version, merged) = merged_diagnostics_for_path(&path, &ruff, &ty);
+        assert_eq!(version, 7);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].message, "ruff");
+        assert_eq!(merged[1].message, "ty");
+
+        let all = merged_diagnostics_for_all_paths(&ruff, &ty);
+        assert_eq!(all.len(), 2);
+        let ty_only = all.iter().find(|(p, _)| p == &only_ty).unwrap();
+        assert_eq!(ty_only.1.len(), 1);
+        assert_eq!(ty_only.1[0].message, "ty only");
+    }
+
+    #[test]
+    fn send_and_log_truncates_text_document_payloads_but_sends_original_body() {
+        let (out_tx, out_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let body = make_did_open(
+            "file:///tmp/main.py",
+            "python",
+            1,
+            "secret payload that must not be logged",
+        );
+        send_and_log(&out_tx, &event_tx, RUFF_SERVER.program, body.clone()).unwrap();
+
+        assert_eq!(out_rx.try_recv().unwrap(), body);
+        match event_rx.try_recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, RUFF_SERVER.program);
+                assert!(message.contains("[LSP SEND]"));
+                assert!(message.contains("<TRUNCATED>"));
+                assert!(!message.contains("secret payload"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        let hover = make_hover(77, "file:///tmp/main.py", 2, 3);
+        send_and_log(&out_tx, &event_tx, TY_SERVER.program, hover.clone()).unwrap();
+
+        assert_eq!(out_rx.try_recv().unwrap(), hover);
+        match event_rx.try_recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, TY_SERVER.program);
+                assert!(message.contains("textDocument/hover"));
+                assert!(!message.contains("<TRUNCATED>"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lsp_process_poll_drains_events_and_shutdown_sends_command() {
+        let (proc, rx, tx) = test_process_with_events(&RUFF_SERVER);
+        tx.send(LspEvent::ServerReady).unwrap();
+        tx.send(LspEvent::Log {
+            name: RUFF_SERVER.program,
+            message: "ready".to_string(),
+        })
+        .unwrap();
+
+        let mut events = Vec::new();
+        proc.poll(&mut events);
+        assert_eq!(events.len(), 2);
+
+        proc.poll(&mut events);
+        assert_eq!(events.len(), 2);
+
+        proc.shutdown();
+        assert!(matches!(rx.try_recv().unwrap(), Cmd::Shutdown));
+    }
+
+    #[test]
+    fn manager_suppresses_diagnostics_then_flushes_after_delay() {
+        let path = PathBuf::from("/tmp/ws/app.py");
+        let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.python = Some(ruff);
+        manager.suppress_diagnostics = true;
+
+        ruff_tx
+            .send(LspEvent::Diagnostics {
+                server_name: RUFF_SERVER.program,
+                path: path.clone(),
+                version: Some(1),
+                items: vec![test_diag("suppressed", DiagSeverity::Error, None)],
+            })
+            .unwrap();
+
+        let events = manager.poll();
+        assert_eq!(events.len(), 1);
+        assert!(manager.get_diagnostics(&path).is_empty());
+        assert!(manager
+            .get_instant_diagnostics_with_version(&path)
+            .1
+            .is_empty());
+        assert!(!manager.dirty_diagnostics);
+
+        manager.suppress_diagnostics = false;
+        manager.last_change = Some(std::time::Instant::now() - Duration::from_secs(4));
+        ruff_tx
+            .send(LspEvent::Diagnostics {
+                server_name: RUFF_SERVER.program,
+                path: path.clone(),
+                version: Some(2),
+                items: vec![test_diag("flushed", DiagSeverity::Warning, Some("W1"))],
+            })
+            .unwrap();
+
+        let events = manager.poll();
+        assert_eq!(events.len(), 1);
+        assert_eq!(manager.get_diagnostics(&path).len(), 1);
+        assert_eq!(manager.get_diagnostics(&path)[0].message, "flushed");
+        assert_eq!(manager.get_instant_diagnostics_with_version(&path).0, 2);
+        assert!(!manager.dirty_diagnostics);
+        assert!(manager.last_change.is_none());
+    }
+
+    #[test]
+    fn format_json_handles_send_prefix_invalid_json_plain_text_and_offsets() {
+        let (send_text, send_spans, send_folds) = format_and_highlight_json("[LSP SEND] not json");
+        assert_eq!(send_text, "[LSP SEND]\nnot json");
+        assert!(send_spans
+            .iter()
+            .any(|span| span.end == "[LSP SEND]\n".len()));
+        assert!(send_folds.is_empty());
+
+        let (invalid_text, invalid_spans, invalid_folds) =
+            format_and_highlight_json("[LSP RECV] {not-json");
+        assert_eq!(invalid_text, "[LSP RECV]\n{not-json");
+        assert!(!invalid_spans.is_empty());
+        assert!(invalid_folds.is_empty());
+
+        let text = "a😀\nline";
+        assert_eq!(lsp_pos_to_offset(text, 0, 0), 0);
+        assert_eq!(lsp_pos_to_offset(text, 0, 1), 1);
+        assert_eq!(lsp_pos_to_offset(text, 0, 2), "a😀".len());
+        assert_eq!(lsp_pos_to_offset(text, 1, 99), text.len());
+        assert_eq!(lsp_pos_to_offset(text, 9, 0), text.len());
+    }
+
+    #[test]
+    fn lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe() {
+        let path = PathBuf::from("/tmp/ws/app.py");
+        let (ruff, ruff_rx) = test_process(&RUFF_SERVER);
+        let (ty, ty_rx) = test_process(&TY_SERVER);
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.python = Some(ruff);
+        manager.ty_process = Some(ty);
+        manager.python_status = LspServerStatus::Running;
+        manager.ty_status = LspServerStatus::Running;
+        manager.diagnostics.insert(
+            path.clone(),
+            vec![test_diag("stale", DiagSeverity::Error, None)],
+        );
+        manager.instant_diagnostics.insert(
+            path.clone(),
+            (1, vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        );
+        manager.ty_instant_diagnostics.insert(
+            path.clone(),
+            (2, vec![test_diag("ty", DiagSeverity::Info, None)]),
+        );
+        manager.merged_instant_diagnostics.insert(
+            path.clone(),
+            (2, vec![test_diag("merged", DiagSeverity::Hint, None)]),
+        );
+        manager.dirty_diagnostics = true;
+        manager.server_logs.insert(
+            RUFF_SERVER.program,
+            vec![LogEntry {
+                text: "log".to_string(),
+                spans: Vec::new(),
+                folds: Vec::new(),
+            }],
+        );
+
+        manager.disable_python();
+        assert!(manager.python_disabled);
+        assert_eq!(manager.python_status, LspServerStatus::Disabled);
+        assert_eq!(manager.ty_status, LspServerStatus::Disabled);
+        assert!(manager.python.is_none());
+        assert!(manager.ty_process.is_none());
+        assert!(manager.diagnostics.is_empty());
+        assert!(manager.instant_diagnostics.is_empty());
+        assert!(manager.ty_instant_diagnostics.is_empty());
+        assert!(manager.merged_instant_diagnostics.is_empty());
+        assert!(!manager.dirty_diagnostics);
+        assert!(manager.server_logs.is_empty());
+        assert!(matches!(ruff_rx.try_recv().unwrap(), Cmd::Shutdown));
+        assert!(matches!(ty_rx.try_recv().unwrap(), Cmd::Shutdown));
+
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.notify_open(&PathBuf::from("notes.txt"), "txt", "plain", 1);
+        assert_eq!(
+            manager.current_path,
+            Some(PathBuf::from("/tmp/ws/notes.txt"))
+        );
+        assert!(manager.current_python_file.is_none());
+        assert!(manager.request_hover(&path, "txt", 0, 0).is_none());
+        assert!(manager.request_definition(&path, "txt", 0, 0).is_none());
+        assert!(manager.request_fix_all(&path, "txt").is_none());
+        assert!(manager.request_organize_imports(&path, "txt").is_none());
+        manager.notify_change(&PathBuf::from("notes.txt"), "txt", "changed", 2);
+        assert!(manager.current_python_file.is_none());
+        assert!(manager.last_change.is_some());
+        manager.notify_close(&PathBuf::from("notes.txt"), "txt");
+        assert_eq!(
+            manager.current_path,
+            Some(PathBuf::from("/tmp/ws/notes.txt"))
+        );
+
+        let manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.shutdown();
+    }
+
+    #[test]
+    fn lsp_format_json_pretty_prints_spans_and_folds_multiline_payloads() {
+        let raw =
+            r#"[LSP RECV] {"outer":{"inner":[1,true,"s",{"deep":false}]},"arr":[{"x":1},{"y":2}]}"#;
+        let (text, spans, folds) = format_and_highlight_json(raw);
+
+        assert!(text.starts_with("[LSP RECV]\n{"));
+        assert!(text.contains("\"outer\""));
+        assert!(text.contains("\"deep\": false"));
+        assert!(spans.iter().any(|s| s.color == [0.313, 0.980, 0.482, 1.0]));
+        assert!(spans.iter().any(|s| s.color == [0.545, 0.913, 0.992, 1.0]));
+        assert!(spans.iter().any(|s| s.color == [0.945, 0.980, 0.549, 1.0]));
+        assert!(spans.iter().any(|s| s.color == [0.741, 0.576, 0.976, 1.0]));
+        assert!(spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]));
+        assert!(folds.iter().any(|(start, end)| *start < *end));
     }
 }

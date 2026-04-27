@@ -309,6 +309,7 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
     })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     fn push_hover_popup_frame(
         &mut self,

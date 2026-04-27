@@ -3,6 +3,7 @@ use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub(crate) fn draw_sticky_lines(
         &mut self,

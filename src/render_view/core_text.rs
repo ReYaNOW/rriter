@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine};
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn update_cache(
         &mut self,

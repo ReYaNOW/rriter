@@ -45,8 +45,13 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
     event_loop.exit();
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl ApplicationHandler for App {
+    // Coverage rationale:
+    // This is the winit/glutin/OpenGL bootstrap boundary. It creates OS window,
+    // GL context, swapchain surface and renderer through external APIs. Editor
+    // and input state logic stays testable in smaller helpers; this wrapper is
+    // not useful as llvm-cov signal.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -130,6 +135,7 @@ impl ApplicationHandler for App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if let Some(dw) = self.dialog_window.as_ref() {
             if _id == dw.id() {
@@ -739,6 +745,7 @@ impl ApplicationHandler for App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         about::about_to_wait(self, event_loop);
     }

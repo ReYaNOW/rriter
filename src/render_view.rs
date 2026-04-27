@@ -47,6 +47,28 @@ impl Default for Telemetry {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn telemetry_default_starts_with_empty_counters_and_fresh_print_time() {
+        let before = Instant::now();
+        let telemetry = Telemetry::default();
+        let after = Instant::now();
+
+        assert_eq!(telemetry.render_time, 0.0);
+        assert_eq!(telemetry.render_count, 0);
+        assert_eq!(telemetry.scroll_time, 0.0);
+        assert_eq!(telemetry.scroll_count, 0);
+        assert_eq!(telemetry.type_time, 0.0);
+        assert_eq!(telemetry.type_count, 0);
+        assert!(telemetry.last_print >= before);
+        assert!(telemetry.last_print <= after);
+        assert!(!TELEMETRY_ENABLED.load(Ordering::Relaxed));
+    }
+}
 use glow::HasContext;
 
 #[derive(Clone, Copy)]
@@ -56,6 +78,7 @@ pub struct ModInterval {
     pub state: crate::editor::LineModState,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw(
         &mut self,

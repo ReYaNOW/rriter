@@ -1,7 +1,105 @@
-#![cfg_attr(coverage_nightly, coverage(off))]
-
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AboutWaitPlan {
+    Wait,
+    WaitUntil(Instant),
+}
+
+fn update_sticky_animation(
+    current: &mut Vec<(usize, usize)>,
+    target: &[(usize, usize)],
+    progress: &mut f32,
+    is_adding: &mut bool,
+    dt: f32,
+) -> bool {
+    let mut needs_redraw = false;
+    if current.as_slice() != target {
+        let old_len = current.len();
+        let new_len = target.len();
+
+        if new_len > old_len {
+            *progress = 0.0;
+            *is_adding = true;
+            current.clear();
+            current.extend_from_slice(target);
+        } else if new_len < old_len {
+            if *is_adding || *progress >= 1.0 {
+                *progress = 0.0;
+                *is_adding = false;
+            }
+        } else {
+            *progress = 1.0;
+            current.clear();
+            current.extend_from_slice(target);
+        }
+        needs_redraw = true;
+    }
+
+    if *progress < 1.0 {
+        *progress += dt * 6.0;
+        if *progress >= 0.99 {
+            *progress = 1.0;
+            if !*is_adding {
+                current.clear();
+                current.extend_from_slice(target);
+            }
+        }
+        needs_redraw = true;
+    }
+
+    needs_redraw
+}
+
+fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Instant {
+    let mut wake_at = base;
+    if let Some(t) = a {
+        if t < wake_at {
+            wake_at = t;
+        }
+    }
+    if let Some(t) = b {
+        if t < wake_at {
+            wake_at = t;
+        }
+    }
+    wake_at
+}
+
+fn compute_about_wait_plan(
+    now: Instant,
+    last_action: Instant,
+    needs_redraw: bool,
+    show_welcome: bool,
+    is_ide_mode: bool,
+    is_highlighting: bool,
+    hover_wake_at: Option<Instant>,
+    hover_poll_pending: bool,
+) -> AboutWaitPlan {
+    if needs_redraw || (show_welcome && is_ide_mode) {
+        return AboutWaitPlan::Wait;
+    }
+
+    let hover_poll_wake_at =
+        hover_poll_pending.then_some(now + std::time::Duration::from_millis(16));
+
+    if is_highlighting {
+        return AboutWaitPlan::WaitUntil(earliest_wake(
+            now + std::time::Duration::from_millis(5),
+            hover_wake_at,
+            hover_poll_wake_at,
+        ));
+    }
+
+    let next_blink = last_action
+        + std::time::Duration::from_millis(
+            (now.duration_since(last_action).as_millis() / 500 + 1) as u64 * 500,
+        );
+
+    AboutWaitPlan::WaitUntil(earliest_wake(next_blink, hover_wake_at, hover_poll_wake_at))
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.run_ide_on_startup {
         app.run_ide_on_startup = false;
@@ -18,36 +116,13 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     let mut hover_wake_at: Option<Instant> = None;
     let mut hover_poll_pending = false;
 
-    if app.current_sticky_lines != app.target_sticky_lines {
-        let old_len = app.current_sticky_lines.len();
-        let new_len = app.target_sticky_lines.len();
-
-        if new_len > old_len {
-            app.sticky_anim_progress = 0.0;
-            app.sticky_anim_is_adding = true;
-            app.current_sticky_lines = app.target_sticky_lines.clone();
-        } else if new_len < old_len {
-            if app.sticky_anim_is_adding || app.sticky_anim_progress >= 1.0 {
-                app.sticky_anim_progress = 0.0;
-                app.sticky_anim_is_adding = false;
-            }
-        } else {
-            app.sticky_anim_progress = 1.0;
-            app.current_sticky_lines = app.target_sticky_lines.clone();
-        }
-        needs_redraw = true;
-    }
-
-    if app.sticky_anim_progress < 1.0 {
-        app.sticky_anim_progress += dt * 6.0;
-        if app.sticky_anim_progress >= 0.99 {
-            app.sticky_anim_progress = 1.0;
-            if !app.sticky_anim_is_adding {
-                app.current_sticky_lines = app.target_sticky_lines.clone();
-            }
-        }
-        needs_redraw = true;
-    }
+    needs_redraw |= update_sticky_animation(
+        &mut app.current_sticky_lines,
+        &app.target_sticky_lines,
+        &mut app.sticky_anim_progress,
+        &mut app.sticky_anim_is_adding,
+        dt,
+    );
 
     if app.autocomplete_active && app.autocomplete_scroll.update(dt) {
         needs_redraw = true;
@@ -835,46 +910,108 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let is_highlighting = !app.is_highlighted_once;
-    let hover_poll_wake_at = if hover_poll_pending {
-        Some(now + std::time::Duration::from_millis(16))
-    } else {
-        None
-    };
+    match compute_about_wait_plan(
+        now,
+        app.last_action,
+        needs_redraw,
+        app.show_welcome,
+        app.is_ide_mode,
+        is_highlighting,
+        hover_wake_at,
+        hover_poll_pending,
+    ) {
+        AboutWaitPlan::Wait => {
+            if let Some(w) = app.window.as_ref() {
+                w.request_redraw();
+            }
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+        AboutWaitPlan::WaitUntil(wake_at) => {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
+        }
+    }
+}
 
-    if needs_redraw || (app.show_welcome && app.is_ide_mode) {
-        if let Some(w) = app.window.as_ref() {
-            w.request_redraw();
-        }
-        event_loop.set_control_flow(ControlFlow::Wait);
-    } else if is_highlighting {
-        let mut wake_at = now + std::time::Duration::from_millis(5);
-        if let Some(t) = hover_wake_at {
-            if t < wake_at {
-                wake_at = t;
-            }
-        }
-        if let Some(t) = hover_poll_wake_at {
-            if t < wake_at {
-                wake_at = t;
-            }
-        }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
-    } else {
-        let next_blink = app.last_action
-            + std::time::Duration::from_millis(
-                (now.duration_since(app.last_action).as_millis() / 500 + 1) as u64 * 500,
-            );
-        let mut wake_at = next_blink;
-        if let Some(t) = hover_wake_at {
-            if t < wake_at {
-                wake_at = t;
-            }
-        }
-        if let Some(t) = hover_poll_wake_at {
-            if t < wake_at {
-                wake_at = t;
-            }
-        }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sticky_animation_add_remove_and_equal_length_are_pure_state_transitions() {
+        let mut current = vec![];
+        let target = vec![(1, 2), (3, 4)];
+        let mut progress = 1.0;
+        let mut adding = false;
+
+        assert!(update_sticky_animation(
+            &mut current,
+            &target,
+            &mut progress,
+            &mut adding,
+            0.01,
+        ));
+        assert_eq!(current, target);
+        assert!(adding);
+        assert!(progress > 0.0 && progress < 1.0);
+
+        let target = vec![(1, 2)];
+        progress = 1.0;
+        assert!(update_sticky_animation(
+            &mut current,
+            &target,
+            &mut progress,
+            &mut adding,
+            0.20,
+        ));
+        assert_eq!(current, target);
+        assert!(!adding);
+        assert_eq!(progress, 1.0);
+
+        let target = vec![(9, 9)];
+        assert!(update_sticky_animation(
+            &mut current,
+            &target,
+            &mut progress,
+            &mut adding,
+            0.01,
+        ));
+        assert_eq!(current, target);
+        assert_eq!(progress, 1.0);
+    }
+
+    #[test]
+    fn about_wait_plan_prioritizes_redraw_highlight_hover_and_blink() {
+        let now = Instant::now();
+        let last_action = now - std::time::Duration::from_millis(1250);
+
+        assert_eq!(
+            compute_about_wait_plan(now, last_action, true, false, false, false, None, false),
+            AboutWaitPlan::Wait,
+        );
+        assert_eq!(
+            compute_about_wait_plan(now, last_action, false, true, true, false, None, false),
+            AboutWaitPlan::Wait,
+        );
+        assert_eq!(
+            compute_about_wait_plan(now, last_action, false, false, false, true, None, false),
+            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(5)),
+        );
+        assert_eq!(
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                false,
+                false,
+                true,
+                Some(now + std::time::Duration::from_millis(2)),
+                true,
+            ),
+            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(2)),
+        );
+        assert_eq!(
+            compute_about_wait_plan(now, last_action, false, false, false, false, None, false),
+            AboutWaitPlan::WaitUntil(last_action + std::time::Duration::from_millis(1500)),
+        );
     }
 }

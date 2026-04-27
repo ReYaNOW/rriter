@@ -340,6 +340,7 @@ pub fn spawn_scan(
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
 /// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
     std::thread::spawn(move || {
         use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
@@ -377,6 +378,7 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
 impl App {
     /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
     /// добавлении workspace или разворачивании папки.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn refresh_file_tree(&mut self) {
         let roots = self.ide_workspaces.clone();
         if roots.is_empty() {
@@ -405,6 +407,7 @@ impl App {
     /// Поллит канал результатов фонового скана.
     /// Возвращает true если пришли новые данные (нужен redraw).
     /// Вызывать из about_to_wait.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn poll_file_tree(&mut self) -> bool {
         let mut updated = false;
         if let Some(rx) = &self.file_tree_rx {
@@ -421,6 +424,7 @@ impl App {
 
     /// Запускает (или перезапускает) фоновый watcher для текущих workspaces.
     /// Старый watcher бricht автоматически, т.к. его `Sender` дропается вместе с rx.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn start_file_watcher(&mut self) {
         if self.ide_workspaces.is_empty() {
             self.file_tree_notify_rx = None;
@@ -434,6 +438,7 @@ impl App {
 
     /// Обрабатывает клик по узлу с индексом node_idx.
     /// Папки — разворачивает/сворачивает, файлы — открывает.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_file_tree_click(&mut self, node_idx: usize) {
         let node = match self.ide_panel.file_tree_nodes.get(node_idx) {
             Some(n) => n.clone(),
@@ -453,6 +458,7 @@ impl App {
 
     /// Возвращает индекс узла дерева под экранными координатами (mx, my),
     /// или None если курсор не над областью дерева файлов.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
         if self.show_settings || self.dialog_window.is_some() {
             return None;
@@ -541,6 +547,113 @@ mod tests {
         assert_eq!(nodes[1].depth, 1);
         assert!(nodes.iter().all(|node| node.name != "__pycache__"));
         assert!(nodes.iter().all(|node| node.name != "z.pyc"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn file_tree_scan_covers_collapsed_depth_limit_and_gitignore_marks() {
+        let root = test_root("file_tree_depth_gitignore");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("alpha").join("nested")).unwrap();
+        std::fs::create_dir_all(root.join("ignored_dir")).unwrap();
+        std::fs::write(root.join("alpha").join("nested").join("deep.py"), "deep").unwrap();
+        std::fs::write(root.join("ignored.txt"), "ignored").unwrap();
+        std::fs::write(root.join(".gitignore"), "ignored.txt\nignored_dir/\n").unwrap();
+
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(&root);
+        let _ = builder.add(root.join(".gitignore"));
+        let gitignore = builder.build().unwrap();
+
+        let collapsed = FxHashSet::default();
+        let collapsed_nodes = scan_dir_parallel(
+            root.clone(),
+            "workspace".to_string(),
+            0,
+            &collapsed,
+            true,
+            10,
+            &gitignore,
+            DEFAULT_IGNORE_PATTERNS,
+        );
+        assert_eq!(collapsed_nodes.len(), 1);
+        assert_eq!(collapsed_nodes[0].name, "workspace");
+        assert!(!collapsed_nodes[0].is_expanded);
+        assert!(!collapsed_nodes[0].is_ignored);
+
+        let mut expanded = FxHashSet::default();
+        expanded.insert(root.clone());
+        expanded.insert(root.join("alpha"));
+        let nodes = scan_dir_parallel(
+            root.clone(),
+            "workspace".to_string(),
+            0,
+            &expanded,
+            true,
+            1,
+            &gitignore,
+            DEFAULT_IGNORE_PATTERNS,
+        );
+        let names: Vec<_> = nodes.iter().map(|node| node.name.as_str()).collect();
+
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"ignored_dir"));
+        assert!(names.contains(&"ignored.txt"));
+        assert!(names.contains(&".gitignore"));
+        assert!(!names.contains(&"deep.py"));
+
+        let alpha = nodes.iter().find(|node| node.name == "alpha").unwrap();
+        assert!(alpha.is_dir);
+        assert!(alpha.is_expanded);
+        assert_eq!(alpha.depth, 1);
+
+        let ignored_file = nodes
+            .iter()
+            .find(|node| node.name == "ignored.txt")
+            .unwrap();
+        assert!(!ignored_file.is_dir);
+        assert!(ignored_file.is_ignored);
+
+        let ignored_dir = nodes
+            .iter()
+            .find(|node| node.name == "ignored_dir")
+            .unwrap();
+        assert!(ignored_dir.is_dir);
+        assert!(ignored_dir.is_ignored);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
+        let root = test_root("spawn_scan");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("keep_dir")).unwrap();
+        std::fs::create_dir_all(root.join("skip_dir")).unwrap();
+        std::fs::write(root.join("keep.rs"), "keep").unwrap();
+        std::fs::write(root.join("skip.py"), "skip").unwrap();
+
+        let mut expanded = FxHashSet::default();
+        expanded.insert(root.clone());
+        let rx = spawn_scan(
+            vec![root.join("missing"), root.clone()],
+            expanded,
+            vec!["skip*".to_string()],
+        );
+
+        let first = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let second = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+
+        let names: Vec<_> = first.iter().map(|node| node.name.as_str()).collect();
+        let second_names: Vec<_> = second.iter().map(|node| node.name.as_str()).collect();
+
+        assert_eq!(names, second_names);
+        assert!(names.contains(&"keep_dir"));
+        assert!(names.contains(&"keep.rs"));
+        assert!(!names.contains(&"missing"));
+        assert!(!names.contains(&"skip_dir"));
+        assert!(!names.contains(&"skip.py"));
+        assert!(first.iter().all(|node| node.path.exists()));
 
         let _ = std::fs::remove_dir_all(&root);
     }

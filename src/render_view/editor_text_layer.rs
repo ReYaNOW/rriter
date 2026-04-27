@@ -3,6 +3,7 @@ use crate::highlighter::ColorSpan;
 use crate::render_view::ModInterval;
 use crate::renderer::Renderer;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_editor_visible_text(

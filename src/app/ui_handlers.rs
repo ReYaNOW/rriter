@@ -4,9 +4,9 @@ use crate::app::App;
 use crate::editor::Editor;
 use crate::ui_system::UiId;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     /// Обрабатывает клик по UI элементу
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
             UiId::HoverPopupScroll => {}
@@ -404,7 +404,9 @@ impl App {
                 self.search_focused = false;
                 self.search_results.clear();
                 self.search_current_idx = None;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::SearchNext => {
                 if !self.search_results.is_empty() {
@@ -412,7 +414,9 @@ impl App {
                         self.search_current_idx = Some((idx + 1) % self.search_results.len());
                     }
                     self.jump_to_search_result();
-                    self.window.as_ref().unwrap().request_redraw();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
             UiId::SearchPrev => {
@@ -425,14 +429,18 @@ impl App {
                         });
                     }
                     self.jump_to_search_result();
-                    self.window.as_ref().unwrap().request_redraw();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
             UiId::SearchCaseToggle => {
                 self.search_case_sensitive = !self.search_case_sensitive;
                 self.update_search();
                 self.jump_to_search_result();
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
 
             // Tabs
@@ -738,13 +746,17 @@ impl App {
                         } else {
                             self.ide_panel.problems_collapsed.insert(path.clone());
                         }
-                        self.window.as_ref().unwrap().request_redraw();
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
                     }
                 }
             }
             UiId::ProblemsTab(idx) => {
                 self.ide_panel.problems_tab = idx;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
                 if let Some(href) =
@@ -849,11 +861,14 @@ impl App {
                         .and_then(|l| l.diagnostics.get(path))
                         .and_then(|diags| diags.get(*diag_idx))
                     {
-                        let _ = self.clipboard.set_text(&diag.message);
+                        let message = diag.message.clone();
+                        self.set_clipboard_text(message);
                         self.ide_panel.diag_copied_idx = Some(idx);
                     }
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::PopupCopyDiagnostic(idx) => {
                 if let Some(path) = &self.file_path {
@@ -863,11 +878,14 @@ impl App {
                         .and_then(|l| l.diagnostics.get(path))
                         .and_then(|diags| diags.get(idx))
                     {
-                        let _ = self.clipboard.set_text(&diag.message);
+                        let message = diag.message.clone();
+                        self.set_clipboard_text(message);
                         self.ide_panel.diag_copied_idx = Some(idx);
                     }
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::LspLogArea(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
@@ -897,7 +915,9 @@ impl App {
                     self.last_click_time = now;
                     self.last_click_pos = (mx, my);
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
         }
     }

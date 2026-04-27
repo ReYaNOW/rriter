@@ -7,9 +7,7 @@ mod highlighter;
 mod languages;
 mod lsp;
 mod queries;
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod render_view;
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod renderer;
 mod scroll;
 mod ui_system;
@@ -48,77 +46,93 @@ impl Default for Config {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn load_recent_files() -> Vec<PathBuf> {
+#[cfg(not(test))]
+fn rriter_config_dir() -> PathBuf {
     let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     path.push(".config");
     path.push("RRiter");
-    path.push("recent.txt");
+    path
+}
+
+#[cfg(not(test))]
+fn recent_files_path() -> PathBuf {
+    rriter_config_dir().join("recent.txt")
+}
+
+#[cfg(not(test))]
+fn open_tabs_path(is_ide: bool) -> PathBuf {
+    rriter_config_dir().join(if is_ide { "tabs_ide.txt" } else { "tabs.txt" })
+}
+
+#[cfg(not(test))]
+fn panel_state_path() -> PathBuf {
+    rriter_config_dir().join("panels.txt")
+}
+
+#[cfg(not(test))]
+fn config_path() -> PathBuf {
+    rriter_config_dir().join("config.json")
+}
+
+fn parse_recent_files(content: &str) -> Vec<PathBuf> {
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn format_recent_files(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+pub fn load_recent_files() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(not(test))]
+pub fn load_recent_files() -> Vec<PathBuf> {
+    let path = recent_files_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(PathBuf::from)
-            .collect()
+        parse_recent_files(&content)
     } else {
         Vec::new()
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+pub fn save_recent_files(_files: &[PathBuf]) {}
+
+#[cfg(not(test))]
 pub fn save_recent_files(files: &[PathBuf]) {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    let _ = std::fs::create_dir_all(&path);
-    path.push("recent.txt");
-    let content = files
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let _ = std::fs::write(&path, content);
+    let dir = rriter_config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("recent.txt"), format_recent_files(files));
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    if is_ide {
-        path.push("tabs_ide.txt");
-    } else {
-        path.push("tabs.txt");
-    }
+fn parse_open_tabs_content(content: &str) -> (Vec<Option<PathBuf>>, usize) {
     let mut tabs = Vec::new();
     let mut active = 0;
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        let mut lines = content.lines();
-        if let Some(first) = lines.next() {
-            active = first.parse().unwrap_or(0);
-        }
-        for line in lines {
-            if line.is_empty() {
-                tabs.push(None);
-            } else {
-                tabs.push(Some(PathBuf::from(line)));
-            }
+    let mut lines = content.lines();
+    if let Some(first) = lines.next() {
+        active = first.parse().unwrap_or(0);
+    }
+    for line in lines {
+        if line.is_empty() {
+            tabs.push(None);
+        } else {
+            tabs.push(Some(PathBuf::from(line)));
         }
     }
     (tabs, active)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    let _ = std::fs::create_dir_all(&path);
-    if is_ide {
-        path.push("tabs_ide.txt");
-    } else {
-        path.push("tabs.txt");
-    }
+fn format_open_tabs_content(tabs: &[crate::app::EditorTab], active_tab: usize) -> String {
     let mut lines = Vec::new();
     lines.push(active_tab.to_string());
     for tab in tabs {
@@ -128,16 +142,38 @@ pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide:
             lines.push(String::new());
         }
     }
-    let _ = std::fs::write(&path, lines.join("\n"));
+    lines.join("\n")
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn save_panel_state(state: &crate::app::IdePanelState) {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    let _ = std::fs::create_dir_all(&path);
-    path.push("panels.txt");
+#[cfg(test)]
+pub fn load_open_tabs(_is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
+    (Vec::new(), 0)
+}
+
+#[cfg(not(test))]
+pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
+    let path = open_tabs_path(is_ide);
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        parse_open_tabs_content(&content)
+    } else {
+        (Vec::new(), 0)
+    }
+}
+
+#[cfg(test)]
+pub fn save_open_tabs(_tabs: &[crate::app::EditorTab], _active_tab: usize, _is_ide: bool) {}
+
+#[cfg(not(test))]
+pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
+    let dir = rriter_config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(
+        open_tabs_path(is_ide),
+        format_open_tabs_content(tabs, active_tab),
+    );
+}
+
+fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
     let mut lines: Vec<String> = Vec::new();
     for slot in &state.slots {
         let id_s = match slot.id {
@@ -159,20 +195,21 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
     }
     lines.push(format!("left_width:{:.1}", state.left_width));
     lines.push(format!("bottom_height:{:.1}", state.bottom_height));
-    let _ = std::fs::write(&path, lines.join("\n"));
+    lines.join("\n")
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn load_panel_state() -> crate::app::IdePanelState {
+#[cfg(test)]
+pub fn save_panel_state(_state: &crate::app::IdePanelState) {}
+
+#[cfg(not(test))]
+pub fn save_panel_state(state: &crate::app::IdePanelState) {
+    let dir = rriter_config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(panel_state_path(), format_panel_state_content(state));
+}
+
+fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
     let mut state = crate::app::IdePanelState::default();
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    path.push("panels.txt");
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return state,
-    };
     let mut loaded: Vec<crate::app::PanelSlot> = Vec::new();
     for line in content.lines() {
         let parts: Vec<&str> = line.splitn(3, ':').collect();
@@ -217,13 +254,21 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
     state
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn save_config(config: &Config) {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    let _ = std::fs::create_dir_all(&path);
-    path.push("config.json");
+#[cfg(test)]
+pub fn load_panel_state() -> crate::app::IdePanelState {
+    crate::app::IdePanelState::default()
+}
+
+#[cfg(not(test))]
+pub fn load_panel_state() -> crate::app::IdePanelState {
+    let path = panel_state_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_panel_state_content(&content),
+        Err(_) => crate::app::IdePanelState::default(),
+    }
+}
+
+fn format_config_content(config: &Config) -> String {
     let paths_str = config
         .ide_workspaces
         .iter()
@@ -235,6 +280,18 @@ pub fn save_config(config: &Config) {
             "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\",\n  \"enable_telemetry\": {}\n}}\n",
             config.window_width, config.window_height, config.maximized, paths_str, ignore_str, config.enable_telemetry
         );
+    content
+}
+
+#[cfg(test)]
+pub fn save_config(_config: &Config) {}
+
+#[cfg(not(test))]
+pub fn save_config(config: &Config) {
+    let dir = rriter_config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let path = config_path();
+    let content = format_config_content(config);
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if existing == content {
             return;
@@ -243,12 +300,65 @@ pub fn save_config(config: &Config) {
     let _ = std::fs::write(&path, content);
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn parse_config_content(content: &str, mut config: Config) -> Config {
+    for line in content.lines() {
+        if line.contains("\"window_width\"") {
+            if let Some(val) = line.split(':').nth(1) {
+                if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
+                    config.window_width = v;
+                }
+            }
+        }
+        if line.contains("\"window_height\"") {
+            if let Some(val) = line.split(':').nth(1) {
+                if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
+                    config.window_height = v;
+                }
+            }
+        }
+        if line.contains("\"maximized\"") {
+            if let Some(val) = line.split(':').nth(1) {
+                if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
+                    config.maximized = v;
+                }
+            }
+        }
+        if line.contains("\"ide_workspaces\"") {
+            if let Some(val) = line.split("\": \"").nth(1) {
+                let paths = val.trim().trim_matches(',').trim_matches('"');
+                if !paths.is_empty() {
+                    config.ide_workspaces = paths.split('|').map(PathBuf::from).collect();
+                }
+            }
+        }
+        if line.contains("\"ide_ignore_patterns\"") {
+            if let Some(val) = line.split("\": \"").nth(1) {
+                let pats = val.trim().trim_matches(',').trim_matches('"');
+                if !pats.is_empty() {
+                    config.ide_ignore_patterns = pats.split('|').map(|s| s.to_string()).collect();
+                }
+            }
+        }
+        if line.contains("\"enable_telemetry\"") {
+            if let Some(val) = line.split(':').nth(1) {
+                if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
+                    config.enable_telemetry = v;
+                }
+            }
+        }
+    }
+    config
+}
+
+#[cfg(test)]
+fn load_config() -> Config {
+    Config::default()
+}
+
+#[cfg(not(test))]
 fn load_config() -> Config {
     let mut config = Config::default();
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
+    let mut path = rriter_config_dir();
 
     if !path.exists() {
         let _ = std::fs::create_dir_all(&path);
@@ -257,53 +367,7 @@ fn load_config() -> Config {
     path.push("config.json");
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            for line in content.lines() {
-                if line.contains("\"window_width\"") {
-                    if let Some(val) = line.split(':').nth(1) {
-                        if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
-                            config.window_width = v;
-                        }
-                    }
-                }
-                if line.contains("\"window_height\"") {
-                    if let Some(val) = line.split(':').nth(1) {
-                        if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
-                            config.window_height = v;
-                        }
-                    }
-                }
-                if line.contains("\"maximized\"") {
-                    if let Some(val) = line.split(':').nth(1) {
-                        if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
-                            config.maximized = v;
-                        }
-                    }
-                }
-                if line.contains("\"ide_workspaces\"") {
-                    if let Some(val) = line.split("\": \"").nth(1) {
-                        let paths = val.trim().trim_matches(',').trim_matches('"');
-                        if !paths.is_empty() {
-                            config.ide_workspaces = paths.split('|').map(PathBuf::from).collect();
-                        }
-                    }
-                }
-                if line.contains("\"ide_ignore_patterns\"") {
-                    if let Some(val) = line.split("\": \"").nth(1) {
-                        let pats = val.trim().trim_matches(',').trim_matches('"');
-                        if !pats.is_empty() {
-                            config.ide_ignore_patterns =
-                                pats.split('|').map(|s| s.to_string()).collect();
-                        }
-                    }
-                }
-                if line.contains("\"enable_telemetry\"") {
-                    if let Some(val) = line.split(':').nth(1) {
-                        if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
-                            config.enable_telemetry = v;
-                        }
-                    }
-                }
-            }
+            config = parse_config_content(&content, config);
         }
     } else {
         // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
@@ -317,10 +381,7 @@ fn load_config() -> Config {
     config
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
-    let path = PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config/kdeglobals");
-    let content = std::fs::read_to_string(path).ok()?;
+fn parse_kde_color(content: &str, target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     let mut current_group = String::new();
 
     for line in content.lines() {
@@ -340,7 +401,12 @@ fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     None
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
+    let path = PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config/kdeglobals");
+    let content = std::fs::read_to_string(path).ok()?;
+    parse_kde_color(&content, target_group, target_key)
+}
+
 fn load_dracula() -> Theme {
     let sel_color =
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
@@ -357,6 +423,222 @@ fn load_dracula() -> Theme {
         diag_warn: [0.945, 0.980, 0.549, 1.0],
         diag_error: [1.0, 0.333, 0.333, 1.0],
         unused: [0.48, 0.48, 0.48, 0.6],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tab(path: Option<&str>) -> crate::app::EditorTab {
+        crate::app::EditorTab {
+            editor: Editor::new(16),
+            file_path: path.map(PathBuf::from),
+            base_title: path.unwrap_or("Безымянный").to_string(),
+            file_extension: String::new(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: false,
+            icon_key: "default_file",
+            syntax_errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn recent_and_open_tabs_text_roundtrip() {
+        let recent = parse_recent_files("/tmp/a.py\n\n  \nrel.rs\n");
+        assert_eq!(
+            recent,
+            vec![PathBuf::from("/tmp/a.py"), PathBuf::from("rel.rs")]
+        );
+        assert_eq!(
+            format_recent_files(&recent),
+            format!("{}{}{}", "/tmp/a.py", "\n", "rel.rs")
+        );
+
+        let (tabs, active) = parse_open_tabs_content("2\n/tmp/a.py\n\nrel.rs\n");
+        assert_eq!(active, 2);
+        assert_eq!(
+            tabs,
+            vec![
+                Some(PathBuf::from("/tmp/a.py")),
+                None,
+                Some(PathBuf::from("rel.rs"))
+            ]
+        );
+
+        let formatted = format_open_tabs_content(&[tab(Some("/tmp/a.py")), tab(None)], 1);
+        assert_eq!(formatted, "1\n/tmp/a.py\n");
+    }
+
+    #[test]
+    fn panel_state_text_preserves_slots_and_sizes() {
+        let mut state = crate::app::IdePanelState::default();
+        state.left_width = 321.25;
+        state.bottom_height = 222.75;
+        state.toggle(crate::app::PanelId::Terminal);
+
+        let formatted = format_panel_state_content(&state);
+        assert!(formatted.contains("Terminal:Bottom:1"));
+        assert!(formatted.contains("left_width:321.2"));
+        assert!(formatted.contains("bottom_height:222.8"));
+
+        let parsed = parse_panel_state_content(
+            "Explorer:Top:1\nTerminal:Bottom:0\nleft_width:444.4\nbottom_height:155.5\n",
+        );
+        assert!(parsed.is_open(crate::app::PanelId::Explorer));
+        assert!(!parsed.is_open(crate::app::PanelId::Terminal));
+        assert_eq!(parsed.left_width, 444.4);
+        assert_eq!(parsed.bottom_height, 155.5);
+        assert!(parsed
+            .slots
+            .iter()
+            .any(|slot| slot.id == crate::app::PanelId::Problems));
+    }
+
+    #[test]
+    fn config_parser_handles_missing_invalid_and_empty_values() {
+        let mut defaults = Config::default();
+        defaults.window_width = 900.0;
+        defaults.window_height = 700.0;
+        defaults.maximized = true;
+        defaults.ide_workspaces = vec![PathBuf::from("/keep")];
+        defaults.ide_ignore_patterns = vec!["old".to_string()];
+        defaults.enable_telemetry = true;
+
+        let parsed = parse_config_content(
+            r#"{
+  "window_width": "wide",
+  "window_height": 640,
+  "maximized": false,
+  "ide_workspaces": "",
+  "ide_ignore_patterns": "target||.git",
+  "enable_telemetry": false
+}"#,
+            defaults,
+        );
+
+        assert_eq!(parsed.window_width, 900.0);
+        assert_eq!(parsed.window_height, 640.0);
+        assert!(!parsed.maximized);
+        assert_eq!(parsed.ide_workspaces, vec![PathBuf::from("/keep")]);
+        assert_eq!(parsed.ide_ignore_patterns, vec!["target", "", ".git"]);
+        assert!(!parsed.enable_telemetry);
+
+        let invalid_json = parse_config_content("not json", Config::default());
+        assert_eq!(invalid_json.window_width, Config::default().window_width);
+    }
+
+    #[test]
+    fn panel_state_parser_keeps_defaults_for_unknown_and_missing_slots() {
+        let parsed = parse_panel_state_content(
+            "Unknown:Top:1\nExplorer:Top:0\nleft_width:nope\nbottom_height:333.3\n",
+        );
+
+        assert!(!parsed.is_open(crate::app::PanelId::Explorer));
+        assert_eq!(
+            parsed.left_width,
+            crate::app::IdePanelState::default().left_width
+        );
+        assert_eq!(parsed.bottom_height, 333.3);
+        assert!(parsed
+            .slots
+            .iter()
+            .any(|slot| slot.id == crate::app::PanelId::Terminal));
+        assert!(parsed
+            .slots
+            .iter()
+            .any(|slot| slot.id == crate::app::PanelId::LspServers));
+    }
+
+    #[test]
+    fn tab_and_recent_parsers_handle_empty_or_invalid_headers() {
+        assert!(parse_recent_files("\n\t\n").is_empty());
+        assert_eq!(format_recent_files(&[]), "");
+
+        let (tabs, active) = parse_open_tabs_content("not-a-number\n\n/tmp/a.py\n");
+        assert_eq!(active, 0);
+        assert_eq!(tabs, vec![None, Some(PathBuf::from("/tmp/a.py"))]);
+
+        let (empty_tabs, empty_active) = parse_open_tabs_content("");
+        assert!(empty_tabs.is_empty());
+        assert_eq!(empty_active, 0);
+    }
+
+    #[test]
+    fn kde_color_parser_respects_group_boundaries_and_rgb_shape() {
+        assert_eq!(
+            parse_kde_color(
+                "[Colors:Selection]\nOther=9,9,9\n[Colors:Window]\nBackgroundNormal=5,10,15\n",
+                "Colors:Window",
+                "BackgroundNormal",
+            ),
+            Some([5.0 / 255.0, 10.0 / 255.0, 15.0 / 255.0, 1.0])
+        );
+        assert_eq!(
+            parse_kde_color(
+                "[Colors:Selection]\nBackgroundNormal=1,2,3,4\n",
+                "Colors:Selection",
+                "BackgroundNormal",
+            ),
+            None
+        );
+        assert_eq!(
+            parse_kde_color(
+                "[Colors:Selection]\nBackgroundNormal=a,b,c\n",
+                "Colors:Selection",
+                "BackgroundNormal",
+            ),
+            Some([0.0, 0.0, 0.0, 1.0])
+        );
+        assert_eq!(
+            parse_kde_color(
+                "[Colors:Selection]\nBackgroundNormal=1,2,3\n[Other]\nBackgroundNormal=4,5,6\n",
+                "Other",
+                "Missing",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn config_text_parse_format_and_kde_color_parse() {
+        let content = r#"{
+  "window_width": 1280.5,
+  "window_height": 720.25,
+  "maximized": true,
+  "ide_workspaces": "/tmp/a|rel",
+  "ide_ignore_patterns": "target|.git",
+  "enable_telemetry": true
+}"#;
+        let config = parse_config_content(content, Config::default());
+        assert_eq!(config.window_width, 1280.5);
+        assert_eq!(config.window_height, 720.25);
+        assert!(config.maximized);
+        assert_eq!(
+            config.ide_workspaces,
+            vec![PathBuf::from("/tmp/a"), PathBuf::from("rel")]
+        );
+        assert_eq!(config.ide_ignore_patterns, vec!["target", ".git"]);
+        assert!(config.enable_telemetry);
+
+        let formatted = format_config_content(&config);
+        assert!(formatted.contains("\"window_width\": 1280.5"));
+        assert!(formatted.contains("\"ide_workspaces\": \"/tmp/a|rel\""));
+
+        let color = parse_kde_color(
+            "[Colors:Window]\nBackgroundNormal=1,2,3\n[Colors:Selection]\nBackgroundNormal=128,64,255\n",
+            "Colors:Selection",
+            "BackgroundNormal",
+        );
+        assert_eq!(color, Some([128.0 / 255.0, 64.0 / 255.0, 1.0, 1.0]));
+        assert_eq!(parse_kde_color("[Bad]\nColor=1,2\n", "Bad", "Color"), None);
     }
 }
 
@@ -489,7 +771,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor,
-        clipboard: Clipboard::new().unwrap_or_else(|_| Clipboard::new().unwrap()),
+        clipboard: Clipboard::new().ok(),
         theme: load_dracula(),
         base_title: title,
         file_path,

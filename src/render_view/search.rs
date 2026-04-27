@@ -3,6 +3,7 @@ use crate::renderer::Renderer;
 use crate::widgets::IconButton;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_search_panel(

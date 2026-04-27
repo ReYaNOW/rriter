@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_problems_panel(
         &mut self,

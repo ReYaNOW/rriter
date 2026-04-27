@@ -409,9 +409,18 @@ mod tests {
         assert_eq!(grid.lines[0][0].c, 'a');
         assert_eq!(grid.lines[0][1].c, '!');
         assert_eq!(grid.lines[2][7].c, '?');
-        assert_eq!((grid.lines[0][2].c, grid.lines[0][2].fg, grid.lines[0][2].bg), ('X', 9, 4));
-        assert_eq!((grid.lines[0][3].c, grid.lines[0][3].fg, grid.lines[0][3].bg), ('Y', 1, 4));
-        assert_eq!((grid.lines[0][4].c, grid.lines[0][4].fg, grid.lines[0][4].bg), ('Z', 200, 17));
+        assert_eq!(
+            (grid.lines[0][2].c, grid.lines[0][2].fg, grid.lines[0][2].bg),
+            ('X', 9, 4)
+        );
+        assert_eq!(
+            (grid.lines[0][3].c, grid.lines[0][3].fg, grid.lines[0][3].bg),
+            ('Y', 1, 4)
+        );
+        assert_eq!(
+            (grid.lines[0][4].c, grid.lines[0][4].fg, grid.lines[0][4].bg),
+            ('Z', 200, 17)
+        );
 
         feed(&mut grid, b"\x1b[?25l\x1b[?1h\x1b[?1000h");
         assert!(!grid.cursor_visible);
@@ -419,10 +428,18 @@ mod tests {
         assert!(grid.mouse_tracking);
 
         feed(&mut grid, b"\x1b[6n\x1b[c\x1b]10;?\x1b\\");
-        let reply_pos = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
-        let reply_device = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
-        let reply_color = rx.recv_timeout(std::time::Duration::from_millis(50)).unwrap();
-        assert!(String::from_utf8(reply_pos).unwrap().starts_with("\x1B[1;6R"));
+        let reply_pos = rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        let reply_device = rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        let reply_color = rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        assert!(String::from_utf8(reply_pos)
+            .unwrap()
+            .starts_with("\x1B[1;6R"));
         assert_eq!(reply_device, b"\x1B[?62c");
         assert_eq!(reply_color, b"\x1B]10;rgb:ffff/ffff/ffff\x1B\\");
 
@@ -473,6 +490,296 @@ mod tests {
 
         feed(&mut grid, b"\x1b[3J");
         assert!(grid.scrollback.is_empty());
+    }
+
+    #[test]
+    fn terminal_resize_preserves_scrollback_saved_cursor_and_alt_buffer() {
+        let mut grid = TermGrid::new(4, 4);
+        set_line(&mut grid, 0, "aaaa");
+        set_line(&mut grid, 1, "bbbb");
+        set_line(&mut grid, 2, "cccc");
+        set_line(&mut grid, 3, "dddd");
+        grid.cur_y = 3;
+        grid.saved_cursor = Some((1, 3));
+
+        grid.resize(4, 2);
+
+        assert_eq!(grid.scrollback.len(), 2);
+        assert_eq!(grid.cur_y, 1);
+        assert_eq!(grid.saved_cursor, Some((1, 1)));
+        let row0: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        let row1: String = grid.lines[1].iter().map(|cell| cell.c).collect();
+        assert_eq!(row0, "cccc");
+        assert_eq!(row1, "dddd");
+
+        grid.resize(4, 4);
+
+        assert!(grid.scrollback.is_empty());
+        assert_eq!(grid.cur_y, 3);
+        assert_eq!(grid.saved_cursor, Some((1, 3)));
+        let row0: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        let row3: String = grid.lines[3].iter().map(|cell| cell.c).collect();
+        assert_eq!(row0, "aaaa");
+        assert_eq!(row3, "dddd");
+
+        feed(&mut grid, b"\x1b[?1049h");
+        assert!(grid.is_alt);
+        set_line(&mut grid, 0, "1111");
+        set_line(&mut grid, 1, "2222");
+        set_line(&mut grid, 2, "3333");
+        set_line(&mut grid, 3, "4444");
+        grid.cur_y = 3;
+
+        grid.resize(6, 2);
+
+        assert_eq!(grid.cols, 6);
+        assert_eq!(grid.visible_rows, 2);
+        assert!(grid.scrollback.is_empty());
+        assert!(grid.lines.iter().all(|line| line.len() == 6));
+        let row0: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        let row1: String = grid.lines[1].iter().map(|cell| cell.c).collect();
+        assert_eq!(row0, "3333  ");
+        assert_eq!(row1, "4444  ");
+
+        feed(&mut grid, b"\x1b[?1049l");
+
+        assert!(!grid.is_alt);
+        assert!(grid.alt_lines.is_none());
+        let row0: String = grid.lines[0].iter().map(|cell| cell.c).collect();
+        let row1: String = grid.lines[1].iter().map(|cell| cell.c).collect();
+        assert_eq!(row0, "aaaa  ");
+        assert_eq!(row1, "bbbb  ");
+        assert_eq!(grid.cur_y, 1);
+    }
+
+    #[test]
+    fn terminal_csi_defaults_scroll_modes_and_sgr_edges_end_to_end() {
+        let mut grid = TermGrid::new(6, 3);
+
+        feed(&mut grid, b"\t\x08\x08Z");
+        assert_eq!((grid.cur_x, grid.cur_y), (1, 1));
+        assert_eq!(grid.lines[1][0].c, 'Z');
+
+        feed(&mut grid, b"\x1b[0G");
+        assert_eq!(grid.cur_x, 0);
+        feed(&mut grid, b"\x1b[99G");
+        assert_eq!(grid.cur_x, 5);
+        feed(&mut grid, b"\x1b[0d");
+        assert_eq!(grid.cur_y, 0);
+        feed(&mut grid, b"\x1b[99d");
+        assert_eq!(grid.cur_y, 2);
+        feed(&mut grid, b"\x1b[0;0f");
+        assert_eq!((grid.cur_x, grid.cur_y), (0, 0));
+
+        feed(
+            &mut grid,
+            b"\x1b[m\x1b[1;34;104mA\x1b[39;49mB\x1b[38;2;1;2;3;48;2;4;5;6mC\x1b[90;107mD\x1b[0mE",
+        );
+        assert_eq!(
+            (grid.lines[0][0].c, grid.lines[0][0].fg, grid.lines[0][0].bg),
+            ('A', 12, 12)
+        );
+        assert_eq!(
+            (grid.lines[0][1].c, grid.lines[0][1].fg, grid.lines[0][1].bg),
+            ('B', 7, 0)
+        );
+        assert_eq!(
+            (grid.lines[0][2].c, grid.lines[0][2].fg, grid.lines[0][2].bg),
+            ('C', 7, 0)
+        );
+        assert_eq!(
+            (grid.lines[0][3].c, grid.lines[0][3].fg, grid.lines[0][3].bg),
+            ('D', 8, 15)
+        );
+        assert_eq!(
+            (grid.lines[0][4].c, grid.lines[0][4].fg, grid.lines[0][4].bg),
+            ('E', 7, 0)
+        );
+        assert!(!grid.cur_bold);
+
+        feed(&mut grid, b"\x1b[?25l\x1b[?1h\x1b[?1002h");
+        assert!(!grid.cursor_visible);
+        assert!(grid.app_cursor_keys);
+        assert!(grid.mouse_tracking);
+        feed(&mut grid, b"\x1b[?25h\x1b[?1l\x1b[?1006l");
+        assert!(grid.cursor_visible);
+        assert!(!grid.app_cursor_keys);
+        assert!(!grid.mouse_tracking);
+
+        let mut scroll = TermGrid::new(4, 3);
+        set_line(&mut scroll, 0, "aaaa");
+        set_line(&mut scroll, 1, "bbbb");
+        set_line(&mut scroll, 2, "cccc");
+
+        feed(&mut scroll, b"\x1b[2;3r\x1b[S");
+        let row0: String = scroll.lines[0].iter().map(|cell| cell.c).collect();
+        let row1: String = scroll.lines[1].iter().map(|cell| cell.c).collect();
+        let row2: String = scroll.lines[2].iter().map(|cell| cell.c).collect();
+        assert_eq!(row0, "aaaa");
+        assert_eq!(row1, "cccc");
+        assert_eq!(row2, "    ");
+
+        feed(&mut scroll, b"\x1b[T");
+        let row1: String = scroll.lines[1].iter().map(|cell| cell.c).collect();
+        let row2: String = scroll.lines[2].iter().map(|cell| cell.c).collect();
+        assert_eq!(row1, "    ");
+        assert_eq!(row2, "cccc");
+    }
+
+    #[test]
+    fn terminal_osc_insert_delete_and_truecolor_edges_end_to_end() {
+        let mut grid = TermGrid::new(8, 4);
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        grid.reply_tx = Some(reply_tx);
+
+        feed(&mut grid, b"\x1b]10;?\x1b\\");
+        assert_eq!(
+            reply_rx.try_recv().unwrap(),
+            b"\x1B]10;rgb:ffff/ffff/ffff\x1B\\".to_vec()
+        );
+
+        feed(&mut grid, b"\x1b[2;1Habcdefgh\x1b[2;3H\x1b[2P");
+        let row1: String = grid.lines[1].iter().map(|cell| cell.c).collect();
+        assert_eq!(row1, "abefgh  ");
+
+        feed(&mut grid, b"\x1b[2;2H\x1b[3X");
+        let row1: String = grid.lines[1].iter().map(|cell| cell.c).collect();
+        assert_eq!(row1, "a   gh  ");
+
+        set_line(&mut grid, 1, "11111111");
+        set_line(&mut grid, 2, "22222222");
+        set_line(&mut grid, 3, "33333333");
+        feed(&mut grid, b"\x1b[2;4r\x1b[3;1H\x1b[L");
+        assert_eq!(
+            grid.lines[2].iter().map(|cell| cell.c).collect::<String>(),
+            "        "
+        );
+        assert_eq!(
+            grid.lines[3].iter().map(|cell| cell.c).collect::<String>(),
+            "22222222"
+        );
+
+        feed(&mut grid, b"\x1b[2;1H\x1b[M");
+        assert_eq!(
+            grid.lines[1].iter().map(|cell| cell.c).collect::<String>(),
+            "        "
+        );
+
+        feed(&mut grid, b"\x1b[38;2;1;2;3m\x1b[48;5;42mX\x1b[39;49m");
+        assert_eq!(grid.cur_bg, 0);
+        assert_eq!(grid.cur_fg, 7);
+        assert_eq!(grid.lines[1][0].bg, 42);
+
+        let before = (grid.cols, grid.visible_rows, grid.lines.len());
+        grid.resize(before.0, before.1);
+        assert_eq!((grid.cols, grid.visible_rows, grid.lines.len()), before);
+
+        grid.scroll_region = (2, 2);
+        grid.scroll_region_up(1);
+        grid.scroll_region_down(1);
+        assert_eq!(grid.scroll_region, (2, 2));
+    }
+
+    #[test]
+    fn terminal_resize_selection_and_alt_growth_edges() {
+        let mut grid = TermGrid::new(3, 2);
+        set_line(&mut grid, 0, "abc");
+        set_line(&mut grid, 1, "def");
+        grid.scrollback.push_back(vec![
+            Cell {
+                c: 's',
+                fg: 7,
+                bg: 0
+            };
+            3
+        ]);
+        grid.saved_cursor = Some((2, 1));
+
+        grid.resize(3, 4);
+        assert_eq!(grid.visible_rows, 4);
+        assert_eq!(grid.cur_y, 1);
+        assert_eq!(grid.saved_cursor, Some((2, 2)));
+        assert!(grid.scrollback.is_empty());
+        assert_eq!(
+            grid.lines[0].iter().map(|cell| cell.c).collect::<String>(),
+            "sss"
+        );
+
+        grid.selection = Some((2, 2, 1, 0));
+        assert_eq!(grid.get_selection_text(), "ss\nabc\ndef");
+        grid.selection = Some((0, 99, 2, 100));
+        assert_eq!(grid.get_selection_text(), "");
+        grid.selection = None;
+        assert_eq!(grid.get_selection_text(), "");
+
+        feed(&mut grid, b"\x1b[?1049h");
+        assert!(grid.is_alt);
+        grid.alt_saved_cursor = Some((9, 9));
+        grid.resize(5, 5);
+        assert_eq!(grid.alt_saved_cursor, Some((9, 4)));
+        assert_eq!(grid.lines.len(), 5);
+        assert!(grid.lines.iter().all(|line| line.len() == 5));
+        grid.resize(5, 3);
+        assert_eq!(grid.lines.len(), 3);
+        assert_eq!(grid.visible_rows, 3);
+    }
+
+    #[test]
+    fn terminal_csi_more_erase_cursor_and_reply_edges() {
+        let mut grid = TermGrid::new(5, 3);
+        set_line(&mut grid, 0, "abcde");
+        set_line(&mut grid, 1, "fghij");
+        set_line(&mut grid, 2, "klmno");
+
+        feed(&mut grid, b"\x1b[2;3H\x1b[J");
+        assert_eq!(
+            grid.lines[1].iter().map(|cell| cell.c).collect::<String>(),
+            "fg   "
+        );
+        assert_eq!(
+            grid.lines[2].iter().map(|cell| cell.c).collect::<String>(),
+            "     "
+        );
+
+        set_line(&mut grid, 0, "abcde");
+        set_line(&mut grid, 1, "fghij");
+        set_line(&mut grid, 2, "klmno");
+        feed(&mut grid, b"\x1b[2;3H\x1b[1J");
+        assert_eq!(
+            grid.lines[0].iter().map(|cell| cell.c).collect::<String>(),
+            "     "
+        );
+        assert_eq!(
+            grid.lines[1].iter().map(|cell| cell.c).collect::<String>(),
+            "   ij"
+        );
+
+        set_line(&mut grid, 1, "fghij");
+        feed(&mut grid, b"\x1b[2;3H\x1b[2K");
+        assert_eq!(
+            grid.lines[1].iter().map(|cell| cell.c).collect::<String>(),
+            "     "
+        );
+
+        feed(&mut grid, b"\x1b[1;1H\x1b[10C\x1b[2D\x1b[2B\x1b[A");
+        assert_eq!((grid.cur_x, grid.cur_y), (2, 1));
+
+        feed(&mut grid, b"\x1b7\x1b[3;5H\x1b8");
+        assert_eq!((grid.cur_x, grid.cur_y), (2, 1));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        grid.reply_tx = Some(tx);
+        feed(&mut grid, b"\x1b]11;?\x1b\\");
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_millis(50))
+                .unwrap(),
+            b"\x1B]11;rgb:ffff/ffff/ffff\x1B\\".to_vec()
+        );
+
+        feed(&mut grid, b"\x1b[38;5;123m\x1b[48;2;9;8;7mQ\x1b[999m");
+        assert_eq!(grid.lines[1][2].c, 'Q');
+        assert_eq!(grid.lines[1][2].fg, 123);
+        assert_eq!(grid.lines[1][2].bg, 0);
     }
 }
 
@@ -872,8 +1179,8 @@ pub struct Terminal {
     pub title: String,
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 impl Terminal {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn spawn(window: Option<std::sync::Arc<winit::window::Window>>) -> Self {
         let pty_system = NativePtySystem::default();
         let pair = pty_system
@@ -979,6 +1286,7 @@ impl Terminal {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn resize_pty(&self, cols: u16, rows: u16) {
         if cols == 0 || rows == 0 {
             return;

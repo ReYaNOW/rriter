@@ -76,6 +76,42 @@ fn test_diagnostic_layout_end_to_end_forces_below_when_y_too_small() {
 }
 
 #[test]
+fn test_diag_popup_byte_at_chooses_nearest_line_and_side() {
+    super::DIAG_CHARS.with(|chars| {
+        let mut chars = chars.borrow_mut();
+        chars.clear();
+        chars.push(super::DiagChar {
+            x: 10.0,
+            y: 20.0,
+            w: 8.0,
+            h: 16.0,
+            byte_offset: 3,
+        });
+        chars.push(super::DiagChar {
+            x: 30.0,
+            y: 20.0,
+            w: 8.0,
+            h: 16.0,
+            byte_offset: 4,
+        });
+        chars.push(super::DiagChar {
+            x: 10.0,
+            y: 60.0,
+            w: 8.0,
+            h: 16.0,
+            byte_offset: 20,
+        });
+    });
+
+    assert_eq!(super::diag_popup_byte_at(12.0, 25.0), 3);
+    assert_eq!(super::diag_popup_byte_at(40.0, 25.0), 5);
+    assert_eq!(super::diag_popup_byte_at(12.0, 65.0), 20);
+
+    super::DIAG_CHARS.with(|chars| chars.borrow_mut().clear());
+    assert_eq!(super::diag_popup_byte_at(0.0, 0.0), 0);
+}
+
+#[test]
 fn test_animated_scissor_keeps_nearest_corner_fixed() {
     let (sc_x, sc_y, sc_w, sc_h) =
         compute_animated_scissor(10.0, 20.0, 100.0, 100.0, 50.0, 50.0, 0.5);

@@ -312,7 +312,7 @@ pub(super) fn source_signature_for_hover(
         }
         None
     }
-        fn def_name(line: &str) -> Option<&str> {
+    fn def_name(line: &str) -> Option<&str> {
         let trimmed = line.trim_start();
         let rest = trimmed
             .strip_prefix("async def ")
@@ -384,7 +384,7 @@ pub(super) fn source_signature_for_hover(
     }
     decorators.reverse();
 
-        let mut sig_lines = Vec::new();
+    let mut sig_lines = Vec::new();
     let mut paren_depth = 0;
     let mut bracket_depth = 0;
     let mut in_string = false;
@@ -662,7 +662,7 @@ pub(super) fn source_class_signature_from_definition_file(
             if next_char.is_none()
                 || matches!(next_char, Some('(') | Some(':') | Some(' ') | Some('['))
             {
-                                let mut sig_lines = vec![];
+                let mut sig_lines = vec![];
                 let mut paren_depth = 0;
                 let mut bracket_depth = 0;
                 let mut in_string = false;
@@ -797,12 +797,14 @@ pub(super) fn wrap_signature_after_first_param(
 #[cfg(test)]
 mod tests {
     use super::{
-        module_path_from_definition_path, should_replace_hover_with_source_signature,
-        source_attribute_hover_from_definition_file, source_class_signature_from_definition_file,
-        source_signature_for_hover, symbol_at_offset, wrap_signature_after_first_param,
+        module_path_from_definition_path, prepend_hover_module_path,
+        should_replace_hover_with_source_signature, source_attribute_hover_from_definition_file,
+        source_class_signature_from_definition_file, source_line, source_signature_for_hover,
+        symbol_at_offset, wrap_signature_after_first_param, HOVER_MODULE_PREFIX,
     };
 
-    #[test]fn wraps_asynccontextmanager_signature_after_first_param() {
+    #[test]
+    fn wraps_asynccontextmanager_signature_after_first_param() {
         let raw = "async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]";
         let wrapped = wrap_signature_after_first_param(raw, "", "async def ");
         assert_eq!(
@@ -964,6 +966,84 @@ mod tests {
     }
 
     #[test]
+    fn module_path_covers_stdlib_stubs_workspace_and_empty_edges() {
+        let stdlib = std::path::Path::new("/opt/pyright/stdlib/pathlib.pyi");
+        assert_eq!(
+            module_path_from_definition_path(stdlib, &[]).as_deref(),
+            Some("pathlib")
+        );
+
+        let stub = std::path::Path::new("/opt/pyright/stubs/redis/client/core.pyi");
+        assert_eq!(
+            module_path_from_definition_path(stub, &[]).as_deref(),
+            Some("client.core")
+        );
+
+        let ws = std::path::PathBuf::from("/work/app");
+        let local = std::path::Path::new("/work/app/pkg/service/__init__.py");
+        assert_eq!(
+            module_path_from_definition_path(local, &[ws]).as_deref(),
+            Some("pkg.service")
+        );
+
+        let empty = std::path::Path::new("/work/app/__init__.py");
+        assert_eq!(
+            module_path_from_definition_path(empty, &[std::path::PathBuf::from("/work/app")]),
+            None
+        );
+    }
+
+    #[test]
+    fn prepend_hover_module_path_shifts_text_spans_and_inline_ranges_once() {
+        let mut popup = crate::app::mouse::HoverPopup {
+            text: "Thing\nvalue".to_string(),
+            spans: vec![crate::highlighter::ColorSpan {
+                start: 0,
+                end: 5,
+                color: [1.0, 0.0, 0.0, 1.0],
+            }],
+            line_kinds: vec![
+                crate::lsp::HoverLineKindPublic::Code,
+                crate::lsp::HoverLineKindPublic::Text,
+            ],
+            inline_code_ranges: vec![(6, 11)],
+            byte_offset: 0,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 1.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        };
+
+        prepend_hover_module_path(&mut popup, "pkg.mod");
+        let prefix = format!("{HOVER_MODULE_PREFIX}pkg.mod\n");
+        assert!(popup.text.starts_with(&prefix));
+        assert_eq!(popup.spans[0].start, prefix.len());
+        assert_eq!(popup.spans[0].end, prefix.len() + 5);
+        assert_eq!(
+            popup.inline_code_ranges[0],
+            (prefix.len() + 6, prefix.len() + 11)
+        );
+        assert_eq!(popup.line_kinds[0], crate::lsp::HoverLineKindPublic::Text);
+
+        let text_once = popup.text.clone();
+        prepend_hover_module_path(&mut popup, "pkg.mod");
+        assert_eq!(popup.text, text_once);
+    }
+
+    #[test]
+    fn source_line_handles_middle_last_and_missing_lines() {
+        let text = "alpha\nbeta\ngamma";
+        let offsets = vec![0, 6, 11];
+        assert_eq!(source_line(text, &offsets, 0), Some("alpha"));
+        assert_eq!(source_line(text, &offsets, 1), Some("beta"));
+        assert_eq!(source_line(text, &offsets, 2), Some("gamma"));
+        assert_eq!(source_line(text, &offsets, 3), None);
+    }
+
+    #[test]
     fn attribute_hover_merges_lsp_type_and_ignores_when_on_declaration() {
         let mut editor = crate::editor::Editor::new(512);
         editor.insert_str(
@@ -996,7 +1076,7 @@ mod tests {
         )
         .expect("expected signature on usage");
 
-                assert_eq!(
+        assert_eq!(
             usage_sig,
             "## Variable handlers of car_wash\nhandlers: list[Controller] = [\n    AuthController,\n    users_router,\n]"
         );
@@ -1008,10 +1088,7 @@ mod tests {
         editor.insert_str(
             "def process_items[T: BaseModel, R: Struct](\n    items: list[T],\n) -> list[R]:\n    pass\n",
         );
-        let hover_offset = editor
-            .get_full_text()
-            .find("process_items")
-            .unwrap();
+        let hover_offset = editor.get_full_text().find("process_items").unwrap();
         let sig = source_signature_for_hover(&editor, hover_offset, true, None, None).unwrap();
         assert_eq!(
             sig,
@@ -1029,16 +1106,35 @@ mod tests {
         ));
         let src = "class RepoBase[TModel: Base, TReadStruct: BasedStruct]:\n    model: ClassVar[type[Base]]\n";
         std::fs::write(&tmp, src).expect("expected temp file write");
-        let sig = source_class_signature_from_definition_file(
-            &tmp,
-            "RepoBase",
-        )
-        .expect("expected class signature");
+        let sig = source_class_signature_from_definition_file(&tmp, "RepoBase")
+            .expect("expected class signature");
         assert_eq!(
             sig,
             "class RepoBase[TModel: Base, TReadStruct: BasedStruct]"
         );
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn source_attribute_hover_covers_class_object_type_cleanup_and_short_assignments() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class Service:\n    client = make_client()\n\nasync def use():\n    return Service.client\n",
+        );
+        let hover_offset = editor.get_full_text().rfind("client").unwrap();
+        let sig = source_signature_for_hover(
+            &editor,
+            hover_offset,
+            false,
+            Some("<class 'pkg.Client'> | ... omitted 3 union elements"),
+            None,
+        )
+        .expect("expected class attribute hover");
+
+        assert_eq!(
+            sig,
+            "## Class attribute client of Service\nclient: pkg.Client | OmittedUnionElements = make_client()"
+        );
     }
 }
 

@@ -358,4 +358,116 @@ mod tests {
         assert_eq!(flat[0].end, 4);
         assert_eq!(flat[0].color, DRACULA_FG);
     }
+
+    #[test]
+    fn highlighter_shift_insert_predicts_colors_splits_and_merges_spans() {
+        let mut highlighter = Highlighter::new();
+        highlighter.spans = vec![
+            ColorSpan {
+                start: 0,
+                end: 4,
+                color: DRACULA_GREEN,
+            },
+            ColorSpan {
+                start: 8,
+                end: 12,
+                color: DRACULA_CYAN,
+            },
+        ];
+
+        highlighter.shift_insert(4, 2, Some("return"));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 4 && span.end == 6 && span.color == DRACULA_PINK));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 10 && span.end == 14 && span.color == DRACULA_CYAN));
+
+        highlighter.spans = vec![ColorSpan {
+            start: 0,
+            end: 6,
+            color: DRACULA_GREEN,
+        }];
+        highlighter.shift_insert(3, 1, Some("9"));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_PURPLE));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 4 && span.end == 7 && span.color == DRACULA_GREEN));
+
+        highlighter.spans.clear();
+        highlighter.shift_insert(0, 3, Some("str"));
+        assert_eq!(highlighter.spans.len(), 1);
+        assert_eq!(highlighter.spans[0].color, DRACULA_CYAN);
+    }
+
+    #[test]
+    fn highlighter_shift_delete_clamps_overlapping_spans() {
+        let mut highlighter = Highlighter::new();
+        highlighter.spans = vec![
+            ColorSpan {
+                start: 0,
+                end: 4,
+                color: DRACULA_GREEN,
+            },
+            ColorSpan {
+                start: 5,
+                end: 10,
+                color: DRACULA_ORANGE,
+            },
+            ColorSpan {
+                start: 12,
+                end: 15,
+                color: DRACULA_CYAN,
+            },
+        ];
+
+        highlighter.shift_delete(3, 6);
+
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 0 && span.end == 3 && span.color == DRACULA_GREEN));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_ORANGE));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start == 6 && span.end == 9 && span.color == DRACULA_CYAN));
+        assert!(highlighter.spans.iter().all(|span| span.start < span.end));
+    }
+
+    #[test]
+    fn highlighter_flatten_spans_handles_empty_and_interpolation_markers() {
+        let mut byte_colors = Vec::new();
+        let empty = flatten_spans(Vec::new(), 0, "", &mut byte_colors, &[], true, false);
+        assert!(empty.is_empty());
+
+        let text = "{x}";
+        let flat = flatten_spans(
+            vec![ColorSpan {
+                start: 0,
+                end: text.len(),
+                color: MARKER_INTERPOLATION,
+            }],
+            text.len(),
+            text,
+            &mut byte_colors,
+            &[],
+            false,
+            false,
+        );
+
+        assert_eq!(byte_colors[0], DRACULA_ORANGE);
+        assert_eq!(byte_colors[1], DRACULA_FG);
+        assert_eq!(byte_colors[2], DRACULA_ORANGE);
+        assert_eq!(flat.len(), 3);
+    }
 }

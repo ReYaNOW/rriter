@@ -1,7 +1,69 @@
 use super::*;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+fn autocomplete_drag_target(
+    py: f32,
+    rect_y: f32,
+    rect_h: f32,
+    drag_offset: f32,
+    total_items: usize,
+    scale: f32,
+) -> f32 {
+    let step = 36.0 * scale;
+    let total_items = total_items as f32;
+    let visible_items = total_items.min(7.0);
+
+    let track_h = rect_h - 8.0 * scale;
+    let total_h = total_items * step + 16.0 * scale;
+    let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
+    let max_scroll = ((total_items - visible_items) * step).max(0.0);
+
+    let ratio = (py - rect_y - 4.0 * scale - drag_offset) / (track_h - thumb_h).max(1.0);
+    (ratio * max_scroll).clamp(0.0, max_scroll)
+}
+
+fn autocomplete_hovered_index(
+    px: f32,
+    py: f32,
+    rect: (f32, f32, f32, f32),
+    current_scroll: f32,
+    total_items: usize,
+    scale: f32,
+) -> Option<usize> {
+    let (rx, ry, rw, rh) = rect;
+    if px < rx || px > rx + rw || py < ry || py > ry + rh {
+        return None;
+    }
+
+    let scroll_x = rx + rw - 14.0 * scale;
+    if px >= scroll_x {
+        return None;
+    }
+
+    let item_h = 36.0 * scale;
+    let content_y = py - ry + current_scroll - (4.0 * scale);
+    if content_y < 0.0 {
+        return None;
+    }
+
+    let idx = (content_y / item_h) as usize;
+    (idx < total_items).then_some(idx)
+}
+
+fn resized_left_width(px: f32, window_width: f32, scale: f32) -> f32 {
+    let sb_w = 48.0 * scale;
+    let max_w = ((window_width - sb_w) / scale) - 300.0;
+    ((px - sb_w) / scale).max(80.0).min(max_w.max(80.0))
+}
+
+fn resized_bottom_height(py: f32, window_height: f32, scale: f32) -> f32 {
+    let max_h = (window_height / scale) - 50.0;
+    ((window_height - py) / scale)
+        .max(60.0)
+        .min(max_h.max(60.0))
+}
+
 impl App {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
         self.renderer.as_mut().unwrap().last_mouse_x = position.x as f32;
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
@@ -56,39 +118,27 @@ impl App {
 
             if self.autocomplete_scroll.is_dragging {
                 self.autocomplete_scroll.anim_speed = 15.0;
-                let step = 36.0 * s;
-                let total_items = self.autocomplete_options.len() as f32;
-                let visible_items = total_items.min(7.0);
-
-                let track_h = rh - 8.0 * s;
-                let total_h = total_items * step + 16.0 * s;
-                let thumb_h = (rh / total_h * track_h).max(20.0 * s);
-                let max_scroll = ((total_items - visible_items) * step).max(0.0);
-
-                let ratio = (py - ry - 4.0 * s - self.autocomplete_scroll.drag_offset)
-                    / (track_h - thumb_h).max(1.0);
-                self.autocomplete_scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                self.autocomplete_scroll.target = autocomplete_drag_target(
+                    py,
+                    ry,
+                    rh,
+                    self.autocomplete_scroll.drag_offset,
+                    self.autocomplete_options.len(),
+                    s,
+                );
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
 
             if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                let scroll_x = rx + rw - 14.0 * s;
-                if px < scroll_x {
-                    let item_h = 36.0 * s;
-                    let scroll = self.autocomplete_scroll.current;
-                    let content_y = py - ry + scroll - (4.0 * s);
-                    if content_y >= 0.0 {
-                        let idx = (content_y / item_h) as usize;
-                        if idx < self.autocomplete_options.len() {
-                            self.autocomplete_hovered_idx = Some(idx);
-                        } else {
-                            self.autocomplete_hovered_idx = None;
-                        }
-                    }
-                } else {
-                    self.autocomplete_hovered_idx = None;
-                }
+                self.autocomplete_hovered_idx = autocomplete_hovered_index(
+                    px,
+                    py,
+                    (rx, ry, rw, rh),
+                    self.autocomplete_scroll.current,
+                    self.autocomplete_options.len(),
+                    s,
+                );
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             } else {
@@ -120,20 +170,15 @@ impl App {
             }
 
             if self.ide_panel.is_resizing_left {
-                let sb_w = 48.0 * s;
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                let max_w = ((ww - sb_w) / s) - 300.0;
-                let new_w = ((px - sb_w) / s).max(80.0).min(max_w.max(80.0));
-                self.ide_panel.left_width = new_w;
+                self.ide_panel.left_width = resized_left_width(px, ww, s);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
 
             if self.ide_panel.is_resizing_bottom {
                 let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                let max_h = (wh / s) - 50.0;
-                let new_h = ((wh - py) / s).max(60.0).min(max_h.max(60.0));
-                self.ide_panel.bottom_height = new_h;
+                self.ide_panel.bottom_height = resized_bottom_height(py, wh, s);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
@@ -1038,5 +1083,67 @@ impl App {
         }
 
         self.window.as_ref().unwrap().request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autocomplete_drag_target_clamps_to_available_scroll() {
+        assert_eq!(autocomplete_drag_target(0.0, 10.0, 200.0, 0.0, 4, 1.0), 0.0);
+
+        let mid = autocomplete_drag_target(100.0, 10.0, 200.0, 0.0, 12, 1.0);
+        let max = autocomplete_drag_target(999.0, 10.0, 200.0, 0.0, 12, 1.0);
+
+        assert!(mid > 0.0);
+        assert_eq!(max, (12.0 - 7.0) * 36.0);
+    }
+
+    #[test]
+    fn autocomplete_hovered_index_ignores_scrollbar_and_outside_rect() {
+        let rect = (10.0, 20.0, 200.0, 160.0);
+
+        assert_eq!(
+            autocomplete_hovered_index(20.0, 30.0, rect, 0.0, 10, 1.0),
+            Some(0)
+        );
+        assert_eq!(
+            autocomplete_hovered_index(20.0, 70.0, rect, 0.0, 10, 1.0),
+            Some(1)
+        );
+        assert_eq!(
+            autocomplete_hovered_index(20.0, 30.0, rect, 72.0, 10, 1.0),
+            Some(2)
+        );
+
+        assert_eq!(
+            autocomplete_hovered_index(999.0, 30.0, rect, 0.0, 10, 1.0),
+            None
+        );
+        assert_eq!(
+            autocomplete_hovered_index(205.0, 30.0, rect, 0.0, 10, 1.0),
+            None
+        );
+        assert_eq!(
+            autocomplete_hovered_index(20.0, 500.0, rect, 0.0, 10, 1.0),
+            None
+        );
+        assert_eq!(
+            autocomplete_hovered_index(20.0, 30.0, rect, 0.0, 0, 1.0),
+            None
+        );
+    }
+
+    #[test]
+    fn resize_helpers_clamp_left_width_and_bottom_height() {
+        assert_eq!(resized_left_width(0.0, 1200.0, 1.0), 80.0);
+        assert_eq!(resized_left_width(248.0, 1200.0, 1.0), 200.0);
+        assert_eq!(resized_left_width(5000.0, 1200.0, 1.0), 852.0);
+
+        assert_eq!(resized_bottom_height(2000.0, 900.0, 1.0), 60.0);
+        assert_eq!(resized_bottom_height(600.0, 900.0, 1.0), 300.0);
+        assert_eq!(resized_bottom_height(0.0, 900.0, 1.0), 850.0);
     }
 }

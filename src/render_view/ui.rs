@@ -5,6 +5,7 @@ mod hover_widget;
 mod problems_panel;
 
 pub(crate) use hover_widget::diag_popup_byte_at;
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
         self.flush();

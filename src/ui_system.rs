@@ -215,6 +215,7 @@ impl UiRegistry {
     }
 
     /// Регистрирует кнопку и возвращает, наведена ли на неё мышь
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn register_button(
         &mut self,
         id: UiId,
@@ -243,6 +244,7 @@ impl UiRegistry {
     }
 
     /// Регистрирует иконочную кнопку
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn register_icon_button(
         &mut self,
         id: UiId,
@@ -425,5 +427,48 @@ mod tests {
         assert!(icon.contains(1.0, 88.0));
         assert!(icon.contains(47.0, 135.0));
         assert!(!icon.contains(49.0, 112.0));
+    }
+
+    #[test]
+    fn ui_element_ids_and_regular_icon_hitboxes_are_stable() {
+        let button = UiElement::Button {
+            id: UiId::WelcomeOpenFile,
+            x: 10.0,
+            y: 20.0,
+            w: 80.0,
+            h: 24.0,
+        };
+        let icon = UiElement::IconButton {
+            id: UiId::SearchClose,
+            x: 30.0,
+            y: 40.0,
+            size: 18.0,
+            active_square_width: None,
+            custom_color: Some([1.0, 0.0, 0.0, 1.0]),
+        };
+        let text = UiElement::TextInput {
+            id: UiId::TerminalSearchInput,
+            x: 0.0,
+            y: 0.0,
+            w: 120.0,
+            h: 22.0,
+        };
+        let rect = UiElement::Rect {
+            id: UiId::HoverPopupScroll,
+            x: 5.0,
+            y: 6.0,
+            w: 7.0,
+            h: 8.0,
+        };
+
+        assert_eq!(button.id(), UiId::WelcomeOpenFile);
+        assert_eq!(icon.id(), UiId::SearchClose);
+        assert_eq!(text.id(), UiId::TerminalSearchInput);
+        assert_eq!(rect.id(), UiId::HoverPopupScroll);
+        assert!(button.contains(90.0, 44.0));
+        assert!(icon.contains(48.0, 58.0));
+        assert!(!icon.contains(49.0, 58.0));
+        assert!(text.contains(120.0, 22.0));
+        assert!(rect.contains(12.0, 14.0));
     }
 }

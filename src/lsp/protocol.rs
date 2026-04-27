@@ -994,4 +994,329 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
     }
+
+    fn recv_non_log(rx: &mpsc::Receiver<LspEvent>) -> LspEvent {
+        loop {
+            let event = rx.recv().unwrap();
+            if !matches!(event, LspEvent::Log { .. }) {
+                return event;
+            }
+        }
+    }
+
+    #[test]
+    fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
+        let workspaces = vec![PathBuf::from("/tmp/ws one"), PathBuf::from("/tmp/ws2")];
+        let init: serde_json::Value =
+            serde_json::from_slice(&make_initialize(42, &workspaces)).unwrap();
+        assert_eq!(init["id"], 42);
+        assert_eq!(init["method"], "initialize");
+        assert_eq!(init["params"]["rootUri"], path_to_uri("/tmp/ws one"));
+        assert_eq!(
+            init["params"]["workspaceFolders"]
+                .as_array()
+                .map(|items| items.len()),
+            Some(2)
+        );
+        assert_eq!(
+            init["params"]["capabilities"]["textDocument"]["codeAction"]
+                ["codeActionLiteralSupport"]["codeActionKind"]["valueSet"][2],
+            "source.fixAll"
+        );
+
+        let init_without_workspace: serde_json::Value =
+            serde_json::from_slice(&make_initialize(43, &[])).unwrap();
+        assert!(init_without_workspace["params"]["rootUri"].is_null());
+        assert!(init_without_workspace["params"]
+            .get("workspaceFolders")
+            .is_none());
+
+        let uri = "file:///tmp/project/main.py";
+        let changed: serde_json::Value =
+            serde_json::from_slice(&make_did_change_full(uri, 5, "a\\b\n\t\"q\"")).unwrap();
+        assert_eq!(changed["method"], "textDocument/didChange");
+        assert_eq!(
+            changed["params"]["contentChanges"][0]["text"],
+            "a\\b\n\t\"q\""
+        );
+
+        let closed: serde_json::Value = serde_json::from_slice(&make_did_close(uri)).unwrap();
+        assert_eq!(closed["method"], "textDocument/didClose");
+        assert_eq!(closed["params"]["textDocument"]["uri"], uri);
+
+        let only = vec!["quickfix".to_string(), "source.fixAll".to_string()];
+        let action: serde_json::Value =
+            serde_json::from_slice(&make_code_action(99, uri, 1, 2, 3, 4, "[]", Some(&only)))
+                .unwrap();
+        assert_eq!(action["id"], 99);
+        assert_eq!(action["params"]["range"]["start"]["line"], 1);
+        assert_eq!(action["params"]["range"]["end"]["character"], 4);
+        assert_eq!(
+            action["params"]["context"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(action["params"]["context"]["only"][1], "source.fixAll");
+
+        let definition: serde_json::Value =
+            serde_json::from_slice(&make_definition(100, uri, 7, 8)).unwrap();
+        assert_eq!(definition["method"], "textDocument/definition");
+        assert_eq!(definition["params"]["position"]["line"], 7);
+
+        let shutdown: serde_json::Value = serde_json::from_slice(&make_shutdown(101)).unwrap();
+        assert_eq!(shutdown["method"], "shutdown");
+        assert!(shutdown["params"].is_null());
+
+        let exit: serde_json::Value = serde_json::from_slice(&make_exit()).unwrap();
+        assert_eq!(exit["method"], "exit");
+    }
+
+    #[test]
+    fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
+        let spans = highlight_diagnostic_message("`NameError` ├─ branch │ tail");
+        assert!(spans.iter().any(|s| s.color == [0.6, 0.6, 0.65, 1.0]));
+        assert!(spans.iter().any(|s| s.color == [0.45, 0.45, 0.50, 1.0]));
+
+        let diag_json = serde_json::json!({
+            "range": {
+                "start": {"line": 4, "character": 1},
+                "end": {"line": 4, "character": 9}
+            },
+            "severity": 99,
+            "code": false,
+            "message": "raw\\ttext\r"
+        });
+        let diag = parse_diagnostic_value(&diag_json).unwrap();
+        assert_eq!(diag.severity, DiagSeverity::Hint);
+        assert_eq!(diag.code, None);
+        assert_eq!(diag.source, None);
+        assert_eq!(diag.message, "raw    text");
+        assert!(parse_diagnostic_value(&serde_json::json!({})).is_none());
+
+        assert_eq!(
+            parse_hover_value(&serde_json::json!({"contents": "plain"})).as_deref(),
+            Some("plain")
+        );
+        assert_eq!(
+            parse_hover_value(
+                &serde_json::json!({"contents": {"kind": "markdown", "value": "obj"}})
+            )
+            .as_deref(),
+            Some("obj")
+        );
+        assert_eq!(
+            parse_hover_value(&serde_json::json!({"contents": [123, {"value": "kept"}, "tail"]}))
+                .as_deref(),
+            Some("kept\ntail")
+        );
+        assert_eq!(
+            parse_definition_path(&serde_json::json!([{"targetUri": "file:///tmp/target.py"}])),
+            Some(PathBuf::from("/tmp/target.py"))
+        );
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let (out_tx, out_rx) = mpsc::channel();
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":"55","method":"client/registerCapability","params":{}}"#,
+            &event_tx,
+            "test",
+            &out_tx,
+            &pending,
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["id"], 55);
+        assert!(reply["result"].is_null());
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":56,"method":"workspace/configuration","params":{"items":[{},{}]}}"#,
+            &event_tx,
+            "test",
+            &out_tx,
+            &pending,
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["id"], 56);
+        assert_eq!(reply["result"].as_array().unwrap().len(), 2);
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":57,"method":"unknown/request","params":{}}"#,
+            &event_tx,
+            "test",
+            &out_tx,
+            &pending,
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["error"]["code"], -32601);
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file:///tmp/a.py","version":3,"diagnostics":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"message":"boom"}]}}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::Diagnostics {
+                server_name,
+                path,
+                version,
+                items,
+            } => {
+                assert_eq!(server_name, "ruff");
+                assert_eq!(path, PathBuf::from("/tmp/a.py"));
+                assert_eq!(version, Some(3));
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].message, "boom");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":58,"method":"workspace/applyEdit","params":{"edit":{"changes":{"file:///tmp/a.py":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"x"}]}}}}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::CodeActions {
+                request_id,
+                actions,
+            } => {
+                assert_eq!(request_id, -1);
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].title, "workspace/applyEdit");
+                assert_eq!(actions[0].edit.as_ref().unwrap().changes.len(), 1);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        let (bad_tx, bad_rx) = mpsc::channel();
+        dispatch_frame(b"not json", &bad_tx, "bad", &out_tx, &pending);
+        match bad_rx.recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, "bad");
+                assert!(message.contains("[LSP RECV ERROR]"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
+        let (event_tx, event_rx) = mpsc::channel();
+        let (out_tx, out_rx) = mpsc::channel();
+        let pending = Arc::new(Mutex::new(HashMap::from([
+            (1, PendingRequestKind::CodeAction),
+            (2, PendingRequestKind::Definition),
+            (3, PendingRequestKind::Hover),
+        ])));
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","method":"window/logMessage","params":{"message":"server note"}}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        match event_rx.recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, "ruff");
+                assert!(message.contains("\"window/logMessage\""));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match event_rx.recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, "ruff");
+                assert_eq!(message, "server note");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":1,"result":[{"title":"Apply","kind":"quickfix","diagnostics":[{"code":"F401"}],"edit":{"documentChanges":[{"textDocument":{"uri":"file:///tmp/doc.py"},"edits":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"newText":"x"}]}]}}]}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::CodeActions {
+                request_id,
+                actions,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].title, "Apply");
+                assert_eq!(actions[0].code.as_deref(), Some("F401"));
+                let edit = actions[0].edit.as_ref().unwrap();
+                assert_eq!(edit.changes[&PathBuf::from("/tmp/doc.py")][0].new_text, "x");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":2,"result":{"uri":"file:///tmp/definition.py"}}"#,
+            &event_tx,
+            "ty",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::DefinitionResponse { request_id, path } => {
+                assert_eq!(request_id, 2);
+                assert_eq!(path, Some(PathBuf::from("/tmp/definition.py")));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":3,"result":null}"#,
+            &event_tx,
+            "ty",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::HoverResponse { request_id, text } => {
+                assert_eq!(request_id, 3);
+                assert_eq!(text, None);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":4,"result":[{"title":"Fallback"}]}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::CodeActions {
+                request_id,
+                actions,
+            } => {
+                assert_eq!(request_id, 4);
+                assert_eq!(actions[0].title, "Fallback");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":5,"method":"client/unregisterCapability","params":{}}"#,
+            &event_tx,
+            "ruff",
+            &out_tx,
+            &pending,
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["id"], 5);
+        assert!(reply["result"].is_null());
+    }
 }

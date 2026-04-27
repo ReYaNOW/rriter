@@ -1,6 +1,7 @@
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     /// Рисует содержимое панели LSP серверов (левая панель)
     pub fn draw_lsp_servers_panel(

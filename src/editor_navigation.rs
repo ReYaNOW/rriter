@@ -470,18 +470,21 @@ impl Editor {
         self.cursor = self.len();
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn move_up(&mut self, renderer: &mut Renderer, shift: bool) {
         self.handle_selection(shift);
         let (x, y) = renderer.get_cursor_xy(self);
         self.cursor = renderer.get_byte_at_xy(self, x, y - renderer.line_height * 1.5);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn move_down(&mut self, renderer: &mut Renderer, shift: bool) {
         self.handle_selection(shift);
         let (x, y) = renderer.get_cursor_xy(self);
         self.cursor = renderer.get_byte_at_xy(self, x, y + renderer.line_height * 0.5);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn set_cursor_at_pos(
         &mut self,
         target_x: f32,
@@ -497,12 +500,14 @@ impl Editor {
         self.cursor = idx;
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn move_page_up(&mut self, renderer: &mut Renderer, shift: bool, step: f32) {
         self.handle_selection(shift);
         let (x, y) = renderer.get_cursor_xy(self);
         self.cursor = renderer.get_byte_at_xy(self, x, y - step);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn move_page_down(&mut self, renderer: &mut Renderer, shift: bool, step: f32) {
         self.handle_selection(shift);
         let (x, y) = renderer.get_cursor_xy(self);

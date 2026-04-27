@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::renderer::Renderer;
 use std::sync::atomic::Ordering;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_lsp_squiggles_and_collect_hovered_diag(
