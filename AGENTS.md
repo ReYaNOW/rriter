@@ -53,7 +53,7 @@ Required file request format:
 Need files:
 1. path/to/file.rs
    Reason: exact code needed for `Owner.method` / behavior.
-   Map ref: `F|symbol_id|...` or `M|module_id|path`
+   Map ref: `F|symbol_id|...`
 
 2. path/to/other.rs
    Reason: called by / calls previous symbol.

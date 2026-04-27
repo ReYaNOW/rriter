@@ -762,8 +762,9 @@ pub fn highlight_python_hover_doc(
             }
         }
 
-        let mut end_line = start_line;
+                let mut end_line = start_line;
         let mut paren_depth = 0i32;
+        let mut bracket_depth = 0i32;
         let mut started = false;
         for i in start_line..lines.len() {
             end_line = i;
@@ -773,9 +774,14 @@ pub fn highlight_python_hover_doc(
                     started = true;
                 } else if c == ')' {
                     paren_depth -= 1;
+                } else if c == '[' {
+                    bracket_depth += 1;
+                    started = true;
+                } else if c == ']' {
+                    bracket_depth -= 1;
                 }
             }
-            if started && paren_depth <= 0 {
+            if started && paren_depth <= 0 && bracket_depth <= 0 {
                 break;
             }
             if !started && lines[i].contains(':') {
@@ -795,11 +801,8 @@ pub fn highlight_python_hover_doc(
         };
         if start < end && end <= msg.len() {
             let sig_code = msg[start..end].to_string();
-            let is_class_sig = sig_code.starts_with("class ");
+                        let is_class_sig = sig_code.starts_with("class ");
             let mut ts_code = sig_code.clone();
-            if is_class_sig {
-                ts_code.replace_range(0..6, "def __");
-            }
             if !ts_code.trim_end().ends_with(':') {
                 ts_code.push(':');
             }
@@ -808,7 +811,9 @@ pub fn highlight_python_hover_doc(
 
             if is_class_sig {
                 let open_paren = sig_code.find('(').unwrap_or(sig_code.len());
-                spans.retain(|s| s.start >= start + open_paren || s.end <= start);
+                let open_bracket = sig_code.find('[').unwrap_or(sig_code.len());
+                let name_end = open_paren.min(open_bracket);
+                spans.retain(|s| s.start >= start + name_end || s.end <= start);
                 spans.push(crate::highlighter::ColorSpan {
                     start,
                     end: start + 5,

@@ -312,13 +312,15 @@ pub(super) fn source_signature_for_hover(
         }
         None
     }
-    fn def_name(line: &str) -> Option<&str> {
+        fn def_name(line: &str) -> Option<&str> {
         let trimmed = line.trim_start();
         let rest = trimmed
             .strip_prefix("async def ")
             .or_else(|| trimmed.strip_prefix("def "))?;
-        let open = rest.find('(')?;
-        let name = rest[..open].trim();
+        let open_paren = rest.find('(')?;
+        let open_bracket = rest.find('[').unwrap_or(open_paren);
+        let name_end = open_paren.min(open_bracket);
+        let name = rest[..name_end].trim();
         if name.is_empty() {
             None
         } else {
@@ -382,7 +384,13 @@ pub(super) fn source_signature_for_hover(
     }
     decorators.reverse();
 
-    let mut sig_lines = Vec::new();
+        let mut sig_lines = Vec::new();
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut found_end = false;
+
     for idx in def_line_idx..(def_line_idx + 16).min(editor.line_offsets.len()) {
         let line = source_line(&text, &editor.line_offsets, idx)?
             .trim_end()
@@ -391,7 +399,37 @@ pub(super) fn source_signature_for_hover(
             break;
         }
         sig_lines.push(line.clone());
-        if line.contains(':') {
+
+        let mut prev_char = ' ';
+        for c in line.chars() {
+            if in_string {
+                if c == string_char && prev_char != '\\' {
+                    in_string = false;
+                }
+            } else {
+                match c {
+                    '"' | '\'' => {
+                        in_string = true;
+                        string_char = c;
+                    }
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    '[' => bracket_depth += 1,
+                    ']' => bracket_depth -= 1,
+                    ':' if paren_depth <= 0 && bracket_depth <= 0 => {
+                        found_end = true;
+                    }
+                    _ => {}
+                }
+            }
+            if c == '\\' && prev_char == '\\' {
+                prev_char = ' ';
+            } else {
+                prev_char = c;
+            }
+        }
+
+        if found_end {
             break;
         }
     }
@@ -624,11 +662,48 @@ pub(super) fn source_class_signature_from_definition_file(
             if next_char.is_none()
                 || matches!(next_char, Some('(') | Some(':') | Some(' ') | Some('['))
             {
-                let mut sig_lines = vec![];
+                                let mut sig_lines = vec![];
+                let mut paren_depth = 0;
+                let mut bracket_depth = 0;
+                let mut in_string = false;
+                let mut string_char = ' ';
+
                 for i in idx..lines.len() {
                     let l = lines[i].trim_end();
-                    if let Some(colon_idx) = l.find(':') {
-                        sig_lines.push(l[..colon_idx].to_string());
+                    let mut prev_char = ' ';
+                    let mut colon_idx = None;
+
+                    for (c_idx, c) in l.char_indices() {
+                        if in_string {
+                            if c == string_char && prev_char != '\\' {
+                                in_string = false;
+                            }
+                        } else {
+                            match c {
+                                '"' | '\'' => {
+                                    in_string = true;
+                                    string_char = c;
+                                }
+                                '(' => paren_depth += 1,
+                                ')' => paren_depth -= 1,
+                                '[' => bracket_depth += 1,
+                                ']' => bracket_depth -= 1,
+                                ':' if paren_depth <= 0 && bracket_depth <= 0 => {
+                                    colon_idx = Some(c_idx);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if c == '\\' && prev_char == '\\' {
+                            prev_char = ' ';
+                        } else {
+                            prev_char = c;
+                        }
+                    }
+
+                    if let Some(c_idx) = colon_idx {
+                        sig_lines.push(l[..c_idx].to_string());
                         break;
                     } else {
                         sig_lines.push(l.to_string());
@@ -723,12 +798,11 @@ pub(super) fn wrap_signature_after_first_param(
 mod tests {
     use super::{
         module_path_from_definition_path, should_replace_hover_with_source_signature,
-        source_attribute_hover_from_definition_file, source_signature_for_hover, symbol_at_offset,
-        wrap_signature_after_first_param,
+        source_attribute_hover_from_definition_file, source_class_signature_from_definition_file,
+        source_signature_for_hover, symbol_at_offset, wrap_signature_after_first_param,
     };
 
-    #[test]
-    fn wraps_asynccontextmanager_signature_after_first_param() {
+    #[test]fn wraps_asynccontextmanager_signature_after_first_param() {
         let raw = "async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]";
         let wrapped = wrap_signature_after_first_param(raw, "", "async def ");
         assert_eq!(
@@ -922,10 +996,49 @@ mod tests {
         )
         .expect("expected signature on usage");
 
-        assert_eq!(
+                assert_eq!(
             usage_sig,
             "## Variable handlers of car_wash\nhandlers: list[Controller] = [\n    AuthController,\n    users_router,\n]"
         );
+    }
+
+    #[test]
+    fn source_signature_handles_python_generics_in_def() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "def process_items[T: BaseModel, R: Struct](\n    items: list[T],\n) -> list[R]:\n    pass\n",
+        );
+        let hover_offset = editor
+            .get_full_text()
+            .find("process_items")
+            .unwrap();
+        let sig = source_signature_for_hover(&editor, hover_offset, true, None, None).unwrap();
+        assert_eq!(
+            sig,
+            "def process_items[T: BaseModel, R: Struct](\n    items: list[T],\n) -> list[R]"
+        );
+    }
+
+    #[test]
+    fn definition_file_class_signature_handles_python_generics() {
+        let mut tmp = std::env::temp_dir();
+        tmp.push(format!(
+            "rriter_class_sig_{}_{}.py",
+            std::process::id(),
+            3usize
+        ));
+        let src = "class RepoBase[TModel: Base, TReadStruct: BasedStruct]:\n    model: ClassVar[type[Base]]\n";
+        std::fs::write(&tmp, src).expect("expected temp file write");
+        let sig = source_class_signature_from_definition_file(
+            &tmp,
+            "RepoBase",
+        )
+        .expect("expected class signature");
+        assert_eq!(
+            sig,
+            "class RepoBase[TModel: Base, TReadStruct: BasedStruct]"
+        );
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
