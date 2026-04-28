@@ -114,6 +114,7 @@ impl Renderer {
         tab_scroll_x: f32,
         _syntax_errors: &[(usize, usize)],
         ctrl_definition_range: Option<(usize, usize)>,
+        ide_workspaces: &[std::path::PathBuf],
     ) -> (bool, Vec<(usize, usize)>) {
         let frame_start_time = Instant::now();
         let was_typing = self.last_editor_version_for_typing != editor.version;
@@ -942,6 +943,7 @@ impl Renderer {
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
+                ide_workspaces,
             );
             self.flush();
         }

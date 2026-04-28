@@ -423,6 +423,7 @@ impl ApplicationHandler for App {
                     self.tab_scroll.current.round(),
                     &self.highlighter.syntax_errors,
                     ctrl_definition_range,
+                    &self.ide_workspaces,
                 );
 
                 self.target_sticky_lines = target_sticky;

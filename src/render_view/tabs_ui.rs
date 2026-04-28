@@ -2,6 +2,17 @@ use crate::editor::Editor;
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+pub(crate) const EXTERNAL_TAB_TITLE_COLOR: [f32; 4] = [1.0, 0.55, 0.18, 1.0];
+
+pub(crate) fn tab_path_is_external(
+    path: &std::path::Path,
+    workspaces: &[std::path::PathBuf],
+) -> bool {
+    !workspaces.is_empty()
+        && path.is_absolute()
+        && !workspaces.iter().any(|workspace| path.starts_with(workspace))
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_tab_bar(
@@ -21,6 +32,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         tab_drag: Option<&crate::app::TabDragState>,
+        ide_workspaces: &[std::path::PathBuf],
     ) -> Option<(std::path::PathBuf, f32, f32)> {
         let tab_bar_bg = self.theme.minimap_bg;
         self.push_rect(x, y, w, h, tab_bar_bg);
@@ -268,7 +280,9 @@ impl Renderer {
             let icon_y = (y + (h - icon_size_tab) / 2.0 - 1.5 * s).round();
             self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
 
-            let text_color = if is_active {
+            let text_color = if paths[i].is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
+                EXTERNAL_TAB_TITLE_COLOR
+            } else if is_active {
                 self.theme.fg
             } else {
                 self.theme.line_num
@@ -473,5 +487,41 @@ impl Renderer {
             self.theme.fg,
             tooltip_scale,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_path_external_detection_requires_absolute_outside_workspace() {
+        let workspaces = vec![std::path::PathBuf::from("/work/app")];
+
+        assert!(!tab_path_is_external(
+            std::path::Path::new("/work/app/pkg/file.py"),
+            &workspaces
+        ));
+        assert!(tab_path_is_external(
+            std::path::Path::new("/tmp/site-packages/lib.py"),
+            &workspaces
+        ));
+        assert!(!tab_path_is_external(
+            std::path::Path::new("relative.py"),
+            &workspaces
+        ));
+        assert!(!tab_path_is_external(
+            std::path::Path::new("/tmp/file.py"),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn external_tab_title_color_is_orange() {
+        assert!(EXTERNAL_TAB_TITLE_COLOR[0] > 0.9);
+        assert!(EXTERNAL_TAB_TITLE_COLOR[1] > 0.4);
+        assert!(EXTERNAL_TAB_TITLE_COLOR[1] < 0.7);
+        assert!(EXTERNAL_TAB_TITLE_COLOR[2] < 0.3);
+        assert_eq!(EXTERNAL_TAB_TITLE_COLOR[3], 1.0);
     }
 }

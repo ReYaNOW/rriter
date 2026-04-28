@@ -39,6 +39,22 @@ fn is_plain_assignment_after_token(after_token: &str) -> bool {
     false
 }
 
+fn plain_assignment_index(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    for (idx, &b) in bytes.iter().enumerate() {
+        if b != b'=' {
+            continue;
+        }
+        let prev = idx.checked_sub(1).and_then(|i| bytes.get(i)).copied();
+        let next = bytes.get(idx + 1).copied();
+        if matches!(prev, Some(b'=' | b'!' | b'<' | b'>' | b':')) || next == Some(b'=') {
+            continue;
+        }
+        return Some(idx);
+    }
+    None
+}
+
 fn token_occurrence_at_word_boundary(text: &str, token: &str, search_start: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut cursor = search_start.min(text.len());
@@ -98,6 +114,16 @@ fn nearest_python_assignment_usage(
 
     let before = text.get(line_start..start)?.trim_start();
     if before.starts_with("def ") || before.starts_with("class ") {
+        return None;
+    }
+    let line = text.get(line_start..line_end)?;
+    let Some(eq_idx) = plain_assignment_index(line) else {
+        return None;
+    };
+    let target_end = line[..eq_idx].find(':').unwrap_or(eq_idx);
+    let source_start_in_line = start.saturating_sub(line_start);
+    let source_end_in_line = end.saturating_sub(line_start);
+    if source_start_in_line >= target_end || source_end_in_line > target_end {
         return None;
     }
     if !text
@@ -1988,6 +2014,22 @@ mod app_behavior_tests {
         let cmp_start = cmp_editor.get_full_text().find("value").unwrap();
         assert_eq!(
             nearest_python_assignment_usage(&cmp_editor, (cmp_start, cmp_start + 5)),
+            None
+        );
+    }
+
+    #[test]
+    fn python_assignment_declaration_ignores_annotation_type_tokens() {
+        let editor = editor_with("title: t.Optional[str] = None\nbody: t.Optional[str] = None\n");
+        let optional_start = editor.get_full_text().find("Optional").unwrap();
+        let title_start = editor.get_full_text().find("title").unwrap();
+
+        assert_eq!(
+            nearest_python_assignment_usage(&editor, (optional_start, optional_start + 8)),
+            None
+        );
+        assert_eq!(
+            nearest_python_assignment_usage(&editor, (title_start, title_start + 5)),
             None
         );
     }
