@@ -712,7 +712,23 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 });
             }
-            crate::lsp::LspEvent::DefinitionResponse { request_id, path } => {
+            crate::lsp::LspEvent::DefinitionResponse { request_id, target } => {
+                let path = target.as_ref().map(|target| target.path.clone());
+                if app.ctrl_definition.request_id == Some(request_id) {
+                    app.ctrl_definition.request_id = None;
+                    app.ctrl_definition.target =
+                        app.ctrl_definition_target_from_lsp(target.map(|target| {
+                            crate::app::DefinitionJumpTarget {
+                                path: target.path,
+                                line: target.line,
+                                col: target.col,
+                            }
+                        }));
+                    if let Some(w) = app.window.as_ref() {
+                        w.request_redraw();
+                    }
+                    continue;
+                }
                 crate::app::mouse::HOVER_STATE.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.definition_request_id == Some(request_id) {

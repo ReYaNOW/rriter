@@ -14,10 +14,102 @@ use app_state::fuzzy_match;
 pub use app_state::*;
 use glutin::display::GetGlDisplay;
 use rustc_hash::FxHashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use winit::event_loop::ActiveEventLoop;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
+
+fn is_python_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+fn is_plain_assignment_after_token(after_token: &str) -> bool {
+    let bytes = after_token.as_bytes();
+    for (idx, &b) in bytes.iter().enumerate() {
+        if b != b'=' {
+            continue;
+        }
+        let prev = idx.checked_sub(1).and_then(|i| bytes.get(i)).copied();
+        let next = bytes.get(idx + 1).copied();
+        if matches!(prev, Some(b'=' | b'!' | b'<' | b'>' | b':')) || next == Some(b'=') {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn token_occurrence_at_word_boundary(text: &str, token: &str, search_start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut cursor = search_start.min(text.len());
+    while cursor < text.len() {
+        let rel = text.get(cursor..)?.find(token)?;
+        let start = cursor + rel;
+        let end = start + token.len();
+        let left_ok = start == 0 || !is_python_ident_byte(bytes[start - 1]);
+        let right_ok = end >= bytes.len() || !is_python_ident_byte(bytes[end]);
+        if left_ok && right_ok {
+            return Some(start);
+        }
+        cursor = end;
+    }
+    None
+}
+
+fn previous_token_occurrence_at_word_boundary(
+    text: &str,
+    token: &str,
+    search_end: usize,
+) -> Option<usize> {
+    let mut best = None;
+    let mut cursor = 0;
+    while let Some(pos) = token_occurrence_at_word_boundary(text, token, cursor) {
+        if pos >= search_end {
+            break;
+        }
+        best = Some(pos);
+        cursor = pos + token.len();
+    }
+    best
+}
+
+fn nearest_python_assignment_usage(
+    editor: &Editor,
+    source_range: (usize, usize),
+) -> Option<usize> {
+    let text = editor.get_full_text();
+    let (start, end) = source_range;
+    let token = text.get(start..end)?;
+    if token.is_empty() {
+        return None;
+    }
+
+    let bytes = text.as_bytes();
+    let line_start = bytes[..start.min(bytes.len())]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+    let line_end = bytes[end.min(bytes.len())..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|pos| end + pos)
+        .unwrap_or(bytes.len());
+
+    let before = text.get(line_start..start)?.trim_start();
+    if before.starts_with("def ") || before.starts_with("class ") {
+        return None;
+    }
+    if !text
+        .get(end..line_end)
+        .is_some_and(is_plain_assignment_after_token)
+    {
+        return None;
+    }
+
+    token_occurrence_at_word_boundary(&text, token, line_end)
+        .or_else(|| previous_token_occurrence_at_word_boundary(&text, token, line_start))
+}
 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -456,6 +548,166 @@ impl App {
         }
 
         *target_scroll_x = target_scroll_x.clamp(0.0, renderer.max_scroll_x).round();
+    }
+
+    fn abs_path_for_workspace(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(ws) = self.ide_workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        }
+    }
+
+    fn current_abs_path(&self) -> Option<PathBuf> {
+        self.file_path
+            .as_ref()
+            .map(|path| self.abs_path_for_workspace(path))
+    }
+
+    pub(crate) fn ctrl_definition_highlight_range(&self) -> Option<(usize, usize)> {
+        if self.modifiers.control_key() && self.ctrl_definition.target.is_some() {
+            self.ctrl_definition.source_range
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn clear_ctrl_definition(&mut self) {
+        self.ctrl_definition = CtrlDefinitionState::default();
+    }
+
+    pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
+        if !self.modifiers.control_key() || self.file_extension != "py" || !self.is_ide_mode {
+            self.clear_ctrl_definition();
+            return;
+        }
+
+        let Some(byte_offset) = byte_offset else {
+            self.clear_ctrl_definition();
+            return;
+        };
+        let Some(source_path) = self.current_abs_path() else {
+            self.clear_ctrl_definition();
+            return;
+        };
+        let source_range = crate::app::mouse::hover_token_bounds(&self.editor, byte_offset);
+        if self.ctrl_definition.source_path.as_ref() == Some(&source_path)
+            && self.ctrl_definition.source_range == Some(source_range)
+        {
+            return;
+        }
+
+        self.ctrl_definition = CtrlDefinitionState {
+            request_id: None,
+            source_path: Some(source_path.clone()),
+            source_range: Some(source_range),
+            target: self.nearest_assignment_usage_target(source_range),
+        };
+
+        if self.ctrl_definition.target.is_some() {
+            return;
+        }
+
+        let Some(path) = self.file_path.clone() else {
+            return;
+        };
+        let (line, col) = crate::lsp::offset_to_lsp_pos(
+            &self.editor.get_full_text(),
+            byte_offset,
+            &self.editor.line_offsets,
+        );
+        self.ctrl_definition.request_id = self
+            .lsp
+            .as_mut()
+            .and_then(|lsp| lsp.request_definition(&path, &self.file_extension, line, col));
+    }
+
+    pub(crate) fn ctrl_definition_target_from_lsp(
+        &self,
+        target: Option<DefinitionJumpTarget>,
+    ) -> Option<DefinitionJumpTarget> {
+        let target = target?;
+        let source_path = self.ctrl_definition.source_path.as_ref()?;
+        let source_range = self.ctrl_definition.source_range?;
+        if self.abs_path_for_workspace(&target.path) == *source_path {
+            let text = self.editor.get_full_text();
+            let target_offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
+            if target_offset >= source_range.0 && target_offset <= source_range.1 {
+                return self.nearest_assignment_usage_target(source_range);
+            }
+        }
+        Some(target)
+    }
+
+    pub(crate) fn ctrl_definition_target_under_mouse(&mut self) -> Option<DefinitionJumpTarget> {
+        let target = self.ctrl_definition.target.clone()?;
+        let source_range = self.ctrl_definition.source_range?;
+        let r = self.renderer.as_mut()?;
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+            0.0
+        } else {
+            38.0 * r.scale_factor
+        };
+        let mouse_x = r.last_mouse_x;
+        let mouse_y = r.last_mouse_y + self.scroll_y.current.round() - tab_bar_h;
+        let byte = r.get_byte_at_xy(&self.editor, mouse_x, mouse_y);
+        let normalized = crate::app::mouse::normalize_hover_byte(&self.editor, byte)?;
+        (crate::app::mouse::hover_token_bounds(&self.editor, normalized) == source_range)
+            .then_some(target)
+    }
+
+    pub(crate) fn jump_to_definition_target(&mut self, target: DefinitionJumpTarget) {
+        self.open_file_in_tab(target.path.clone(), true);
+        let text = self.editor.get_full_text();
+        let offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
+        self.editor.cursor = offset;
+        self.editor.selection_anchor = None;
+        self.clear_ctrl_definition();
+
+        if let Some(r) = self.renderer.as_mut() {
+            let wh = self
+                .window
+                .as_ref()
+                .map(|w| w.inner_size().height as f32)
+                .unwrap_or(r.height);
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                0.0
+            } else {
+                38.0 * r.scale_factor
+            };
+            let line = (target.line as usize).min(self.editor.line_offsets.len().saturating_sub(1));
+            let line_top_y = line as f32 * r.line_height;
+            let max_scroll = r.get_max_scroll(&self.editor, wh - tab_bar_h);
+            self.scroll_y.target = (line_top_y - (wh - tab_bar_h) * 0.35)
+                .max(0.0)
+                .min(max_scroll)
+                .round();
+            self.scroll_y.anim_speed = 15.0;
+            self.scroll_x.target = 0.0;
+        }
+
+        if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
+        }
+    }
+
+    fn nearest_assignment_usage_target(
+        &self,
+        source_range: (usize, usize),
+    ) -> Option<DefinitionJumpTarget> {
+        let usage = nearest_python_assignment_usage(&self.editor, source_range)?;
+        let (line, col) = crate::lsp::offset_to_lsp_pos(
+            &self.editor.get_full_text(),
+            usage,
+            &self.editor.line_offsets,
+        );
+        Some(DefinitionJumpTarget {
+            path: self.current_abs_path()?,
+            line,
+            col,
+        })
     }
 
     pub fn get_current_word_prefix(&self) -> String {
@@ -1274,6 +1526,7 @@ mod app_behavior_tests {
             lsp: None,
             lsp_actions_menu: None,
             pending_fix_all_id: None,
+            ctrl_definition: CtrlDefinitionState::default(),
             ui_registry: crate::ui_system::UiRegistry::new(),
             tabs: Vec::new(),
             active_tab: 0,
@@ -1706,6 +1959,70 @@ mod app_behavior_tests {
         std::fs::remove_file(first).ok();
         std::fs::remove_file(second).ok();
         std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn python_assignment_declaration_jump_prefers_nearest_usage() {
+        let editor = editor_with("value = build()\nprint(value)\nvalue_other = value\n");
+        let source_start = editor.get_full_text().find("value").unwrap();
+        let usage = nearest_python_assignment_usage(&editor, (source_start, source_start + 5))
+            .expect("expected usage");
+
+        assert_eq!(
+            editor.get_full_text().get(usage..usage + 5),
+            Some("value")
+        );
+        assert_eq!(editor.get_full_text()[..usage].lines().count(), 2);
+    }
+
+    #[test]
+    fn python_assignment_declaration_ignores_def_and_comparisons() {
+        let def_editor = editor_with("def value():\n    return value\n");
+        let def_start = def_editor.get_full_text().find("value").unwrap();
+        assert_eq!(
+            nearest_python_assignment_usage(&def_editor, (def_start, def_start + 5)),
+            None
+        );
+
+        let cmp_editor = editor_with("value == other\nprint(value)\n");
+        let cmp_start = cmp_editor.get_full_text().find("value").unwrap();
+        assert_eq!(
+            nearest_python_assignment_usage(&cmp_editor, (cmp_start, cmp_start + 5)),
+            None
+        );
+    }
+
+    #[test]
+    fn ctrl_definition_same_declaration_target_redirects_to_usage() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.file_extension = "py".to_string();
+        app.file_path = Some(PathBuf::from("/tmp/ctrl_def.py"));
+        app.editor = editor_with("value = build()\nprint(value)\n");
+
+        let source_start = app.editor.get_full_text().find("value").unwrap();
+        let source_range = (source_start, source_start + 5);
+        let (line, col) = crate::lsp::offset_to_lsp_pos(
+            &app.editor.get_full_text(),
+            source_start,
+            &app.editor.line_offsets,
+        );
+        app.ctrl_definition.source_path = app.current_abs_path();
+        app.ctrl_definition.source_range = Some(source_range);
+
+        let target = app
+            .ctrl_definition_target_from_lsp(Some(DefinitionJumpTarget {
+                path: PathBuf::from("/tmp/ctrl_def.py"),
+                line,
+                col,
+            }))
+            .expect("expected usage target");
+
+        assert_eq!(target.path, PathBuf::from("/tmp/ctrl_def.py"));
+        assert_eq!(target.line, 1);
+        assert_eq!(target.col, 6);
     }
 
     #[test]

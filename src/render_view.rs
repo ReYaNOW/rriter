@@ -113,6 +113,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         _syntax_errors: &[(usize, usize)],
+        ctrl_definition_range: Option<(usize, usize)>,
     ) -> (bool, Vec<(usize, usize)>) {
         let frame_start_time = Instant::now();
         let was_typing = self.last_editor_version_for_typing != editor.version;
@@ -684,6 +685,7 @@ impl Renderer {
             skip_visual_lines,
             end_visual_line,
             ui_registry,
+            ctrl_definition_range,
         );
 
         self.flush();

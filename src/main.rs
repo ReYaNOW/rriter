@@ -857,6 +857,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,
+        ctrl_definition: crate::app::CtrlDefinitionState::default(),
         ui_registry: crate::ui_system::UiRegistry::new(),
         tabs: Vec::new(),
         active_tab: 0,

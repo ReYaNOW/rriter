@@ -121,6 +121,13 @@ impl App {
             if !in_hover_popup {
                 clear_hover_popup(self.renderer.as_mut());
             }
+
+            if self.modifiers.control_key() {
+                if let Some(target) = self.ctrl_definition_target_under_mouse() {
+                    self.jump_to_definition_target(target);
+                    return;
+                }
+            }
         }
 
         if self.is_ide_mode

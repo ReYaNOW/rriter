@@ -275,7 +275,15 @@ impl ApplicationHandler for App {
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-            WindowEvent::ModifiersChanged(mod_state) => self.modifiers = mod_state.state(),
+            WindowEvent::ModifiersChanged(mod_state) => {
+                self.modifiers = mod_state.state();
+                if !self.modifiers.control_key() {
+                    self.clear_ctrl_definition();
+                }
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
@@ -381,6 +389,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                let ctrl_definition_range = self.ctrl_definition_highlight_range();
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -413,6 +422,7 @@ impl ApplicationHandler for App {
                     &mut self.ui_registry,
                     self.tab_scroll.current.round(),
                     &self.highlighter.syntax_errors,
+                    ctrl_definition_range,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -703,6 +713,9 @@ impl ApplicationHandler for App {
                     });
                     if hover_popup_hovered {
                         winit::window::CursorIcon::Default
+                    } else if self.modifiers.control_key() && self.ctrl_definition.target.is_some()
+                    {
+                        winit::window::CursorIcon::Pointer
                     } else if is_text || self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else {

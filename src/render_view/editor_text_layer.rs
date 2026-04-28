@@ -32,6 +32,7 @@ impl Renderer {
         skip_visual_lines: usize,
         end_visual_line: usize,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        ctrl_definition_range: Option<(usize, usize)>,
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -181,7 +182,7 @@ impl Renderer {
                     self.flush();
                 }
 
-                let s = if current_chunk_offset < first_len {
+                let chunk = if current_chunk_offset < first_len {
                     let s_end = end_byte.min(first_len);
                     &first[current_chunk_offset..s_end]
                 } else {
@@ -190,7 +191,7 @@ impl Renderer {
                     &second[s_start..s_end]
                 };
 
-                for c in s.chars() {
+                for c in chunk.chars() {
                     if x - render_scroll_x > self.width + 150.0 {
                         out_of_bounds = true;
                         break;
@@ -250,6 +251,9 @@ impl Renderer {
 
                     let is_unused = unused_idx < unused_spans.len()
                         && current_offset >= unused_spans[unused_idx].0;
+                    let is_ctrl_definition = ctrl_definition_range.is_some_and(|(start, end)| {
+                        current_offset >= start && current_offset < end
+                    });
 
                     let is_bracket = if let Some((b1, b2)) = bracket_pairs {
                         current_offset == b1 || current_offset == b2
@@ -299,6 +303,16 @@ impl Renderer {
                             adv,
                             self.line_height,
                             [0.6, 0.6, 0.6, 0.3],
+                        );
+                    }
+
+                    if is_ctrl_definition && !is_newline && !is_hidden && adv > 0.0 {
+                        self.push_rect(
+                            x - render_scroll_x,
+                            y - self.baseline_offset + self.line_height - 3.0 * s,
+                            adv,
+                            1.5 * s,
+                            [0.545, 0.913, 0.992, 0.95],
                         );
                     }
 

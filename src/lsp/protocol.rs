@@ -140,8 +140,15 @@ pub enum LspEvent {
     },
     DefinitionResponse {
         request_id: i32,
-        path: Option<PathBuf>,
+        target: Option<DefinitionTarget>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionTarget {
+    pub path: PathBuf,
+    pub line: u32,
+    pub col: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -620,17 +627,40 @@ pub(super) fn parse_hover_value(v: &serde_json::Value) -> Option<String> {
     None
 }
 
-pub(super) fn parse_definition_path(v: &serde_json::Value) -> Option<PathBuf> {
+fn definition_position(v: &serde_json::Value) -> Option<(u32, u32)> {
+    let line = v.get("line")?.as_u64()? as u32;
+    let col = v.get("character")?.as_u64()? as u32;
+    Some((line, col))
+}
+
+pub(super) fn parse_definition_target(v: &serde_json::Value) -> Option<DefinitionTarget> {
     if let Some(uri) = v.get("uri").and_then(|u| u.as_str()) {
-        return Some(uri_to_path(uri));
+        let (line, col) = v
+            .pointer("/range/start")
+            .and_then(definition_position)
+            .unwrap_or((0, 0));
+        return Some(DefinitionTarget {
+            path: uri_to_path(uri),
+            line,
+            col,
+        });
     }
     if let Some(uri) = v.get("targetUri").and_then(|u| u.as_str()) {
-        return Some(uri_to_path(uri));
+        let (line, col) = v
+            .pointer("/targetSelectionRange/start")
+            .or_else(|| v.pointer("/targetRange/start"))
+            .and_then(definition_position)
+            .unwrap_or((0, 0));
+        return Some(DefinitionTarget {
+            path: uri_to_path(uri),
+            line,
+            col,
+        });
     }
     if let Some(arr) = v.as_array() {
         for item in arr {
-            if let Some(path) = parse_definition_path(item) {
-                return Some(path);
+            if let Some(target) = parse_definition_target(item) {
+                return Some(target);
             }
         }
     }
@@ -825,10 +855,10 @@ pub(super) fn dispatch_frame(
                             }
                         }
                         Some(PendingRequestKind::Definition) => {
-                            let path = parse_definition_path(result);
+                            let target = parse_definition_target(result);
                             let _ = event_tx.send(LspEvent::DefinitionResponse {
                                 request_id: req_id as i32,
-                                path,
+                                target,
                             });
                         }
                         None => {
@@ -1112,9 +1142,21 @@ mod tests {
             Some("kept\ntail")
         );
         assert_eq!(
-            parse_definition_path(&serde_json::json!([{"targetUri": "file:///tmp/target.py"}])),
+            parse_definition_target(&serde_json::json!([{"targetUri": "file:///tmp/target.py"}]))
+                .map(|target| target.path),
             Some(PathBuf::from("/tmp/target.py"))
         );
+        let target = parse_definition_target(&serde_json::json!([{
+            "targetUri": "file:///tmp/target.py",
+            "targetSelectionRange": {
+                "start": {"line": 12, "character": 4},
+                "end": {"line": 12, "character": 10}
+            }
+        }]))
+        .unwrap();
+        assert_eq!(target.path, PathBuf::from("/tmp/target.py"));
+        assert_eq!(target.line, 12);
+        assert_eq!(target.col, 4);
 
         let (event_tx, event_rx) = mpsc::channel();
         let (out_tx, out_rx) = mpsc::channel();
@@ -1268,9 +1310,12 @@ mod tests {
             &pending,
         );
         match recv_non_log(&event_rx) {
-            LspEvent::DefinitionResponse { request_id, path } => {
+            LspEvent::DefinitionResponse { request_id, target } => {
                 assert_eq!(request_id, 2);
-                assert_eq!(path, Some(PathBuf::from("/tmp/definition.py")));
+                let target = target.unwrap();
+                assert_eq!(target.path, PathBuf::from("/tmp/definition.py"));
+                assert_eq!(target.line, 0);
+                assert_eq!(target.col, 0);
             }
             other => panic!("unexpected event: {other:?}"),
         }

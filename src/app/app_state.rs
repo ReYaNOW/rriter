@@ -273,6 +273,21 @@ pub struct KeyLog {
     pub t_render: Option<std::time::Instant>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefinitionJumpTarget {
+    pub path: PathBuf,
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CtrlDefinitionState {
+    pub request_id: Option<i32>,
+    pub source_path: Option<PathBuf>,
+    pub source_range: Option<(usize, usize)>,
+    pub target: Option<DefinitionJumpTarget>,
+}
+
 pub struct App {
     pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,
@@ -381,6 +396,8 @@ pub struct App {
     pub lsp_actions_menu: Option<LspActionsMenu>,
     /// Ожидаем ответа на Fix All запрос
     pub pending_fix_all_id: Option<i32>,
+    /// Ctrl-hover definition/declaration jump target.
+    pub ctrl_definition: CtrlDefinitionState,
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,

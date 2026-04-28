@@ -486,6 +486,11 @@ impl App {
             let is_text_area = (!in_diag_popup || in_hover_popup)
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
+            let ctrl_definition_byte = if is_text_area {
+                normalize_hover_byte(&self.editor, byte_offset)
+            } else {
+                None
+            };
 
             let mut clear_diag_popup = false;
             HOVER_STATE.with(|state| {
@@ -559,6 +564,7 @@ impl App {
             if clear_diag_popup {
                 HOVER_STATE.with(|s| s.borrow_mut().reset_diagnostic_popup());
             }
+            self.update_ctrl_definition_hover(ctrl_definition_byte);
         }
         let wh = window_size.height as f32;
 
