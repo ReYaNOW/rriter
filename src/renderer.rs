@@ -138,6 +138,7 @@ impl FontData {
 pub struct Renderer {
     pub gl: glow::Context,
     pub program: glow::Program,
+    pub proj_loc: Option<glow::UniformLocation>,
     pub vao: glow::VertexArray,
     pub vbo: glow::Buffer,
     pub texture: glow::Texture,
@@ -442,6 +443,7 @@ impl Renderer {
             gl.attach_shader(program, v_shader);
             gl.attach_shader(program, f_shader);
             gl.link_program(program);
+            let proj_loc = gl.get_uniform_location(program, "proj");
 
             gl.delete_shader(v_shader);
             gl.delete_shader(f_shader);
@@ -607,6 +609,7 @@ impl Renderer {
             let mut renderer = Self {
                 gl,
                 program,
+                proj_loc,
                 vao,
                 vbo,
                 texture,

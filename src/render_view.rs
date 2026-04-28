@@ -116,10 +116,15 @@ impl Renderer {
         ctrl_definition_range: Option<(usize, usize)>,
         ide_workspaces: &[std::path::PathBuf],
     ) -> (bool, Vec<(usize, usize)>) {
-        let frame_start_time = Instant::now();
-        let was_typing = self.last_editor_version_for_typing != editor.version;
-        let was_scrolling = (self.last_scroll_y - scroll_y).abs() > 0.1
-            || (self.last_scroll_x - scroll_x).abs() > 0.1;
+        let telemetry_frame_start =
+            TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
+        let telemetry_was_typing = telemetry_frame_start
+            .is_some()
+            .then_some(self.last_editor_version_for_typing != editor.version);
+        let telemetry_was_scrolling = telemetry_frame_start.is_some().then_some(
+            (self.last_scroll_y - scroll_y).abs() > 0.1
+                || (self.last_scroll_x - scroll_x).abs() > 0.1,
+        );
 
         let cursor_phys_line = editor
             .line_offsets
@@ -1093,14 +1098,14 @@ impl Renderer {
             );
         }
 
-        if TELEMETRY_ENABLED.load(Ordering::Relaxed) {
+        if let Some(frame_start_time) = telemetry_frame_start {
             let elapsed = frame_start_time.elapsed().as_secs_f32();
             TELEMETRY.with(|t| {
                 let mut t = t.borrow_mut();
-                if was_typing {
+                if telemetry_was_typing.unwrap_or(false) {
                     t.type_time += elapsed;
                     t.type_count += 1;
-                } else if was_scrolling {
+                } else if telemetry_was_scrolling.unwrap_or(false) {
                     t.scroll_time += elapsed;
                     t.scroll_count += 1;
                 } else {

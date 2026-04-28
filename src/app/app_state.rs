@@ -318,6 +318,7 @@ pub struct App {
     pub modifiers: ModifiersState,
     pub is_dragging: bool,
     pub is_focused: bool,
+    pub render_suspended: bool,
     pub current_cursor: winit::window::CursorIcon,
 
     pub show_fps: bool,

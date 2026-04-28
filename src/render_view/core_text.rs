@@ -507,9 +507,8 @@ impl Renderer {
                 0.0,
                 1.0,
             ];
-            let proj_loc = self.gl.get_uniform_location(self.program, "proj");
             self.gl
-                .uniform_matrix_4_f32_slice(proj_loc.as_ref(), false, &proj);
+                .uniform_matrix_4_f32_slice(self.proj_loc.as_ref(), false, &proj);
             self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
 
             self.gl.buffer_sub_data_u8_slice(

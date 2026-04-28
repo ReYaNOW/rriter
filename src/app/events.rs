@@ -243,6 +243,7 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(focused) => {
                 self.is_focused = focused;
                 if focused {
+                    self.render_suspended = false;
                     if let Some(dw) = self.dialog_window.as_ref() {
                         // НЕ вызываем focus_window() здесь.
                         // Это - главная причина "мерцания" при Alt+Tab, т.к. приложение
@@ -251,11 +252,25 @@ impl ApplicationHandler for App {
                         // клавиши на основное окно, что является более предсказуемым поведением.
                         dw.request_redraw();
                     }
+                    self.window.as_ref().unwrap().request_redraw();
+                } else {
+                    self.render_suspended = true;
+                    self.last_frame = Instant::now();
                 }
-                self.window.as_ref().unwrap().request_redraw();
+            }
+            WindowEvent::Occluded(occluded) => {
+                self.render_suspended = occluded;
+                self.last_frame = Instant::now();
+                if !occluded {
+                    self.window.as_ref().unwrap().request_redraw();
+                }
             }
             WindowEvent::Resized(size) => {
-                if size.width > 0 && size.height > 0 {
+                if size.width == 0 || size.height == 0 {
+                    self.render_suspended = true;
+                    self.last_frame = Instant::now();
+                } else {
+                    self.render_suspended = false;
                     let gl_context = self.gl_context.as_ref().unwrap();
                     let gl_surface = self.gl_surface.as_ref().unwrap();
                     gl_surface.resize(
@@ -297,6 +312,11 @@ impl ApplicationHandler for App {
                 self.handle_main_keyboard_input(event_loop, key_event);
             }
             WindowEvent::RedrawRequested => {
+                if self.render_suspended {
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                    return;
+                }
+
                 let gl_context = self.gl_context.as_ref().unwrap();
                 let gl_surface = self.gl_surface.as_ref().unwrap();
 

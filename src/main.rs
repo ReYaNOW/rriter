@@ -752,9 +752,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
-    if config.enable_telemetry {
-        crate::render_view::TELEMETRY_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    crate::render_view::TELEMETRY_ENABLED
+        .store(config.enable_telemetry, std::sync::atomic::Ordering::Relaxed);
     let highlighter = Highlighter::new();
 
     let show_welcome = !has_file_arg && !run_ide_on_startup;
@@ -786,6 +785,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         modifiers: ModifiersState::empty(),
         is_dragging: false,
         is_focused: true,
+        render_suspended: false,
         current_cursor: winit::window::CursorIcon::Default,
 
         show_fps: false,

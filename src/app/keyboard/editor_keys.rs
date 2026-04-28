@@ -568,7 +568,6 @@ impl App {
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
                     if let Some(txt) = key_event.logical_key.to_text() {
-                        let t0 = std::time::Instant::now();
                         let insert_txt = match txt {
                             "(" => "()",
                             "[" => "[]",
@@ -583,7 +582,7 @@ impl App {
                         {
                             self.pending_key_log = Some(crate::app::KeyLog {
                                 key: txt.to_string(),
-                                t0,
+                                t0: std::time::Instant::now(),
                                 t_highlight: None,
                                 t_render: None,
                             });

@@ -1495,6 +1495,7 @@ mod app_behavior_tests {
             modifiers: winit::keyboard::ModifiersState::empty(),
             is_dragging: false,
             is_focused: true,
+            render_suspended: false,
             current_cursor: winit::window::CursorIcon::Default,
             show_fps: false,
             window_width: 1000.0,

@@ -528,7 +528,11 @@ impl App {
                             if state.byte_offset.is_some()
                                 && !state.should_keep_popup_through_empty_space()
                             {
-                                println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
+                                if crate::render_view::TELEMETRY_ENABLED
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
+                                }
                                 state.byte_offset = None;
                                 state.timer = 0.0;
                                 state.request_id = None;
@@ -546,14 +550,22 @@ impl App {
                     }
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                         let keep_visible_popup = state.popup.is_some();
-                        println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
+                        if crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
+                        }
                         clear_diag_popup = state.begin_type_hover_transition(byte_offset);
                     }
                 } else if !in_hover_popup {
                     if state.byte_offset.is_some()
                         && !state.should_keep_popup_through_empty_space()
                     {
-                        println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
+                        if crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
+                        }
                         state.byte_offset = None;
                         state.timer = 0.0;
                         state.request_id = None;

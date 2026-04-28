@@ -73,6 +73,7 @@ fn compute_about_wait_plan(
     show_welcome: bool,
     is_ide_mode: bool,
     is_highlighting: bool,
+    idle_blink_enabled: bool,
     hover_wake_at: Option<Instant>,
     hover_poll_pending: bool,
 ) -> AboutWaitPlan {
@@ -91,12 +92,29 @@ fn compute_about_wait_plan(
         ));
     }
 
+    if !idle_blink_enabled {
+        return if let Some(wake_at) = earliest_optional_wake(hover_wake_at, hover_poll_wake_at) {
+            AboutWaitPlan::WaitUntil(wake_at)
+        } else {
+            AboutWaitPlan::Wait
+        };
+    }
+
     let next_blink = last_action
         + std::time::Duration::from_millis(
             (now.duration_since(last_action).as_millis() / 500 + 1) as u64 * 500,
         );
 
     AboutWaitPlan::WaitUntil(earliest_wake(next_blink, hover_wake_at, hover_poll_wake_at))
+}
+
+fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -108,6 +126,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let now = Instant::now();
+    if app.render_suspended {
+        app.last_frame = now;
+        event_loop.set_control_flow(ControlFlow::Wait);
+        return;
+    }
+
     let raw_dt = (now - app.last_frame).as_secs_f32();
     let dt = raw_dt.min(0.016);
     app.last_frame = now;
@@ -163,10 +187,14 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 );
                                 state.request_id =
                                     lsp.request_hover(&path, &app.file_extension, line, col);
-                                println!(
-                                    "[HOVER DEBUG] 0.34s expired. Sent hover request. id: {:?}",
-                                    state.request_id
-                                );
+                                if crate::render_view::TELEMETRY_ENABLED
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    println!(
+                                        "[HOVER DEBUG] 0.34s expired. Sent hover request. id: {:?}",
+                                        state.request_id
+                                    );
+                                }
                                 if state.request_id.is_some() {
                                     hover_poll_pending = true;
                                 }
@@ -186,7 +214,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else if state.popup.is_some() || state.pending_popup.is_some() {
             state.timer += raw_dt;
             if state.timer >= 0.25 {
-                println!("[HOVER DEBUG] 0.25s hide timer expired. Clearing popup.");
+                if crate::render_view::TELEMETRY_ENABLED
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    println!("[HOVER DEBUG] 0.25s hide timer expired. Clearing popup.");
+                }
                 state.popup = None;
                 state.pending_popup = None;
                 state.rect = None;
@@ -596,10 +628,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 crate::app::mouse::HOVER_STATE.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.request_id == Some(request_id) {
-                        println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
+                        if crate::render_view::TELEMETRY_ENABLED
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
+                        }
                         state.request_id = None;
                         let Some(t) = text else {
-                            println!("[HOVER DEBUG] Text is empty. Clearing popup.");
+                            if crate::render_view::TELEMETRY_ENABLED
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                println!("[HOVER DEBUG] Text is empty. Clearing popup.");
+                            }
                             state.popup = None;
                             state.pending_popup = None;
                             state.rect = None;
@@ -695,10 +735,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 state.definition_request_id = None;
                             }
                             if state.definition_request_id.is_some() {
-                                println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
+                                if crate::render_view::TELEMETRY_ENABLED
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
+                                }
                                 state.pending_popup = Some(popup);
                             } else {
-                                println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
+                                if crate::render_view::TELEMETRY_ENABLED
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
+                                }
                                 state.finish_stale_combined_transition();
                                 state.popup = Some(popup);
                             }
@@ -926,6 +974,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let is_highlighting = !app.is_highlighted_once;
+    let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
     match compute_about_wait_plan(
         now,
         app.last_action,
@@ -933,6 +982,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         app.show_welcome,
         app.is_ide_mode,
         is_highlighting,
+        idle_blink_enabled,
         hover_wake_at,
         hover_poll_pending,
     ) {
@@ -1001,15 +1051,45 @@ mod tests {
         let last_action = now - std::time::Duration::from_millis(1250);
 
         assert_eq!(
-            compute_about_wait_plan(now, last_action, true, false, false, false, None, false),
+            compute_about_wait_plan(
+                now,
+                last_action,
+                true,
+                false,
+                false,
+                false,
+                true,
+                None,
+                false,
+            ),
             AboutWaitPlan::Wait,
         );
         assert_eq!(
-            compute_about_wait_plan(now, last_action, false, true, true, false, None, false),
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                true,
+                true,
+                false,
+                true,
+                None,
+                false,
+            ),
             AboutWaitPlan::Wait,
         );
         assert_eq!(
-            compute_about_wait_plan(now, last_action, false, false, false, true, None, false),
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                false,
+                false,
+                true,
+                true,
+                None,
+                false,
+            ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(5)),
         );
         assert_eq!(
@@ -1020,14 +1100,53 @@ mod tests {
                 false,
                 false,
                 true,
+                true,
                 Some(now + std::time::Duration::from_millis(2)),
                 true,
             ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(2)),
         );
         assert_eq!(
-            compute_about_wait_plan(now, last_action, false, false, false, false, None, false),
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                false,
+                false,
+                false,
+                true,
+                None,
+                false,
+            ),
             AboutWaitPlan::WaitUntil(last_action + std::time::Duration::from_millis(1500)),
+        );
+        assert_eq!(
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+            ),
+            AboutWaitPlan::Wait,
+        );
+        assert_eq!(
+            compute_about_wait_plan(
+                now,
+                last_action,
+                false,
+                false,
+                false,
+                false,
+                false,
+                Some(now + std::time::Duration::from_millis(20)),
+                true,
+            ),
+            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(16)),
         );
     }
 }
