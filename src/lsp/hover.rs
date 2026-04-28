@@ -746,6 +746,7 @@ pub(crate) enum PendingRequestKind {
     Hover,
     CodeAction,
     Definition,
+    Completion,
 }
 
 #[cfg(test)]

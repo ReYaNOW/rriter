@@ -45,6 +45,9 @@ fn lsp_action_label<'a>(
         crate::app::LspActionItem::OrganizeImports => {
             std::borrow::Cow::Borrowed("Упорядочить импорты")
         }
+        crate::app::LspActionItem::CompleteImports => {
+            std::borrow::Cow::Borrowed("Подсказки импортов ty")
+        }
     }
 }
 
@@ -921,7 +924,9 @@ impl Renderer {
                 crate::app::LspActionItem::CodeAction(_) => 1,
                 crate::app::LspActionItem::AddNoqa { .. }
                 | crate::app::LspActionItem::AddNoqaAll => 2,
-                crate::app::LspActionItem::FixAll | crate::app::LspActionItem::OrganizeImports => 3,
+                crate::app::LspActionItem::FixAll
+                | crate::app::LspActionItem::OrganizeImports
+                | crate::app::LspActionItem::CompleteImports => 3,
             };
 
             if prev_group != 0 && group != prev_group {
@@ -976,9 +981,9 @@ impl Renderer {
 
             let label_str = lsp_action_label(item, &mut scratch);
             let label_color = match item {
-                crate::app::LspActionItem::FixAll | crate::app::LspActionItem::OrganizeImports => {
-                    group_color
-                }
+                crate::app::LspActionItem::FixAll
+                | crate::app::LspActionItem::OrganizeImports
+                | crate::app::LspActionItem::CompleteImports => group_color,
                 _ => self.theme.fg,
             };
 

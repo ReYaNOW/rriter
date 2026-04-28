@@ -852,6 +852,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
         autocomplete_hovered_idx: None,
         autocomplete_rect: None,
+        autocomplete_mode: crate::app::AutocompleteMode::TreeSitter,
+        autocomplete_pending_request_id: None,
 
         current_sticky_lines: Vec::new(),
         target_sticky_lines: Vec::new(),

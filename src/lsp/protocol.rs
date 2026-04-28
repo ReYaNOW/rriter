@@ -142,6 +142,10 @@ pub enum LspEvent {
         request_id: i32,
         target: Option<DefinitionTarget>,
     },
+    CompletionResponse {
+        request_id: i32,
+        items: Vec<LspCompletionItem>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +161,16 @@ pub struct CodeAction {
     pub kind: Option<String>,
     pub edit: Option<WorkspaceEdit>,
     pub code: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LspCompletionItem {
+    pub label: String,
+    pub kind: crate::highlighter::SymbolKind,
+    pub module: Option<String>,
+    pub insert_text: Option<String>,
+    pub text_edit: Option<TextChange>,
+    pub additional_text_edits: Vec<TextChange>,
 }
 
 // ── Конфигурация LSP-серверов ─────────────────────────────────────────────────
@@ -230,6 +244,13 @@ pub(super) enum Cmd {
         uri: String,
         line: u32,
         col: u32,
+    },
+    Completion {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+        trigger: Option<String>,
     },
 }
 
@@ -328,7 +349,7 @@ pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
     };
 
     let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"completion":{{"completionItem":{{"snippetSupport":false,"labelDetailsSupport":true,"resolveSupport":{{"properties":["additionalTextEdits","textEdit","detail"]}}}}}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
         std::process::id(),
         root_uri_json
     );
@@ -407,6 +428,32 @@ pub(super) fn make_definition(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8
         r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
         id, json_escape(uri), line, col
     ).into_bytes()
+}
+
+pub(super) fn make_completion(
+    id: i32,
+    uri: &str,
+    line: u32,
+    col: u32,
+    trigger: Option<&str>,
+) -> Vec<u8> {
+    let context = if let Some(ch) = trigger {
+        format!(
+            r#","context":{{"triggerKind":2,"triggerCharacter":"{}"}}"#,
+            json_escape(ch)
+        )
+    } else {
+        String::from(r#","context":{"triggerKind":1}"#)
+    };
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
+        id,
+        json_escape(uri),
+        line,
+        col,
+        context
+    )
+    .into_bytes()
 }
 
 pub(super) fn make_shutdown(id: i32) -> Vec<u8> {
@@ -563,6 +610,23 @@ pub(super) fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange>
     })
 }
 
+fn parse_completion_text_edit_value(v: &serde_json::Value) -> Option<TextChange> {
+    if let Some(change) = parse_text_edit_value(v) {
+        return Some(change);
+    }
+    let replace = v.get("replace").or_else(|| v.get("insert"))?;
+    let start = replace.get("start")?;
+    let end_r = replace.get("end")?;
+    let new_text = v.get("newText").and_then(|t| t.as_str()).unwrap_or("");
+    Some(TextChange {
+        start_line: start.get("line")?.as_u64()? as u32,
+        start_col: start.get("character")?.as_u64()? as u32,
+        end_line: end_r.get("line")?.as_u64()? as u32,
+        end_col: end_r.get("character")?.as_u64()? as u32,
+        new_text: new_text.to_string(),
+    })
+}
+
 pub(super) fn parse_workspace_edit_value(v: &serde_json::Value) -> WorkspaceEdit {
     let mut edit = WorkspaceEdit::default();
 
@@ -698,6 +762,80 @@ pub(super) fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeActio
         edit,
         code,
     })
+}
+
+fn completion_kind(kind: Option<u64>) -> crate::highlighter::SymbolKind {
+    match kind {
+        Some(2 | 3 | 4) => crate::highlighter::SymbolKind::Function,
+        Some(5 | 6 | 10 | 12 | 13) => crate::highlighter::SymbolKind::Variable,
+        Some(7 | 8 | 9 | 22 | 25) => crate::highlighter::SymbolKind::Class,
+        Some(14) => crate::highlighter::SymbolKind::Keyword,
+        _ => crate::highlighter::SymbolKind::Unknown,
+    }
+}
+
+fn completion_module(v: &serde_json::Value) -> Option<String> {
+    if let Some(desc) = v
+        .pointer("/labelDetails/description")
+        .and_then(|value| value.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        return Some(desc.trim().to_string());
+    }
+    if let Some(detail) = v
+        .get("detail")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if detail.contains('.') || detail.contains(" import ") || detail.starts_with("from ") {
+            return Some(detail.to_string());
+        }
+    }
+    v.pointer("/data/module")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCompletionItem> {
+    let label = v.get("label")?.as_str()?.to_string();
+    let insert_text = v
+        .get("insertText")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            v.pointer("/textEdit/newText")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    let text_edit = v.get("textEdit").and_then(parse_completion_text_edit_value);
+    let additional_text_edits = v
+        .get("additionalTextEdits")
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter_map(parse_text_edit_value).collect())
+        .unwrap_or_default();
+
+    Some(LspCompletionItem {
+        label,
+        kind: completion_kind(v.get("kind").and_then(|value| value.as_u64())),
+        module: completion_module(v),
+        insert_text,
+        text_edit,
+        additional_text_edits,
+    })
+}
+
+pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompletionItem> {
+    let items = if let Some(arr) = result.as_array() {
+        arr
+    } else if let Some(arr) = result.get("items").and_then(|value| value.as_array()) {
+        arr
+    } else {
+        return Vec::new();
+    };
+    items.iter().filter_map(parse_completion_item_value).collect()
 }
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
@@ -861,6 +999,13 @@ pub(super) fn dispatch_frame(
                                 target,
                             });
                         }
+                        Some(PendingRequestKind::Completion) => {
+                            let items = parse_completion_items(result);
+                            let _ = event_tx.send(LspEvent::CompletionResponse {
+                                request_id: req_id as i32,
+                                items,
+                            });
+                        }
                         None => {
                             if result.get("contents").is_some() {
                                 if let Some(hover) = parse_hover_value(result) {
@@ -999,6 +1144,25 @@ mod tests {
         assert_eq!(action.kind.as_deref(), Some("source.fixAll"));
         assert_eq!(action.code.as_deref(), Some("123"));
         assert!(action.edit.is_some());
+
+        let completion_json = serde_json::json!({
+            "label": "Path",
+            "kind": 7,
+            "labelDetails": {"description": "pathlib"},
+            "insertText": "Path",
+            "additionalTextEdits": [{
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 0}
+                },
+                "newText": "from pathlib import Path\n"
+            }]
+        });
+        let completion = parse_completion_item_value(&completion_json).unwrap();
+        assert_eq!(completion.label, "Path");
+        assert_eq!(completion.module.as_deref(), Some("pathlib"));
+        assert_eq!(completion.kind, crate::highlighter::SymbolKind::Class);
+        assert_eq!(completion.additional_text_edits.len(), 1);
     }
 
     #[test]
@@ -1096,6 +1260,12 @@ mod tests {
             serde_json::from_slice(&make_definition(100, uri, 7, 8)).unwrap();
         assert_eq!(definition["method"], "textDocument/definition");
         assert_eq!(definition["params"]["position"]["line"], 7);
+
+        let completion: serde_json::Value =
+            serde_json::from_slice(&make_completion(102, uri, 2, 4, Some("."))).unwrap();
+        assert_eq!(completion["method"], "textDocument/completion");
+        assert_eq!(completion["params"]["context"]["triggerKind"], 2);
+        assert_eq!(completion["params"]["context"]["triggerCharacter"], ".");
 
         let shutdown: serde_json::Value = serde_json::from_slice(&make_shutdown(101)).unwrap();
         assert_eq!(shutdown["method"], "shutdown");
@@ -1258,6 +1428,7 @@ mod tests {
             (1, PendingRequestKind::CodeAction),
             (2, PendingRequestKind::Definition),
             (3, PendingRequestKind::Hover),
+            (6, PendingRequestKind::Completion),
         ])));
 
         dispatch_frame(
@@ -1333,6 +1504,22 @@ mod tests {
             LspEvent::HoverResponse { request_id, text } => {
                 assert_eq!(request_id, 3);
                 assert_eq!(text, None);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":6,"result":{"isIncomplete":false,"items":[{"label":"Path","kind":7,"labelDetails":{"description":"pathlib"}}]}}"#,
+            &event_tx,
+            "ty",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::CompletionResponse { request_id, items } => {
+                assert_eq!(request_id, 6);
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].module.as_deref(), Some("pathlib"));
             }
             other => panic!("unexpected event: {other:?}"),
         }

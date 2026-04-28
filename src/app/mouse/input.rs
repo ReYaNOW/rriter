@@ -275,6 +275,12 @@ impl App {
                                         }
                                     }
                                 }
+                                crate::app::LspActionItem::CompleteImports => {
+                                    self.request_ty_autocomplete(
+                                        AutocompleteMode::TyImports,
+                                        None,
+                                    );
+                                }
                             }
                             self.window.as_ref().unwrap().request_redraw();
                             return;
@@ -948,8 +954,16 @@ impl App {
                         && last_mouse_y <= ry + rh
                     {
                         let scroll_x = rx + rw - 14.0 * s;
+                        let ty_btn_x = rx + rw - 40.0 * s;
+                        let ty_btn_y = ry + 8.0 * s;
 
-                        if last_mouse_x >= scroll_x {
+                        if last_mouse_x >= ty_btn_x
+                            && last_mouse_x <= ty_btn_x + 28.0 * s
+                            && last_mouse_y >= ty_btn_y
+                            && last_mouse_y <= ty_btn_y + 20.0 * s
+                        {
+                            self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
+                        } else if last_mouse_x >= scroll_x {
                             if let Some((drag_offset, target)) = autocomplete_scroll_click_target(
                                 last_mouse_y,
                                 ry,

@@ -192,6 +192,12 @@ impl App {
             items.push(crate::app::LspActionItem::AddNoqaAll);
         }
 
+        if matches!(self.file_extension.as_str(), "py" | "pyi")
+            && super::python_import_completion_allowed(&self.editor)
+        {
+            items.push(crate::app::LspActionItem::CompleteImports);
+        }
+
         // Запрашиваем code actions от LSP
         let pending_id = if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
             let ext = self.file_extension.clone();
@@ -256,6 +262,9 @@ impl App {
                         self.pending_fix_all_id = Some(id);
                     }
                 }
+            }
+            crate::app::LspActionItem::CompleteImports => {
+                self.request_ty_autocomplete(crate::app::AutocompleteMode::TyImports, None);
             }
         }
 

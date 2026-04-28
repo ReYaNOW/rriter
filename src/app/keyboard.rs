@@ -1,4 +1,4 @@
-use crate::app::{App, PendingAction};
+use crate::app::{App, AutocompleteMode, PendingAction};
 use crate::editor::Editor;
 use std::io::Write;
 use std::time::Instant;

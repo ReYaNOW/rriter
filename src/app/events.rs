@@ -526,7 +526,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+                if self.autocomplete_active {
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
                     let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
@@ -538,6 +538,7 @@ impl ApplicationHandler for App {
                         cx,
                         cy - render_scroll_y,
                         &self.autocomplete_options,
+                        self.autocomplete_mode,
                         self.autocomplete_selected_idx,
                         self.autocomplete_anim_progress,
                         self.autocomplete_scroll.current,

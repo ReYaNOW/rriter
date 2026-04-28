@@ -27,7 +27,7 @@ use hover::PendingRequestKind;
 pub use hover::{HoverLineKindPublic, highlight_hover_text};
 use protocol::*;
 pub use protocol::{
-    CodeAction, LspEvent, TextChange, WorkspaceEdit, highlight_diagnostic_message,
+    CodeAction, LspCompletionItem, LspEvent, TextChange, WorkspaceEdit, highlight_diagnostic_message,
     offset_to_lsp_pos,
 };
 use std::thread;
@@ -439,6 +439,21 @@ fn run_supervisor(
                             break 'inner;
                         }
                     }
+                    Ok(Cmd::Completion {
+                        id,
+                        uri,
+                        line,
+                        col,
+                        trigger,
+                    }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::Completion);
+                        }
+                        let msg = make_completion(id, &uri, line, col, trigger.as_deref());
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
                     Ok(Cmd::CodeAction {
                         id,
                         uri,
@@ -591,6 +606,25 @@ impl LspProcess {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
         let _ = self.cmd_tx.send(Cmd::Definition { id, uri, line, col });
+        id
+    }
+
+    pub fn request_completion(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+        trigger: Option<&str>,
+    ) -> i32 {
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = self.cmd_tx.send(Cmd::Completion {
+            id,
+            uri,
+            line,
+            col,
+            trigger: trigger.map(str::to_string),
+        });
         id
     }
 
@@ -968,6 +1002,30 @@ impl LspManager {
         } else {
             None
         }
+    }
+
+    pub fn request_ty_completion(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+        trigger: Option<&str>,
+    ) -> Option<i32> {
+        if !Self::is_python_ext(ext) {
+            return None;
+        }
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.ensure_python();
+        self.ty_process
+            .as_mut()
+            .map(|proc| proc.request_completion(&abs_path, line, col, trigger))
     }
 
     /// Уведомляет LSP о закрытии файла

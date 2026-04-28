@@ -138,6 +138,75 @@ fn nearest_python_assignment_usage(editor: &Editor, source_range: (usize, usize)
         .or_else(|| previous_token_occurrence_at_word_boundary(&text, token, line_start))
 }
 
+fn cursor_line_bounds(text: &str, cursor: usize) -> (usize, usize) {
+    let cursor = cursor.min(text.len());
+    let start = text.as_bytes()[..cursor]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+    let end = text.as_bytes()[cursor..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|pos| cursor + pos)
+        .unwrap_or(text.len());
+    (start, end)
+}
+
+fn cursor_in_python_string_or_comment(line_prefix: &str) -> bool {
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    for b in line_prefix.bytes() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if !single && !double && b == b'#' {
+            return true;
+        }
+        if !double && b == b'\'' {
+            single = !single;
+        } else if !single && b == b'"' {
+            double = !double;
+        }
+    }
+    single || double
+}
+
+fn python_import_completion_allowed(editor: &Editor) -> bool {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let (line_start, line_end) = cursor_line_bounds(&text, cursor);
+    let line = text.get(line_start..line_end).unwrap_or("");
+    let prefix = text.get(line_start..cursor).unwrap_or("");
+    if cursor_in_python_string_or_comment(prefix) {
+        return false;
+    }
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("def ")
+        || trimmed.starts_with("async ")
+        || trimmed.starts_with("class ")
+        || trimmed.starts_with("from ")
+        || trimmed.starts_with("import ")
+    {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    let prev_ident = cursor
+        .checked_sub(1)
+        .and_then(|idx| bytes.get(idx))
+        .is_some_and(|&b| is_python_ident_byte(b));
+    let next_ident = bytes
+        .get(cursor)
+        .is_some_and(|&b| is_python_ident_byte(b));
+    !prev_ident && !next_ident
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn set_clipboard_text(&mut self, text: impl Into<String>) {
@@ -761,11 +830,111 @@ impl App {
         String::from_utf8(res).unwrap_or_default()
     }
 
+    pub fn request_ty_autocomplete(
+        &mut self,
+        mode: AutocompleteMode,
+        trigger: Option<&str>,
+    ) {
+        if !self.is_ide_mode || self.show_welcome {
+            return;
+        }
+        if mode == AutocompleteMode::TyImports && self.get_current_word_prefix().is_empty() {
+            self.autocomplete_mode = mode;
+            self.autocomplete_active = true;
+            self.autocomplete_options.clear();
+            self.autocomplete_selected_idx = 0;
+            self.autocomplete_pending_request_id = None;
+            self.autocomplete_anim_progress = 0.0;
+            self.autocomplete_scroll.current = 0.0;
+            self.autocomplete_scroll.target = 0.0;
+            return;
+        }
+        let Some(path) = self.file_path.clone() else {
+            return;
+        };
+        let Some(lsp) = self.lsp.as_mut() else {
+            return;
+        };
+        let text = self.editor.get_full_text();
+        lsp.notify_change(&path, &self.file_extension, &text, self.editor.version as i32);
+        let (line, col) =
+            crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
+        if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
+        {
+            self.autocomplete_mode = mode;
+            self.autocomplete_pending_request_id = Some(id);
+            if !self.autocomplete_active {
+                self.autocomplete_anim_progress = 0.0;
+                self.autocomplete_scroll.current = 0.0;
+                self.autocomplete_scroll.target = 0.0;
+            }
+            self.autocomplete_active = true;
+        }
+    }
+
+    pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        let prefix = self.get_current_word_prefix();
+        if self.autocomplete_mode == AutocompleteMode::TyImports && prefix.is_empty() {
+            self.autocomplete_options.clear();
+            self.autocomplete_active = true;
+            return;
+        }
+
+        let prefix_lower = prefix.to_lowercase();
+        let mut seen = FxHashMap::default();
+        let mut matches = Vec::new();
+
+        for item in items {
+            let item: AutocompleteItem = item.into();
+            if self.autocomplete_mode == AutocompleteMode::TyImports && item.module.is_none() {
+                continue;
+            }
+            let key = (item.word.clone(), item.module.clone().unwrap_or_default());
+            if seen.insert(key, ()).is_some() {
+                continue;
+            }
+            let word_lower = item.word.to_lowercase();
+            let indices = if prefix.is_empty() {
+                Vec::new()
+            } else if let Some(indices) = fuzzy_match(&prefix_lower, &word_lower) {
+                indices
+            } else {
+                continue;
+            };
+            let is_prefix = prefix.is_empty() || word_lower.starts_with(&prefix_lower);
+            matches.push((is_prefix, item.word.len(), item, indices));
+        }
+
+        matches.sort_unstable_by_key(|(is_prefix, len, item, _)| {
+            let type_priority = match item.kind {
+                SymbolKind::Variable | SymbolKind::Parameter => 0,
+                SymbolKind::Function => 1,
+                SymbolKind::Class => 2,
+                SymbolKind::Keyword => 3,
+                SymbolKind::Unknown => 4,
+            };
+            (!*is_prefix, type_priority, *len)
+        });
+
+        self.autocomplete_options = matches
+            .into_iter()
+            .take(80)
+            .map(|(_, _, item, indices)| (item, indices))
+            .collect();
+        self.autocomplete_active =
+            !self.autocomplete_options.is_empty() || self.autocomplete_mode == AutocompleteMode::TyImports;
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_scroll.current = 0.0;
+        self.autocomplete_scroll.target = 0.0;
+    }
+
     pub fn update_autocomplete(&mut self) {
         let prefix = self.get_current_word_prefix();
         if prefix.is_empty() {
             self.autocomplete_active = false;
             self.autocomplete_options.clear();
+            self.autocomplete_mode = AutocompleteMode::TreeSitter;
             return;
         }
 
@@ -825,7 +994,11 @@ impl App {
             (match_priority, type_priority, std::cmp::Reverse(*score))
         });
 
-        self.autocomplete_options = matches.into_iter().take(60).map(|m| (m.2, m.3)).collect();
+        self.autocomplete_options = matches
+            .into_iter()
+            .take(60)
+            .map(|m| (m.2.into(), m.3))
+            .collect();
 
         if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
@@ -833,6 +1006,7 @@ impl App {
                 self.autocomplete_scroll.current = 0.0;
                 self.autocomplete_scroll.target = 0.0;
             }
+            self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
         } else {
@@ -874,10 +1048,21 @@ impl App {
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return;
         }
-        let selected = self.autocomplete_options[self.autocomplete_selected_idx]
+        let selected_item = self.autocomplete_options[self.autocomplete_selected_idx]
             .0
-            .word
             .clone();
+        if selected_item.text_edit.is_some() || !selected_item.additional_text_edits.is_empty() {
+            self.apply_lsp_completion_item(&selected_item);
+            self.autocomplete_active = false;
+            self.autocomplete_selected_idx = 0;
+            self.autocomplete_scroll.current = 0.0;
+            self.autocomplete_scroll.target = 0.0;
+            return;
+        }
+        let selected = selected_item
+            .insert_text
+            .clone()
+            .unwrap_or(selected_item.word.clone());
         let prefix_len = self.get_current_word_prefix().len();
 
         for _ in 0..prefix_len {
@@ -897,11 +1082,82 @@ impl App {
         self.autocomplete_selected_idx = 0;
         self.autocomplete_scroll.current = 0.0;
         self.autocomplete_scroll.target = 0.0;
+        self.sync_after_autocomplete();
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
+    }
+
+    fn apply_lsp_completion_item(&mut self, item: &AutocompleteItem) {
+        let Some(main_edit) = item.text_edit.clone() else {
+            if !item.additional_text_edits.is_empty() {
+                if let Some(path) = self.file_path.clone() {
+                    let mut changes = std::collections::HashMap::new();
+                    changes.insert(path, item.additional_text_edits.clone());
+                    self.apply_workspace_edit(&crate::lsp::WorkspaceEdit { changes }, true);
+                }
+            }
+            return;
+        };
+
+        let text = self.editor.get_full_text();
+        let main_start =
+            crate::lsp::lsp_pos_to_offset(&text, main_edit.start_line, main_edit.start_col);
+        let mut target_cursor = main_start + main_edit.new_text.len();
+        let mut changes = item.additional_text_edits.clone();
+        changes.push(main_edit);
+
+        let mut ops = Vec::with_capacity(changes.len());
+        for change in &changes {
+            let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
+            let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
+            ops.push((start, end, change.new_text.clone()));
+        }
+        ops.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+
+        for (start, end, new_text) in &ops {
+            if *start <= *end {
+                let (off, len, _) = self.editor.replace_range(*start, *end, new_text);
+                self.highlighter.shift_delete(off, len);
+                self.highlighter
+                    .shift_insert(off, new_text.len(), Some(new_text));
+            }
+        }
+
+        for (start, end, new_text) in &ops {
+            if *end <= main_start {
+                let delta = new_text.len() as isize - (*end - *start) as isize;
+                target_cursor = ((target_cursor as isize) + delta).max(0) as usize;
+            }
+        }
+        self.editor.cursor = target_cursor.min(self.editor.len());
+        self.editor.selection_anchor = None;
+        self.sync_after_autocomplete();
+
+        if let Some(w) = self.window.as_ref() {
+            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+            w.request_redraw();
+        }
+    }
+
+    fn sync_after_autocomplete(&mut self) {
+        if self.editor.sync_edits.is_empty() {
+            return;
+        }
+        let edits = std::mem::take(&mut self.editor.sync_edits);
+        if self.is_ide_mode {
+            if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                let text = self.editor.get_full_text();
+                let ext = self.file_extension.clone();
+                let path = path.clone();
+                lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+            }
+        }
+        self.highlighter
+            .apply_edits(self.editor.version, edits, None, None);
+        self.last_sent_version = self.editor.version;
     }
 
     pub fn update_terminal_search(&mut self) {
@@ -1544,6 +1800,8 @@ mod app_behavior_tests {
             autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
             autocomplete_hovered_idx: None,
             autocomplete_rect: None,
+            autocomplete_mode: AutocompleteMode::TreeSitter,
+            autocomplete_pending_request_id: None,
             current_sticky_lines: Vec::new(),
             target_sticky_lines: Vec::new(),
             sticky_anim_progress: 1.0,
@@ -1641,6 +1899,69 @@ mod app_behavior_tests {
         assert!(!app.autocomplete_active);
         assert_eq!(app.autocomplete_selected_idx, 0);
         assert_eq!(app.autocomplete_scroll.target, 0.0);
+    }
+
+    #[test]
+    fn ty_import_autocomplete_waits_for_prefix_and_requires_module() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("");
+        app.autocomplete_mode = AutocompleteMode::TyImports;
+
+        app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+            label: "Path".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("pathlib".to_string()),
+            insert_text: Some("Path".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+        assert!(app.autocomplete_active);
+        assert!(app.autocomplete_options.is_empty());
+
+        app.editor = editor_with("Pa");
+        app.autocomplete_mode = AutocompleteMode::TyImports;
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "Path".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("pathlib".to_string()),
+                insert_text: Some("Path".to_string()),
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "ParamSpec".to_string(),
+                kind: SymbolKind::Class,
+                module: None,
+                insert_text: Some("ParamSpec".to_string()),
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+        assert_eq!(app.autocomplete_options.len(), 1);
+        assert_eq!(app.autocomplete_options[0].0.word, "Path");
+        assert_eq!(app.autocomplete_options[0].0.module.as_deref(), Some("pathlib"));
+    }
+
+    #[test]
+    fn python_import_completion_guard_rejects_def_async_and_strings() {
+        let mut ok = editor_with("\n");
+        ok.cursor = 0;
+        assert!(python_import_completion_allowed(&ok));
+
+        let mut in_def = editor_with("def func(");
+        in_def.cursor = in_def.len();
+        assert!(!python_import_completion_allowed(&in_def));
+
+        let mut in_async = editor_with("async ");
+        in_async.cursor = in_async.len();
+        assert!(!python_import_completion_allowed(&in_async));
+
+        let mut in_string = editor_with("value = \"Pa");
+        in_string.cursor = in_string.len();
+        assert!(!python_import_completion_allowed(&in_string));
     }
 
     #[test]

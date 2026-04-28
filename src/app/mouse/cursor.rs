@@ -38,6 +38,15 @@ fn autocomplete_hovered_index(
     if px >= scroll_x {
         return None;
     }
+    let ty_btn_x = rx + rw - 40.0 * scale;
+    let ty_btn_y = ry + 8.0 * scale;
+    if px >= ty_btn_x
+        && px <= ty_btn_x + 28.0 * scale
+        && py >= ty_btn_y
+        && py <= ty_btn_y + 20.0 * scale
+    {
+        return None;
+    }
 
     let item_h = 36.0 * scale;
     let content_y = py - ry + current_scroll - (4.0 * scale);

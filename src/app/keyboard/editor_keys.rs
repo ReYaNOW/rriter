@@ -106,7 +106,7 @@ impl App {
             return;
         }
 
-        if self.autocomplete_active && !self.autocomplete_options.is_empty() {
+        if self.autocomplete_active {
             match autocomplete_key_action(physical_key) {
                 AutocompleteKeyAction::DismissAndContinue => {
                     self.autocomplete_active = false;
@@ -120,38 +120,30 @@ impl App {
                     return;
                 }
                 AutocompleteKeyAction::MoveDown => {
-                    self.autocomplete_selected_idx =
-                        (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
-                    self.ensure_autocomplete_visible();
+                    if !self.autocomplete_options.is_empty() {
+                        self.autocomplete_selected_idx =
+                            (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
+                        self.ensure_autocomplete_visible();
+                    }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
                 AutocompleteKeyAction::MoveUp => {
-                    if self.autocomplete_selected_idx == 0 {
-                        self.autocomplete_selected_idx = self.autocomplete_options.len() - 1;
-                    } else {
-                        self.autocomplete_selected_idx -= 1;
+                    if !self.autocomplete_options.is_empty() {
+                        if self.autocomplete_selected_idx == 0 {
+                            self.autocomplete_selected_idx = self.autocomplete_options.len() - 1;
+                        } else {
+                            self.autocomplete_selected_idx -= 1;
+                        }
+                        self.ensure_autocomplete_visible();
                     }
-                    self.ensure_autocomplete_visible();
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
                 AutocompleteKeyAction::Apply => {
-                    self.apply_autocomplete();
-                    let edits = std::mem::take(&mut self.editor.sync_edits);
-                    if !edits.is_empty() {
-                        if self.is_ide_mode {
-                            if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-                                let text = self.editor.get_full_text();
-                                let ext = self.file_extension.clone();
-                                let path = path.clone();
-                                lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
-                            }
-                        }
-                        self.highlighter
-                            .apply_edits(self.editor.version, edits, None, None);
+                    if !self.autocomplete_options.is_empty() {
+                        self.apply_autocomplete();
                     }
-                    self.last_sent_version = self.editor.version;
                     return;
                 }
                 AutocompleteKeyAction::None => {}
@@ -206,6 +198,7 @@ impl App {
         let mut is_edit = false;
         let mut should_trigger_autocomplete = false;
         let mut should_sync = true;
+        let mut ty_completion_trigger: Option<&'static str> = None;
 
         let old_cursor_y = self
             .renderer
@@ -404,6 +397,9 @@ impl App {
                     is_edit = true;
                     if self.autocomplete_active {
                         should_trigger_autocomplete = true;
+                        if self.autocomplete_mode != AutocompleteMode::TreeSitter {
+                            ty_completion_trigger = None;
+                        }
                     }
                 }
                 cursor_moved = true;
@@ -414,6 +410,9 @@ impl App {
                     is_edit = true;
                     if self.autocomplete_active {
                         should_trigger_autocomplete = true;
+                        if self.autocomplete_mode != AutocompleteMode::TreeSitter {
+                            ty_completion_trigger = None;
+                        }
                     }
                 }
                 cursor_moved = true;
@@ -424,6 +423,9 @@ impl App {
                     is_edit = true;
                     if self.autocomplete_active {
                         should_trigger_autocomplete = true;
+                        if self.autocomplete_mode != AutocompleteMode::TreeSitter {
+                            ty_completion_trigger = None;
+                        }
                     }
                 }
                 cursor_moved = true;
@@ -434,6 +436,9 @@ impl App {
                     is_edit = true;
                     if self.autocomplete_active {
                         should_trigger_autocomplete = true;
+                        if self.autocomplete_mode != AutocompleteMode::TreeSitter {
+                            ty_completion_trigger = None;
+                        }
                     }
                 }
                 cursor_moved = true;
@@ -603,7 +608,16 @@ impl App {
                         cursor_moved = true;
                         is_edit = true;
 
-                        if txt.chars().all(|c| c.is_alphanumeric() || c == '_') || txt == "." {
+                        if txt == "." {
+                            should_trigger_autocomplete = true;
+                            ty_completion_trigger = Some(".");
+                        } else if txt == "(" {
+                            should_trigger_autocomplete = true;
+                            ty_completion_trigger = Some("(");
+                        } else if txt == "," {
+                            should_trigger_autocomplete = true;
+                            ty_completion_trigger = Some(",");
+                        } else if txt.chars().all(|c| c.is_alphanumeric() || c == '_') {
                             should_trigger_autocomplete = true;
                         }
                         if txt == "=" {
@@ -623,7 +637,19 @@ impl App {
         if is_edit {
             self.lsp_actions_menu = None;
             if should_trigger_autocomplete {
-                self.update_autocomplete();
+                if let Some(trigger) = ty_completion_trigger {
+                    self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
+                } else if self.autocomplete_active
+                    && self.autocomplete_mode == AutocompleteMode::TyImports
+                {
+                    self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
+                } else if self.autocomplete_active
+                    && self.autocomplete_mode == AutocompleteMode::TyContext
+                {
+                    self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
+                } else {
+                    self.update_autocomplete();
+                }
             } else {
                 self.autocomplete_active = false;
                 self.autocomplete_selected_idx = 0;

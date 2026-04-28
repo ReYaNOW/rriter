@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use crate::highlighter::{CompletionItem, Highlighter};
+use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
 use crate::renderer::{Renderer, Theme};
 use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
@@ -103,6 +103,7 @@ pub enum LspActionItem {
     AddNoqaAll,
     FixAll,
     OrganizeImports,
+    CompleteImports,
 }
 
 /// Состояние всплывающего меню Alt+Enter
@@ -117,6 +118,55 @@ pub struct LspActionsMenu {
     pub menu_y: f32,
     /// ID запроса code actions (ждём ответа)
     pub pending_request_id: Option<i32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutocompleteMode {
+    TreeSitter,
+    TyContext,
+    TyImports,
+}
+
+#[derive(Clone, Debug)]
+pub struct AutocompleteItem {
+    pub word: String,
+    pub kind: SymbolKind,
+    pub scope_start: usize,
+    pub scope_end: usize,
+    pub module: Option<String>,
+    pub insert_text: Option<String>,
+    pub text_edit: Option<crate::lsp::TextChange>,
+    pub additional_text_edits: Vec<crate::lsp::TextChange>,
+}
+
+impl From<CompletionItem> for AutocompleteItem {
+    fn from(item: CompletionItem) -> Self {
+        Self {
+            word: item.word,
+            kind: item.kind,
+            scope_start: item.scope_start,
+            scope_end: item.scope_end,
+            module: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }
+    }
+}
+
+impl From<crate::lsp::LspCompletionItem> for AutocompleteItem {
+    fn from(item: crate::lsp::LspCompletionItem) -> Self {
+        Self {
+            word: item.label,
+            kind: item.kind,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: item.module,
+            insert_text: item.insert_text,
+            text_edit: item.text_edit,
+            additional_text_edits: item.additional_text_edits,
+        }
+    }
 }
 
 pub struct IdePanelState {
@@ -369,12 +419,14 @@ pub struct App {
     pub should_maximize: bool,
 
     pub autocomplete_active: bool,
-    pub autocomplete_options: Vec<(CompletionItem, Vec<usize>)>,
+    pub autocomplete_options: Vec<(AutocompleteItem, Vec<usize>)>,
     pub autocomplete_selected_idx: usize,
     pub autocomplete_anim_progress: f32,
     pub autocomplete_scroll: crate::scroll::ScrollState,
     pub autocomplete_hovered_idx: Option<usize>,
     pub autocomplete_rect: Option<(f32, f32, f32, f32)>,
+    pub autocomplete_mode: AutocompleteMode,
+    pub autocomplete_pending_request_id: Option<i32>,
 
     pub current_sticky_lines: Vec<(usize, usize)>,
     pub target_sticky_lines: Vec<(usize, usize)>,
