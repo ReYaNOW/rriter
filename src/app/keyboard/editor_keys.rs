@@ -61,6 +61,10 @@ fn sync_edit_line_range(
     (line_start_byte, line_end_byte)
 }
 
+fn bounded_repeat_scroll_delta(delta_y: f32, line_height: f32) -> Option<f32> {
+    (delta_y.abs() <= line_height * 2.0).then_some(delta_y)
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_editor_keyboard_input(
@@ -109,13 +113,11 @@ impl App {
         if self.autocomplete_active {
             match autocomplete_key_action(physical_key) {
                 AutocompleteKeyAction::DismissAndContinue => {
-                    self.autocomplete_active = false;
-                    self.autocomplete_selected_idx = 0;
+                    self.close_autocomplete();
                     self.window.as_ref().unwrap().request_redraw();
                 }
                 AutocompleteKeyAction::DismissAndConsume => {
-                    self.autocomplete_active = false;
-                    self.autocomplete_selected_idx = 0;
+                    self.close_autocomplete();
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
@@ -123,7 +125,9 @@ impl App {
                     if !self.autocomplete_options.is_empty() {
                         self.autocomplete_selected_idx =
                             (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
+                        self.autocomplete_hovered_idx = None;
                         self.ensure_autocomplete_visible();
+                        self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
                     }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
@@ -135,7 +139,9 @@ impl App {
                         } else {
                             self.autocomplete_selected_idx -= 1;
                         }
+                        self.autocomplete_hovered_idx = None;
                         self.ensure_autocomplete_visible();
+                        self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
                     }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
@@ -148,6 +154,20 @@ impl App {
                 }
                 AutocompleteKeyAction::None => {}
             }
+        }
+        if self.autocomplete_mode == AutocompleteMode::TyContext
+            && self.autocomplete_pending_request_id.is_some()
+            && matches!(
+                physical_key,
+                PhysicalKey::Code(KeyCode::Enter | KeyCode::Tab | KeyCode::NumpadEnter)
+            )
+            && cursor_after_python_member_dot(&self.editor)
+        {
+            self.autocomplete_apply_pending_response = true;
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
+            }
+            return;
         }
 
         // Alt+Enter — меню быстрых действий LSP
@@ -197,7 +217,7 @@ impl App {
         let mut cursor_moved = false;
         let mut is_edit = false;
         let mut should_trigger_autocomplete = false;
-        let mut should_sync = true;
+        let mut should_notify_lsp = true;
         let mut ty_completion_trigger: Option<&'static str> = None;
 
         let old_cursor_y = self
@@ -477,7 +497,7 @@ impl App {
                     .shift_insert(self.editor.cursor - ins_len, ins_len, Some(" "));
                 cursor_moved = true;
                 is_edit = true;
-                should_sync = false;
+                should_notify_lsp = false;
             }
             PhysicalKey::Code(KeyCode::Digit4) if ctrl => {
                 self.close_tab_at(self.active_tab);
@@ -485,28 +505,37 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                 let mut copied = false;
-                crate::app::mouse::HOVER_STATE.with(|state| {
-                    let mut state = state.borrow_mut();
-                    if let (Some(popup), Some(a), Some(b)) = (
-                        state.popup.as_ref(),
-                        state.selection_anchor,
-                        state.selection_cursor,
-                    ) {
-                        let start = a.min(b);
-                        let end = a.max(b);
-                        if start < end
-                            && end <= popup.text.len()
-                            && popup.text.is_char_boundary(start)
-                            && popup.text.is_char_boundary(end)
-                        {
-                            self.set_clipboard_text(&popup.text[start..end]);
-                            state.selection_anchor = None;
-                            state.selection_cursor = None;
-                            state.selecting = false;
-                            copied = true;
+                if let Some(text) = self.selected_autocomplete_detail_text() {
+                    self.set_clipboard_text(text);
+                    self.autocomplete_detail_selection_anchor = None;
+                    self.autocomplete_detail_selection_cursor = None;
+                    self.autocomplete_detail_selecting = false;
+                    copied = true;
+                }
+                if !copied {
+                    crate::app::mouse::HOVER_STATE.with(|state| {
+                        let mut state = state.borrow_mut();
+                        if let (Some(popup), Some(a), Some(b)) = (
+                            state.popup.as_ref(),
+                            state.selection_anchor,
+                            state.selection_cursor,
+                        ) {
+                            let start = a.min(b);
+                            let end = a.max(b);
+                            if start < end
+                                && end <= popup.text.len()
+                                && popup.text.is_char_boundary(start)
+                                && popup.text.is_char_boundary(end)
+                            {
+                                self.set_clipboard_text(&popup.text[start..end]);
+                                state.selection_anchor = None;
+                                state.selection_cursor = None;
+                                state.selecting = false;
+                                copied = true;
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 if let Some(r) = self.renderer.as_ref() {
                     if !copied {
                         let diag_copy = crate::app::mouse::HOVER_STATE.with(|s| {
@@ -568,7 +597,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
                 self.editor.select_all();
-                self.autocomplete_active = false;
+                self.close_autocomplete();
             }
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
@@ -611,17 +640,11 @@ impl App {
                         if txt == "." {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
-                        } else if txt == "(" {
-                            should_trigger_autocomplete = true;
-                            ty_completion_trigger = Some("(");
-                        } else if txt == "," {
-                            should_trigger_autocomplete = true;
-                            ty_completion_trigger = Some(",");
                         } else if txt.chars().all(|c| c.is_alphanumeric() || c == '_') {
                             should_trigger_autocomplete = true;
                         }
                         if txt == "=" {
-                            should_sync = false;
+                            should_notify_lsp = false;
                         }
                     }
                 }
@@ -629,8 +652,7 @@ impl App {
         }
 
         if cursor_moved && !is_edit {
-            self.autocomplete_active = false;
-            self.autocomplete_selected_idx = 0;
+            self.close_autocomplete();
             self.lsp_actions_menu = None;
         }
 
@@ -639,20 +661,19 @@ impl App {
             if should_trigger_autocomplete {
                 if let Some(trigger) = ty_completion_trigger {
                     self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
+                } else if cursor_after_python_member_dot(&self.editor)
+                    || cursor_inside_python_call_parens(&self.editor)
+                {
+                    self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
                 } else if self.autocomplete_active
                     && self.autocomplete_mode == AutocompleteMode::TyImports
                 {
                     self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
-                } else if self.autocomplete_active
-                    && self.autocomplete_mode == AutocompleteMode::TyContext
-                {
-                    self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
                 } else {
                     self.update_autocomplete();
                 }
             } else {
-                self.autocomplete_active = false;
-                self.autocomplete_selected_idx = 0;
+                self.close_autocomplete();
             }
 
             App::update_window_title(
@@ -666,77 +687,73 @@ impl App {
                 self.search_results.clear();
             }
 
-            if should_sync {
-                if !self.editor.sync_edits.is_empty() {
-                    let edits = std::mem::take(&mut self.editor.sync_edits);
-                    // LSP didChange — отправляем полный текст только если файл Python и IDE режим
-                    if self.is_ide_mode {
-                        if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-                            let text = self.editor.get_full_text();
-                            let ext = self.file_extension.clone();
-                            let path = path.clone();
-                            lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
-                        }
+            if !self.editor.sync_edits.is_empty() {
+                let edits = std::mem::take(&mut self.editor.sync_edits);
+                // LSP can skip low-value keystrokes; highlighter cannot, its replica must stay exact.
+                if should_notify_lsp && self.is_ide_mode {
+                    if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                        let text = self.editor.get_full_text();
+                        let ext = self.file_extension.clone();
+                        let path = path.clone();
+                        lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
                     }
-                    let (line_start_byte, line_end_byte) =
-                        sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
-
-                    self.highlighter.apply_edits(
-                        self.editor.version,
-                        edits,
-                        line_start_byte,
-                        line_end_byte,
-                    );
                 }
+                let (line_start_byte, line_end_byte) =
+                    sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
+
+                self.highlighter.apply_edits(
+                    self.editor.version,
+                    edits,
+                    line_start_byte,
+                    line_end_byte,
+                );
+            }
+            if should_notify_lsp {
                 self.last_sent_version = self.editor.version;
+            }
 
-                // Check poll once but don't sleep
-                if self.highlighter.poll(self.editor.version) {
-                    let autofold_threshold = match self.file_extension.as_str() {
-                        "py" | "pyi" | "rs" | "dart" => 1,
-                        _ => 2,
-                    };
-                    self.editor.foldable_lines.clear();
-                    self.editor.foldable_ranges_bytes.clear();
-                    for &(start_b, end_b, is_autofold, is_sticky) in
-                        &self.highlighter.foldable_ranges
-                    {
-                        self.editor
-                            .foldable_ranges_bytes
-                            .push((start_b, end_b, is_sticky));
-                        let sl = self
-                            .editor
-                            .line_offsets
-                            .partition_point(|&x| x <= start_b)
-                            .saturating_sub(1);
-                        let el = self
-                            .editor
-                            .line_offsets
-                            .partition_point(|&x| x <= end_b)
-                            .saturating_sub(1);
-                        if el > sl {
-                            self.editor.foldable_lines.insert(sl, el);
-                            if is_autofold
-                                && el - sl >= autofold_threshold
-                                && !self.is_highlighted_once
-                            {
-                                self.editor.folded_lines.insert(sl);
-                                self.editor
-                                    .folded_start_bytes
-                                    .insert(self.editor.line_offsets[sl]);
-                            }
+            // Check poll once but don't sleep
+            if self.highlighter.poll(self.editor.version) {
+                let autofold_threshold = match self.file_extension.as_str() {
+                    "py" | "pyi" | "rs" | "dart" => 1,
+                    _ => 2,
+                };
+                self.editor.foldable_lines.clear();
+                self.editor.foldable_ranges_bytes.clear();
+                for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
+                    self.editor
+                        .foldable_ranges_bytes
+                        .push((start_b, end_b, is_sticky));
+                    let sl = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&x| x <= start_b)
+                        .saturating_sub(1);
+                    let el = self
+                        .editor
+                        .line_offsets
+                        .partition_point(|&x| x <= end_b)
+                        .saturating_sub(1);
+                    if el > sl {
+                        self.editor.foldable_lines.insert(sl, el);
+                        if is_autofold && el - sl >= autofold_threshold && !self.is_highlighted_once
+                        {
+                            self.editor.folded_lines.insert(sl);
+                            self.editor
+                                .folded_start_bytes
+                                .insert(self.editor.line_offsets[sl]);
                         }
                     }
-
-                    self.is_highlighted_once = true;
-                    if self.autocomplete_active {
-                        self.update_autocomplete();
-                    }
                 }
 
-                if let Some(log) = &mut self.pending_key_log {
-                    log.t_highlight = Some(std::time::Instant::now());
+                self.is_highlighted_once = true;
+                if self.autocomplete_active {
+                    self.update_autocomplete();
                 }
+            }
+
+            if let Some(log) = &mut self.pending_key_log {
+                log.t_highlight = Some(std::time::Instant::now());
             }
         }
 
@@ -782,8 +799,13 @@ impl App {
                     .get_cursor_xy(&self.editor)
                     .1;
                 let delta_y = new_cursor_y - old_cursor_y;
-                self.scroll_y.target += delta_y;
-                self.scroll_y.current += delta_y;
+                if let Some(delta_y) = bounded_repeat_scroll_delta(
+                    delta_y,
+                    self.renderer.as_ref().unwrap().line_height,
+                ) {
+                    self.scroll_y.target += delta_y;
+                    self.scroll_y.current += delta_y;
+                }
                 let max_scroll = self
                     .renderer
                     .as_mut()
@@ -896,10 +918,28 @@ mod tests {
             (Some(0), Some(20))
         );
 
+        let edits = vec![
+            crate::highlighter::SyncEdit::Insert {
+                offset: 7,
+                text: " ".to_string(),
+            },
+            crate::highlighter::SyncEdit::Delete { offset: 7, len: 1 },
+        ];
+        assert_eq!(
+            sync_edit_line_range(&edits, &lines, 24),
+            (Some(6), Some(12))
+        );
+
         let edits = vec![crate::highlighter::SyncEdit::Insert {
             offset: 3,
             text: "x".to_string(),
         }];
         assert_eq!(sync_edit_line_range(&edits, &[], 9), (Some(0), Some(9)));
+    }
+
+    #[test]
+    fn bounded_repeat_scroll_delta_ignores_stale_large_focus_jump() {
+        assert_eq!(bounded_repeat_scroll_delta(22.0, 12.0), Some(22.0));
+        assert_eq!(bounded_repeat_scroll_delta(-25.0, 12.0), None);
     }
 }

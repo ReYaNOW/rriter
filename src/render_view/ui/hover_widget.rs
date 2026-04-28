@@ -345,6 +345,16 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
     })
 }
 
+fn valid_diagnostic_popup_cache(
+    cache: Vec<crate::app::mouse::HoveredDiagnostic>,
+    diagnostics_len: usize,
+) -> Vec<crate::app::mouse::HoveredDiagnostic> {
+    cache
+        .into_iter()
+        .filter(|(idx, _, _, _, _)| *idx < diagnostics_len)
+        .collect()
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     fn push_hover_popup_frame(
@@ -397,7 +407,12 @@ impl Renderer {
             let s = s.borrow();
             s.diagnostic_popup_cache().to_vec()
         });
+        let hovered_diags_cache =
+            valid_diagnostic_popup_cache(hovered_diags_cache, lsp_diagnostics.len());
         if hovered_diags_cache.is_empty() {
+            crate::app::mouse::HOVER_STATE.with(|state| {
+                state.borrow_mut().reset_diagnostic_popup();
+            });
             return;
         }
 

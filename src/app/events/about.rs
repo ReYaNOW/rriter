@@ -620,6 +620,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     if let Some(w) = app.window.as_ref() {
                         w.request_redraw();
                     }
+                } else if app.autocomplete_detail_request_id == Some(request_id) {
+                    app.merge_autocomplete_details(items);
+                    if let Some(w) = app.window.as_ref() {
+                        w.request_redraw();
+                    }
                 }
             }
             crate::lsp::LspEvent::ServerReady => {}

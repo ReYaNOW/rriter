@@ -63,6 +63,30 @@ fn terminal_mouse_sgr_sequence(
     format!("\x1b[<{};{};{}{}", btn_code, cell_x, cell_y, end_char)
 }
 
+fn autocomplete_item_index_at(
+    px: f32,
+    py: f32,
+    rect: Rect,
+    current_scroll: f32,
+    total_items: usize,
+    scale: f32,
+) -> Option<usize> {
+    let (rx, ry, rw, rh) = rect;
+    if px < rx || px > rx + rw || py < ry || py > ry + rh {
+        return None;
+    }
+    if px >= rx + rw - 14.0 * scale {
+        return None;
+    }
+    let content_y = py - ry + current_scroll - 4.0 * scale;
+    if content_y < 0.0 {
+        return None;
+    }
+    let idx = (content_y / (36.0 * scale)) as usize;
+    (idx < total_items).then_some(idx)
+}
+
+#[cfg(test)]
 fn autocomplete_scroll_click_target(
     mouse_y: f32,
     rect_y: f32,
@@ -105,7 +129,64 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if state == ElementState::Released && self.autocomplete_detail_selecting {
+            self.autocomplete_detail_selecting = false;
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+            if self.autocomplete_active {
+                let in_main = self
+                    .autocomplete_rect
+                    .is_some_and(|(x, y, w, h)| mx >= x && mx <= x + w && my >= y && my <= y + h);
+                let in_detail = self
+                    .autocomplete_detail_rect
+                    .is_some_and(|(x, y, w, h)| mx >= x && mx <= x + w && my >= y && my <= y + h);
+                if in_detail {
+                    if let (Some(rect), Some(popup)) = (
+                        self.autocomplete_detail_rect,
+                        self.autocomplete_detail_popup.as_ref(),
+                    ) {
+                        let byte = hover_popup_byte_at(
+                            self.renderer.as_mut().unwrap(),
+                            popup,
+                            rect,
+                            mx,
+                            my,
+                        );
+                        self.autocomplete_detail_selection_anchor = Some(byte);
+                        self.autocomplete_detail_selection_cursor = Some(byte);
+                        self.autocomplete_detail_selecting = true;
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                if in_main {
+                    if let Some(rect) = self.autocomplete_rect {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        if let Some(idx) = autocomplete_item_index_at(
+                            mx,
+                            my,
+                            rect,
+                            self.autocomplete_scroll.current,
+                            self.autocomplete_options.len(),
+                            s,
+                        ) {
+                            if idx == self.autocomplete_selected_idx {
+                                self.apply_autocomplete();
+                            } else {
+                                self.autocomplete_selected_idx = idx;
+                                self.autocomplete_hovered_idx = None;
+                                self.request_autocomplete_detail_for_index(idx);
+                            }
+                        }
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+                self.close_autocomplete();
+                self.window.as_ref().unwrap().request_redraw();
+            }
             let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
             let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
             let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
@@ -276,10 +357,7 @@ impl App {
                                     }
                                 }
                                 crate::app::LspActionItem::CompleteImports => {
-                                    self.request_ty_autocomplete(
-                                        AutocompleteMode::TyImports,
-                                        None,
-                                    );
+                                    self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
                                 }
                             }
                             self.window.as_ref().unwrap().request_redraw();
@@ -940,7 +1018,6 @@ impl App {
         if state == ElementState::Pressed {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-            let s = self.renderer.as_ref().unwrap().scale_factor;
 
             // Sidebar processing and resizing moved to ui_registry
             // Обработка кликов в дереве файлов теперь выполняется через ui_registry
@@ -953,41 +1030,11 @@ impl App {
                         && last_mouse_y >= ry
                         && last_mouse_y <= ry + rh
                     {
-                        let scroll_x = rx + rw - 14.0 * s;
-                        let ty_btn_x = rx + rw - 40.0 * s;
-                        let ty_btn_y = ry + 8.0 * s;
-
-                        if last_mouse_x >= ty_btn_x
-                            && last_mouse_x <= ty_btn_x + 28.0 * s
-                            && last_mouse_y >= ty_btn_y
-                            && last_mouse_y <= ty_btn_y + 20.0 * s
-                        {
-                            self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
-                        } else if last_mouse_x >= scroll_x {
-                            if let Some((drag_offset, target)) = autocomplete_scroll_click_target(
-                                last_mouse_y,
-                                ry,
-                                rh,
-                                self.autocomplete_scroll.current,
-                                self.autocomplete_options.len(),
-                                s,
-                            ) {
-                                self.autocomplete_scroll.is_dragging = true;
-                                self.autocomplete_scroll.drag_offset = drag_offset;
-                                if (target - self.autocomplete_scroll.current).abs() > f32::EPSILON
-                                {
-                                    self.autocomplete_scroll.anim_speed = 15.0;
-                                    self.autocomplete_scroll.target = target;
-                                }
-                            }
-                        } else if let Some(idx) = self.autocomplete_hovered_idx {
-                            self.autocomplete_selected_idx = idx;
-                            self.apply_autocomplete();
-                        }
+                        self.close_autocomplete();
+                        self.window.as_ref().unwrap().request_redraw();
                         return;
                     } else {
-                        self.autocomplete_active = false;
-                        self.autocomplete_selected_idx = 0;
+                        self.close_autocomplete();
                         self.window.as_ref().unwrap().request_redraw();
                     }
                 }
@@ -1071,5 +1118,22 @@ mod tests {
         let (_, paged_target) =
             autocomplete_scroll_click_target(140.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
         assert!(paged_target > 0.0);
+    }
+
+    #[test]
+    fn autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll() {
+        let rect = (10.0, 20.0, 200.0, 260.0);
+        assert_eq!(
+            autocomplete_item_index_at(20.0, 60.0, rect, 0.0, 10, 1.0),
+            Some(1)
+        );
+        assert_eq!(
+            autocomplete_item_index_at(20.0, 60.0, rect, 72.0, 10, 1.0),
+            Some(3)
+        );
+        assert_eq!(
+            autocomplete_item_index_at(202.0, 60.0, rect, 0.0, 10, 1.0),
+            None
+        );
     }
 }

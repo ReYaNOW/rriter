@@ -201,10 +201,282 @@ fn python_import_completion_allowed(editor: &Editor) -> bool {
         .checked_sub(1)
         .and_then(|idx| bytes.get(idx))
         .is_some_and(|&b| is_python_ident_byte(b));
-    let next_ident = bytes
-        .get(cursor)
-        .is_some_and(|&b| is_python_ident_byte(b));
+    let next_ident = bytes.get(cursor).is_some_and(|&b| is_python_ident_byte(b));
     !prev_ident && !next_ident
+}
+
+fn is_magic_python_name(name: &str) -> bool {
+    name.len() > 4 && name.starts_with("__") && name.ends_with("__")
+}
+
+fn is_type_like_completion_source(text: &str) -> bool {
+    let s = text.trim();
+    if s.is_empty() {
+        return false;
+    }
+    if s.contains("module") || s.contains('/') || s.contains('\\') {
+        return false;
+    }
+    s.contains('|')
+        || s.contains('[')
+        || s.contains(']')
+        || s.contains("->")
+        || s.chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_' || c == '.')
+        || matches!(
+            s,
+            "Any"
+                | "None"
+                | "bool"
+                | "bytes"
+                | "dict"
+                | "float"
+                | "int"
+                | "list"
+                | "set"
+                | "str"
+                | "tuple"
+                | "type"
+        )
+}
+
+fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
+    let Some(module) = item.module.as_deref() else {
+        return false;
+    };
+    let Some(detail) = item.detail.as_deref() else {
+        return false;
+    };
+    detail.contains(module) && detail.contains(&format!(".{}", item.word))
+}
+
+fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
+    let mut counts: FxHashMap<String, usize> = FxHashMap::default();
+    for item in items {
+        let Some(module) = item.module.as_ref() else {
+            continue;
+        };
+        if is_type_like_completion_source(module) {
+            continue;
+        }
+        if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter)
+            && !completion_item_has_explicit_owner(item)
+        {
+            continue;
+        }
+        *counts.entry(module.clone()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(module, _)| module)
+}
+
+fn imported_python_module_for_symbol(text: &str, symbol: &str) -> Option<String> {
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("from ") else {
+            continue;
+        };
+        let Some((module, imports)) = rest.split_once(" import ") else {
+            continue;
+        };
+        if imports.trim_start().starts_with('(') {
+            for import_line in lines.by_ref() {
+                let item = import_line
+                    .trim()
+                    .trim_end_matches(',')
+                    .split(" as ")
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if item == ")" {
+                    break;
+                }
+                if item == symbol {
+                    return Some(module.trim().to_string());
+                }
+            }
+        } else {
+            for item in imports.split(',') {
+                let name = item.trim().split(" as ").next().unwrap_or("").trim();
+                if name == symbol {
+                    return Some(module.trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim_start();
+    let prefix = format!("class {class_name}");
+    let rest = trimmed.strip_prefix(&prefix)?;
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    let open = rest.find('(')?;
+    let close = rest.rfind(')')?;
+    if close <= open {
+        return Some(Vec::new());
+    }
+    Some(
+        rest[open + 1..close]
+            .split(',')
+            .filter_map(|base| {
+                let name = base
+                    .trim()
+                    .split(|c: char| c == '[' || c == '(' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                (!name.is_empty()).then(|| name.to_string())
+            })
+            .collect(),
+    )
+}
+
+fn class_direct_attr(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("def ")
+        || trimmed.starts_with("async def ")
+        || trimmed.starts_with('@')
+        || trimmed.starts_with("class ")
+    {
+        return None;
+    }
+    let end = trimmed
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(trimmed.len());
+    if end == 0 {
+        return None;
+    }
+    let rest = trimmed[end..].trim_start();
+    (rest.starts_with(':') || rest.starts_with('=')).then_some(&trimmed[..end])
+}
+
+fn python_class_attr_owner_in_source(source: &str, class_name: &str, attr: &str) -> Option<String> {
+    fn find(source: &str, class_name: &str, attr: &str, depth: usize) -> Option<String> {
+        if depth > 8 {
+            return None;
+        }
+        let lines: Vec<&str> = source.lines().collect();
+        for (idx, line) in lines.iter().enumerate() {
+            let class_indent = line.len().saturating_sub(line.trim_start().len());
+            let Some(bases) = class_header_bases(line, class_name) else {
+                continue;
+            };
+            let direct_indent = class_indent + 4;
+            for body in lines.iter().skip(idx + 1) {
+                if body.trim().is_empty() {
+                    continue;
+                }
+                let indent = body.len().saturating_sub(body.trim_start().len());
+                if indent <= class_indent {
+                    break;
+                }
+                if indent == direct_indent && class_direct_attr(body) == Some(attr) {
+                    return Some(class_name.to_string());
+                }
+            }
+            for base in bases {
+                if let Some(owner) = find(source, &base, attr, depth + 1) {
+                    return Some(owner);
+                }
+            }
+        }
+        None
+    }
+    find(source, class_name, attr, 0)
+}
+
+fn imported_python_class_source(
+    current_text: &str,
+    workspaces: &[PathBuf],
+    current_path: Option<&Path>,
+    class_name: &str,
+) -> Option<String> {
+    let module = imported_python_module_for_symbol(current_text, class_name)?;
+    let rel = module.replace('.', "/") + ".py";
+    for ws in workspaces {
+        let path = ws.join(&rel);
+        if let Ok(source) = std::fs::read_to_string(path) {
+            return Some(source);
+        }
+    }
+    if let Some(path) = current_path.and_then(Path::parent) {
+        for root in path.ancestors() {
+            let candidate = root.join(&rel);
+            if let Ok(source) = std::fs::read_to_string(candidate) {
+                return Some(source);
+            }
+        }
+    }
+    None
+}
+
+fn python_member_chain_too_deep(editor: &Editor) -> bool {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let (line_start, _) = cursor_line_bounds(&text, cursor);
+    let prefix = text.get(line_start..cursor).unwrap_or("");
+    if cursor_in_python_string_or_comment(prefix) {
+        return false;
+    }
+    let chain = prefix
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+        .next()
+        .unwrap_or("");
+    chain.bytes().filter(|&b| b == b'.').count() > 4
+}
+
+fn cursor_after_python_member_dot(editor: &Editor) -> bool {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let (line_start, _) = cursor_line_bounds(&text, cursor);
+    let prefix = text.get(line_start..cursor).unwrap_or("");
+    if cursor_in_python_string_or_comment(prefix) {
+        return false;
+    }
+    let bytes = prefix.as_bytes();
+    let mut idx = bytes.len();
+    while idx > 0 {
+        let b = bytes[idx - 1];
+        if is_python_ident_byte(b) {
+            idx -= 1;
+        } else {
+            break;
+        }
+    }
+    if idx == 0 || bytes[idx - 1] != b'.' {
+        return false;
+    }
+    idx >= 2 && is_python_ident_byte(bytes[idx - 2])
+}
+
+fn cursor_inside_python_call_parens(editor: &Editor) -> bool {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let (line_start, _) = cursor_line_bounds(&text, cursor);
+    let prefix = text.get(line_start..cursor).unwrap_or("");
+    if cursor_in_python_string_or_comment(prefix) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for b in prefix.bytes() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth > 0
 }
 
 impl App {
@@ -544,6 +816,24 @@ impl App {
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
+            let highest = self
+                .tabs
+                .iter()
+                .map(|t| t.editor.version)
+                .max()
+                .unwrap_or(0)
+                .max(self.editor.version);
+            self.editor.version = highest + 1;
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.highlighter.reset(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+            );
+            self.clear_ctrl_definition();
+            crate::app::mouse::HOVER_STATE.with(|state| {
+                *state.borrow_mut() = crate::app::mouse::HoverState::default();
+            });
         } else {
             self.tabs.remove(idx);
             if idx < self.active_tab {
@@ -551,7 +841,7 @@ impl App {
             }
         }
 
-        self.autocomplete_active = false;
+        self.close_autocomplete();
         self.show_welcome =
             self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
 
@@ -830,12 +1120,212 @@ impl App {
         String::from_utf8(res).unwrap_or_default()
     }
 
-    pub fn request_ty_autocomplete(
-        &mut self,
-        mode: AutocompleteMode,
-        trigger: Option<&str>,
-    ) {
+    pub fn close_autocomplete(&mut self) {
+        self.autocomplete_active = false;
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_scroll.current = 0.0;
+        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_rect = None;
+        self.autocomplete_anchor = None;
+        self.autocomplete_pending_request_id = None;
+        self.autocomplete_detail_request_id = None;
+        self.autocomplete_detail_word = None;
+        self.autocomplete_detail_popup = None;
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.autocomplete_min_width = 0.0;
+        self.autocomplete_detail_selection_anchor = None;
+        self.autocomplete_detail_selection_cursor = None;
+        self.autocomplete_detail_selecting = false;
+        self.autocomplete_apply_pending_response = false;
+    }
+
+    pub fn autocomplete_detail_selection(&self) -> Option<(usize, usize)> {
+        let a = self.autocomplete_detail_selection_anchor?;
+        let b = self.autocomplete_detail_selection_cursor?;
+        (a != b).then_some((a.min(b), a.max(b)))
+    }
+
+    pub fn selected_autocomplete_detail_text(&self) -> Option<String> {
+        let popup = self.autocomplete_detail_popup.as_ref()?;
+        let (start, end) = self.autocomplete_detail_selection()?;
+        if start < end
+            && end <= popup.text.len()
+            && popup.text.is_char_boundary(start)
+            && popup.text.is_char_boundary(end)
+        {
+            Some(popup.text[start..end].to_string())
+        } else {
+            None
+        }
+    }
+
+    fn autocomplete_detail_text<'a>(
+        item: &AutocompleteItem,
+        detail: &'a str,
+    ) -> std::borrow::Cow<'a, str> {
+        let Some(owner) = item
+            .module
+            .as_deref()
+            .filter(|module| !is_type_like_completion_source(module))
+        else {
+            return std::borrow::Cow::Borrowed(detail);
+        };
+        if detail.contains(owner) || detail.contains(&format!(".{}", item.word)) {
+            return std::borrow::Cow::Borrowed(detail);
+        }
+        for prefix in ["(variable) ", "(parameter) "] {
+            if let Some(rest) = detail.strip_prefix(prefix) {
+                if rest.starts_with(&item.word) {
+                    return std::borrow::Cow::Owned(format!("{prefix}{owner}.{rest}"));
+                }
+            }
+        }
+        std::borrow::Cow::Borrowed(detail)
+    }
+
+    fn autocomplete_has_only_current_text_match(&self) -> bool {
+        let prefix = self.get_current_word_prefix();
+        !prefix.is_empty()
+            && self.autocomplete_options.len() == 1
+            && self.autocomplete_options[0].0.word == prefix
+    }
+
+    fn hide_autocomplete_popup_keep_request(&mut self) {
+        self.autocomplete_active = false;
+        self.autocomplete_options.clear();
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_scroll.current = 0.0;
+        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_rect = None;
+        self.autocomplete_anchor = None;
+        self.autocomplete_detail_request_id = None;
+        self.autocomplete_detail_word = None;
+        self.autocomplete_detail_popup = None;
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.autocomplete_min_width = 0.0;
+        self.autocomplete_detail_selection_anchor = None;
+        self.autocomplete_detail_selection_cursor = None;
+        self.autocomplete_detail_selecting = false;
+        self.autocomplete_apply_pending_response = false;
+    }
+
+    pub fn refresh_autocomplete_detail_popup(&mut self) {
+        let idx = self.autocomplete_selected_idx;
+        let Some((item, _)) = self.autocomplete_options.get(idx) else {
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+            return;
+        };
+        let Some(detail) = item.detail.as_ref().filter(|s| !s.trim().is_empty()) else {
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+            return;
+        };
+        let (text, spans, line_kinds, inline_code_ranges) = {
+            let detail_text = Self::autocomplete_detail_text(item, detail);
+            if self
+                .autocomplete_detail_popup
+                .as_ref()
+                .is_some_and(|popup| popup.text == detail_text.as_ref())
+            {
+                return;
+            }
+            crate::lsp::highlight_hover_text(detail_text.as_ref())
+        };
+        self.autocomplete_detail_popup = Some(crate::app::mouse::HoverPopup {
+            text,
+            spans,
+            line_kinds,
+            inline_code_ranges,
+            byte_offset: self.editor.cursor,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: Some(0.0),
+            offset_y: Some(0.0),
+            anim_progress: self.autocomplete_anim_progress,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.autocomplete_detail_selection_anchor = None;
+        self.autocomplete_detail_selection_cursor = None;
+        self.autocomplete_detail_selecting = false;
+    }
+
+    pub fn request_autocomplete_detail_for_index(&mut self, idx: usize) {
+        if self.autocomplete_mode != AutocompleteMode::TreeSitter {
+            self.refresh_autocomplete_detail_popup();
+            return;
+        }
+        let Some((item, _)) = self.autocomplete_options.get(idx) else {
+            return;
+        };
+        if item.detail.is_some() {
+            self.refresh_autocomplete_detail_popup();
+            return;
+        }
+        if self.autocomplete_detail_word.as_deref() == Some(item.word.as_str())
+            && self.autocomplete_detail_request_id.is_some()
+        {
+            return;
+        }
+        let Some(path) = self.file_path.clone() else {
+            return;
+        };
+        let Some(lsp) = self.lsp.as_mut() else {
+            return;
+        };
+        let text = self.editor.get_full_text();
+        let (line, col) =
+            crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
+        if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, None) {
+            self.autocomplete_detail_request_id = Some(id);
+            self.autocomplete_detail_word = Some(item.word.clone());
+        }
+    }
+
+    pub fn merge_autocomplete_details(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        let Some(target) = self.autocomplete_detail_word.clone() else {
+            return;
+        };
+        let resolved = items
+            .into_iter()
+            .find(|item| item.label == target)
+            .and_then(|item| item.detail.map(|detail| (detail, item.module)));
+        if let Some((detail, module)) = resolved {
+            for (item, _) in &mut self.autocomplete_options {
+                if item.word == target {
+                    item.detail = Some(detail.clone());
+                    if let Some(module) = module.as_ref() {
+                        item.module = Some(module.clone());
+                    }
+                }
+            }
+            self.refresh_autocomplete_detail_popup();
+        }
+        self.autocomplete_detail_request_id = None;
+        self.autocomplete_detail_word = None;
+    }
+
+    pub fn request_ty_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
         if !self.is_ide_mode || self.show_welcome {
+            return;
+        }
+        if mode == AutocompleteMode::TyContext
+            && (python_member_chain_too_deep(&self.editor)
+                || trigger.is_none()
+                    && self.get_current_word_prefix().is_empty()
+                    && !cursor_after_python_member_dot(&self.editor))
+        {
+            self.close_autocomplete();
             return;
         }
         if mode == AutocompleteMode::TyImports && self.get_current_word_prefix().is_empty() {
@@ -847,37 +1337,95 @@ impl App {
             self.autocomplete_anim_progress = 0.0;
             self.autocomplete_scroll.current = 0.0;
             self.autocomplete_scroll.target = 0.0;
+            self.autocomplete_anchor = None;
             return;
         }
         let Some(path) = self.file_path.clone() else {
             return;
         };
+        let hide_exact_match =
+            mode == AutocompleteMode::TyContext && self.autocomplete_has_only_current_text_match();
         let Some(lsp) = self.lsp.as_mut() else {
             return;
         };
         let text = self.editor.get_full_text();
-        lsp.notify_change(&path, &self.file_extension, &text, self.editor.version as i32);
+        lsp.notify_change(
+            &path,
+            &self.file_extension,
+            &text,
+            self.editor.version as i32,
+        );
         let (line, col) =
             crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
         if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
         {
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = Some(id);
-            if !self.autocomplete_active {
+            self.autocomplete_apply_pending_response = false;
+            if hide_exact_match {
+                self.hide_autocomplete_popup_keep_request();
+            } else if !self.autocomplete_active {
                 self.autocomplete_anim_progress = 0.0;
                 self.autocomplete_scroll.current = 0.0;
                 self.autocomplete_scroll.target = 0.0;
+                self.autocomplete_anchor = None;
+            } else {
+                self.autocomplete_active = true;
             }
-            self.autocomplete_active = true;
         }
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
         let prefix = self.get_current_word_prefix();
+        if self.autocomplete_mode == AutocompleteMode::TyContext
+            && (python_member_chain_too_deep(&self.editor)
+                || prefix.is_empty() && !cursor_after_python_member_dot(&self.editor))
+        {
+            self.close_autocomplete();
+            return;
+        }
         if self.autocomplete_mode == AutocompleteMode::TyImports && prefix.is_empty() {
             self.autocomplete_options.clear();
             self.autocomplete_active = true;
             return;
+        }
+
+        let mut items: Vec<AutocompleteItem> =
+            items.into_iter().map(AutocompleteItem::from).collect();
+        let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext)
+            .then(|| common_completion_owner(&items))
+            .flatten();
+        let inherited_owner_source = common_owner.as_ref().and_then(|owner| {
+            imported_python_class_source(
+                &self.editor.get_full_text(),
+                &self.ide_workspaces,
+                self.file_path.as_deref(),
+                owner,
+            )
+        });
+        for item in &mut items {
+            if self.autocomplete_mode == AutocompleteMode::TyContext {
+                if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter) {
+                    if !completion_item_has_explicit_owner(item) {
+                        item.module = common_owner.as_ref().map(|owner| {
+                            inherited_owner_source
+                                .as_deref()
+                                .and_then(|source| {
+                                    python_class_attr_owner_in_source(source, owner, &item.word)
+                                })
+                                .unwrap_or_else(|| owner.clone())
+                        });
+                    }
+                } else {
+                    let has_type_source = item
+                        .module
+                        .as_deref()
+                        .is_some_and(is_type_like_completion_source);
+                    if has_type_source || item.module.is_none() {
+                        item.module = common_owner.clone();
+                    }
+                }
+            }
         }
 
         let prefix_lower = prefix.to_lowercase();
@@ -885,7 +1433,6 @@ impl App {
         let mut matches = Vec::new();
 
         for item in items {
-            let item: AutocompleteItem = item.into();
             if self.autocomplete_mode == AutocompleteMode::TyImports && item.module.is_none() {
                 continue;
             }
@@ -913,7 +1460,12 @@ impl App {
                 SymbolKind::Keyword => 3,
                 SymbolKind::Unknown => 4,
             };
-            (!*is_prefix, type_priority, *len)
+            (
+                !*is_prefix,
+                is_magic_python_name(&item.word),
+                type_priority,
+                *len,
+            )
         });
 
         self.autocomplete_options = matches
@@ -921,15 +1473,51 @@ impl App {
             .take(80)
             .map(|(_, _, item, indices)| (item, indices))
             .collect();
-        self.autocomplete_active =
-            !self.autocomplete_options.is_empty() || self.autocomplete_mode == AutocompleteMode::TyImports;
+        if self.autocomplete_options.len() == 1
+            && !prefix.is_empty()
+            && self.autocomplete_options[0].0.word == prefix
+        {
+            self.close_autocomplete();
+            return;
+        }
+        self.autocomplete_active = !self.autocomplete_options.is_empty()
+            || self.autocomplete_mode == AutocompleteMode::TyImports;
+        if !self.autocomplete_active {
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+            self.autocomplete_detail_placement = None;
+            self.autocomplete_detail_max_scroll = 0.0;
+            return;
+        }
         self.autocomplete_selected_idx = 0;
         self.autocomplete_hovered_idx = None;
         self.autocomplete_scroll.current = 0.0;
         self.autocomplete_scroll.target = 0.0;
+        self.refresh_autocomplete_detail_popup();
+        if self.autocomplete_apply_pending_response {
+            self.autocomplete_apply_pending_response = false;
+            self.apply_autocomplete();
+            return;
+        }
+        if self.autocomplete_mode == AutocompleteMode::TreeSitter {
+            self.request_autocomplete_detail_for_index(0);
+        }
     }
 
     pub fn update_autocomplete(&mut self) {
+        if self.autocomplete_active && self.autocomplete_mode != AutocompleteMode::TreeSitter {
+            let after_member_dot = cursor_after_python_member_dot(&self.editor);
+            let inside_call = cursor_inside_python_call_parens(&self.editor);
+            let empty_prefix = self.get_current_word_prefix().is_empty();
+            if self.autocomplete_mode == AutocompleteMode::TyContext
+                && (python_member_chain_too_deep(&self.editor)
+                    || (!after_member_dot && !inside_call)
+                    || (empty_prefix && !after_member_dot))
+            {
+                self.close_autocomplete();
+            }
+            return;
+        }
         let prefix = self.get_current_word_prefix();
         if prefix.is_empty() {
             self.autocomplete_active = false;
@@ -991,7 +1579,12 @@ impl App {
             };
 
             let match_priority = if *is_prefix { 0 } else { 1 };
-            (match_priority, type_priority, std::cmp::Reverse(*score))
+            (
+                match_priority,
+                is_magic_python_name(&comp.word),
+                type_priority,
+                std::cmp::Reverse(*score),
+            )
         });
 
         self.autocomplete_options = matches
@@ -1005,10 +1598,13 @@ impl App {
                 self.autocomplete_anim_progress = 0.0;
                 self.autocomplete_scroll.current = 0.0;
                 self.autocomplete_scroll.target = 0.0;
+                self.autocomplete_anchor = None;
             }
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
+            self.refresh_autocomplete_detail_popup();
+            self.request_autocomplete_detail_for_index(0);
         } else {
             self.autocomplete_active = false;
         }
@@ -1053,10 +1649,7 @@ impl App {
             .clone();
         if selected_item.text_edit.is_some() || !selected_item.additional_text_edits.is_empty() {
             self.apply_lsp_completion_item(&selected_item);
-            self.autocomplete_active = false;
-            self.autocomplete_selected_idx = 0;
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
+            self.close_autocomplete();
             return;
         }
         let selected = selected_item
@@ -1078,10 +1671,7 @@ impl App {
         self.highlighter
             .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
 
-        self.autocomplete_active = false;
-        self.autocomplete_selected_idx = 0;
-        self.autocomplete_scroll.current = 0.0;
-        self.autocomplete_scroll.target = 0.0;
+        self.close_autocomplete();
         self.sync_after_autocomplete();
 
         if let Some(w) = self.window.as_ref() {
@@ -1677,7 +2267,7 @@ impl App {
 mod app_behavior_tests {
     use super::*;
     use arboard::Clipboard;
-    use std::time::Instant;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     fn test_theme() -> crate::renderer::Theme {
         crate::renderer::Theme {
@@ -1800,8 +2390,20 @@ mod app_behavior_tests {
             autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
             autocomplete_hovered_idx: None,
             autocomplete_rect: None,
+            autocomplete_anchor: None,
             autocomplete_mode: AutocompleteMode::TreeSitter,
             autocomplete_pending_request_id: None,
+            autocomplete_detail_request_id: None,
+            autocomplete_detail_word: None,
+            autocomplete_detail_popup: None,
+            autocomplete_detail_rect: None,
+            autocomplete_detail_placement: None,
+            autocomplete_detail_max_scroll: 0.0,
+            autocomplete_min_width: 0.0,
+            autocomplete_detail_selection_anchor: None,
+            autocomplete_detail_selection_cursor: None,
+            autocomplete_detail_selecting: false,
+            autocomplete_apply_pending_response: false,
             current_sticky_lines: Vec::new(),
             target_sticky_lines: Vec::new(),
             sticky_anim_progress: 1.0,
@@ -1913,6 +2515,7 @@ mod app_behavior_tests {
             label: "Path".to_string(),
             kind: SymbolKind::Class,
             module: Some("pathlib".to_string()),
+            detail: Some("type[Path]".to_string()),
             insert_text: Some("Path".to_string()),
             text_edit: None,
             additional_text_edits: Vec::new(),
@@ -1927,6 +2530,7 @@ mod app_behavior_tests {
                 label: "Path".to_string(),
                 kind: SymbolKind::Class,
                 module: Some("pathlib".to_string()),
+                detail: Some("type[Path]".to_string()),
                 insert_text: Some("Path".to_string()),
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -1935,6 +2539,7 @@ mod app_behavior_tests {
                 label: "ParamSpec".to_string(),
                 kind: SymbolKind::Class,
                 module: None,
+                detail: Some("typing special form".to_string()),
                 insert_text: Some("ParamSpec".to_string()),
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -1942,7 +2547,493 @@ mod app_behavior_tests {
         ]);
         assert_eq!(app.autocomplete_options.len(), 1);
         assert_eq!(app.autocomplete_options[0].0.word, "Path");
-        assert_eq!(app.autocomplete_options[0].0.module.as_deref(), Some("pathlib"));
+        assert_eq!(
+            app.autocomplete_options[0].0.module.as_deref(),
+            Some("pathlib")
+        );
+    }
+
+    #[test]
+    fn autocomplete_orders_magic_names_after_regular_members_and_merges_lazy_detail() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("st");
+        app.editor.cursor = 2;
+        app.highlighter.completions = vec![
+            completion("__str__", SymbolKind::Function, 0, 100),
+            completion("strip", SymbolKind::Function, 0, 100),
+        ];
+
+        app.update_autocomplete();
+        assert_eq!(app.autocomplete_options[0].0.word, "strip");
+        assert_eq!(app.autocomplete_options[1].0.word, "__str__");
+        assert!(app.autocomplete_options[0].0.detail.is_none());
+
+        app.autocomplete_detail_word = Some("strip".to_string());
+        app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+            label: "strip".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("str".to_string()),
+            detail: Some("(chars: str | None = None) -> str".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+        assert_eq!(
+            app.autocomplete_options[0].0.detail.as_deref(),
+            Some("(chars: str | None = None) -> str")
+        );
+    }
+
+    #[test]
+    fn autocomplete_detail_popup_uses_hover_text_and_selection_state() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_options = vec![(
+            AutocompleteItem {
+                word: "id".to_string(),
+                kind: SymbolKind::Variable,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: Some("BoxReadPublic".to_string()),
+                detail: Some("(variable) id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        )];
+
+        app.refresh_autocomplete_detail_popup();
+        let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+        assert_eq!(popup.text, "(variable) BoxReadPublic.id: int");
+        assert!(popup.line_kinds.len() >= 1);
+
+        app.autocomplete_detail_selection_anchor = Some(11);
+        app.autocomplete_detail_selection_cursor = Some(24);
+        assert_eq!(
+            app.selected_autocomplete_detail_text().as_deref(),
+            Some("BoxReadPublic")
+        );
+    }
+
+    #[test]
+    fn close_autocomplete_clears_detail_popup_and_selection() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.autocomplete_active = true;
+        app.autocomplete_selected_idx = 4;
+        app.autocomplete_hovered_idx = Some(2);
+        app.autocomplete_rect = Some((9.0, 8.0, 7.0, 6.0));
+        app.autocomplete_anchor = Some((10.0, 20.0));
+        app.autocomplete_pending_request_id = Some(1);
+        app.autocomplete_detail_request_id = Some(2);
+        app.autocomplete_detail_word = Some("id".to_string());
+        app.autocomplete_detail_popup = Some(crate::app::mouse::HoverPopup {
+            text: "detail".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 0,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 1.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        app.autocomplete_detail_rect = Some((1.0, 2.0, 3.0, 4.0));
+        app.autocomplete_detail_placement = Some(1);
+        app.autocomplete_min_width = 240.0;
+        app.autocomplete_detail_selection_anchor = Some(0);
+        app.autocomplete_detail_selection_cursor = Some(3);
+        app.autocomplete_detail_selecting = true;
+
+        app.close_autocomplete();
+
+        assert!(!app.autocomplete_active);
+        assert_eq!(app.autocomplete_selected_idx, 0);
+        assert_eq!(app.autocomplete_hovered_idx, None);
+        assert_eq!(app.autocomplete_rect, None);
+        assert_eq!(app.autocomplete_anchor, None);
+        assert_eq!(app.autocomplete_pending_request_id, None);
+        assert_eq!(app.autocomplete_detail_request_id, None);
+        assert_eq!(app.autocomplete_detail_word, None);
+        assert!(app.autocomplete_detail_popup.is_none());
+        assert!(app.autocomplete_detail_rect.is_none());
+        assert_eq!(app.autocomplete_detail_placement, None);
+        assert_eq!(app.autocomplete_min_width, 0.0);
+        assert_eq!(app.autocomplete_detail_selection_anchor, None);
+        assert_eq!(app.autocomplete_detail_selection_cursor, None);
+        assert!(!app.autocomplete_detail_selecting);
+    }
+
+    #[test]
+    fn tree_sitter_refresh_does_not_close_active_ty_member_completion() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_pending_request_id = Some(77);
+
+        app.update_autocomplete();
+
+        assert!(app.autocomplete_active);
+        assert_eq!(app.autocomplete_mode, AutocompleteMode::TyContext);
+        assert_eq!(app.autocomplete_pending_request_id, Some(77));
+    }
+
+    #[test]
+    fn ty_context_completion_closes_after_deleted_dot_or_empty_argument() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_pending_request_id = Some(9);
+        app.editor = editor_with("box");
+
+        app.update_autocomplete();
+        assert!(!app.autocomplete_active);
+        assert_eq!(app.autocomplete_pending_request_id, None);
+
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_pending_request_id = Some(10);
+        app.editor = editor_with("call(");
+
+        app.update_autocomplete();
+        assert!(!app.autocomplete_active);
+        assert_eq!(app.autocomplete_pending_request_id, None);
+    }
+
+    #[test]
+    fn pending_ty_context_enter_applies_first_response_without_newline() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_pending_request_id = Some(7);
+        app.autocomplete_apply_pending_response = true;
+
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "id".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) BoxRead.id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "name".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) BoxRead.name: str".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        assert_eq!(app.editor.get_full_text(), "box.id");
+        assert!(!app.autocomplete_apply_pending_response);
+        assert!(!app.editor.get_full_text().contains('\n'));
+    }
+
+    #[test]
+    fn ty_context_preserves_explicit_owner_and_hides_attribute_types() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "id".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("BoxReadPublic".to_string()),
+                detail: Some("(variable) BoxReadPublic.id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "model_dump".to_string(),
+                kind: SymbolKind::Function,
+                module: Some("BoxRead".to_string()),
+                detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+        let id = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "id")
+            .unwrap();
+        assert_eq!(id.0.module.as_deref(), Some("BoxReadPublic"));
+
+        app.editor = editor_with("box.");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "id".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("int".to_string()),
+                detail: Some("(variable) id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "model_dump".to_string(),
+                kind: SymbolKind::Function,
+                module: Some("BoxRead".to_string()),
+                detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+        let typed_id = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "id")
+            .unwrap();
+        assert_eq!(typed_id.0.module.as_deref(), Some("BoxRead"));
+
+        app.editor = editor_with("value");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+            label: "value".to_string(),
+            kind: SymbolKind::Variable,
+            module: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+        assert!(!app.autocomplete_active);
+    }
+
+    #[test]
+    fn inherited_python_attr_owner_uses_declaring_base_class() {
+        let source = "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    created_at: dt.datetime\n\nclass BoxRead(BoxReadPublic, kw_only=True):\n    percentage: int | None\n    user_id: int | None = None\n";
+
+        assert_eq!(
+            python_class_attr_owner_in_source(source, "BoxRead", "id").as_deref(),
+            Some("BoxReadPublic")
+        );
+        assert_eq!(
+            python_class_attr_owner_in_source(source, "BoxRead", "created_at").as_deref(),
+            Some("BoxReadPublic")
+        );
+        assert_eq!(
+            python_class_attr_owner_in_source(source, "BoxRead", "user_id").as_deref(),
+            Some("BoxRead")
+        );
+
+        let imports = "from car_wash.domains.washes.boxes.output import BoxRead\n";
+        assert_eq!(
+            imported_python_module_for_symbol(imports, "BoxRead").as_deref(),
+            Some("car_wash.domains.washes.boxes.output")
+        );
+    }
+
+    #[test]
+    fn ty_context_completion_uses_declaring_owner_not_field_type() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rriter_owner_test_{stamp}"));
+        let package_dir = root.join("car_wash/domains/washes/boxes");
+        std::fs::create_dir_all(&package_dir).unwrap();
+        std::fs::write(
+            package_dir.join("output.py"),
+            "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    name: str\n    car_wash_id: int\n    car_wash: CarWashRead\n    created_at: dt.datetime\n\nclass BoxRead(BoxReadPublic, kw_only=True):\n    percentage: int | None\n    user_id: int | None = None\n    employee: UserRead | None = None\n    car_wash: CarWashRead\n",
+        )
+        .unwrap();
+        let current = root.join("car_wash/domains/washes/bookings/service.py");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.file_path = Some(current);
+        app.editor = editor_with("from car_wash.domains.washes.boxes.output import BoxRead\nbox.");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "model_dump".to_string(),
+                kind: SymbolKind::Function,
+                module: Some("BoxRead".to_string()),
+                detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "id".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("int".to_string()),
+                detail: Some("(variable) id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "created_at".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("datetime".to_string()),
+                detail: Some("(variable) created_at: datetime".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "car_wash".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("CarWashRead".to_string()),
+                detail: Some("(variable) car_wash: CarWashRead".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        let id_owner = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "id")
+            .and_then(|(item, _)| item.module.as_deref());
+        let created_at_owner = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "created_at")
+            .and_then(|(item, _)| item.module.as_deref());
+        let car_wash_owner = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "car_wash")
+            .and_then(|(item, _)| item.module.as_deref());
+        assert_eq!(id_owner, Some("BoxReadPublic"));
+        assert_eq!(created_at_owner, Some("BoxReadPublic"));
+        assert_eq!(car_wash_owner, Some("BoxRead"));
+    }
+
+    #[test]
+    fn closing_definition_tab_resets_transient_editor_state() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.editor = editor_with("box.id");
+        app.file_path = Some(PathBuf::from("/tmp/main.py"));
+        app.file_extension = "py".to_string();
+        app.base_title = "main.py".to_string();
+        app.scroll_y.current = 300.0;
+        app.autocomplete_active = true;
+        app.autocomplete_pending_request_id = Some(7);
+        app.tabs.push(EditorTab {
+            editor: editor_with("box.id"),
+            file_path: Some(PathBuf::from("/tmp/main.py")),
+            base_title: "main.py".to_string(),
+            file_extension: "py".to_string(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: true,
+            icon_key: "python",
+            syntax_errors: Vec::new(),
+        });
+        app.tabs[0].scroll_y.current = 300.0;
+        app.tabs.push(EditorTab {
+            editor: editor_with("class BoxReadPublic:\n    id: int\n"),
+            file_path: Some(PathBuf::from("/tmp/output.py")),
+            base_title: "output.py".to_string(),
+            file_extension: "py".to_string(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans: vec![crate::highlighter::ColorSpan {
+                start: 0,
+                end: 5,
+                color: crate::highlighter::DRACULA_PINK,
+            }],
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: true,
+            icon_key: "python",
+            syntax_errors: Vec::new(),
+        });
+        app.active_tab = 1;
+        app.sync_active_tab();
+
+        let old_version = app.tabs[0].editor.version;
+        app.close_tab_at(1);
+
+        assert_eq!(app.file_path.as_deref(), Some(Path::new("/tmp/main.py")));
+        assert!(app.editor.version > old_version);
+        assert!(!app.autocomplete_active);
+        assert_eq!(app.autocomplete_pending_request_id, None);
+        assert_eq!(app.scroll_y.current, 300.0);
+    }
+
+    #[test]
+    fn ty_context_exact_single_match_hides_without_waiting_for_response() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.model_dump");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_pending_request_id = Some(42);
+        app.autocomplete_options = vec![(
+            AutocompleteItem {
+                word: "model_dump".to_string(),
+                kind: SymbolKind::Function,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: Some("BoxRead".to_string()),
+                detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        )];
+
+        assert!(app.autocomplete_has_only_current_text_match());
+        app.hide_autocomplete_popup_keep_request();
+
+        assert!(!app.autocomplete_active);
+        assert!(app.autocomplete_options.is_empty());
+        assert_eq!(app.autocomplete_pending_request_id, Some(42));
+        assert_eq!(app.autocomplete_mode, AutocompleteMode::TyContext);
     }
 
     #[test]
@@ -1962,6 +3053,42 @@ mod app_behavior_tests {
         let mut in_string = editor_with("value = \"Pa");
         in_string.cursor = in_string.len();
         assert!(!python_import_completion_allowed(&in_string));
+    }
+
+    #[test]
+    fn python_completion_context_detects_member_dot_and_call_parens() {
+        let after_dot = editor_with("value.attr");
+        assert!(cursor_after_python_member_dot(&after_dot));
+        assert!(!cursor_inside_python_call_parens(&after_dot));
+
+        let double_dot = editor_with("box..");
+        assert!(!cursor_after_python_member_dot(&double_dot));
+
+        let bare_dot = editor_with(".");
+        assert!(!cursor_after_python_member_dot(&bare_dot));
+
+        let in_call = editor_with("call(arg");
+        assert!(cursor_inside_python_call_parens(&in_call));
+        assert!(!cursor_after_python_member_dot(&in_call));
+
+        let plain = editor_with("plain");
+        assert!(!cursor_after_python_member_dot(&plain));
+        assert!(!cursor_inside_python_call_parens(&plain));
+    }
+
+    #[test]
+    fn python_completion_closes_for_implausibly_deep_member_chain() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("box.ooo.o.o.o.o.o");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        assert!(python_member_chain_too_deep(&app.editor));
+        app.update_autocomplete();
+
+        assert!(!app.autocomplete_active);
     }
 
     #[test]

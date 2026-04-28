@@ -1,4 +1,7 @@
-use crate::app::{App, AutocompleteMode, PendingAction};
+use crate::app::{
+    App, AutocompleteMode, PendingAction, cursor_after_python_member_dot,
+    cursor_inside_python_call_parens,
+};
 use crate::editor::Editor;
 use std::io::Write;
 use std::time::Instant;

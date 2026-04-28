@@ -147,32 +147,40 @@ impl Renderer {
         x: f32,
         mut y: f32,
         options: &[(crate::app::AutocompleteItem, Vec<usize>)],
-        mode: crate::app::AutocompleteMode,
+        _mode: crate::app::AutocompleteMode,
         selected_idx: usize,
         anim_progress: f32,
         scroll_y: f32,
         hovered_idx: Option<usize>,
+        min_width: f32,
     ) -> (f32, f32, f32, f32) {
         let scale = self.scale_factor;
+        if options.is_empty() {
+            return (x, y, 0.0, 0.0);
+        }
 
         let step = 36.0 * scale;
         let item_h = 28.0 * scale;
         let padding_top = 8.0 * scale;
         let padding_bottom = 8.0 * scale;
 
+        let left_pad = 12.0 * scale;
+        let icon_sz = 20.0 * scale;
+        let icon_gap = 8.0 * scale;
+        let right_pad = 18.0 * scale;
+        let content_start_offset = left_pad + icon_sz + icon_gap;
         let mut max_w = 195.0 * scale;
         for (opt, _) in options {
             let w = self.measure_width(opt.word.as_str(), "", 0, opt.word.len());
-            if w + 60.0 * scale > max_w {
-                max_w = w + 60.0 * scale;
-            }
+            max_w = max_w.max(content_start_offset + w + right_pad);
             if let Some(module) = &opt.module {
                 let module_w = self.measure_width(module, "", 0, module.len());
-                max_w = max_w.max(w + module_w + 92.0 * scale);
+                let ratio_w = (w / 0.45).max(module_w / 0.55);
+                max_w = max_w.max(content_start_offset + ratio_w + right_pad + 10.0 * scale);
             }
         }
 
-        max_w = max_w.min(450.0 * scale);
+        max_w = max_w.max(min_width).min(620.0 * scale);
 
         let visible_items = options.len().max(1).min(7);
 
@@ -239,57 +247,6 @@ impl Renderer {
         }
 
         // --- 4. Отрисовка элементов ---
-        let button_w = 28.0 * scale;
-        let button_h = 20.0 * scale;
-        let button_x = x + max_w - button_w - 12.0 * scale;
-        let button_y = y + 8.0 * scale;
-        let mx = self.last_mouse_x;
-        let my = self.last_mouse_y;
-        let button_hovered = mx >= button_x
-            && mx <= button_x + button_w
-            && my >= button_y
-            && my <= button_y + button_h;
-        self.push_rounded_rect(
-            button_x,
-            button_y,
-            button_w,
-            button_h,
-            4.0 * scale,
-            if button_hovered {
-                [0.30, 0.42, 0.36, 1.0]
-            } else {
-                [0.22, 0.28, 0.25, 1.0]
-            },
-        );
-        self.draw_string_scaled(
-            "ty",
-            button_x + 7.0 * scale,
-            button_y + 14.0 * scale,
-            [0.45, 0.90, 0.60, 1.0],
-            0.75,
-        );
-
-        if options.is_empty() {
-            let msg = if mode == crate::app::AutocompleteMode::TyImports {
-                "Начните набирать"
-            } else {
-                "Нет подсказок"
-            };
-            let msg_w = self.measure_width(msg, "", 0, msg.len());
-            self.draw_string_scaled(
-                msg,
-                (x + (max_w - msg_w) * 0.5).round(),
-                (y + padding_top + item_h * 0.72).round(),
-                [0.62, 0.64, 0.70, 1.0],
-                0.9,
-            );
-            self.flush();
-            unsafe {
-                self.gl.disable(glow::SCISSOR_TEST);
-            }
-            return (x, y, max_w, current_h);
-        }
-
         let mut current_y = y + padding_top - scroll_y;
 
         for (i, (item, matches)) in options.iter().enumerate() {
@@ -320,7 +277,7 @@ impl Renderer {
                 );
             }
 
-            let mut cx = x + 12.0 * scale;
+            let mut cx = x + left_pad;
 
             let (icon_char, icon_fg) = match item.kind {
                 crate::highlighter::SymbolKind::Class => ("\u{f03d7}", [0.8, 0.9, 1.0, 1.0]),
@@ -330,8 +287,6 @@ impl Renderer {
                 crate::highlighter::SymbolKind::Keyword => ("\u{f030b}", [1.0, 0.8, 0.9, 1.0]),
                 crate::highlighter::SymbolKind::Unknown => ("\u{f03d7}", [0.65, 0.65, 0.65, 1.0]),
             };
-
-            let icon_sz = 20.0 * scale;
 
             if let Some(g) = self.get_glyph(icon_char.chars().next().unwrap()) {
                 let char_scale = 0.8;
@@ -354,15 +309,48 @@ impl Renderer {
                     0.0,
                 );
             }
-            cx += icon_sz + 8.0 * scale;
+            cx += icon_sz + icon_gap;
 
             let cy = sel_rect_y + item_h * 0.72;
 
-            let right_limit = if item.module.is_some() {
-                x + max_w * 0.62
+            let module_metrics = item.module.as_ref().map(|module| {
+                let content_w = max_w - content_start_offset - right_pad;
+                let module_limit = content_w * 0.55;
+                let mut end = module.len();
+                let ellipsis_w = self.measure_width("...", "", 0, 3);
+                while end > 0
+                    && self.measure_width(&module[..end], "", 0, end)
+                        + if end < module.len() { ellipsis_w } else { 0.0 }
+                        > module_limit
+                {
+                    end -= 1;
+                    while end > 0 && !module.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                }
+                let shown = if end < module.len() {
+                    let mut s = String::with_capacity(end + 3);
+                    s.push_str(&module[..end]);
+                    s.push_str("...");
+                    s
+                } else {
+                    module.clone()
+                };
+                let shown_w = self.measure_width(&shown, "", 0, shown.len());
+                let module_x = x + max_w - right_pad - shown_w;
+                (module_x, shown)
+            });
+            let right_limit = module_metrics
+                .as_ref()
+                .map(|(module_x, _)| *module_x - 10.0 * scale)
+                .unwrap_or(x + max_w - 30.0 * scale);
+            let content_w = max_w - content_start_offset - right_pad;
+            let name_limit = if module_metrics.is_some() {
+                cx + content_w * 0.45
             } else {
-                x + max_w - 30.0 * scale
+                right_limit
             };
+            let right_limit = right_limit.min(name_limit);
             let mut truncated = false;
             for (j, c) in item.word.chars().enumerate() {
                 if let Some(g) = self.get_glyph(c) {
@@ -397,12 +385,10 @@ impl Renderer {
                 self.draw_string_scaled("...", cx.round(), cy.round(), [0.5, 0.5, 0.55, 1.0], 1.0);
             }
 
-            if let Some(module) = &item.module {
-                let module_w = self.measure_width(module, "", 0, module.len());
-                let module_x = x + max_w - module_w - 18.0 * scale;
+            if let Some((module_x, module)) = module_metrics {
                 self.draw_string_scaled(
-                    module,
-                    module_x.max(x + max_w * 0.56).round(),
+                    &module,
+                    module_x.round(),
                     cy.round(),
                     [0.50, 0.72, 0.82, 1.0],
                     0.82,

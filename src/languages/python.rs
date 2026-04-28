@@ -934,9 +934,55 @@ pub fn push_python_ts_spans(
         })
     });
 
+    let class_attr_ranges = python_class_attr_name_ranges(code);
+    for (start, end) in &class_attr_ranges {
+        best_spans.remove(&(global_start + *start, global_start + *end));
+    }
+
     for ((start, end), (_, color)) in best_spans {
         spans.push(crate::highlighter::ColorSpan { start, end, color });
     }
+    for (start, end) in class_attr_ranges {
+        spans.push(crate::highlighter::ColorSpan {
+            start: global_start + start,
+            end: global_start + end,
+            color: crate::highlighter::DRACULA_FG,
+        });
+    }
+}
+
+pub(crate) fn python_class_attr_name_ranges(code: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut offset = 0usize;
+    let mut class_indent: Option<usize> = None;
+    for line in code.lines() {
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("class ") {
+            class_indent = Some(indent);
+        } else if let Some(cls_indent) = class_indent {
+            if !trimmed.is_empty() && indent <= cls_indent {
+                class_indent = None;
+            } else if indent == cls_indent + 4
+                && !trimmed.starts_with("def ")
+                && !trimmed.starts_with("async def ")
+                && !trimmed.starts_with('@')
+            {
+                let name_len = trimmed
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .unwrap_or(trimmed.len());
+                if name_len > 0 {
+                    let rest = trimmed[name_len..].trim_start();
+                    if rest.starts_with(':') || rest.starts_with('=') {
+                        let start = offset + indent;
+                        ranges.push((start, start + name_len));
+                    }
+                }
+            }
+        }
+        offset += line.len() + 1;
+    }
+    ranges
 }
 
 pub fn highlight_python_hover_doc(
@@ -1624,6 +1670,25 @@ Inline ``call(name=1)`` text\n";
                 .iter()
                 .all(|span| span.start >= 7 && span.end > span.start)
         );
+
+        let mut class_attr_spans = Vec::new();
+        let class_code = "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    created_at: dt.datetime\n";
+        push_python_ts_spans(class_code, 0, &mut class_attr_spans);
+        for name in ["id", "created_at"] {
+            let start = class_code.find(name).unwrap();
+            assert!(has_color_span(
+                &class_attr_spans,
+                start,
+                start + name.len(),
+                crate::highlighter::DRACULA_FG,
+            ));
+            assert!(!has_color_span(
+                &class_attr_spans,
+                start,
+                start + name.len(),
+                crate::highlighter::DRACULA_ORANGE,
+            ));
+        }
     }
 
     #[test]

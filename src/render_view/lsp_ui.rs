@@ -51,6 +51,63 @@ fn lsp_action_label<'a>(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::lsp_action_label;
+
+    #[test]
+    fn lsp_action_label_formats_code_actions_and_noqa_codes() {
+        let mut scratch = String::new();
+        let action = crate::app::LspActionItem::CodeAction(crate::lsp::CodeAction {
+            title: "remove unused import".to_string(),
+            kind: Some("quickfix".to_string()),
+            edit: None,
+            code: Some("F401".to_string()),
+        });
+
+        assert_eq!(
+            lsp_action_label(&action, &mut scratch),
+            "Исправить (F401): remove unused import"
+        );
+
+        let noqa = crate::app::LspActionItem::AddNoqa {
+            codes: vec!["F401".to_string(), "F821".to_string()],
+        };
+        assert_eq!(
+            lsp_action_label(&noqa, &mut scratch),
+            "Игнорировать F401, F821 (# noqa)"
+        );
+    }
+
+    #[test]
+    fn lsp_action_label_formats_static_actions() {
+        let mut scratch = String::new();
+        assert_eq!(
+            lsp_action_label(
+                &crate::app::LspActionItem::AddNoqa { codes: Vec::new() },
+                &mut scratch
+            ),
+            "Игнорировать ошибку (# noqa)"
+        );
+        assert_eq!(
+            lsp_action_label(&crate::app::LspActionItem::AddNoqaAll, &mut scratch),
+            "Игнорировать всё в файле (# noqa)"
+        );
+        assert_eq!(
+            lsp_action_label(&crate::app::LspActionItem::FixAll, &mut scratch),
+            "Исправить все доступные ошибки"
+        );
+        assert_eq!(
+            lsp_action_label(&crate::app::LspActionItem::OrganizeImports, &mut scratch),
+            "Упорядочить импорты"
+        );
+        assert_eq!(
+            lsp_action_label(&crate::app::LspActionItem::CompleteImports, &mut scratch),
+            "Подсказки импортов ty"
+        );
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     /// Рисует содержимое панели LSP серверов (левая панель)

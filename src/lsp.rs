@@ -27,8 +27,8 @@ use hover::PendingRequestKind;
 pub use hover::{HoverLineKindPublic, highlight_hover_text};
 use protocol::*;
 pub use protocol::{
-    CodeAction, LspCompletionItem, LspEvent, TextChange, WorkspaceEdit, highlight_diagnostic_message,
-    offset_to_lsp_pos,
+    CodeAction, LspCompletionItem, LspEvent, TextChange, WorkspaceEdit,
+    highlight_diagnostic_message, offset_to_lsp_pos,
 };
 use std::thread;
 use std::time::Duration;

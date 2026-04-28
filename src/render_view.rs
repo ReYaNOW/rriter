@@ -48,6 +48,24 @@ impl Default for Telemetry {
     }
 }
 
+fn transient_python_member_dot_byte(editor: &Editor) -> Option<usize> {
+    let cursor = editor.cursor.min(editor.len());
+    if cursor < 2 || editor.byte_at(cursor - 1) != b'.' || editor.byte_at(cursor - 2) == b'.' {
+        return None;
+    }
+    let prev = editor.byte_at(cursor - 2);
+    (prev.is_ascii_alphanumeric() || prev == b'_').then_some(cursor - 1)
+}
+
+fn diagnostic_overlaps_transient_member_dot(
+    dot_byte: Option<usize>,
+    cursor: usize,
+    diag_start: usize,
+    diag_end: usize,
+) -> bool {
+    dot_byte.is_some_and(|dot_byte| diag_start <= cursor && diag_end.saturating_add(1) >= dot_byte)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +85,49 @@ mod tests {
         assert!(telemetry.last_print >= before);
         assert!(telemetry.last_print <= after);
         assert!(!TELEMETRY_ENABLED.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn transient_python_member_dot_byte_accepts_single_dot_only() {
+        let mut editor = Editor::new(32);
+        editor.insert_str("box.");
+        assert_eq!(transient_python_member_dot_byte(&editor), Some(3));
+
+        let mut double_dot = Editor::new(32);
+        double_dot.insert_str("box..");
+        assert_eq!(transient_python_member_dot_byte(&double_dot), None);
+
+        let mut bare_dot = Editor::new(32);
+        bare_dot.insert_str(".");
+        assert_eq!(transient_python_member_dot_byte(&bare_dot), None);
+    }
+
+    #[test]
+    fn diagnostic_overlap_suppresses_single_dot_not_double_dot() {
+        let mut editor = Editor::new(32);
+        editor.insert_str("box.");
+        let dot = transient_python_member_dot_byte(&editor);
+        assert!(diagnostic_overlaps_transient_member_dot(
+            dot,
+            editor.cursor,
+            0,
+            4
+        ));
+        assert!(!diagnostic_overlaps_transient_member_dot(
+            dot,
+            editor.cursor,
+            0,
+            1
+        ));
+
+        let mut double_dot = Editor::new(32);
+        double_dot.insert_str("box..");
+        assert!(!diagnostic_overlaps_transient_member_dot(
+            transient_python_member_dot_byte(&double_dot),
+            double_dot.cursor,
+            0,
+            5
+        ));
     }
 }
 use glow::HasContext;
@@ -176,6 +237,7 @@ impl Renderer {
 
         self.lsp_diagnostic_indices.clear();
         self.unused_spans_cache.clear();
+        let transient_member_dot = transient_python_member_dot_byte(editor);
         for (idx, d) in instant_raw.iter().enumerate() {
             let diag_line = d.start_line as usize;
             let mut suppress = false;
@@ -188,6 +250,19 @@ impl Renderer {
                 let code = d.code.as_deref().unwrap_or("");
                 if code == "W291" || code == "W293" {
                     suppress = true;
+                }
+
+                if let Some(dot_byte) = transient_member_dot {
+                    let start = get_byte_offset(d.start_line, d.start_col);
+                    let end = get_byte_offset(d.end_line, d.end_col);
+                    if diagnostic_overlaps_transient_member_dot(
+                        Some(dot_byte),
+                        editor.cursor,
+                        start,
+                        end,
+                    ) {
+                        suppress = true;
+                    }
                 }
             }
 

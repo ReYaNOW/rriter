@@ -27,6 +27,6 @@ pub(crate) use hover_mouse_logic::{
     hover_bytes_share_token, hover_token_bounds, normalize_hover_byte,
 };
 pub use hover_state_core::{
-    HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, hover_source_line_y_band,
-    is_in_hover_popup_or_bridge,
+    HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,
+    hover_source_line_y_band, is_in_hover_popup_or_bridge,
 };

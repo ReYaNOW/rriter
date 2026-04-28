@@ -1,4 +1,4 @@
-RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think about the most performant and non resource-intensive solution. If you are an Agent, always write in the summary after completed task - why your solution is SOTA in performance and most non resource-intensive solution.
+RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think about the most performant and non resource-intensive solution. If you are an Agent, always write in the summary after completed task - why your solution is SOTA in performance and most non resource-intensive solution. If not SOTA, make SOTA. But for SOTA ONLY touch code that you have been writen in current task, dont touch otherwise if not asked. Do not tell about SOTA in bugfix tasks.
 
 ## 0. Context Order
 

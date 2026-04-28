@@ -47,6 +47,17 @@ fn autocomplete_max_scroll(total_items: usize, scale: f32) -> f32 {
     ((total_items - visible_items) * step).max(0.0)
 }
 
+fn scroll_autocomplete_list(
+    scroll: &mut crate::scroll::ScrollState,
+    dy: f32,
+    total_items: usize,
+    scale: f32,
+) {
+    scroll.anim_speed = 7.0;
+    scroll.scroll_by(dy);
+    scroll.clamp_target(0.0, autocomplete_max_scroll(total_items, scale));
+}
+
 fn settings_ide_max_scroll(
     workspace_count: usize,
     ignore_chip_widths: impl IntoIterator<Item = f32>,
@@ -88,12 +99,43 @@ impl App {
 
         // Единая дельта как эталон для всех скролл-панелей в редакторе
         let (dx, dy) = wheel_delta(delta, lh);
+        let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+        let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.autocomplete_active {
+            if let (Some(rect), Some(popup)) = (
+                self.autocomplete_detail_rect,
+                self.autocomplete_detail_popup.as_mut(),
+            ) {
+                if point_in_rect(mx, my, rect) {
+                    popup.scroll.anim_speed = 7.0;
+                    popup.scroll.scroll_by(dy);
+                    popup
+                        .scroll
+                        .clamp_target(0.0, self.autocomplete_detail_max_scroll);
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+            if let Some(rect) = self.autocomplete_rect {
+                if point_in_rect(mx, my, rect) {
+                    scroll_autocomplete_list(
+                        &mut self.autocomplete_scroll,
+                        dy,
+                        self.autocomplete_options.len(),
+                        s,
+                    );
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+            self.close_autocomplete();
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         let mut consumed_by_diag = false;
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(rect) = state.diag_rect {
-                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
                 if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     state.diag_scroll.anim_speed = 7.0;
                     state.diag_scroll.scroll_by(dy);
@@ -112,8 +154,6 @@ impl App {
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(rect) = state.rect {
-                let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-                let my = self.renderer.as_ref().unwrap().last_mouse_y;
                 if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
@@ -400,19 +440,6 @@ impl App {
             }
         }
 
-        if let (true, Some((rx, ry, rw, rh))) = (self.autocomplete_active, self.autocomplete_rect) {
-            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
-            let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            if point_in_rect(mx, my, (rx, ry, rw, rh)) {
-                self.autocomplete_scroll.anim_speed = 7.0;
-                self.autocomplete_scroll.scroll_by(dy);
-                let max_scroll = autocomplete_max_scroll(self.autocomplete_options.len(), s);
-                self.autocomplete_scroll.clamp_target(0.0, max_scroll);
-                self.window.as_ref().unwrap().request_redraw();
-                return;
-            }
-        }
-
         if self.show_settings && self.settings_tab == 0 {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let h = self.window.as_ref().unwrap().inner_size().height as f32;
@@ -555,6 +582,16 @@ mod tests {
         assert_eq!(autocomplete_max_scroll(7, 1.0), 0.0);
         assert_eq!(autocomplete_max_scroll(10, 1.0), 108.0);
         assert_eq!(autocomplete_max_scroll(9, 2.0), 144.0);
+    }
+
+    #[test]
+    fn scroll_autocomplete_list_clamps_without_closing_state() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll_autocomplete_list(&mut scroll, 300.0, 10, 1.0);
+        assert_eq!(scroll.target, 108.0);
+
+        scroll_autocomplete_list(&mut scroll, -500.0, 10, 1.0);
+        assert_eq!(scroll.target, 0.0);
     }
 
     #[test]

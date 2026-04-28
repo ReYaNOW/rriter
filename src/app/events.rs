@@ -19,6 +19,18 @@ mod about;
 mod source_hover;
 use source_hover::*;
 
+fn autocomplete_detail_placement(
+    _list_rect: (f32, f32, f32, f32),
+    _box_w: f32,
+    _box_h: f32,
+    _viewport_w: f32,
+    _viewport_h: f32,
+    _gap: f32,
+    _margin: f32,
+) -> i8 {
+    2
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
     let w = app.window.as_ref().unwrap();
@@ -242,6 +254,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(focused) => {
                 self.is_focused = focused;
+                self.modifiers = winit::keyboard::ModifiersState::empty();
                 if focused {
                     self.render_suspended = false;
                     if let Some(dw) = self.dialog_window.as_ref() {
@@ -256,6 +269,11 @@ impl ApplicationHandler for App {
                 } else {
                     self.render_suspended = true;
                     self.last_frame = Instant::now();
+                    self.close_autocomplete();
+                    self.is_dragging = false;
+                    self.scroll_x.is_dragging = false;
+                    self.scroll_y.is_dragging = false;
+                    crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 }
             }
             WindowEvent::Occluded(occluded) => {
@@ -317,9 +335,6 @@ impl ApplicationHandler for App {
                     return;
                 }
 
-                let gl_context = self.gl_context.as_ref().unwrap();
-                let gl_surface = self.gl_surface.as_ref().unwrap();
-
                 if !self.is_ready {
                     unsafe {
                         use glow::HasContext;
@@ -327,7 +342,11 @@ impl ApplicationHandler for App {
                         gl.clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
                     }
-                    gl_surface.swap_buffers(gl_context).unwrap();
+                    self.gl_surface
+                        .as_ref()
+                        .unwrap()
+                        .swap_buffers(self.gl_context.as_ref().unwrap())
+                        .unwrap();
 
                     self.is_ready = true;
                     // Применяем максимизацию, если сохранено
@@ -527,29 +546,143 @@ impl ApplicationHandler for App {
                 }
 
                 if self.autocomplete_active {
-                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
                     let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
                         38.0 * s
                     };
                     let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
+                    let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
+                    let (anchor_x, anchor_y) = *self
+                        .autocomplete_anchor
+                        .get_or_insert((cx, cy - render_scroll_y));
                     let rect = self.renderer.as_mut().unwrap().draw_autocomplete(
-                        cx,
-                        cy - render_scroll_y,
+                        anchor_x,
+                        anchor_y,
                         &self.autocomplete_options,
                         self.autocomplete_mode,
                         self.autocomplete_selected_idx,
                         self.autocomplete_anim_progress,
                         self.autocomplete_scroll.current,
                         self.autocomplete_hovered_idx,
+                        self.autocomplete_min_width,
                     );
+                    self.autocomplete_min_width = self.autocomplete_min_width.max(rect.2);
                     self.autocomplete_rect = Some(rect);
+                    if rect.2 > 0.0
+                        && rect.3 > 0.0
+                        && mx >= rect.0
+                        && mx <= rect.0 + rect.2
+                        && my >= rect.1
+                        && my <= rect.1 + rect.3
+                    {
+                        crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                    }
+                    self.refresh_autocomplete_detail_popup();
+                    if let Some(mut popup) = self.autocomplete_detail_popup.take() {
+                        let (rx, ry, rw, rh) = rect;
+                        let (popup_x, popup_y, line_top_y) = {
+                            let r = self.renderer.as_mut().unwrap();
+                            let pad = 12.0 * r.scale_factor;
+                            let line_h = 22.0 * r.scale_factor;
+                            let max_text_w = (r.width - 80.0 * r.scale_factor)
+                                .min(820.0 * r.scale_factor)
+                                .max(320.0 * r.scale_factor);
+                            let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
+                                cache.scale_factor == r.scale_factor
+                                    && cache.max_text_w == max_text_w
+                                    && cache.span_count == popup.spans.len()
+                                    && cache.text_len == popup.text.len()
+                            });
+                            if !cache_valid {
+                                popup.layout_cache =
+                                    Some(r.build_hover_popup_layout(&popup, max_text_w, line_h));
+                            }
+                            let box_w = popup
+                                .layout_cache
+                                .as_ref()
+                                .map(|layout| layout.max_line_w + pad * 2.0)
+                                .unwrap_or(320.0 * r.scale_factor);
+                            let box_h = popup
+                                .layout_cache
+                                .as_ref()
+                                .map(|layout| {
+                                    (r.height * 0.35).min(layout.total_text_h + pad * 2.0)
+                                })
+                                .unwrap_or(120.0 * r.scale_factor);
+                            let gap = 8.0 * r.scale_factor;
+                            let margin = 4.0 * r.scale_factor;
+                            let placement =
+                                *self.autocomplete_detail_placement.get_or_insert_with(|| {
+                                    autocomplete_detail_placement(
+                                        (rx, ry, rw, rh),
+                                        box_w,
+                                        box_h,
+                                        r.width,
+                                        r.height,
+                                        gap,
+                                        margin,
+                                    )
+                                });
+                            let clamp_x = |value: f32| {
+                                value
+                                    .max(margin)
+                                    .min((r.width - box_w - margin).max(margin))
+                            };
+                            let (popup_x, popup_y) = match placement {
+                                1 => (clamp_x(rx + rw + gap), ry),
+                                -1 => (clamp_x(rx - gap - box_w), ry),
+                                2 => (clamp_x(rx), ry + rh + gap),
+                                _ => (clamp_x(rx), (ry - gap - box_h).max(margin)),
+                            };
+                            let phys_line = self
+                                .editor
+                                .line_offsets
+                                .partition_point(|&o| o <= self.editor.cursor)
+                                .saturating_sub(1);
+                            let vis_line_idx =
+                                r.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
+                            (
+                                popup_x,
+                                popup_y,
+                                vis_line_idx * r.line_height - render_scroll_y,
+                            )
+                        };
+                        popup.byte_offset = self.editor.cursor;
+                        popup.anchor_x = popup_x;
+                        popup.anchor_y = popup_y;
+                        popup.offset_x = Some(0.0);
+                        popup.offset_y = Some(popup_y - line_top_y);
+                        popup.anim_progress = self.autocomplete_anim_progress;
+                        let selection = self.autocomplete_detail_selection();
+                        let (bx, by, bw, bh, max_scroll) =
+                            self.renderer.as_mut().unwrap().draw_hover_popup(
+                                &mut popup,
+                                None,
+                                selection,
+                                &self.editor,
+                                &mut self.ui_registry,
+                                mx,
+                                my,
+                                render_scroll_y,
+                                &mut wants_pointer,
+                            );
+                        self.autocomplete_detail_rect = Some((bx, by, bw, bh));
+                        if mx >= bx && mx <= bx + bw && my >= by && my <= by + bh {
+                            crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                        }
+                        self.autocomplete_detail_max_scroll = max_scroll;
+                        self.autocomplete_detail_popup = Some(popup);
+                    } else {
+                        self.autocomplete_detail_rect = None;
+                        self.autocomplete_detail_max_scroll = 0.0;
+                    }
                     if self.autocomplete_hovered_idx.is_some() {
                         wants_pointer = true;
                     }
                 } else {
                     self.autocomplete_rect = None;
+                    self.autocomplete_detail_rect = None;
                 }
 
                 let mut settings_cursor_mode = 0;
@@ -752,7 +885,11 @@ impl ApplicationHandler for App {
                     self.window.as_ref().unwrap().set_cursor(cursor_icon);
                 }
 
-                gl_surface.swap_buffers(gl_context).unwrap();
+                self.gl_surface
+                    .as_ref()
+                    .unwrap()
+                    .swap_buffers(self.gl_context.as_ref().unwrap())
+                    .unwrap();
 
                 if let Some(log) = self.pending_key_log.take() {
                     let now = std::time::Instant::now();
@@ -783,5 +920,62 @@ impl ApplicationHandler for App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         about::about_to_wait(self, event_loop);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::autocomplete_detail_placement;
+
+    #[test]
+    fn autocomplete_detail_placement_stays_below_completion_window() {
+        assert_eq!(
+            autocomplete_detail_placement(
+                (20.0, 40.0, 80.0, 120.0),
+                150.0,
+                90.0,
+                400.0,
+                300.0,
+                8.0,
+                4.0
+            ),
+            2
+        );
+        assert_eq!(
+            autocomplete_detail_placement(
+                (260.0, 120.0, 80.0, 120.0),
+                150.0,
+                90.0,
+                400.0,
+                300.0,
+                8.0,
+                4.0
+            ),
+            2
+        );
+        assert_eq!(
+            autocomplete_detail_placement(
+                (120.0, 140.0, 180.0, 80.0),
+                150.0,
+                90.0,
+                320.0,
+                300.0,
+                8.0,
+                4.0
+            ),
+            2
+        );
+        assert_eq!(
+            autocomplete_detail_placement(
+                (120.0, 30.0, 180.0, 80.0),
+                150.0,
+                90.0,
+                320.0,
+                300.0,
+                8.0,
+                4.0
+            ),
+            2
+        );
     }
 }

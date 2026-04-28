@@ -38,16 +38,6 @@ fn autocomplete_hovered_index(
     if px >= scroll_x {
         return None;
     }
-    let ty_btn_x = rx + rw - 40.0 * scale;
-    let ty_btn_y = ry + 8.0 * scale;
-    if px >= ty_btn_x
-        && px <= ty_btn_x + 28.0 * scale
-        && py >= ty_btn_y
-        && py <= ty_btn_y + 20.0 * scale
-    {
-        return None;
-    }
-
     let item_h = 36.0 * scale;
     let content_y = py - ry + current_scroll - (4.0 * scale);
     if content_y < 0.0 {
@@ -79,6 +69,39 @@ impl App {
 
         if self.dialog_window.is_some() {
             return;
+        }
+
+        if self.autocomplete_detail_selecting {
+            if let (Some(rect), Some(popup)) = (
+                self.autocomplete_detail_rect,
+                self.autocomplete_detail_popup.as_ref(),
+            ) {
+                let byte = hover_popup_byte_at(
+                    self.renderer.as_mut().unwrap(),
+                    popup,
+                    rect,
+                    position.x as f32,
+                    position.y as f32,
+                );
+                self.autocomplete_detail_selection_cursor = Some(byte);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
+        if self.autocomplete_active {
+            let px = position.x as f32;
+            let py = position.y as f32;
+            let in_detail = self
+                .autocomplete_detail_rect
+                .is_some_and(|(rx, ry, rw, rh)| {
+                    px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
+                });
+            if in_detail {
+                clear_hover_popup(self.renderer.as_mut());
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
         }
 
         let mut popup_selecting = false;
@@ -140,6 +163,7 @@ impl App {
             }
 
             if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+                clear_hover_popup(self.renderer.as_mut());
                 self.autocomplete_hovered_idx = autocomplete_hovered_index(
                     px,
                     py,

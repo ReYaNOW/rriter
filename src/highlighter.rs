@@ -231,6 +231,18 @@ fn resolve_color(
     color
 }
 
+fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "attribute" {
+        return false;
+    }
+    parent.child_by_field_name("attribute").is_some_and(|attr| {
+        attr.start_byte() == node.start_byte() && attr.end_byte() == node.end_byte()
+    })
+}
+
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
@@ -828,6 +840,12 @@ impl Highlighter {
                                                         ..cap.node.end_byte()],
                                                 )
                                                 .unwrap_or("");
+                                                if lang_name == "py"
+                                                    && name == "py_ident"
+                                                    && is_python_attribute_property(cap.node)
+                                                {
+                                                    continue;
+                                                }
 
                                                 let color = resolve_color(
                                                     name,
@@ -1056,6 +1074,13 @@ impl Highlighter {
                     merged_spans.clear();
                 }
                 merged_spans.extend(spans);
+                if lang_name == "py" {
+                    for (start, end) in
+                        crate::languages::python::python_class_attr_name_ranges(text)
+                    {
+                        merged_spans.retain(|span| span.start != start || span.end != end);
+                    }
+                }
 
                 let flat_spans = flatten_spans(
                     merged_spans,
@@ -1380,6 +1405,53 @@ mod tests {
                 "missing builtin {builtin} for {ext}"
             );
         }
+    }
+
+    #[test]
+    fn highlighter_keeps_python_class_fields_plain_fg() {
+        let mut highlighter = Highlighter::new();
+        let source = "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    active: bool = True\n    created_at: dt.datetime\n";
+
+        highlighter.reset(1, source.to_string(), "py".to_string());
+        wait(&mut highlighter, 1);
+
+        for name in ["id", "active", "created_at"] {
+            let start = source.find(name).unwrap();
+            let end = start + name.len();
+            assert!(
+                !highlighter.spans.iter().any(|span| {
+                    span.start < end && span.end > start && span.color == DRACULA_ORANGE
+                }),
+                "{name} must not be parameter-orange in class body"
+            );
+        }
+    }
+
+    #[test]
+    fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
+        let mut highlighter = Highlighter::new();
+        let source = "class KnownDBError(DefaultHttpException):\n    def __init__(self, msg: str | None = None):\n        self.msg = msg\n";
+
+        highlighter.reset(1, source.to_string(), "py".to_string());
+        wait(&mut highlighter, 1);
+
+        let attr_start = source.find("self.msg").unwrap() + "self.".len();
+        let attr_end = attr_start + "msg".len();
+        assert!(
+            !highlighter.spans.iter().any(|span| {
+                span.start < attr_end && span.end > attr_start && span.color == DRACULA_ORANGE
+            }),
+            "self.msg attribute name must stay plain"
+        );
+
+        let param_start = source.find("msg: str").unwrap();
+        let param_end = param_start + "msg".len();
+        assert!(
+            highlighter.spans.iter().any(|span| {
+                span.start <= param_start && span.end >= param_end && span.color == DRACULA_ORANGE
+            }),
+            "bare parameter msg must stay orange"
+        );
     }
 
     #[test]

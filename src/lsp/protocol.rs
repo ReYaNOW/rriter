@@ -168,6 +168,7 @@ pub struct LspCompletionItem {
     pub label: String,
     pub kind: crate::highlighter::SymbolKind,
     pub module: Option<String>,
+    pub detail: Option<String>,
     pub insert_text: Option<String>,
     pub text_edit: Option<TextChange>,
     pub additional_text_edits: Vec<TextChange>,
@@ -774,13 +775,75 @@ fn completion_kind(kind: Option<u64>) -> crate::highlighter::SymbolKind {
     }
 }
 
-fn completion_module(v: &serde_json::Value) -> Option<String> {
+fn completion_module(
+    v: &serde_json::Value,
+    kind: &crate::highlighter::SymbolKind,
+) -> Option<String> {
+    let label = v
+        .get("label")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if let Some(owner) =
+        completion_detail(v).and_then(|detail| owner_from_completion_detail(label, &detail))
+    {
+        return Some(owner);
+    }
+    if let Some(owner) = v
+        .pointer("/data/owner")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(owner.to_string());
+    }
+    if let Some(full_name) = v
+        .pointer("/data/fullName")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Some(owner) = owner_from_completion_detail(label, full_name) {
+            return Some(owner);
+        }
+        return Some(full_name.to_string());
+    }
+    if !matches!(
+        kind,
+        crate::highlighter::SymbolKind::Variable | crate::highlighter::SymbolKind::Parameter
+    ) {
+        if let Some(module) = v
+            .pointer("/data/module")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(module.to_string());
+        }
+    }
     if let Some(desc) = v
         .pointer("/labelDetails/description")
         .and_then(|value| value.as_str())
         .filter(|s| !s.trim().is_empty())
     {
+        if matches!(
+            kind,
+            crate::highlighter::SymbolKind::Variable | crate::highlighter::SymbolKind::Parameter
+        ) {
+            return None;
+        }
         return Some(desc.trim().to_string());
+    }
+    None
+}
+
+fn completion_detail(v: &serde_json::Value) -> Option<String> {
+    if let Some(label_detail) = v
+        .pointer("/labelDetails/detail")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(label_detail.to_string());
     }
     if let Some(detail) = v
         .get("detail")
@@ -788,15 +851,39 @@ fn completion_module(v: &serde_json::Value) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        if detail.contains('.') || detail.contains(" import ") || detail.starts_with("from ") {
-            return Some(detail.to_string());
+        return Some(detail.to_string());
+    }
+    if let Some(doc) = v.get("documentation") {
+        if let Some(s) = doc.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(s.to_string());
+        }
+        if let Some(s) = doc
+            .get("value")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(s.to_string());
         }
     }
-    v.pointer("/data/module")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    None
+}
+
+fn owner_from_completion_detail(label: &str, detail: &str) -> Option<String> {
+    if label.is_empty() {
+        return None;
+    }
+    let needle = format!(".{label}");
+    let idx = detail.find(&needle)?;
+    let before = &detail[..idx];
+    let owner_start = before
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '.'))
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .unwrap_or(0);
+    let owner = before[owner_start..].trim().trim_matches('`');
+    (!owner.is_empty()).then(|| owner.to_string())
 }
 
 pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCompletionItem> {
@@ -817,10 +904,12 @@ pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCo
         .map(|items| items.iter().filter_map(parse_text_edit_value).collect())
         .unwrap_or_default();
 
+    let kind = completion_kind(v.get("kind").and_then(|value| value.as_u64()));
     Some(LspCompletionItem {
         label,
-        kind: completion_kind(v.get("kind").and_then(|value| value.as_u64())),
-        module: completion_module(v),
+        module: completion_module(v, &kind),
+        kind,
+        detail: completion_detail(v),
         insert_text,
         text_edit,
         additional_text_edits,
@@ -835,7 +924,10 @@ pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompl
     } else {
         return Vec::new();
     };
-    items.iter().filter_map(parse_completion_item_value).collect()
+    items
+        .iter()
+        .filter_map(parse_completion_item_value)
+        .collect()
 }
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
@@ -1148,7 +1240,8 @@ mod tests {
         let completion_json = serde_json::json!({
             "label": "Path",
             "kind": 7,
-            "labelDetails": {"description": "pathlib"},
+            "labelDetails": {"detail": " -> Path", "description": "pathlib"},
+            "detail": "fallback detail should not be owner",
             "insertText": "Path",
             "additionalTextEdits": [{
                 "range": {
@@ -1161,8 +1254,57 @@ mod tests {
         let completion = parse_completion_item_value(&completion_json).unwrap();
         assert_eq!(completion.label, "Path");
         assert_eq!(completion.module.as_deref(), Some("pathlib"));
+        assert_eq!(completion.detail.as_deref(), Some("-> Path"));
         assert_eq!(completion.kind, crate::highlighter::SymbolKind::Class);
         assert_eq!(completion.additional_text_edits.len(), 1);
+    }
+
+    #[test]
+    fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
+        let completion_json = serde_json::json!({
+            "label": "id",
+            "kind": 5,
+            "labelDetails": {"description": "int"},
+            "data": {"fullName": "BoxReadPublic.id"},
+            "detail": "(variable) BoxReadPublic.id: int"
+        });
+
+        let completion = parse_completion_item_value(&completion_json).unwrap();
+
+        assert_eq!(completion.label, "id");
+        assert_eq!(completion.module.as_deref(), Some("BoxReadPublic"));
+        assert_eq!(
+            completion.detail.as_deref(),
+            Some("(variable) BoxReadPublic.id: int")
+        );
+        assert_eq!(completion.kind, crate::highlighter::SymbolKind::Variable);
+
+        let typed_attr = parse_completion_item_value(&serde_json::json!({
+            "label": "id",
+            "kind": 5,
+            "labelDetails": {"description": "int"},
+            "detail": "(variable) id: int"
+        }))
+        .unwrap();
+        assert_eq!(typed_attr.module, None);
+
+        let datetime_attr = parse_completion_item_value(&serde_json::json!({
+            "label": "created_at",
+            "kind": 5,
+            "labelDetails": {"description": "datetime"},
+            "detail": "(variable) created_at: datetime"
+        }))
+        .unwrap();
+        assert_eq!(datetime_attr.module, None);
+
+        let data_module_type_attr = parse_completion_item_value(&serde_json::json!({
+            "label": "car_wash",
+            "kind": 10,
+            "data": {"module": "CarWashRead"},
+            "detail": "(variable) car_wash: CarWashRead"
+        }))
+        .unwrap();
+        assert_eq!(data_module_type_attr.module, None);
     }
 
     #[test]

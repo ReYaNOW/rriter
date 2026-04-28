@@ -199,19 +199,73 @@ fn looks_like_type_expr_line(line: &str) -> bool {
     if t.is_empty() || t.starts_with('#') {
         return false;
     }
-    if !(t.contains('[') && t.contains(']')) {
+    if t.starts_with("bound method ") {
         return false;
     }
-    if t.contains("->") || t.contains('(') || t.contains(')') || t.contains(':') {
+    if t.contains(':') {
         return false;
     }
-    t.chars().all(|c| {
+    let chars_allowed = t.chars().all(|c| {
         c.is_alphanumeric()
             || matches!(
                 c,
-                '_' | '.' | '[' | ']' | ',' | '|' | '?' | ' ' | '"' | '\''
+                '_' | '.'
+                    | '['
+                    | ']'
+                    | '('
+                    | ')'
+                    | '-'
+                    | '>'
+                    | ','
+                    | '|'
+                    | '&'
+                    | '?'
+                    | ' '
+                    | '"'
+                    | '\''
             )
-    })
+    });
+    if !chars_allowed {
+        return false;
+    }
+    if t.contains('[') && t.contains(']') {
+        return true;
+    }
+    let has_type_operator = t.contains('|') || t.contains('&') || t.contains("->");
+    if has_type_operator {
+        return t
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|token| is_simple_type_token(token) || is_simple_class_type_token(token));
+    }
+    is_simple_type_token(t) || is_simple_class_type_token(t)
+}
+
+fn is_simple_type_token(token: &str) -> bool {
+    matches!(
+        token,
+        "Any"
+            | "Literal"
+            | "None"
+            | "Unknown"
+            | "bool"
+            | "bytes"
+            | "datetime"
+            | "dict"
+            | "float"
+            | "int"
+            | "list"
+            | "set"
+            | "str"
+            | "tuple"
+            | "type"
+    )
+}
+
+fn is_simple_class_type_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && token.chars().any(|c| c.is_ascii_lowercase())
 }
 
 fn looks_like_simple_type_name_line(line: &str, next_line: Option<&str>) -> bool {
@@ -600,8 +654,7 @@ fn add_type_expr_spans_for_line(
     line_offset: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
 ) {
-    let type_color = [0.545, 0.913, 0.992, 1.0];
-    let neutral_color = [0.972, 0.972, 0.949, 1.0];
+    let neutral_color = crate::highlighter::DRACULA_FG;
     let mut run_start: Option<usize> = None;
     for (idx, ch) in line.char_indices() {
         let is_type_char = ch.is_alphanumeric() || ch == '_' || ch == '.';
@@ -612,10 +665,11 @@ fn add_type_expr_spans_for_line(
             continue;
         }
         if let Some(start) = run_start.take() {
+            let token = &line[start..idx];
             spans.push(crate::highlighter::ColorSpan {
                 start: line_offset + start,
                 end: line_offset + idx,
-                color: type_color,
+                color: type_expr_token_color(token),
             });
         }
         if matches!(ch, '[' | ']') {
@@ -627,11 +681,21 @@ fn add_type_expr_spans_for_line(
         }
     }
     if let Some(start) = run_start {
+        let token = &line[start..];
         spans.push(crate::highlighter::ColorSpan {
             start: line_offset + start,
             end: line_offset + line.len(),
-            color: type_color,
+            color: type_expr_token_color(token),
         });
+    }
+}
+
+fn type_expr_token_color(token: &str) -> [f32; 4] {
+    match token {
+        "None" | "True" | "False" => crate::highlighter::DRACULA_PINK,
+        token if is_simple_type_token(token) => crate::highlighter::DRACULA_CYAN,
+        token if is_simple_class_type_token(token) => crate::highlighter::DRACULA_DARK_CYAN,
+        _ => crate::highlighter::DRACULA_CYAN,
     }
 }
 
@@ -1002,6 +1066,7 @@ Append object to the end of the list.";
         let l_bracket = text.find('[').unwrap_or(0);
         let r_bracket = text.find(']').unwrap_or(0);
         let cyan = [0.545, 0.913, 0.992, 1.0];
+        let class_cyan = crate::highlighter::DRACULA_DARK_CYAN;
         let white = [0.972, 0.972, 0.949, 1.0];
 
         assert!(
@@ -1016,7 +1081,7 @@ Append object to the end of the list.";
         );
         assert!(spans.iter().any(|s| s.start <= provide_start
             && s.end >= provide_start + "Provide".len()
-            && s.color == cyan));
+            && s.color == class_cyan));
         assert!(
             spans
                 .iter()
@@ -1053,6 +1118,49 @@ Append object to the end of the list.";
                 .iter()
                 .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white)
         );
+    }
+
+    #[test]
+    fn callable_type_expr_line_gets_type_highlighting() {
+        let raw = "list[(...) -> Unknown]";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "list[(...) -> Unknown]");
+        let list_start = text.find("list").unwrap_or(0);
+        let unknown_start = text.find("Unknown").unwrap_or(0);
+        let cyan = [0.545, 0.913, 0.992, 1.0];
+
+        assert!(spans.iter().any(|s| s.start <= list_start
+            && s.end >= list_start + "list".len()
+            && s.color == cyan));
+        assert!(spans.iter().any(|s| s.start <= unknown_start
+            && s.end >= unknown_start + "Unknown".len()
+            && s.color == cyan));
+    }
+
+    #[test]
+    fn simple_type_expr_lines_get_type_highlighting() {
+        for raw in ["str", "CarWashRead", "UserRepository"] {
+            let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+            assert!(
+                spans
+                    .iter()
+                    .any(|s| s.color == crate::highlighter::DRACULA_CYAN
+                        || s.color == crate::highlighter::DRACULA_DARK_CYAN),
+                "{text} should have type highlight"
+            );
+        }
+
+        let (text, spans, _kinds, _inline) = highlight_hover_text("int | None");
+        let none_start = text.find("None").unwrap();
+        assert!(spans.iter().any(|s| s.start <= none_start
+            && s.end >= none_start + "None".len()
+            && s.color == crate::highlighter::DRACULA_PINK));
+
+        let (text, spans, _kinds, _inline) = highlight_hover_text("bool & AlwaysFalsy");
+        let always_start = text.find("AlwaysFalsy").unwrap();
+        assert!(spans.iter().any(|s| s.start <= always_start
+            && s.end >= always_start + "AlwaysFalsy".len()
+            && s.color == crate::highlighter::DRACULA_DARK_CYAN));
     }
 
     #[test]

@@ -839,12 +839,11 @@ impl App {
                                 let visible_h =
                                     (self.window_height as f32 - tab_h).max(renderer.line_height);
                                 let max_scroll = renderer.get_max_scroll(&self.editor, visible_h);
-                                self.scroll_y.target = (cy
-                                    - renderer.baseline_offset
-                                    - visible_h * 0.45)
-                                    .max(0.0)
-                                    .min(max_scroll)
-                                    .round();
+                                self.scroll_y.target =
+                                    (cy - renderer.baseline_offset - visible_h * 0.45)
+                                        .max(0.0)
+                                        .min(max_scroll)
+                                        .round();
 
                                 self.scroll_y.anim_speed = 7.0;
                                 self.scroll_x.anim_speed = 7.0;

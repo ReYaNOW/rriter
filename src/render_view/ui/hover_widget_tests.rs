@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn test_valid_diagnostic_popup_cache_drops_stale_indices() {
+    let cache = vec![(0, 1.0, 2.0, 3.0, 4.0), (3, 5.0, 6.0, 7.0, 8.0)];
+    assert_eq!(
+        valid_diagnostic_popup_cache(cache, 3),
+        vec![(0, 1.0, 2.0, 3.0, 4.0)]
+    );
+}
+
+#[test]
 fn test_hover_y_position_fits_above() {
     let y = compute_hover_y_position(100.0, 20.0, 40.0, 1000.0, 1.0);
     // line_top_y=100, box_h=40, margin=8. Ожидаем сверху: 100 - 40 - 8 = 52.

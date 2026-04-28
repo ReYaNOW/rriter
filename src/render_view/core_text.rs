@@ -1,6 +1,6 @@
+use super::editor_text_layer::folded_import_display_end;
 use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine};
-use super::editor_text_layer::folded_import_display_end;
 use glow::HasContext;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -251,8 +251,7 @@ impl Renderer {
                     } else {
                         editor.len()
                     };
-                    first_line_end =
-                        folded_import_display_end(editor, line_start, first_line_end);
+                    first_line_end = folded_import_display_end(editor, line_start, first_line_end);
 
                     if editor.cursor >= first_line_end {
                         x += self.measure_width(first, second, line_start, first_line_end);

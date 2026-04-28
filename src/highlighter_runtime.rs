@@ -28,18 +28,37 @@ impl Highlighter {
         let mut updated = false;
         while let Ok((ver, spans, completions, foldable_ranges, syntax_errors)) = self.rx.try_recv()
         {
-            if ver >= self.current_version {
-                self.current_version = ver;
-                if ver == current_editor_version {
-                    self.spans = spans;
-                    self.completions = completions;
-                    self.foldable_ranges = foldable_ranges;
-                    self.syntax_errors = syntax_errors;
-                    updated = true;
-                }
-            }
+            updated |= self.apply_poll_result(
+                current_editor_version,
+                ver,
+                spans,
+                completions,
+                foldable_ranges,
+                syntax_errors,
+            );
         }
         updated
+    }
+
+    fn apply_poll_result(
+        &mut self,
+        current_editor_version: u64,
+        ver: u64,
+        spans: Vec<ColorSpan>,
+        completions: Vec<CompletionItem>,
+        foldable_ranges: Vec<(usize, usize, bool, bool)>,
+        syntax_errors: Vec<(usize, usize)>,
+    ) -> bool {
+        if ver != current_editor_version || ver < self.current_version {
+            return false;
+        }
+
+        self.current_version = ver;
+        self.spans = spans;
+        self.completions = completions;
+        self.foldable_ranges = foldable_ranges;
+        self.syntax_errors = syntax_errors;
+        true
     }
 
     /// Блокирует текущий поток (до `timeout`) ожидая первый результат для `version`.
@@ -55,14 +74,14 @@ impl Highlighter {
             let remaining = deadline - now;
             match self.rx.recv_timeout(remaining) {
                 Ok((ver, spans, completions, foldable_ranges, syntax_errors)) => {
-                    if ver >= self.current_version {
-                        self.current_version = ver;
-                    }
-                    if ver == version {
-                        self.spans = spans;
-                        self.completions = completions;
-                        self.foldable_ranges = foldable_ranges;
-                        self.syntax_errors = syntax_errors;
+                    if self.apply_poll_result(
+                        version,
+                        ver,
+                        spans,
+                        completions,
+                        foldable_ranges,
+                        syntax_errors,
+                    ) {
                         // Дренируем оставшиеся ожидающие результаты
                         self.poll(version);
                         return true;
@@ -357,6 +376,45 @@ mod tests {
         assert_eq!(flat[0].start, 0);
         assert_eq!(flat[0].end, 4);
         assert_eq!(flat[0].color, DRACULA_FG);
+    }
+
+    #[test]
+    fn highlighter_poll_ignores_non_current_versions_without_advancing_watermark() {
+        let mut highlighter = Highlighter::new();
+        let future_span = ColorSpan {
+            start: 0,
+            end: 6,
+            color: DRACULA_GREEN,
+        };
+        let current_span = ColorSpan {
+            start: 0,
+            end: 6,
+            color: DRACULA_PINK,
+        };
+
+        let future_applied = highlighter.apply_poll_result(
+            2,
+            3,
+            vec![future_span],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        assert!(!future_applied);
+        assert_eq!(highlighter.current_version, 0);
+        assert!(highlighter.spans.is_empty());
+
+        let current_applied = highlighter.apply_poll_result(
+            2,
+            2,
+            vec![current_span],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        assert!(current_applied);
+        assert_eq!(highlighter.current_version, 2);
+        assert_eq!(highlighter.spans[0].color, DRACULA_PINK);
     }
 
     #[test]
