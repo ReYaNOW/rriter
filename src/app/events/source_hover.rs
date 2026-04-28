@@ -327,6 +327,70 @@ pub(super) fn source_signature_for_hover(
             Some(name)
         }
     }
+    fn enclosing_python_owner(
+        text: &str,
+        line_offsets: &[usize],
+        line_idx: usize,
+    ) -> (Option<String>, Option<String>) {
+        let mut method_name = None;
+        let mut class_name = None;
+        let mut def_indent = usize::MAX;
+        for up in (0..=line_idx).rev() {
+            let Some(line) = source_line(text, line_offsets, up) else {
+                continue;
+            };
+            let trimmed = line.trim_start();
+            let indent = line.len() - trimmed.len();
+            if method_name.is_none() {
+                if let Some(name) = def_name(trimmed) {
+                    method_name = Some(name.to_string());
+                    def_indent = indent;
+                    continue;
+                }
+            }
+            if indent < def_indent {
+                if let Some(rest) = trimmed.strip_prefix("class ") {
+                    class_name = rest
+                        .split(|c: char| c == '(' || c == ':' || c.is_whitespace() || c == '[')
+                        .next()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    break;
+                }
+            }
+        }
+        (class_name, method_name)
+    }
+    fn self_parameter_hover(
+        symbol: &str,
+        text: &str,
+        line_offsets: &[usize],
+        line_idx: usize,
+        lsp_type: Option<&str>,
+        module_path: Option<&str>,
+    ) -> Option<String> {
+        if symbol != "self" && symbol != "cls" {
+            return None;
+        }
+        let raw_ty = lsp_type?;
+        if !raw_ty.contains("Self@") {
+            return None;
+        }
+        let (class_name, method_name) = enclosing_python_owner(text, line_offsets, line_idx);
+        let class_name = class_name?;
+        let method_name = method_name.unwrap_or_else(|| "__init__".to_string());
+        let owner = if let Some(m) = module_path {
+            format!("{m}.{class_name}.{method_name}")
+        } else {
+            format!("{class_name}.{method_name}")
+        };
+        let ty = if symbol == "cls" {
+            format!("type[{class_name}]")
+        } else {
+            class_name
+        };
+        Some(format!("## Parameter {symbol} of {owner}\n{symbol}: {ty}"))
+    }
 
     let text = editor.get_full_text();
     let line_idx = editor
@@ -335,6 +399,18 @@ pub(super) fn source_signature_for_hover(
         .saturating_sub(1);
 
     let hovered_symbol = symbol_at_offset(editor, byte_offset);
+    if let Some(symbol) = hovered_symbol.as_deref() {
+        if let Some(param_hover) = self_parameter_hover(
+            symbol,
+            &text,
+            &editor.line_offsets,
+            line_idx,
+            lsp_type,
+            module_path,
+        ) {
+            return Some(param_hover);
+        }
+    }
     let mut def_line_idx = hovered_symbol.as_deref().and_then(|symbol| {
         for idx in 0..editor.line_offsets.len() {
             let line = source_line(&text, &editor.line_offsets, idx)?.trim_start();
@@ -1136,13 +1212,44 @@ mod tests {
             "## Class attribute client of Service\nclient: pkg.Client | OmittedUnionElements = make_client()"
         );
     }
+
+    #[test]
+    fn self_hover_uses_parameter_header_and_class_type() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class FcmSenderService:\n    def __init__(self, saq_session: AnnSaqDBSession):\n        self.fcm_token_repo = FcmTokenRepository(saq_session)\n",
+        );
+        let hover_offset = editor.get_full_text().find("self").unwrap();
+        let sig = source_signature_for_hover(
+            &editor,
+            hover_offset,
+            false,
+            Some("Self@__init__ (invariant)"),
+            Some("car_wash.core.fcm.service"),
+        )
+        .unwrap();
+        assert_eq!(
+            sig,
+            "## Parameter self of car_wash.core.fcm.service.FcmSenderService.__init__\nself: FcmSenderService"
+        );
+    }
+
+    #[test]
+    fn bound_method_hover_triggers_source_replacement() {
+        assert!(should_replace_hover_with_source_signature(
+            "bound method Self@send_notification_by_booking.get_notif_and_data_by_state(\n    booking: BookingRead,\n    state: StateEnum\n) -> tuple[Notification, dict[str, str]]"
+        ));
+    }
 }
 
 pub(super) fn should_replace_hover_with_source_signature(clean_msg: &str) -> bool {
     should_replace_simple_type_hover(clean_msg) || {
         let trimmed = clean_msg.trim_start();
-        (trimmed.starts_with('(') || trimmed.starts_with(") ->") || trimmed.starts_with("(_:"))
-            && clean_msg.contains("_AsyncGeneratorContextManager")
+        trimmed.starts_with("bound method ")
+            || ((trimmed.starts_with('(')
+                || trimmed.starts_with(") ->")
+                || trimmed.starts_with("(_:"))
+                && clean_msg.contains("_AsyncGeneratorContextManager"))
     }
 }
 

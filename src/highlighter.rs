@@ -405,7 +405,7 @@ impl Highlighter {
                 let lang_name = match actual_ext.as_str() {
                     "sh" | "bash" => "bash",
                     "rs" => "rs",
-                    "py" => "py",
+                    "py" | "pyi" => "py",
                     "toml" => "toml",
                     "go" => "go",
                     "js" | "jsx" | "mjs" | "cjs" => "js",

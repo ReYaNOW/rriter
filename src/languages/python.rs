@@ -496,17 +496,20 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         let mut header_text = s.to_string();
         let is_ru_attr = s.starts_with("Атрибут класса ");
         let is_en_attr = s.starts_with("Class attribute ");
+        let is_en_param = s.starts_with("Parameter ");
         let is_ru_var = s.starts_with("Переменная ");
         let is_en_var = s.starts_with("Variable ");
 
         let is_ru = is_ru_attr || is_ru_var;
-        let is_en = is_en_attr || is_en_var;
+        let is_en = is_en_attr || is_en_var || is_en_param;
 
         if is_ru || is_en {
             let prefix_len = if is_ru_attr {
                 "Атрибут класса ".len()
             } else if is_en_attr {
                 "Class attribute ".len()
+            } else if is_en_param {
+                "Parameter ".len()
             } else if is_ru_var {
                 "Переменная ".len()
             } else {
@@ -519,13 +522,27 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                     let clean_name = s[prefix_len..v_idx].trim_matches('`').trim();
                     let clean_path = s[v_idx + separator.len()..].trim_matches('`').trim();
 
-                    // extract module if possible
-                    if let Some(dot_idx) = clean_path.rfind('.') {
+                    if is_en_param {
+                        if let Some((owner_prefix, method)) = clean_path.rsplit_once('.') {
+                            if let Some((module, cls)) = owner_prefix.rsplit_once('.') {
+                                extra_module_line = Some(module.to_string());
+                                header_text =
+                                    format!("Parameter {} of {}.{}", clean_name, cls, method);
+                            } else {
+                                header_text =
+                                    format!("Parameter {} of {}", clean_name, clean_path);
+                            }
+                        } else {
+                            header_text = format!("Parameter {} of {}", clean_name, clean_path);
+                        }
+                    } else if let Some(dot_idx) = clean_path.rfind('.') {
                         let module = &clean_path[..dot_idx];
                         let cls = &clean_path[dot_idx + 1..];
                         extra_module_line = Some(module.to_string());
                         let kind = if is_ru_attr || is_en_attr {
                             "Class attribute"
+                        } else if is_en_param {
+                            "Parameter"
                         } else {
                             "Variable"
                         };
@@ -533,6 +550,8 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                     } else {
                         let kind = if is_ru_attr || is_en_attr {
                             "Class attribute"
+                        } else if is_en_param {
+                            "Parameter"
                         } else {
                             "Variable"
                         };
@@ -546,6 +565,8 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                 let clean_name = s[prefix_len..].trim_matches('`').trim();
                 let kind = if is_ru_attr || is_en_attr {
                     "Class attribute"
+                } else if is_en_param {
+                    "Parameter"
                 } else {
                     "Variable"
                 };
@@ -934,11 +955,14 @@ pub fn highlight_python_hover_doc(
         if kind == HoverLineKind::Header2 || kind == HoverLineKind::Text {
             let is_en_attr = line.starts_with("Class attribute ");
             let is_ru_attr = line.starts_with("Атрибут класса ");
+            let is_en_param = line.starts_with("Parameter ");
             let is_en_var = line.starts_with("Variable ");
             let is_ru_var = line.starts_with("Переменная ");
 
-            if is_en_attr || is_ru_attr || is_en_var || is_ru_var {
+            if is_en_attr || is_ru_attr || is_en_param || is_en_var || is_ru_var {
                 let separator = if is_en_attr || is_en_var {
+                    " of "
+                } else if is_en_param {
                     " of "
                 } else {
                     " в "
@@ -947,6 +971,8 @@ pub fn highlight_python_hover_doc(
                     16
                 } else if is_ru_attr {
                     15
+                } else if is_en_param {
+                    10
                 } else if is_en_var {
                     9
                 } else {
@@ -1224,6 +1250,18 @@ Note: return make(x=1)\n";
         assert!(fragments.contains(&"items"));
         assert!(fragments.contains(&"Result"));
         assert!(fragments.contains(&"go"));
+    }
+
+    #[test]
+    fn parameter_header_splits_module_and_owner_like_attributes() {
+        let raw = "## Parameter self of car_wash.core.fcm.service.FcmSenderService.__init__\nself: FcmSenderService";
+        let (out, kinds, _) = normalize_python_hover_doc(raw);
+        assert_eq!(
+            out,
+            "[[MODULE]] car_wash.core.fcm.service\nParameter self of FcmSenderService.__init__\n---\nself: FcmSenderService"
+        );
+        assert!(matches!(kinds[1], HoverLineKind::Text));
+        assert!(matches!(kinds[2], HoverLineKind::Separator));
     }
 
     #[test]

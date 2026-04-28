@@ -744,6 +744,10 @@ pub struct LspManager {
 }
 
 impl LspManager {
+    fn is_python_ext(ext: &str) -> bool {
+        matches!(ext, "py" | "pyi")
+    }
+
     pub fn new(workspaces: Vec<PathBuf>) -> Self {
         LspManager {
             python: None,
@@ -866,7 +870,7 @@ impl LspManager {
     /// Возвращает процесс для нужного расширения, запустив при необходимости
     fn process_for_ext(&mut self, ext: &str) -> Option<&mut LspProcess> {
         match ext {
-            "py" => {
+            "py" | "pyi" => {
                 self.ensure_python();
                 self.python.as_mut()
             }
@@ -886,7 +890,7 @@ impl LspManager {
         };
         self.current_path = Some(abs_path.clone());
         let ws = self.workspaces.first().cloned();
-        if ext == "py" {
+        if Self::is_python_ext(ext) {
             self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
             self.ensure_python();
             if let Some(proc) = &mut self.python {
@@ -911,7 +915,7 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if ext == "py" {
+        if Self::is_python_ext(ext) {
             self.current_path = Some(abs_path.clone());
             self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
             self.ensure_python();
@@ -975,7 +979,7 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if ext == "py" {
+        if Self::is_python_ext(ext) {
             if self.current_path.as_ref() == Some(&abs_path) {
                 self.current_path = None;
             }

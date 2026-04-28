@@ -605,7 +605,10 @@ impl App {
     }
 
     pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
-        if !self.modifiers.control_key() || self.file_extension != "py" || !self.is_ide_mode {
+        if !self.modifiers.control_key()
+            || !matches!(self.file_extension.as_str(), "py" | "pyi")
+            || !self.is_ide_mode
+        {
             self.clear_ctrl_definition();
             return;
         }
