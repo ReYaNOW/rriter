@@ -376,14 +376,18 @@ mod tests {
         ];
 
         highlighter.shift_insert(4, 2, Some("return"));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 4 && span.end == 6 && span.color == DRACULA_PINK));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 10 && span.end == 14 && span.color == DRACULA_CYAN));
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 4 && span.end == 6 && span.color == DRACULA_PINK)
+        );
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 10 && span.end == 14 && span.color == DRACULA_CYAN)
+        );
 
         highlighter.spans = vec![ColorSpan {
             start: 0,
@@ -391,14 +395,18 @@ mod tests {
             color: DRACULA_GREEN,
         }];
         highlighter.shift_insert(3, 1, Some("9"));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_PURPLE));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 4 && span.end == 7 && span.color == DRACULA_GREEN));
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_PURPLE)
+        );
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 4 && span.end == 7 && span.color == DRACULA_GREEN)
+        );
 
         highlighter.spans.clear();
         highlighter.shift_insert(0, 3, Some("str"));
@@ -429,18 +437,24 @@ mod tests {
 
         highlighter.shift_delete(3, 6);
 
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 0 && span.end == 3 && span.color == DRACULA_GREEN));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_ORANGE));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start == 6 && span.end == 9 && span.color == DRACULA_CYAN));
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 0 && span.end == 3 && span.color == DRACULA_GREEN)
+        );
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_ORANGE)
+        );
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start == 6 && span.end == 9 && span.color == DRACULA_CYAN)
+        );
         assert!(highlighter.spans.iter().all(|span| span.start < span.end));
     }
 

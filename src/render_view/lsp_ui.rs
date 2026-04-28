@@ -976,8 +976,9 @@ impl Renderer {
 
             let label_str = lsp_action_label(item, &mut scratch);
             let label_color = match item {
-                crate::app::LspActionItem::FixAll
-                | crate::app::LspActionItem::OrganizeImports => group_color,
+                crate::app::LspActionItem::FixAll | crate::app::LspActionItem::OrganizeImports => {
+                    group_color
+                }
                 _ => self.theme.fg,
             };
 

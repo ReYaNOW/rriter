@@ -284,17 +284,9 @@ impl App {
                                     }
                                 } else {
                                     let seq = if dy < 0.0 {
-                                        if app_cursor {
-                                            b"\x1BOA"
-                                        } else {
-                                            b"\x1B[A"
-                                        }
+                                        if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
                                     } else {
-                                        if app_cursor {
-                                            b"\x1BOB"
-                                        } else {
-                                            b"\x1B[B"
-                                        }
+                                        if app_cursor { b"\x1BOB" } else { b"\x1B[B" }
                                     };
                                     let steps = (dy.abs() / 20.0).max(1.0) as usize;
                                     for _ in 0..steps.min(3) {

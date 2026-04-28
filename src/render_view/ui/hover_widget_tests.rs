@@ -206,13 +206,7 @@ fn test_opening_hover_popup_animation_uses_stable_source_anchor() {
         progress,
     );
     let frame_from_stable_mouse = compute_animated_popup_frame(
-        stable_mx,
-        stable_my,
-        target.0,
-        target.1,
-        target.2,
-        target.3,
-        progress,
+        stable_mx, stable_my, target.0, target.1, target.2, target.3, progress,
     );
     let frame_from_live_mouse = compute_animated_popup_frame(
         live_mouse_inside_popup.0,
@@ -243,14 +237,7 @@ fn test_opening_combined_popup_keeps_source_side_when_cursor_moves_inside() {
     );
 
     let frame_from_stable_mouse = compute_combined_popup_frame(
-        stable_mx,
-        stable_my,
-        target.0,
-        target.1,
-        target.2,
-        target.3,
-        progress,
-        true,
+        stable_mx, stable_my, target.0, target.1, target.2, target.3, progress, true,
     );
     let frame_from_live_mouse = compute_combined_popup_frame(
         live_mouse_inside_left_side.0,

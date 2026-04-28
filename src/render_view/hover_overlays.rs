@@ -147,13 +147,14 @@ impl Renderer {
                             .or(hit_type_target)
                     } else {
                         let line_x = mx - self.left_padding + render_scroll_x;
-                        let target_under_cursor = crate::app::mouse::diagnostic_hover_type_target_at_x(
-                            editor,
-                            line,
-                            line_x,
-                            hit_type_target,
-                            |ch| self.char_advance(ch),
-                        );
+                        let target_under_cursor =
+                            crate::app::mouse::diagnostic_hover_type_target_at_x(
+                                editor,
+                                line,
+                                line_x,
+                                hit_type_target,
+                                |ch| self.char_advance(ch),
+                            );
                         crate::app::mouse::HOVER_STATE
                             .with(|s| s.borrow().byte_offset)
                             .or(target_under_cursor)
@@ -445,7 +446,18 @@ impl Renderer {
                 });
                 println!(
                     "[HOVER VIS LOG] is_error: {}, timer_ready: {}, has_type: {}, d_type_target: {:?}, type_byte: {:?}, hover_byte: {:?}, stale: {}, popup_diag: {:?}, SHOW_ERR: {}, SHOW_TYPE: {}, SHOW_COMB: {}, SHOW_PLACEHOLDER: {}",
-                    is_error_hovered, error_timer_ready, has_type_popup, effective_hovered_diag_type_target, type_popup_byte, hover_byte_offset, stale, popup_diag, show_error, show_type, show_combined, show_placeholder_type
+                    is_error_hovered,
+                    error_timer_ready,
+                    has_type_popup,
+                    effective_hovered_diag_type_target,
+                    type_popup_byte,
+                    hover_byte_offset,
+                    stale,
+                    popup_diag,
+                    show_error,
+                    show_type,
+                    show_combined,
+                    show_placeholder_type
                 );
                 LAST_LOG.store(now_ms, Ordering::Relaxed);
             }

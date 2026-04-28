@@ -558,7 +558,8 @@ impl Renderer {
                     let end = anchor.max(cursor);
                     let mut sel_start_x = text_start_x;
                     let mut sel_w = 0.0;
-                    for (part_start, part) in [(0usize, first_text), (first_text.len(), second_text)]
+                    for (part_start, part) in
+                        [(0usize, first_text), (first_text.len(), second_text)]
                     {
                         for (local_idx, c) in part.char_indices() {
                             let byte_idx = part_start + local_idx;

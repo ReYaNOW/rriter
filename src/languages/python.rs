@@ -2,6 +2,17 @@ use crate::lsp::HoverLineKindPublic;
 use std::collections::HashMap;
 use tree_sitter::StreamingIterator;
 
+pub const DOCSTRING_TEXT: [f32; 4] = crate::highlighter::DRACULA_COMMENT;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportBlock {
+    pub start: usize,
+    pub end: usize,
+    pub keyword_start: usize,
+    pub keyword_end: usize,
+    pub line_count: usize,
+}
+
 thread_local! {
     pub static TS_DIAG_PARSER: std::cell::RefCell<tree_sitter::Parser> = {
         let mut parser = tree_sitter::Parser::new();
@@ -28,6 +39,231 @@ pub enum HoverLineKind {
     Separator,
     Header1,
     Header2,
+}
+
+pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
+    let mut blocks = Vec::new();
+    let mut current: Option<ImportBlock> = None;
+    let mut pending_blank_lines = 0usize;
+    let mut offset = 0usize;
+    let mut continuing = false;
+    let mut paren_depth = 0i32;
+
+    for raw_line in text.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        let line_end = line_start + line.len();
+        let leading = line.len().saturating_sub(line.trim_start().len());
+        let trimmed = line.trim_start();
+
+        if trimmed.is_empty() && current.is_some() {
+            pending_blank_lines += 1;
+            continue;
+        }
+
+        if let Some(keyword_len) = python_import_keyword_len(trimmed) {
+            let keyword_start = line_start + leading;
+            if let Some(block) = &mut current {
+                block.end = line_end;
+                block.line_count += pending_blank_lines + 1;
+            } else {
+                current = Some(ImportBlock {
+                    start: line_start,
+                    end: line_end,
+                    keyword_start,
+                    keyword_end: keyword_start + keyword_len,
+                    line_count: 1,
+                });
+            }
+            pending_blank_lines = 0;
+            update_python_import_continuation(trimmed, &mut paren_depth, &mut continuing);
+            if !continuing {
+                paren_depth = 0;
+            }
+            continue;
+        }
+
+        if continuing && !trimmed.is_empty() {
+            if let Some(block) = &mut current {
+                block.end = line_end;
+                block.line_count += pending_blank_lines + 1;
+            }
+            pending_blank_lines = 0;
+            update_python_import_continuation(trimmed, &mut paren_depth, &mut continuing);
+            continue;
+        }
+
+        pending_blank_lines = 0;
+        continuing = false;
+        paren_depth = 0;
+        finish_import_block(&mut current, &mut blocks);
+    }
+
+    finish_import_block(&mut current, &mut blocks);
+    blocks
+}
+
+pub fn push_docstring_highlight_spans(
+    source: &str,
+    start: usize,
+    end: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    if start >= end || end > source.len() {
+        return;
+    }
+    spans.push(crate::highlighter::ColorSpan {
+        start,
+        end,
+        color: DOCSTRING_TEXT,
+    });
+
+    let bytes = source.as_bytes();
+    let mut quote_start = start;
+    while quote_start < end && bytes[quote_start].is_ascii_alphabetic() {
+        quote_start += 1;
+    }
+    if quote_start >= end {
+        return;
+    }
+
+    let quote = bytes[quote_start];
+    if quote != b'\'' && quote != b'"' {
+        return;
+    }
+    let triple =
+        quote_start + 2 < end && bytes[quote_start + 1] == quote && bytes[quote_start + 2] == quote;
+    let quote_len = if triple { 3 } else { 1 };
+    let content_start = quote_start + quote_len;
+    let content_end = end.saturating_sub(quote_len);
+    if content_start >= content_end {
+        return;
+    }
+
+    spans.push(crate::highlighter::ColorSpan {
+        start: quote_start,
+        end: content_start,
+        color: crate::highlighter::DRACULA_COMMENT,
+    });
+    if content_end < end {
+        spans.push(crate::highlighter::ColorSpan {
+            start: content_end,
+            end,
+            color: crate::highlighter::DRACULA_COMMENT,
+        });
+    }
+
+    let content = &source[content_start..content_end];
+    let mut line_offset = content_start;
+    for raw_line in content.split_inclusive('\n') {
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        push_docstring_line_spans(line, line_offset, spans);
+        line_offset += raw_line.len();
+    }
+}
+
+fn python_import_keyword_len(trimmed: &str) -> Option<usize> {
+    if trimmed.starts_with("from ") {
+        Some("from".len())
+    } else if trimmed.starts_with("import ") {
+        Some("import".len())
+    } else {
+        None
+    }
+}
+
+fn update_python_import_continuation(trimmed: &str, paren_depth: &mut i32, continuing: &mut bool) {
+    for b in trimmed.bytes() {
+        match b {
+            b'(' | b'[' | b'{' => *paren_depth += 1,
+            b')' | b']' | b'}' => *paren_depth -= 1,
+            _ => {}
+        }
+    }
+    *continuing = *paren_depth > 0 || trimmed.ends_with('\\');
+}
+
+fn finish_import_block(current: &mut Option<ImportBlock>, blocks: &mut Vec<ImportBlock>) {
+    if let Some(block) = current.take() {
+        if block.line_count >= 2 && block.end > block.start {
+            blocks.push(block);
+        }
+    }
+}
+
+fn push_docstring_line_spans(
+    line: &str,
+    line_start: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let trimmed = line.trim_start();
+    let leading = line.len().saturating_sub(trimmed.len());
+    let header = matches!(
+        trimmed,
+        "Args:"
+            | "Arguments:"
+            | "Parameters:"
+            | "Returns:"
+            | "Raises:"
+            | "Yields:"
+            | "Examples:"
+            | "Notes:"
+            | "Note:"
+    );
+    if header {
+        spans.push(crate::highlighter::ColorSpan {
+            start: line_start + leading,
+            end: line_start + leading + trimmed.len(),
+            color: crate::highlighter::DRACULA_CYAN,
+        });
+    }
+
+    if let Some(rest) = trimmed.strip_prefix(":param ") {
+        let role_start = line_start + leading;
+        let role_end = role_start + ":param".len();
+        spans.push(crate::highlighter::ColorSpan {
+            start: role_start,
+            end: role_end,
+            color: crate::highlighter::DRACULA_CYAN,
+        });
+        if let Some(colon) = rest.find(':') {
+            let name_start = role_start + ":param ".len();
+            spans.push(crate::highlighter::ColorSpan {
+                start: name_start,
+                end: name_start + colon,
+                color: crate::highlighter::DRACULA_ORANGE,
+            });
+        }
+    } else if trimmed.starts_with(":return") || trimmed.starts_with(":raises ") {
+        let role_len = trimmed
+            .find(':')
+            .unwrap_or(trimmed.len())
+            .max(":return".len().min(trimmed.len()));
+        spans.push(crate::highlighter::ColorSpan {
+            start: line_start + leading,
+            end: line_start + leading + role_len,
+            color: crate::highlighter::DRACULA_CYAN,
+        });
+    }
+
+    let mut search_from = 0usize;
+    while let Some(open_rel) = line[search_from..].find("``") {
+        let open = search_from + open_rel;
+        let body_start = open + 2;
+        let Some(close_rel) = line[body_start..].find("``") else {
+            break;
+        };
+        let close = body_start + close_rel;
+        if close > body_start {
+            spans.push(crate::highlighter::ColorSpan {
+                start: line_start + body_start,
+                end: line_start + close,
+                color: crate::highlighter::DRACULA_CYAN,
+            });
+        }
+        search_from = close + 2;
+    }
 }
 
 pub fn normalize_inline_rst_code(line: &str) -> (String, Vec<(usize, usize)>) {
@@ -529,8 +765,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                                 header_text =
                                     format!("Parameter {} of {}.{}", clean_name, cls, method);
                             } else {
-                                header_text =
-                                    format!("Parameter {} of {}", clean_name, clean_path);
+                                header_text = format!("Parameter {} of {}", clean_name, clean_path);
                             }
                         } else {
                             header_text = format!("Parameter {} of {}", clean_name, clean_path);
@@ -1384,8 +1619,60 @@ Inline ``call(name=1)`` text\n";
             &mut ts_spans,
         );
         assert!(!ts_spans.is_empty());
-        assert!(ts_spans
-            .iter()
-            .all(|span| span.start >= 7 && span.end > span.start));
+        assert!(
+            ts_spans
+                .iter()
+                .all(|span| span.start >= 7 && span.end > span.start)
+        );
+    }
+
+    #[test]
+    fn python_import_blocks_cover_from_and_import_groups() {
+        let text = "from os import path\nimport sys\n\n\ndef f():\n    pass\n";
+        let blocks = import_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            &text[blocks[0].keyword_start..blocks[0].keyword_end],
+            "from"
+        );
+        assert_eq!(blocks[0].line_count, 2);
+    }
+
+    #[test]
+    fn python_import_blocks_keep_blank_lines_between_groups_only() {
+        let text = "import time\nimport typing\n\nimport msgspec\nfrom sqlalchemy import inspect\n\n\ndef f():\n    pass\n";
+        let blocks = import_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].line_count, 5);
+        assert_eq!(
+            &text[blocks[0].start..blocks[0].end],
+            "import time\nimport typing\n\nimport msgspec\nfrom sqlalchemy import inspect"
+        );
+    }
+
+    #[test]
+    fn python_docstring_spans_color_text_header_and_inline_code() {
+        let text = "def f():\n    \"\"\"Args:\n    value: use ``int``.\n    \"\"\"\n";
+        let start = text.find("\"\"\"").unwrap();
+        let end = text.rfind("\"\"\"").unwrap() + 3;
+        let mut spans = Vec::new();
+        push_docstring_highlight_spans(text, start, end, &mut spans);
+        let doc_text = text.find("value: use").unwrap();
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.color == DOCSTRING_TEXT && s.start <= doc_text && s.end > doc_text)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.color == crate::highlighter::DRACULA_CYAN)
+        );
+        let inline_code = text.find("int").unwrap();
+        assert!(spans.iter().any(|s| {
+            s.color == crate::highlighter::DRACULA_CYAN
+                && s.start <= inline_code
+                && s.end >= inline_code + "int".len()
+        }));
     }
 }

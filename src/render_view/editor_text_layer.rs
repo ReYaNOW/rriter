@@ -3,6 +3,109 @@ use crate::highlighter::ColorSpan;
 use crate::render_view::ModInterval;
 use crate::renderer::Renderer;
 
+fn folded_import_keyword_range(
+    editor: &Editor,
+    line_start: usize,
+    line_end: usize,
+) -> Option<(usize, usize)> {
+    let mut start = line_start;
+    while start < line_end {
+        let b = editor.byte_at(start);
+        if b != b' ' && b != b'\t' {
+            break;
+        }
+        start += 1;
+    }
+
+    if starts_with_word(editor, start, line_end, b"from")
+        || starts_with_word(editor, start, line_end, b"import")
+        || starts_with_word(editor, start, line_end, b"use")
+    {
+        let end = word_end(editor, start, line_end);
+        return (end > start).then_some((start, end));
+    }
+
+    if starts_with_word(editor, start, line_end, b"pub") {
+        let mut p = word_end(editor, start, line_end);
+        while p < line_end && (editor.byte_at(p) == b' ' || editor.byte_at(p) == b'\t') {
+            p += 1;
+        }
+        if p < line_end && editor.byte_at(p) == b'(' {
+            while p < line_end && editor.byte_at(p) != b')' {
+                p += 1;
+            }
+            if p < line_end {
+                p += 1;
+            }
+            while p < line_end && (editor.byte_at(p) == b' ' || editor.byte_at(p) == b'\t') {
+                p += 1;
+            }
+        }
+        if starts_with_word(editor, p, line_end, b"use") {
+            let end = word_end(editor, p, line_end);
+            return (end > p).then_some((p, end));
+        }
+    }
+
+    None
+}
+
+pub(super) fn folded_import_display_end(
+    editor: &Editor,
+    line_start: usize,
+    line_end: usize,
+) -> usize {
+    folded_import_keyword_range(editor, line_start, line_end)
+        .map(|(_, end)| end)
+        .unwrap_or(line_end)
+}
+
+fn starts_with_word(editor: &Editor, start: usize, line_end: usize, word: &[u8]) -> bool {
+    if start + word.len() > line_end {
+        return false;
+    }
+    for (i, b) in word.iter().enumerate() {
+        if editor.byte_at(start + i) != *b {
+            return false;
+        }
+    }
+    let end = start + word.len();
+    end == line_end || !is_ident_byte(editor.byte_at(end))
+}
+
+fn word_end(editor: &Editor, mut p: usize, line_end: usize) -> usize {
+    while p < line_end && is_ident_byte(editor.byte_at(p)) {
+        p += 1;
+    }
+    p
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editor_with_text(text: &str) -> Editor {
+        let mut editor = Editor::new(text.len() + 16);
+        editor.insert_str(text);
+        editor
+    }
+
+    #[test]
+    fn folded_import_keyword_range_covers_collapsed_click_words() {
+        let editor = editor_with_text("from os import path\nimport sys\n");
+        assert_eq!(folded_import_keyword_range(&editor, 0, 19), Some((0, 4)));
+        assert_eq!(folded_import_display_end(&editor, 0, 19), 4);
+
+        let rust = editor_with_text("pub(crate) use crate::x;\n");
+        assert_eq!(folded_import_keyword_range(&rust, 0, 24), Some((11, 14)));
+        assert_eq!(folded_import_display_end(&rust, 0, 24), 14);
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -139,7 +242,7 @@ impl Renderer {
             let v_line_info = self.visual_lines[i];
             let start_byte = v_line_info.byte_idx;
 
-            let end_byte = if v_line_info.is_folded {
+            let mut end_byte = if v_line_info.is_folded {
                 let phys_idx = v_line_info.physical_line - 1;
                 if phys_idx + 1 < editor.line_offsets.len() {
                     editor.line_offsets[phys_idx + 1].saturating_sub(1)
@@ -156,6 +259,9 @@ impl Renderer {
                     len
                 }
             };
+            if v_line_info.is_folded {
+                end_byte = folded_import_display_end(editor, start_byte, end_byte);
+            }
 
             let y = self.baseline_offset + v_line_info.y_offset - render_scroll_y;
             let mut x = self.left_padding;
@@ -175,6 +281,11 @@ impl Renderer {
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
+            let folded_keyword_range = if v_line_info.is_folded {
+                folded_import_keyword_range(editor, start_byte, end_byte)
+            } else {
+                None
+            };
 
             let mut out_of_bounds = false;
 
@@ -325,6 +436,11 @@ impl Renderer {
                                 {
                                     current_color = spans[span_idx].color;
                                 }
+                                if folded_keyword_range.is_some_and(|(start, end)| {
+                                    current_offset >= start && current_offset < end
+                                }) {
+                                    current_color = [0.55, 0.62, 0.80, 1.0];
+                                }
 
                                 if is_unused {
                                     current_color = self.theme.unused;
@@ -420,6 +536,23 @@ impl Renderer {
 
                 let hit_y_top = y - self.line_height;
                 let hit_y_bottom = y + 5.0 * s;
+                if let Some((word_start, word_end)) =
+                    folded_import_keyword_range(editor, start_byte, end_byte)
+                {
+                    let word_x = self.left_padding
+                        + self.measure_width(first, second, start_byte, word_start)
+                        - render_scroll_x;
+                    let word_w = self.measure_width(first, second, word_start, word_end);
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::EditorFoldDots(phys_idx),
+                        word_x - 2.0 * s,
+                        hit_y_top,
+                        word_w + 4.0 * s,
+                        hit_y_bottom - hit_y_top,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                }
                 let hit_w = next_x + 10.0 * s - (box_x - 2.0 * s);
                 ui_registry.register_rect(
                     crate::ui_system::UiId::EditorFoldDots(phys_idx),
@@ -440,7 +573,13 @@ impl Renderer {
 
                 self.push_rounded_rect(box_x, box_y_draw, box_w, box_h_draw, 4.0 * s, dots_bg);
 
-                self.draw_string_scaled(dots_str, box_x + 3.0 * s, y, self.theme.fg, 1.0);
+                self.draw_string_scaled(
+                    dots_str,
+                    box_x + 3.0 * s,
+                    y,
+                    crate::highlighter::DRACULA_COMMENT,
+                    1.0,
+                );
 
                 let mut suffix_draw_x = next_x;
                 for i in 0..v_line_info.fold_suffix_len {

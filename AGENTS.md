@@ -1,4 +1,4 @@
-RRiter agent rules. Strict mode. Small patches. Fast UI first.
+RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think about the most performant and not resource-intensive solution.
 
 ## 0. Context Order
 
@@ -462,7 +462,9 @@ Syntax/languages:
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
+* `src/languages/dart.rs` -> Dart import-block helpers.
 * `src/languages/python.rs` -> Python hover formatting/highlighting helpers.
+* `src/languages/rust.rs` -> Rust import-block helpers.
 
 LSP:
 

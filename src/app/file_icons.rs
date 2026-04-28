@@ -14,8 +14,8 @@ pub mod file_icons_bytes {
 
 use file_icons_bytes::{file_svg, folder_svg};
 use file_icons_map::{
-    file_icon_key_exact, folder_icon_key_exact, match_file_pattern, match_folder_pattern,
-    FILE_ICON_FALLBACKS, FOLDER_ICON_FALLBACKS,
+    FILE_ICON_FALLBACKS, FOLDER_ICON_FALLBACKS, file_icon_key_exact, folder_icon_key_exact,
+    match_file_pattern, match_folder_pattern,
 };
 
 struct FallbackMatcher {

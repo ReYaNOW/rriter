@@ -666,6 +666,10 @@ impl App {
 
                 // Check poll once but don't sleep
                 if self.highlighter.poll(self.editor.version) {
+                    let autofold_threshold = match self.file_extension.as_str() {
+                        "py" | "pyi" | "rs" | "dart" => 1,
+                        _ => 2,
+                    };
                     self.editor.foldable_lines.clear();
                     self.editor.foldable_ranges_bytes.clear();
                     for &(start_b, end_b, is_autofold, is_sticky) in
@@ -686,7 +690,10 @@ impl App {
                             .saturating_sub(1);
                         if el > sl {
                             self.editor.foldable_lines.insert(sl, el);
-                            if is_autofold && el - sl >= 2 && !self.is_highlighted_once {
+                            if is_autofold
+                                && el - sl >= autofold_threshold
+                                && !self.is_highlighted_once
+                            {
                                 self.editor.folded_lines.insert(sl);
                                 self.editor
                                     .folded_start_bytes

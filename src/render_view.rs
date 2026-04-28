@@ -116,8 +116,7 @@ impl Renderer {
         ctrl_definition_range: Option<(usize, usize)>,
         ide_workspaces: &[std::path::PathBuf],
     ) -> (bool, Vec<(usize, usize)>) {
-        let telemetry_frame_start =
-            TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
+        let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
         let telemetry_was_typing = telemetry_frame_start
             .is_some()
             .then_some(self.last_editor_version_for_typing != editor.version);
@@ -507,8 +506,7 @@ impl Renderer {
                             }
                         }
                     } else if sel_start >= first_len {
-                        if let Some(s) =
-                            second.get((sel_start - first_len)..(sel_end - first_len))
+                        if let Some(s) = second.get((sel_start - first_len)..(sel_end - first_len))
                         {
                             if is_valid_word(s) {
                                 target_word_str = Some(s);

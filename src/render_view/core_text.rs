@@ -1,5 +1,6 @@
 use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine};
+use super::editor_text_layer::folded_import_display_end;
 use glow::HasContext;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -42,6 +43,9 @@ impl Renderer {
                     if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
                         end_byte -= 1;
                     }
+                }
+                if is_folded {
+                    end_byte = folded_import_display_end(editor, start_byte, end_byte);
                 }
 
                 let mut whitespace_px_width = 0.0;
@@ -242,11 +246,13 @@ impl Renderer {
                 let mut x = self.left_padding;
 
                 if is_folded {
-                    let first_line_end = if phys_line + 1 < editor.line_offsets.len() {
+                    let mut first_line_end = if phys_line + 1 < editor.line_offsets.len() {
                         editor.line_offsets[phys_line + 1].saturating_sub(1)
                     } else {
                         editor.len()
                     };
+                    first_line_end =
+                        folded_import_display_end(editor, line_start, first_line_end);
 
                     if editor.cursor >= first_line_end {
                         x += self.measure_width(first, second, line_start, first_line_end);
@@ -388,6 +394,9 @@ impl Renderer {
             if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
                 end_byte -= 1;
             }
+        }
+        if is_folded {
+            end_byte = folded_import_display_end(editor, start_byte, end_byte);
         }
 
         let mut current_x = self.left_padding - self.last_scroll_x;

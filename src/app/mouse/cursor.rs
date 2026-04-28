@@ -532,6 +532,15 @@ impl App {
                     if !same_word && state.should_lock_hover_target_while_popup_opens(Some(byte_offset)) {
                         return;
                     }
+                    if same_word && !in_hover_popup {
+                        let popup_matches_byte = state
+                            .popup
+                            .as_ref()
+                            .is_some_and(|popup| popup.byte_offset == byte_offset);
+                        if !popup_matches_byte {
+                            state.reset_type_hover_wait_after_mouse_motion();
+                        }
+                    }
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                         let keep_visible_popup = state.popup.is_some();
                         if crate::render_view::TELEMETRY_ENABLED

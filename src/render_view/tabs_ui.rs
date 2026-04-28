@@ -10,7 +10,9 @@ pub(crate) fn tab_path_is_external(
 ) -> bool {
     !workspaces.is_empty()
         && path.is_absolute()
-        && !workspaces.iter().any(|workspace| path.starts_with(workspace))
+        && !workspaces
+            .iter()
+            .any(|workspace| path.starts_with(workspace))
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -278,13 +280,14 @@ impl Renderer {
             let icon_y = (y + (h - icon_size_tab) / 2.0 - 1.5 * s).round();
             self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
 
-            let text_color = if paths[i].is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
-                EXTERNAL_TAB_TITLE_COLOR
-            } else if is_active {
-                self.theme.fg
-            } else {
-                self.theme.line_num
-            };
+            let text_color =
+                if paths[i].is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
+                    EXTERNAL_TAB_TITLE_COLOR
+                } else if is_active {
+                    self.theme.fg
+                } else {
+                    self.theme.line_num
+                };
             let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
             self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
 

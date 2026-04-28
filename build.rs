@@ -144,7 +144,10 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
             if !prefix.contains(".*") && !suffix.contains(".*") {
                 return Some(format!(
                     "    if name.starts_with(\"{}\") && name.ends_with(\"{}\") && name.len() >= {} {{ return Some(\"{}\"); }}",
-                    escape(&prefix), escape(&suffix), prefix.len() + suffix.len(), escape(key)
+                    escape(&prefix),
+                    escape(&suffix),
+                    prefix.len() + suffix.len(),
+                    escape(key)
                 ));
             }
         }

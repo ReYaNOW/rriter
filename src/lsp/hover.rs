@@ -750,7 +750,7 @@ pub(crate) enum PendingRequestKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{highlight_hover_text, HoverLineKindPublic};
+    use super::{HoverLineKindPublic, highlight_hover_text};
 
     fn rendered_color_at(spans: &[crate::highlighter::ColorSpan], offset: usize) -> [f32; 4] {
         spans
@@ -840,8 +840,11 @@ Return a shallow copy of the dict.";
         let raw = "def update(m: SupportsKeysAndGetItem[str, Provide], /) -> None\n\
 In either case, this is followed by: for k, v in F.items(): D[k] = v";
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
-        assert!(text
-            .contains("In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"));
+        assert!(
+            text.contains(
+                "In either case, this is followed by:\n    for k, v in F.items(): D[k] = v"
+            )
+        );
         assert!(kinds.iter().any(|kind| *kind == HoverLineKindPublic::Code));
     }
 
@@ -859,9 +862,11 @@ Can be used either with an ``async with`` block:\n\
     Connection string.";
         let (text, _spans, kinds, _inline) = highlight_hover_text(raw);
         assert!(text.contains("Parameters"));
-        assert!(kinds
-            .iter()
-            .any(|kind| *kind == HoverLineKindPublic::Header1));
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| *kind == HoverLineKindPublic::Header1)
+        );
     }
 
     #[test]
@@ -998,21 +1003,29 @@ Append object to the end of the list.";
         let cyan = [0.545, 0.913, 0.992, 1.0];
         let white = [0.972, 0.972, 0.949, 1.0];
 
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= dict_start && s.end >= dict_start + 4 && s.color == cyan));
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.color == cyan));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= dict_start && s.end >= dict_start + 4 && s.color == cyan)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.color == cyan)
+        );
         assert!(spans.iter().any(|s| s.start <= provide_start
             && s.end >= provide_start + "Provide".len()
             && s.color == cyan));
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white));
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white)
+        );
     }
 
     #[test]
@@ -1029,12 +1042,16 @@ Append object to the end of the list.";
         assert!(spans.iter().any(|s| s.start <= literal_start
             && s.end >= literal_start + "Literal".len()
             && s.color == cyan));
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white));
-        assert!(spans
-            .iter()
-            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white)
+        );
     }
 
     #[test]
@@ -1335,9 +1352,11 @@ Args:
         assert!(text.contains("Initialize a Litestar application."));
         assert!(text.contains("Parameters"));
         assert!(!text.contains("Args:"));
-        assert!(kinds
-            .iter()
-            .any(|kind| *kind == HoverLineKindPublic::Separator));
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| *kind == HoverLineKindPublic::Separator)
+        );
 
         let class_idx = text.find("class").unwrap();
         assert!(spans.iter().any(|s| {
@@ -1447,8 +1466,7 @@ The Litestar application.\n\
 
     #[test]
     fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
-        let raw =
-            "@asynccontextmanager async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:";
+        let raw = "@asynccontextmanager async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:";
         let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
         assert_eq!(
             text,

@@ -1,7 +1,7 @@
 use glow::HasContext;
 use std::collections::HashMap;
-use swash::scale::{image::Content, Render, ScaleContext, Source, StrikeWith};
 use swash::FontRef;
+use swash::scale::{Render, ScaleContext, Source, StrikeWith, image::Content};
 
 pub const MAX_VERTICES: usize = 32_768;
 pub const ATLAS_SIZE_W: i32 = 1024;
@@ -712,8 +712,12 @@ impl Renderer {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         let svg_str = match c {
-            '▶' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"4 2 16 20\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>",
-            '▼' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"2 4 20 16\"><g transform=\"rotate(90 12 12)\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></g></svg>",
+            '▶' => {
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"4 2 16 20\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>"
+            }
+            '▼' => {
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"2 4 20 16\"><g transform=\"rotate(90 12 12)\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></g></svg>"
+            }
             _ => return None,
         };
 

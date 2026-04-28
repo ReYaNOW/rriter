@@ -213,11 +213,7 @@ fn compute_combined_separator_visible_rect(
     let x1 = bx.max(frame_x);
     let x2 = (bx + box_w).min(frame_x + frame_w);
     let w = x2 - x1;
-    if w <= 0.0 {
-        None
-    } else {
-        Some((x1, w))
-    }
+    if w <= 0.0 { None } else { Some((x1, w)) }
 }
 
 fn compute_hover_scissor_rect(

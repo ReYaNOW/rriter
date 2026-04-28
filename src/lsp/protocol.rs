@@ -1049,17 +1049,19 @@ mod tests {
             Some(2)
         );
         assert_eq!(
-            init["params"]["capabilities"]["textDocument"]["codeAction"]
-                ["codeActionLiteralSupport"]["codeActionKind"]["valueSet"][2],
+            init["params"]["capabilities"]["textDocument"]["codeAction"]["codeActionLiteralSupport"]
+                ["codeActionKind"]["valueSet"][2],
             "source.fixAll"
         );
 
         let init_without_workspace: serde_json::Value =
             serde_json::from_slice(&make_initialize(43, &[])).unwrap();
         assert!(init_without_workspace["params"]["rootUri"].is_null());
-        assert!(init_without_workspace["params"]
-            .get("workspaceFolders")
-            .is_none());
+        assert!(
+            init_without_workspace["params"]
+                .get("workspaceFolders")
+                .is_none()
+        );
 
         let uri = "file:///tmp/project/main.py";
         let changed: serde_json::Value =

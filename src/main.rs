@@ -277,9 +277,14 @@ fn format_config_content(config: &Config) -> String {
         .join("|");
     let ignore_str = config.ide_ignore_patterns.join("|");
     let content = format!(
-            "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\",\n  \"enable_telemetry\": {}\n}}\n",
-            config.window_width, config.window_height, config.maximized, paths_str, ignore_str, config.enable_telemetry
-        );
+        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\",\n  \"enable_telemetry\": {}\n}}\n",
+        config.window_width,
+        config.window_height,
+        config.maximized,
+        paths_str,
+        ignore_str,
+        config.enable_telemetry
+    );
     content
 }
 
@@ -496,10 +501,12 @@ mod tests {
         assert!(!parsed.is_open(crate::app::PanelId::Terminal));
         assert_eq!(parsed.left_width, 444.4);
         assert_eq!(parsed.bottom_height, 155.5);
-        assert!(parsed
-            .slots
-            .iter()
-            .any(|slot| slot.id == crate::app::PanelId::Problems));
+        assert!(
+            parsed
+                .slots
+                .iter()
+                .any(|slot| slot.id == crate::app::PanelId::Problems)
+        );
     }
 
     #[test]
@@ -547,14 +554,18 @@ mod tests {
             crate::app::IdePanelState::default().left_width
         );
         assert_eq!(parsed.bottom_height, 333.3);
-        assert!(parsed
-            .slots
-            .iter()
-            .any(|slot| slot.id == crate::app::PanelId::Terminal));
-        assert!(parsed
-            .slots
-            .iter()
-            .any(|slot| slot.id == crate::app::PanelId::LspServers));
+        assert!(
+            parsed
+                .slots
+                .iter()
+                .any(|slot| slot.id == crate::app::PanelId::Terminal)
+        );
+        assert!(
+            parsed
+                .slots
+                .iter()
+                .any(|slot| slot.id == crate::app::PanelId::LspServers)
+        );
     }
 
     #[test]
@@ -752,8 +763,10 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
-    crate::render_view::TELEMETRY_ENABLED
-        .store(config.enable_telemetry, std::sync::atomic::Ordering::Relaxed);
+    crate::render_view::TELEMETRY_ENABLED.store(
+        config.enable_telemetry,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let highlighter = Highlighter::new();
 
     let show_welcome = !has_file_arg && !run_ide_on_startup;

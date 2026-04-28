@@ -24,11 +24,11 @@ mod hover;
 mod protocol;
 
 use hover::PendingRequestKind;
-pub use hover::{highlight_hover_text, HoverLineKindPublic};
+pub use hover::{HoverLineKindPublic, highlight_hover_text};
 use protocol::*;
 pub use protocol::{
-    highlight_diagnostic_message, offset_to_lsp_pos, CodeAction, LspEvent, TextChange,
-    WorkspaceEdit,
+    CodeAction, LspEvent, TextChange, WorkspaceEdit, highlight_diagnostic_message,
+    offset_to_lsp_pos,
 };
 use std::thread;
 use std::time::Duration;
@@ -1434,9 +1434,11 @@ mod tests {
         assert!(pretty.contains("\"items\": ["));
         assert!(!spans.is_empty());
         assert!(spans.iter().any(|span| span.end <= pretty.len()));
-        assert!(folds
-            .iter()
-            .all(|(start, end)| start < end && *end <= pretty.len()));
+        assert!(
+            folds
+                .iter()
+                .all(|(start, end)| start < end && *end <= pretty.len())
+        );
     }
 
     #[test]
@@ -1675,9 +1677,11 @@ mod tests {
             Cmd::CodeAction { id, only: Some(only), .. } if id == imports_id && only == vec!["source.organizeImports".to_string()]
         ));
 
-        assert!(manager
-            .request_code_actions(&path, "txt", 0, 0, 0, 0, &[], None)
-            .is_none());
+        assert!(
+            manager
+                .request_code_actions(&path, "txt", 0, 0, 0, 0, &[], None)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1863,10 +1867,12 @@ mod tests {
         let events = manager.poll();
         assert_eq!(events.len(), 1);
         assert!(manager.get_diagnostics(&path).is_empty());
-        assert!(manager
-            .get_instant_diagnostics_with_version(&path)
-            .1
-            .is_empty());
+        assert!(
+            manager
+                .get_instant_diagnostics_with_version(&path)
+                .1
+                .is_empty()
+        );
         assert!(!manager.dirty_diagnostics);
 
         manager.suppress_diagnostics = false;
@@ -1893,9 +1899,11 @@ mod tests {
     fn format_json_handles_send_prefix_invalid_json_plain_text_and_offsets() {
         let (send_text, send_spans, send_folds) = format_and_highlight_json("[LSP SEND] not json");
         assert_eq!(send_text, "[LSP SEND]\nnot json");
-        assert!(send_spans
-            .iter()
-            .any(|span| span.end == "[LSP SEND]\n".len()));
+        assert!(
+            send_spans
+                .iter()
+                .any(|span| span.end == "[LSP SEND]\n".len())
+        );
         assert!(send_folds.is_empty());
 
         let (invalid_text, invalid_spans, invalid_folds) =

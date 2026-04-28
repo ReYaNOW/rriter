@@ -321,11 +321,7 @@ pub(super) fn source_signature_for_hover(
         let open_bracket = rest.find('[').unwrap_or(open_paren);
         let name_end = open_paren.min(open_bracket);
         let name = rest[..name_end].trim();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name)
-        }
+        if name.is_empty() { None } else { Some(name) }
     }
     fn enclosing_python_owner(
         text: &str,
@@ -873,10 +869,10 @@ pub(super) fn wrap_signature_after_first_param(
 #[cfg(test)]
 mod tests {
     use super::{
-        module_path_from_definition_path, prepend_hover_module_path,
+        HOVER_MODULE_PREFIX, module_path_from_definition_path, prepend_hover_module_path,
         should_replace_hover_with_source_signature, source_attribute_hover_from_definition_file,
         source_class_signature_from_definition_file, source_line, source_signature_for_hover,
-        symbol_at_offset, wrap_signature_after_first_param, HOVER_MODULE_PREFIX,
+        symbol_at_offset, wrap_signature_after_first_param,
     };
 
     #[test]
@@ -901,7 +897,8 @@ mod tests {
             .expect("expected test function name");
         let signature = source_signature_for_hover(&editor, hover_offset, true, None, None)
             .expect("expected signature");
-        assert_eq!(signature,
+        assert_eq!(
+            signature,
             "@asynccontextmanager\nasync def lifespan(_: Litestar,\n                   arg: str) -> AsyncGenerator[None, Any]"
         );
     }
@@ -936,7 +933,8 @@ mod tests {
             .expect("expected client usage");
         let signature = source_signature_for_hover(&editor, hover_offset, false, None, None)
             .expect("expected attribute hover");
-        assert_eq!(signature,
+        assert_eq!(
+            signature,
             "## Class attribute client of FcmSenderService\nclient: AsyncFirebaseClient = AsyncFirebaseClient(\n    request_timeout=RequestTimeout(timeout=50)\n    )"
         );
     }

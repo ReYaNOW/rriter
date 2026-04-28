@@ -437,9 +437,11 @@ mod tests {
         let reply_color = rx
             .recv_timeout(std::time::Duration::from_millis(50))
             .unwrap();
-        assert!(String::from_utf8(reply_pos)
-            .unwrap()
-            .starts_with("\x1B[1;6R"));
+        assert!(
+            String::from_utf8(reply_pos)
+                .unwrap()
+                .starts_with("\x1B[1;6R")
+        );
         assert_eq!(reply_device, b"\x1B[?62c");
         assert_eq!(reply_color, b"\x1B]10;rgb:ffff/ffff/ffff\x1B\\");
 
@@ -466,11 +468,12 @@ mod tests {
         assert_eq!(grid.lines[0][3].c, 'd');
 
         feed(&mut grid, b"\x1b[2J");
-        assert!(grid
-            .lines
-            .iter()
-            .flat_map(|line| line.iter())
-            .all(|cell| cell.c == ' '));
+        assert!(
+            grid.lines
+                .iter()
+                .flat_map(|line| line.iter())
+                .all(|cell| cell.c == ' ')
+        );
 
         set_line(&mut grid, 0, "11111");
         set_line(&mut grid, 1, "22222");

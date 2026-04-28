@@ -214,8 +214,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else if state.popup.is_some() || state.pending_popup.is_some() {
             state.timer += raw_dt;
             if state.timer >= 0.25 {
-                if crate::render_view::TELEMETRY_ENABLED
-                    .load(std::sync::atomic::Ordering::Relaxed)
+                if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
                 {
                     println!("[HOVER DEBUG] 0.25s hide timer expired. Clearing popup.");
                 }

@@ -55,7 +55,11 @@ fn plain_assignment_index(line: &str) -> Option<usize> {
     None
 }
 
-fn token_occurrence_at_word_boundary(text: &str, token: &str, search_start: usize) -> Option<usize> {
+fn token_occurrence_at_word_boundary(
+    text: &str,
+    token: &str,
+    search_start: usize,
+) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut cursor = search_start.min(text.len());
     while cursor < text.len() {
@@ -89,10 +93,7 @@ fn previous_token_occurrence_at_word_boundary(
     best
 }
 
-fn nearest_python_assignment_usage(
-    editor: &Editor,
-    source_range: (usize, usize),
-) -> Option<usize> {
+fn nearest_python_assignment_usage(editor: &Editor, source_range: (usize, usize)) -> Option<usize> {
     let text = editor.get_full_text();
     let (start, end) = source_range;
     let token = text.get(start..end)?;
@@ -708,8 +709,9 @@ impl App {
             };
             let line = (target.line as usize).min(self.editor.line_offsets.len().saturating_sub(1));
             let line_top_y = line as f32 * r.line_height;
-            let max_scroll = r.get_max_scroll(&self.editor, wh - tab_bar_h);
-            self.scroll_y.target = (line_top_y - (wh - tab_bar_h) * 0.35)
+            let visible_h = (wh - tab_bar_h).max(r.line_height);
+            let max_scroll = r.get_max_scroll(&self.editor, visible_h);
+            self.scroll_y.target = (line_top_y - visible_h * 0.45)
                 .max(0.0)
                 .min(max_scroll)
                 .round();
@@ -1262,6 +1264,7 @@ impl App {
         let ext = self.file_extension.as_str();
         let threshold = match ext {
             "json" | "toml" | "yaml" | "yml" | "html" | "css" | "xml" | "md" | "txt" => 20,
+            "py" | "pyi" | "rs" | "dart" => 1,
             _ => 2,
         };
         self.editor.foldable_lines.clear();
@@ -1998,10 +2001,7 @@ mod app_behavior_tests {
         let usage = nearest_python_assignment_usage(&editor, (source_start, source_start + 5))
             .expect("expected usage");
 
-        assert_eq!(
-            editor.get_full_text().get(usage..usage + 5),
-            Some("value")
-        );
+        assert_eq!(editor.get_full_text().get(usage..usage + 5), Some("value"));
         assert_eq!(editor.get_full_text()[..usage].lines().count(), 2);
     }
 
@@ -2105,16 +2105,18 @@ mod app_behavior_tests {
         app.editor = editor_with("x = 1\nvalue = 2  # noqa: E501\n");
 
         app.insert_noqa_comment(0, &["F401".to_string(), "E501".to_string()]);
-        assert!(app
-            .editor
-            .get_full_text()
-            .starts_with("x = 1  # noqa: F401, E501\n"));
+        assert!(
+            app.editor
+                .get_full_text()
+                .starts_with("x = 1  # noqa: F401, E501\n")
+        );
 
         app.insert_noqa_comment(1, &["F821".to_string(), "E501".to_string()]);
-        assert!(app
-            .editor
-            .get_full_text()
-            .contains("value = 2  # noqa: E501, F821"));
+        assert!(
+            app.editor
+                .get_full_text()
+                .contains("value = 2  # noqa: E501, F821")
+        );
 
         app.insert_noqa_comment(1, &[]);
         assert!(app.editor.get_full_text().contains("value = 2  # noqa\n"));
@@ -2188,10 +2190,11 @@ mod app_behavior_tests {
             pending_request_id: None,
         });
         app.apply_selected_lsp_action();
-        assert!(app
-            .editor
-            .get_full_text()
-            .starts_with("aBc  # noqa: T002\n"));
+        assert!(
+            app.editor
+                .get_full_text()
+                .starts_with("aBc  # noqa: T002\n")
+        );
 
         assert!(app.lsp_panel_bounds().is_none());
 
@@ -2248,16 +2251,18 @@ mod app_behavior_tests {
         }];
         app.handle_ui_click(crate::ui_system::UiId::LspLogScrollY(0));
         app.handle_ui_click(crate::ui_system::UiId::LspLogScrollX(0));
-        assert!(app
-            .ide_panel
-            .lsp_logs_scroll_y
-            .get("ruff")
-            .is_some_and(|scroll| scroll.is_dragging));
-        assert!(app
-            .ide_panel
-            .lsp_logs_scroll_x
-            .get("ruff")
-            .is_some_and(|scroll| scroll.is_dragging));
+        assert!(
+            app.ide_panel
+                .lsp_logs_scroll_y
+                .get("ruff")
+                .is_some_and(|scroll| scroll.is_dragging)
+        );
+        assert!(
+            app.ide_panel
+                .lsp_logs_scroll_x
+                .get("ruff")
+                .is_some_and(|scroll| scroll.is_dragging)
+        );
 
         app.ide_panel
             .flat_diags

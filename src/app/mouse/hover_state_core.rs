@@ -244,6 +244,13 @@ impl HoverState {
         !keep_visible_popup
     }
 
+    pub fn reset_type_hover_wait_after_mouse_motion(&mut self) {
+        self.timer = 0.0;
+        self.request_id = None;
+        self.definition_request_id = None;
+        self.pending_popup = None;
+    }
+
     pub fn record_hovered_diagnostic(
         &mut self,
         diagnostic: HoveredDiagnostic,

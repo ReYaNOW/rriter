@@ -1,12 +1,12 @@
 mod tests {
     use super::super::{
-        advance_hover_anim_progress, clear_hover_popup, compute_hover_visibility,
-        compute_hover_visibility_from_matches, diagnostic_hover_byte_range_on_line,
-        diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
-        diagnostic_hover_type_target_at_x, hover_byte_on_line_at_x, hover_bytes_share_token,
-        hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
-        is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte, HoverState,
-        HOVER_STATE,
+        HOVER_STATE, HoverState, advance_hover_anim_progress, clear_hover_popup,
+        compute_hover_visibility, compute_hover_visibility_from_matches,
+        diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+        diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
+        hover_byte_on_line_at_x, hover_bytes_share_token, hover_source_line_y_band,
+        hover_token_bounds, hover_token_text, is_hover_target_byte, is_in_hover_popup_or_bridge,
+        is_python_hover_keyword, normalize_hover_byte,
     };
 
     #[test]
@@ -990,6 +990,36 @@ mod tests {
     }
 
     #[test]
+    fn mouse_motion_resets_type_hover_request_wait() {
+        let mut state = HoverState::default();
+        state.byte_offset = Some(12);
+        state.timer = crate::app::mouse::HOVER_REQUEST_DELAY_SEC - 0.01;
+        state.request_id = Some(1);
+        state.definition_request_id = Some(2);
+        state.pending_popup = Some(crate::app::mouse::HoverPopup {
+            text: "pending".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 12,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+
+        state.reset_type_hover_wait_after_mouse_motion();
+
+        assert_eq!(state.timer, 0.0);
+        assert!(state.request_id.is_none());
+        assert!(state.definition_request_id.is_none());
+        assert!(state.pending_popup.is_none());
+    }
+
+    #[test]
     fn stale_combined_popup_uses_frozen_diagnostics_not_live_cache() {
         let mut state = HoverState::default();
         state.popup = Some(crate::app::mouse::HoverPopup {
@@ -1377,20 +1407,12 @@ mod tests {
         let crud_repo = text.find("crud_repo").unwrap();
         let char_w = 10.0;
 
-        let self_byte = hover_byte_on_line_at_x(
-            &editor,
-            0,
-            self_attr as f32 * char_w,
-            |_ch| char_w,
-        )
-        .and_then(|byte| normalize_hover_byte(&editor, byte));
-        let crud_byte = hover_byte_on_line_at_x(
-            &editor,
-            0,
-            crud_repo as f32 * char_w,
-            |_ch| char_w,
-        )
-        .and_then(|byte| normalize_hover_byte(&editor, byte));
+        let self_byte =
+            hover_byte_on_line_at_x(&editor, 0, self_attr as f32 * char_w, |_ch| char_w)
+                .and_then(|byte| normalize_hover_byte(&editor, byte));
+        let crud_byte =
+            hover_byte_on_line_at_x(&editor, 0, crud_repo as f32 * char_w, |_ch| char_w)
+                .and_then(|byte| normalize_hover_byte(&editor, byte));
 
         assert_eq!(self_byte, Some(self_attr));
         assert_eq!(crud_byte, Some(crud_repo));
@@ -1428,7 +1450,10 @@ mod tests {
         assert_eq!(fallback, Some(text.find("crud_repo").unwrap()));
         assert_eq!(near_right_edge_of_f, Some(last_self_byte));
         assert_eq!(render_target, Some(last_self_byte));
-        assert_eq!(hover_token_text(&editor, last_self_byte).as_deref(), Some("self"));
+        assert_eq!(
+            hover_token_text(&editor, last_self_byte).as_deref(),
+            Some("self")
+        );
     }
 
     #[test]
@@ -1472,12 +1497,14 @@ mod tests {
         let start_col = text[..self_attr].encode_utf16().count() as u32;
         let end_col = text[..attr_end].encode_utf16().count() as u32;
         let char_w = 10.0;
-        let byte_under_dot =
-            hover_byte_on_line_at_x(&editor, 0, dot as f32 * char_w, |_ch| char_w);
+        let byte_under_dot = hover_byte_on_line_at_x(&editor, 0, dot as f32 * char_w, |_ch| char_w);
         let fallback = diagnostic_hover_byte_range_on_line(&editor, 0, start_col, end_col)
             .map(|(_, _, target)| target);
 
-        assert_eq!(byte_under_dot.and_then(|byte| normalize_hover_byte(&editor, byte)), None);
+        assert_eq!(
+            byte_under_dot.and_then(|byte| normalize_hover_byte(&editor, byte)),
+            None
+        );
         assert_eq!(fallback, Some(text.find("crud_repo").unwrap()));
     }
 

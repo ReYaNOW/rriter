@@ -736,6 +736,12 @@ Language module registry.
 
 Use when adding language-specific support.
 
+### `src/languages/dart.rs`
+
+Dart-specific import-block helpers.
+
+Use when Dart import folding behavior changes.
+
 ### `src/languages/python.rs`
 
 Python-specific language helpers.
@@ -744,8 +750,15 @@ Responsibilities:
 
 * Python hover signature parsing/highlighting.
 * Python-specific syntax details for hover or display.
+* Python import-block and docstring highlighting helpers.
 
 Use when Python LSP hover formatting changes.
+
+### `src/languages/rust.rs`
+
+Rust-specific import-block helpers.
+
+Use when Rust import folding behavior changes.
 
 ### `src/lsp.rs`
 
