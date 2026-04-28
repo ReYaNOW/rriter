@@ -183,6 +183,100 @@ fn test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_a
 }
 
 #[test]
+fn test_opening_hover_popup_animation_uses_stable_source_anchor() {
+    let target = (100.0, 100.0, 500.0, 300.0);
+    let progress = 0.55;
+    let source_anchor = (220.0, 520.0);
+    let live_mouse_inside_popup = (460.0, 180.0);
+    let (stable_mx, stable_my) = stable_hover_animation_mouse(
+        live_mouse_inside_popup.0,
+        live_mouse_inside_popup.1,
+        source_anchor.0,
+        source_anchor.1,
+        progress,
+    );
+
+    let frame_from_source = compute_animated_popup_frame(
+        source_anchor.0,
+        source_anchor.1,
+        target.0,
+        target.1,
+        target.2,
+        target.3,
+        progress,
+    );
+    let frame_from_stable_mouse = compute_animated_popup_frame(
+        stable_mx,
+        stable_my,
+        target.0,
+        target.1,
+        target.2,
+        target.3,
+        progress,
+    );
+    let frame_from_live_mouse = compute_animated_popup_frame(
+        live_mouse_inside_popup.0,
+        live_mouse_inside_popup.1,
+        target.0,
+        target.1,
+        target.2,
+        target.3,
+        progress,
+    );
+
+    assert_eq!(frame_from_stable_mouse, frame_from_source);
+    assert_ne!(frame_from_live_mouse, frame_from_source);
+}
+
+#[test]
+fn test_opening_combined_popup_keeps_source_side_when_cursor_moves_inside() {
+    let target = (100.0, 100.0, 500.0, 300.0);
+    let progress = 0.55;
+    let source_anchor = (650.0, 520.0);
+    let live_mouse_inside_left_side = (130.0, 180.0);
+    let (stable_mx, stable_my) = stable_hover_animation_mouse(
+        live_mouse_inside_left_side.0,
+        live_mouse_inside_left_side.1,
+        source_anchor.0,
+        source_anchor.1,
+        progress,
+    );
+
+    let frame_from_stable_mouse = compute_combined_popup_frame(
+        stable_mx,
+        stable_my,
+        target.0,
+        target.1,
+        target.2,
+        target.3,
+        progress,
+        true,
+    );
+    let frame_from_live_mouse = compute_combined_popup_frame(
+        live_mouse_inside_left_side.0,
+        live_mouse_inside_left_side.1,
+        target.0,
+        target.1,
+        target.2,
+        target.3,
+        progress,
+        true,
+    );
+
+    assert!((frame_from_stable_mouse.0 + frame_from_stable_mouse.2 - 600.0).abs() < 0.001);
+    assert!(frame_from_stable_mouse.0 > 100.0);
+    assert_eq!(frame_from_live_mouse.0, 100.0);
+}
+
+#[test]
+fn test_fully_open_hover_popup_animation_uses_live_mouse() {
+    assert_eq!(
+        stable_hover_animation_mouse(460.0, 180.0, 220.0, 520.0, 1.0),
+        (460.0, 180.0)
+    );
+}
+
+#[test]
 fn test_popup_above_cursor_expands_bottom_to_top() {
     let (frame_x, frame_y, frame_w, frame_h) =
         compute_animated_popup_frame(220.0, 520.0, 100.0, 100.0, 500.0, 300.0, 0.25);

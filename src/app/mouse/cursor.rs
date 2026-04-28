@@ -275,30 +275,10 @@ impl App {
         }
 
         if type_rect.is_some() || diag_rect_full.is_some() {
-            if let (Some((rx, ry, rw, rh)), Some((anchor_x, anchor_y, popup_byte_offset))) =
+            if let (Some((rx, ry, rw, rh)), Some((anchor_x, anchor_y, _popup_byte_offset))) =
                 (type_rect, popup_meta)
             {
-                let phys_line = self
-                    .editor
-                    .line_offsets
-                    .partition_point(|&o| o <= popup_byte_offset)
-                    .saturating_sub(1);
-                let vis_line_idx = self
-                    .renderer
-                    .as_ref()
-                    .unwrap()
-                    .phys_to_visual
-                    .get(phys_line)
-                    .copied()
-                    .unwrap_or(0) as f32;
-                let line_top_y = (vis_line_idx * self.renderer.as_ref().unwrap().line_height)
-                    - (self.scroll_y.current.round()
-                        - if self.show_welcome || !self.is_ide_mode {
-                            0.0
-                        } else {
-                            38.0 * s
-                        });
-                let line_bottom_y = line_top_y + self.renderer.as_ref().unwrap().line_height;
+                let (line_top_y, line_bottom_y) = hover_source_line_y_band(anchor_y, s);
 
                 let px = position.x as f32;
                 let py = position.y as f32;
@@ -325,6 +305,7 @@ impl App {
                     diag_rect_full
                 {
                     let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
+                    let (line_top_y, line_bottom_y) = hover_source_line_y_band(anchor_y, s);
                     let px = position.x as f32;
                     let py = position.y as f32;
                     if is_in_hover_popup_or_bridge(
@@ -333,13 +314,13 @@ impl App {
                         (rx, ry, rw, rh),
                         anchor_x,
                         anchor_y,
-                        anchor_y - 10.0 * s,
-                        anchor_y + 10.0 * s,
+                        line_top_y,
+                        line_bottom_y,
                         self.renderer.as_ref().unwrap().width,
                         s,
                     ) {
                         in_hover_popup = true;
-                        if py >= anchor_y - 10.0 * s && py <= anchor_y + 10.0 * s {
+                        if py >= line_top_y && py <= line_bottom_y {
                             in_hover_source_line = true;
                         }
                     }
@@ -448,18 +429,18 @@ impl App {
                             continue;
                         }
 
-                        let byte_under_cursor = self.renderer.as_mut().unwrap().get_byte_at_xy(
-                            &self.editor,
-                            px,
-                            py + render_scroll_y,
-                        );
-                        if let Some(normalized) =
-                            normalize_hover_byte(&self.editor, byte_under_cursor)
-                        {
-                            diag_hover_byte = Some(normalized);
-                        } else {
-                            diag_hover_byte = Some(type_target);
-                        }
+                        let line_x = px - left_padding + render_scroll_x;
+                        let type_target_under_cursor = {
+                            let renderer = self.renderer.as_mut().unwrap();
+                            diagnostic_hover_type_target_at_x(
+                                &self.editor,
+                                line,
+                                line_x,
+                                Some(type_target),
+                                |ch| renderer.char_advance(ch),
+                            )
+                        };
+                        diag_hover_byte = type_target_under_cursor;
                         break 'diag_scan;
                     }
                 }
@@ -547,6 +528,9 @@ impl App {
                         let (old_start, old_end) = hover_token_bounds(&self.editor, old_byte);
                         let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
                         same_word = old_start == new_start && old_end == new_end;
+                    }
+                    if !same_word && state.should_lock_hover_target_while_popup_opens(Some(byte_offset)) {
+                        return;
                     }
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                         let keep_visible_popup = state.popup.is_some();

@@ -249,19 +249,31 @@ pub(crate) fn diagnostic_hover_byte_range_on_line(
 
     let scan_start = start_byte.min(line_end);
     let scan_end = end_byte.max(scan_start).min(line_end);
-    let mut target_raw_byte = None;
-    let mut target_byte = None;
+    let mut first_target_raw_byte = None;
+    let mut first_target_byte = None;
+    let mut dotted_target_raw_byte = None;
+    let mut dotted_target_byte = None;
 
-    for byte in scan_start..scan_end {
+    let mut byte = scan_start;
+    while byte < scan_end {
         if let Some(normalized) = normalize_hover_byte(editor, byte) {
-            target_raw_byte = Some(byte);
-            target_byte = Some(normalized);
-            break;
+            let (token_start, token_end) = hover_token_bounds(editor, normalized);
+            if first_target_byte.is_none() {
+                first_target_raw_byte = Some(byte);
+                first_target_byte = Some(normalized);
+            }
+            if token_start > line_start && editor.byte_at(token_start - 1) == b'.' {
+                dotted_target_raw_byte = Some(byte);
+                dotted_target_byte = Some(normalized);
+            }
+            byte = token_end.max(byte + 1);
+        } else {
+            byte += 1;
         }
     }
 
-    let target_raw_byte = target_raw_byte?;
-    let target_byte = target_byte?;
+    let target_raw_byte = dotted_target_raw_byte.or(first_target_raw_byte)?;
+    let target_byte = dotted_target_byte.or(first_target_byte)?;
 
     let mut range_start = target_byte;
     let mut range_end = target_byte.saturating_add(1).min(line_end);
@@ -330,6 +342,86 @@ pub(crate) fn diagnostic_hover_byte_range_on_line(
     }
 
     Some((range_start, range_end, target_byte))
+}
+
+pub(crate) fn hover_byte_on_line_at_x<F>(
+    editor: &crate::editor::Editor,
+    line: usize,
+    target_x: f32,
+    mut char_advance: F,
+) -> Option<usize>
+where
+    F: FnMut(char) -> f32,
+{
+    let start_byte = *editor.line_offsets.get(line)?;
+    let mut end_byte = editor
+        .line_offsets
+        .get(line + 1)
+        .copied()
+        .unwrap_or(editor.len());
+    if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\n' {
+        end_byte -= 1;
+        if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
+            end_byte -= 1;
+        }
+    }
+
+    if start_byte >= end_byte {
+        return None;
+    }
+
+    let target_x = target_x.max(0.0);
+    let (first, second) = editor.text_parts();
+    let first_len = first.len();
+    let mut x = 0.0;
+    let mut byte = start_byte;
+    let mut last_valid_byte = start_byte;
+
+    while byte < end_byte {
+        let chunk = if byte < first_len {
+            &first[byte..end_byte.min(first_len)]
+        } else {
+            &second[byte - first_len..end_byte - first_len]
+        };
+
+        for ch in chunk.chars() {
+            let is_hidden = ch == '\u{FE0F}' || ch == '\u{200D}';
+            let advance = if is_hidden {
+                0.0
+            } else if ch == '\t' {
+                char_advance(' ') * 4.0
+            } else {
+                char_advance(ch)
+            };
+
+            if !is_hidden && target_x < x + advance {
+                return Some(last_valid_byte);
+            }
+
+            x += advance;
+            byte += ch.len_utf8();
+            if !is_hidden {
+                last_valid_byte = byte;
+            }
+        }
+    }
+
+    Some(last_valid_byte.min(end_byte))
+}
+
+pub(crate) fn diagnostic_hover_type_target_at_x<F>(
+    editor: &crate::editor::Editor,
+    line: usize,
+    target_x: f32,
+    fallback_target: Option<usize>,
+    char_advance: F,
+) -> Option<usize>
+where
+    F: FnMut(char) -> f32,
+{
+    hover_byte_on_line_at_x(editor, line, target_x, char_advance)
+        .and_then(|byte| normalize_hover_byte(editor, byte))
+        .or(fallback_target)
 }
 
 #[cfg(test)]

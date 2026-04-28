@@ -3,7 +3,8 @@ mod tests {
         advance_hover_anim_progress, clear_hover_popup, compute_hover_visibility,
         compute_hover_visibility_from_matches, diagnostic_hover_byte_range_on_line,
         diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
-        hover_bytes_share_token, hover_token_bounds, hover_token_text, is_hover_target_byte,
+        diagnostic_hover_type_target_at_x, hover_byte_on_line_at_x, hover_bytes_share_token,
+        hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
         is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte, HoverState,
         HOVER_STATE,
     };
@@ -783,6 +784,9 @@ mod tests {
 
         assert!(!state.should_keep_popup_through_empty_space());
 
+        state.rect = Some((80.0, 40.0, 220.0, 140.0));
+        assert!(!state.should_keep_popup_through_empty_space());
+
         state.request_id = Some(1);
         assert!(state.should_keep_popup_through_empty_space());
 
@@ -813,7 +817,113 @@ mod tests {
     }
 
     #[test]
-    fn empty_space_keeps_active_combined_popup_without_pending_request() {
+    fn far_empty_space_does_not_keep_in_flight_hover_before_popup_rect_exists() {
+        let mut state = HoverState::default();
+
+        state.request_id = Some(9);
+        assert!(!state.should_keep_popup_through_empty_space());
+
+        state.request_id = None;
+        state.definition_request_id = Some(10);
+        assert!(!state.should_keep_popup_through_empty_space());
+
+        state.definition_request_id = None;
+        state.pending_popup = Some(crate::app::mouse::HoverPopup {
+            text: "pending".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        assert!(!state.should_keep_popup_through_empty_space());
+
+        state.pending_popup = None;
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "not drawn yet".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        assert!(!state.should_keep_popup_through_empty_space());
+
+        state.rect = Some((80.0, 40.0, 220.0, 140.0));
+        assert!(!state.should_keep_popup_through_empty_space());
+    }
+
+    #[test]
+    fn opening_popup_locks_hover_target_against_new_editor_word() {
+        let mut state = HoverState::default();
+        state.byte_offset = Some(17);
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "opening".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.4,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.rect = Some((80.0, 40.0, 220.0, 140.0));
+
+        assert!(state.should_lock_hover_target_while_popup_opens(Some(99)));
+        assert!(!state.should_lock_hover_target_while_popup_opens(Some(17)));
+
+        state.popup.as_mut().unwrap().anim_progress = 1.0;
+        assert!(!state.should_lock_hover_target_while_popup_opens(Some(99)));
+    }
+
+    #[test]
+    fn pending_hover_response_locks_target_before_popup_rect_exists() {
+        let mut state = HoverState::default();
+        state.byte_offset = Some(17);
+        state.request_id = Some(1);
+
+        assert!(state.should_lock_hover_target_while_popup_opens(Some(99)));
+
+        state.request_id = None;
+        state.pending_popup = Some(crate::app::mouse::HoverPopup {
+            text: "waiting definition".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 17,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        assert!(state.should_lock_hover_target_while_popup_opens(Some(99)));
+
+        state.pending_popup = None;
+        state.definition_request_id = Some(2);
+        assert!(state.should_lock_hover_target_while_popup_opens(Some(99)));
+    }
+
+    #[test]
+    fn far_empty_space_does_not_keep_active_combined_popup_without_pending_request() {
         let mut state = HoverState::default();
         state.popup = Some(crate::app::mouse::HoverPopup {
             text: "combined".to_string(),
@@ -833,9 +943,49 @@ mod tests {
         state.byte_offset = None;
         state.timer = 0.19;
 
-        assert!(state.keep_active_combined_popup_on_empty_space());
-        assert_eq!(state.byte_offset, Some(3717));
-        assert_eq!(state.timer, 0.0);
+        assert!(!state.keep_active_combined_popup_on_empty_space());
+        assert_eq!(state.byte_offset, None);
+        assert_eq!(state.timer, 0.19);
+        assert!(!state.should_keep_popup_through_empty_space());
+    }
+
+    #[test]
+    fn far_empty_space_does_not_keep_combined_popup_or_opening_popup() {
+        let mut state = HoverState::default();
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "combined".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 3717,
+            anchor_x: 100.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.3,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        state.popup_diag_type_target = Some(3717);
+        state.rect = Some((80.0, 40.0, 220.0, 140.0));
+
+        assert!(!state.should_keep_popup_through_empty_space());
+        assert!(!state.keep_active_combined_popup_on_empty_space());
+
+        state.pending_popup = Some(crate::app::mouse::HoverPopup {
+            text: "pending next".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 4000,
+            anchor_x: 140.0,
+            anchor_y: 120.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
         assert!(state.should_keep_popup_through_empty_space());
     }
 
@@ -1179,6 +1329,181 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_hover_range_targets_self_crud_repo_dotted_attr_tail() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        editor.insert_str("        self.box_repo = BoxRepository(session)\n");
+        let text = editor.get_full_text();
+        let target = text.find("self.crud_repo").unwrap();
+        let target_end = target + "self.crud_repo".len();
+        let crud_repo = text.find("crud_repo").unwrap();
+        let start_col = text[..target].encode_utf16().count() as u32;
+        let end_col = text[..target_end].encode_utf16().count() as u32;
+
+        let range = diagnostic_hover_byte_range_on_line(&editor, 0, start_col, end_col).unwrap();
+        let (token_start, token_end) = hover_token_bounds(&editor, range.2);
+        let (exact_start, exact_end) = hover_token_bounds(&editor, crud_repo);
+
+        assert_eq!((range.0, range.1), (crud_repo, target_end));
+        assert_eq!((token_start, token_end), (crud_repo, target_end));
+        assert_eq!(range.2, crud_repo);
+        assert_eq!((exact_start, exact_end), (crud_repo, target_end));
+        assert_eq!(normalize_hover_byte(&editor, crud_repo), Some(crud_repo));
+        assert_eq!(normalize_hover_byte(&editor, target), Some(target));
+        assert_eq!(normalize_hover_byte(&editor, target_end), None);
+    }
+
+    #[test]
+    fn diagnostic_hover_range_keeps_plain_identifier_first_token() {
+        let mut editor = crate::editor::Editor::new(128);
+        editor.insert_str("        repository = crud_repo\n");
+        let text = editor.get_full_text();
+        let target = text.find("crud_repo").unwrap();
+        let target_end = target + "crud_repo".len();
+        let start_col = text[..target].encode_utf16().count() as u32;
+        let end_col = text[..target_end].encode_utf16().count() as u32;
+
+        let range = diagnostic_hover_byte_range_on_line(&editor, 0, start_col, end_col).unwrap();
+
+        assert_eq!((range.0, range.1, range.2), (target, target_end, target));
+    }
+
+    #[test]
+    fn diagnostic_hover_x_selects_self_or_crud_repo_on_same_dotted_span() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        let text = editor.get_full_text();
+        let self_attr = text.find("self.crud_repo").unwrap();
+        let crud_repo = text.find("crud_repo").unwrap();
+        let char_w = 10.0;
+
+        let self_byte = hover_byte_on_line_at_x(
+            &editor,
+            0,
+            self_attr as f32 * char_w,
+            |_ch| char_w,
+        )
+        .and_then(|byte| normalize_hover_byte(&editor, byte));
+        let crud_byte = hover_byte_on_line_at_x(
+            &editor,
+            0,
+            crud_repo as f32 * char_w,
+            |_ch| char_w,
+        )
+        .and_then(|byte| normalize_hover_byte(&editor, byte));
+
+        assert_eq!(self_byte, Some(self_attr));
+        assert_eq!(crud_byte, Some(crud_repo));
+    }
+
+    #[test]
+    fn diagnostic_hover_x_keeps_right_edge_of_self_on_self_not_attr_tail() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        let text = editor.get_full_text();
+        let self_attr = text.find("self.crud_repo").unwrap();
+        let attr_end = self_attr + "self.crud_repo".len();
+        let start_col = text[..self_attr].encode_utf16().count() as u32;
+        let end_col = text[..attr_end].encode_utf16().count() as u32;
+        let last_self_byte = self_attr + "sel".len();
+        let char_w = 10.0;
+        let fallback = diagnostic_hover_byte_range_on_line(&editor, 0, start_col, end_col)
+            .map(|(_, _, target)| target);
+
+        let near_right_edge_of_f = hover_byte_on_line_at_x(
+            &editor,
+            0,
+            (last_self_byte as f32 * char_w) + char_w * 0.95,
+            |_ch| char_w,
+        )
+        .and_then(|byte| normalize_hover_byte(&editor, byte));
+        let render_target = diagnostic_hover_type_target_at_x(
+            &editor,
+            0,
+            (last_self_byte as f32 * char_w) + char_w * 0.95,
+            fallback,
+            |_ch| char_w,
+        );
+
+        assert_eq!(fallback, Some(text.find("crud_repo").unwrap()));
+        assert_eq!(near_right_edge_of_f, Some(last_self_byte));
+        assert_eq!(render_target, Some(last_self_byte));
+        assert_eq!(hover_token_text(&editor, last_self_byte).as_deref(), Some("self"));
+    }
+
+    #[test]
+    fn diagnostic_hover_x_uses_line_relative_x_with_nonzero_line_start() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("before = 1\n");
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        let text = editor.get_full_text();
+        let line = 1;
+        let line_start = editor.line_offsets[line];
+        let self_attr = text.find("self.crud_repo").unwrap();
+        let attr_end = self_attr + "self.crud_repo".len();
+        let start_col = text[line_start..self_attr].encode_utf16().count() as u32;
+        let end_col = text[line_start..attr_end].encode_utf16().count() as u32;
+        let last_self_byte = self_attr + "sel".len();
+        let last_self_col = last_self_byte - line_start;
+        let char_w = 10.0;
+        let fallback = diagnostic_hover_byte_range_on_line(&editor, line, start_col, end_col)
+            .map(|(_, _, target)| target);
+
+        let render_target = diagnostic_hover_type_target_at_x(
+            &editor,
+            line,
+            (last_self_col as f32 * char_w) + char_w * 0.95,
+            fallback,
+            |_ch| char_w,
+        );
+
+        assert_eq!(fallback, Some(text.find("crud_repo").unwrap()));
+        assert_eq!(render_target, Some(last_self_byte));
+    }
+
+    #[test]
+    fn diagnostic_hover_x_over_dot_falls_back_to_dotted_attr_tail() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        let text = editor.get_full_text();
+        let self_attr = text.find("self.crud_repo").unwrap();
+        let attr_end = self_attr + "self.crud_repo".len();
+        let dot = self_attr + "self".len();
+        let start_col = text[..self_attr].encode_utf16().count() as u32;
+        let end_col = text[..attr_end].encode_utf16().count() as u32;
+        let char_w = 10.0;
+        let byte_under_dot =
+            hover_byte_on_line_at_x(&editor, 0, dot as f32 * char_w, |_ch| char_w);
+        let fallback = diagnostic_hover_byte_range_on_line(&editor, 0, start_col, end_col)
+            .map(|(_, _, target)| target);
+
+        assert_eq!(byte_under_dot.and_then(|byte| normalize_hover_byte(&editor, byte)), None);
+        assert_eq!(fallback, Some(text.find("crud_repo").unwrap()));
+    }
+
+    #[test]
+    fn diagnostic_hover_range_does_not_leak_self_crud_repo_to_next_line() {
+        let mut editor = crate::editor::Editor::new(256);
+        editor.insert_str("        self.booking_repo: BookingRepository = self.crud_repo\n");
+        editor.insert_str("        self.box_repo = BoxRepository(session)\n");
+        let text = editor.get_full_text();
+        let next_line_box = text.find("self.box_repo").unwrap();
+        let next_start_col = text[editor.line_offsets[1]..next_line_box]
+            .encode_utf16()
+            .count() as u32;
+        let next_end_col = next_start_col + "self.box_repo".encode_utf16().count() as u32;
+
+        let range =
+            diagnostic_hover_byte_range_on_line(&editor, 1, next_start_col, next_end_col).unwrap();
+        let target = text.find("self.crud_repo").unwrap();
+        let next_target = text.find("box_repo").unwrap();
+
+        assert_ne!(range.2, target);
+        assert_eq!(range.2, next_target);
+        assert_eq!(&text[range.0..range.1], "box_repo");
+    }
+
+    #[test]
     fn hover_token_bounds_handles_empty_and_escaped_string_literal() {
         let editor = crate::editor::Editor::new(8);
         assert_eq!(hover_token_bounds(&editor, 99), (0, 0));
@@ -1210,6 +1535,93 @@ mod tests {
             popup_rect,
             460.0,
             305.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_source_line_band_is_tight_around_anchor_y() {
+        let (top, bottom) = hover_source_line_y_band(354.0, 1.0);
+
+        assert_eq!((top, bottom), (344.0, 364.0));
+    }
+
+    #[test]
+    fn hover_bridge_does_not_capture_below_type_anchor_band_when_popup_is_above() {
+        let popup_rect = (96.0, 80.0, 760.0, 210.0);
+        let (line_top_y, line_bottom_y) = hover_source_line_y_band(354.0, 1.0);
+
+        assert!(is_in_hover_popup_or_bridge(
+            620.0,
+            line_bottom_y,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+        assert!(!is_in_hover_popup_or_bridge(
+            620.0,
+            line_bottom_y + 0.1,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+        assert!(!is_in_hover_popup_or_bridge(
+            620.0,
+            line_bottom_y + 18.0,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn hover_bridge_does_not_capture_above_type_anchor_band_when_popup_is_below() {
+        let popup_rect = (96.0, 420.0, 760.0, 210.0);
+        let (line_top_y, line_bottom_y) = hover_source_line_y_band(354.0, 1.0);
+
+        assert!(is_in_hover_popup_or_bridge(
+            620.0,
+            line_top_y,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+        assert!(!is_in_hover_popup_or_bridge(
+            620.0,
+            line_top_y - 0.1,
+            popup_rect,
+            620.0,
+            354.0,
+            line_top_y,
+            line_bottom_y,
+            1000.0,
+            1.0,
+        ));
+        assert!(!is_in_hover_popup_or_bridge(
+            620.0,
+            line_top_y - 18.0,
+            popup_rect,
+            620.0,
+            354.0,
             line_top_y,
             line_bottom_y,
             1000.0,

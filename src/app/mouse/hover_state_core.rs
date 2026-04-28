@@ -360,14 +360,39 @@ impl HoverState {
 
     pub fn should_keep_popup_through_empty_space(&self) -> bool {
         self.stale_combined_popup
-            || self.popup_diag_type_target.is_some()
             || (self.popup.is_some()
                 && (self.pending_popup.is_some()
                     || self.request_id.is_some()
                     || self.definition_request_id.is_some()))
     }
 
+    pub fn should_lock_hover_target_while_popup_opens(&self, next_byte: Option<usize>) -> bool {
+        let Some(next_byte) = next_byte else {
+            return false;
+        };
+        let current_byte = self
+            .byte_offset
+            .or_else(|| self.pending_popup.as_ref().map(|popup| popup.byte_offset))
+            .or_else(|| self.popup.as_ref().map(|popup| popup.byte_offset));
+        let Some(current_byte) = current_byte else {
+            return false;
+        };
+        if current_byte == next_byte {
+            return false;
+        }
+        self.pending_popup.is_some()
+            || self.request_id.is_some()
+            || self.definition_request_id.is_some()
+            || self
+                .popup
+                .as_ref()
+                .is_some_and(|popup| self.rect.is_none() || popup.anim_progress < 1.0)
+    }
+
     pub fn keep_active_combined_popup_on_empty_space(&mut self) -> bool {
+        if !self.stale_combined_popup {
+            return false;
+        }
         let Some(target) = self.combined_type_target() else {
             return false;
         };
@@ -402,8 +427,7 @@ impl HoverState {
 
         if let Some((rx, ry, rw, rh, anchor_x_start, anchor_x_end, anchor_y)) = self.diag_rect {
             let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
-            let line_top_y = anchor_y - 10.0 * scale;
-            let line_bottom_y = anchor_y + 10.0 * scale;
+            let (line_top_y, line_bottom_y) = hover_source_line_y_band(anchor_y, scale);
             if is_in_hover_popup_or_bridge(
                 px,
                 py,
@@ -421,8 +445,7 @@ impl HoverState {
         }
 
         if let (Some((rx, ry, rw, rh)), Some(popup)) = (self.rect, self.popup.as_ref()) {
-            let line_top_y = popup.anchor_y - 10.0 * scale;
-            let line_bottom_y = popup.anchor_y + 10.0 * scale;
+            let (line_top_y, line_bottom_y) = hover_source_line_y_band(popup.anchor_y, scale);
             if is_in_hover_popup_or_bridge(
                 px,
                 py,
@@ -443,6 +466,11 @@ impl HoverState {
     }
 }
 
+pub fn hover_source_line_y_band(anchor_y: f32, scale: f32) -> (f32, f32) {
+    let half_h = 10.0 * scale;
+    (anchor_y - half_h, anchor_y + half_h)
+}
+
 pub fn is_in_hover_popup_or_bridge(
     px: f32,
     py: f32,
@@ -460,13 +488,12 @@ pub fn is_in_hover_popup_or_bridge(
     }
 
     let bridge_radius = 72.0 * scale;
-    let bridge_margin = 16.0 * scale;
 
     if ry + rh <= line_top_y {
-        if py > line_bottom_y + bridge_margin {
+        if py > line_bottom_y {
             return false;
         }
-    } else if ry >= line_bottom_y && py < line_top_y - bridge_margin {
+    } else if ry >= line_bottom_y && py < line_top_y {
         return false;
     }
 
@@ -495,11 +522,11 @@ pub fn is_in_hover_popup_or_bridge(
 
     let on_line_x = (px - anchor_x).abs() < bridge_radius;
     let on_line_y = if ry + rh <= line_top_y {
-        py >= ry + rh - bridge_radius * 0.5 && py <= line_bottom_y + bridge_margin
+        py >= ry + rh - bridge_radius * 0.5 && py <= line_bottom_y
     } else if ry >= line_bottom_y {
-        py >= line_top_y - bridge_margin && py <= ry + bridge_radius * 0.5
+        py >= line_top_y && py <= ry + bridge_radius * 0.5
     } else {
-        py >= line_top_y - bridge_radius * 0.5 && py <= line_bottom_y + bridge_radius * 0.5
+        py >= line_top_y && py <= line_bottom_y
     };
 
     on_line_x && on_line_y

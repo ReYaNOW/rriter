@@ -20,12 +20,13 @@ pub use hover_mouse_logic::{
 #[cfg(test)]
 pub(super) use hover_mouse_logic::{
     compute_hover_visibility, diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
-    hover_token_text, is_hover_target_byte, is_python_hover_keyword,
+    hover_byte_on_line_at_x, hover_token_text, is_hover_target_byte, is_python_hover_keyword,
 };
 pub(crate) use hover_mouse_logic::{
-    diagnostic_hover_byte_range_on_line, hover_bytes_share_token, hover_token_bounds,
-    normalize_hover_byte,
+    diagnostic_hover_byte_range_on_line, diagnostic_hover_type_target_at_x, hover_bytes_share_token,
+    hover_token_bounds, normalize_hover_byte,
 };
 pub use hover_state_core::{
-    is_in_hover_popup_or_bridge, HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine,
+    hover_source_line_y_band, is_in_hover_popup_or_bridge, HoverLayoutCache, HoverPopup,
+    HoverState, HoverVisualLine,
 };

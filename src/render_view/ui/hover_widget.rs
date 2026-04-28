@@ -158,6 +158,20 @@ fn compute_hover_popup_anim_rect(
     (anim_x, anim_y, anim_w, anim_h)
 }
 
+fn stable_hover_animation_mouse(
+    live_mx: f32,
+    live_my: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    anim_progress: f32,
+) -> (f32, f32) {
+    if anim_progress < 1.0 {
+        (anchor_x, anchor_y)
+    } else {
+        (live_mx, live_my)
+    }
+}
+
 pub fn compute_animated_popup_frame(
     mx: f32,
     my: f32,
@@ -613,8 +627,12 @@ impl Renderer {
         }
 
         let anim_progress = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress);
+        let source_anchor_x = popup_anchor_x.unwrap_or((first_diag_x + first_diag_x_end) * 0.5);
+        let source_anchor_y = (first_line_y_top + first_diag_y_bottom) * 0.5;
+        let (anim_mx, anim_my) =
+            stable_hover_animation_mouse(mx, my, source_anchor_x, source_anchor_y, anim_progress);
         let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) =
-            compute_animated_scissor(mx, my, bx, by, box_w, combined_h, anim_progress);
+            compute_animated_scissor(anim_mx, anim_my, bx, by, box_w, combined_h, anim_progress);
 
         let apply_scissor = |gl: &glow::Context,
                              height: f32,
@@ -640,8 +658,8 @@ impl Renderer {
 
         self.flush();
         let (frame_x, frame_y, frame_w, frame_h) = compute_combined_popup_frame(
-            mx,
-            my,
+            anim_mx,
+            anim_my,
             bx,
             by,
             box_w,
@@ -1143,9 +1161,16 @@ impl Renderer {
         } else {
             anim_progress
         };
-        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_hover_content_scissor(
+        let (anim_mx, anim_my) = stable_hover_animation_mouse(
             mx,
             my,
+            popup.anchor_x,
+            popup.anchor_y,
+            attached_anim_progress,
+        );
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_hover_content_scissor(
+            anim_mx,
+            anim_my,
             bx,
             by,
             box_w,
@@ -1174,7 +1199,7 @@ impl Renderer {
         if attached_diag.is_none() {
             self.flush();
             let (frame_x, frame_y, frame_w, frame_h) =
-                compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress);
+                compute_animated_popup_frame(anim_mx, anim_my, bx, by, box_w, box_h, anim_progress);
             self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s);
         }
 

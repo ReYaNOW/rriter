@@ -146,9 +146,17 @@ impl Renderer {
                             .with(|s| s.borrow().combined_type_target())
                             .or(hit_type_target)
                     } else {
+                        let line_x = mx - self.left_padding + render_scroll_x;
+                        let target_under_cursor = crate::app::mouse::diagnostic_hover_type_target_at_x(
+                            editor,
+                            line,
+                            line_x,
+                            hit_type_target,
+                            |ch| self.char_advance(ch),
+                        );
                         crate::app::mouse::HOVER_STATE
                             .with(|s| s.borrow().byte_offset)
-                            .or(hit_type_target)
+                            .or(target_under_cursor)
                     };
                     if hovered_diag_type_target.is_none() {
                         hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
