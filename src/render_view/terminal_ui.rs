@@ -243,7 +243,7 @@ impl Renderer {
                         .term_search_results
                         .iter()
                         .enumerate()
-                        .filter(|(_, &(_sx, sy, _ex, ey))| {
+                        .filter(|&(_, &(_sx, sy, _ex, ey))| {
                             let start_y = sy.min(ey);
                             let end_y = sy.max(ey);
                             i >= start_y && i <= end_y

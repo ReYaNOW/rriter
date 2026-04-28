@@ -648,7 +648,7 @@ fn main() {
     unsafe {
         // Константа M_ARENA_MAX = -8. Настраиваем glibc напрямую,
         // так как переменные окружения читать уже поздно.
-        extern "C" {
+        unsafe extern "C" {
             fn mallopt(param: i32, val: i32) -> i32;
         }
         mallopt(-8, 2);
