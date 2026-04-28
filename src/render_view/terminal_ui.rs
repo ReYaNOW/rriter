@@ -216,6 +216,8 @@ impl Renderer {
                 );
             }
 
+            let mut row_search_results = std::mem::take(&mut self.terminal_row_search_results);
+
             for i in 0..total_lines {
                 let offset_from_bottom = total_lines - 1 - i;
                 let draw_y = term_content_y + term_content_h
@@ -238,20 +240,21 @@ impl Renderer {
                     &grid.lines[i - scrollback_len]
                 };
 
-                let row_search_results: Vec<_> = if ide_panel.term_show_search {
-                    ide_panel
-                        .term_search_results
-                        .iter()
-                        .enumerate()
-                        .filter(|&(_, &(_sx, sy, _ex, ey))| {
-                            let start_y = sy.min(ey);
-                            let end_y = sy.max(ey);
-                            i >= start_y && i <= end_y
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                row_search_results.clear();
+                if ide_panel.term_show_search {
+                    row_search_results.extend(
+                        ide_panel
+                            .term_search_results
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .filter(|&(_, (_sx, sy, _ex, ey))| {
+                                let start_y = sy.min(ey);
+                                let end_y = sy.max(ey);
+                                i >= start_y && i <= end_y
+                            }),
+                    );
+                }
 
                 for (c_idx, cell) in row.iter().enumerate() {
                     if c_idx >= grid.cols {
@@ -299,7 +302,7 @@ impl Renderer {
 
                     let mut is_search_res = false;
                     let mut is_active_search = false;
-                    for &(idx, &(sx, sy, ex, ey)) in &row_search_results {
+                    for &(idx, (sx, sy, ex, ey)) in &row_search_results {
                         let start_y = sy.min(ey);
                         let end_y = sy.max(ey);
                         let start_x = if sy < ey {
@@ -354,8 +357,9 @@ impl Renderer {
                         } else {
                             self.theme.fg
                         };
+                        let mut char_buf = [0u8; 4];
                         self.draw_string_mono_scaled(
-                            &cell.c.to_string(),
+                            cell.c.encode_utf8(&mut char_buf),
                             cx,
                             draw_y + self.baseline_offset * term_scale,
                             fg_color,
@@ -364,6 +368,8 @@ impl Renderer {
                     }
                 }
             }
+
+            self.terminal_row_search_results = row_search_results;
 
             if ide_panel.terminal_focused {
                 let cursor_offset_from_bottom = grid

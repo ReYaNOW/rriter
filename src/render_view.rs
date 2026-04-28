@@ -175,9 +175,9 @@ impl Renderer {
             current_byte
         };
 
-        let mut lsp_diagnostics_filtered = Vec::new();
-        let mut unused_spans = Vec::new();
-        for d in instant_raw {
+        self.lsp_diagnostic_indices.clear();
+        self.unused_spans_cache.clear();
+        for (idx, d) in instant_raw.iter().enumerate() {
             let diag_line = d.start_line as usize;
             let mut suppress = false;
 
@@ -193,18 +193,19 @@ impl Renderer {
             }
 
             if !suppress {
-                lsp_diagnostics_filtered.push(d.clone());
+                self.lsp_diagnostic_indices.push(idx);
                 if d.tags.contains(&1) || d.tags.contains(&2) {
                     let start = get_byte_offset(d.start_line, d.start_col);
                     let end = get_byte_offset(d.end_line, d.end_col);
                     if start < end {
-                        unused_spans.push((start, end));
+                        self.unused_spans_cache.push((start, end));
                     }
                 }
             }
         }
-        unused_spans.sort_unstable_by_key(|&(s, _)| s);
-        let lsp_diagnostics = &lsp_diagnostics_filtered;
+        self.unused_spans_cache.sort_unstable_by_key(|&(s, _)| s);
+        let has_lsp_diagnostics = !self.lsp_diagnostic_indices.is_empty();
+        let lsp_diagnostics = instant_raw;
 
         let delayed_diagnostics = if let Some(l) = lsp {
             if let Some(p) = editor_path {
@@ -401,7 +402,7 @@ impl Renderer {
                 ide_panel,
                 lsp,
                 ui_registry,
-                !lsp_diagnostics.is_empty(),
+                has_lsp_diagnostics,
                 s,
                 mx,
                 my,
@@ -422,46 +423,56 @@ impl Renderer {
         let len = first_len + second.len();
 
         // --- Подсветка скобок ---
-        let mut bracket_pairs = None;
-        let find_matching_bracket = |pos: usize, b: u8| -> Option<usize> {
-            let (open, close, dir) = match b {
-                b'(' => (b'(', b')', 1isize),
-                b'[' => (b'[', b']', 1isize),
-                b'{' => (b'{', b'}', 1isize),
-                b')' => (b')', b'(', -1isize),
-                b']' => (b']', b'[', -1isize),
-                b'}' => (b'}', b'{', -1isize),
-                _ => return None,
-            };
-            let mut depth = 1;
-            let mut curr = pos as isize + dir;
-            while curr >= 0 && curr < len as isize {
-                let cb = editor.byte_at(curr as usize);
-                if cb == open {
-                    depth += 1;
-                } else if cb == close {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(curr as usize);
+        let bracket_pairs = if self.bracket_pair_cache_version == editor.version
+            && self.bracket_pair_cache_cursor == editor.cursor
+        {
+            self.bracket_pair_cache
+        } else {
+            let mut bracket_pairs = None;
+            let find_matching_bracket = |pos: usize, b: u8| -> Option<usize> {
+                let (open, close, dir) = match b {
+                    b'(' => (b'(', b')', 1isize),
+                    b'[' => (b'[', b']', 1isize),
+                    b'{' => (b'{', b'}', 1isize),
+                    b')' => (b')', b'(', -1isize),
+                    b']' => (b']', b'[', -1isize),
+                    b'}' => (b'}', b'{', -1isize),
+                    _ => return None,
+                };
+                let mut depth = 1;
+                let mut curr = pos as isize + dir;
+                while curr >= 0 && curr < len as isize {
+                    let cb = editor.byte_at(curr as usize);
+                    if cb == open {
+                        depth += 1;
+                    } else if cb == close {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(curr as usize);
+                        }
                     }
+                    curr += dir;
                 }
-                curr += dir;
-            }
-            None
-        };
+                None
+            };
 
-        if editor.cursor < len {
-            let b = editor.byte_at(editor.cursor);
-            if let Some(matching) = find_matching_bracket(editor.cursor, b) {
-                bracket_pairs = Some((editor.cursor, matching));
+            if editor.cursor < len {
+                let b = editor.byte_at(editor.cursor);
+                if let Some(matching) = find_matching_bracket(editor.cursor, b) {
+                    bracket_pairs = Some((editor.cursor, matching));
+                }
             }
-        }
-        if bracket_pairs.is_none() && editor.cursor > 0 {
-            let b = editor.byte_at(editor.cursor - 1);
-            if let Some(matching) = find_matching_bracket(editor.cursor - 1, b) {
-                bracket_pairs = Some((editor.cursor - 1, matching));
+            if bracket_pairs.is_none() && editor.cursor > 0 {
+                let b = editor.byte_at(editor.cursor - 1);
+                if let Some(matching) = find_matching_bracket(editor.cursor - 1, b) {
+                    bracket_pairs = Some((editor.cursor - 1, matching));
+                }
             }
-        }
+            self.bracket_pair_cache = bracket_pairs;
+            self.bracket_pair_cache_version = editor.version;
+            self.bracket_pair_cache_cursor = editor.cursor;
+            bracket_pairs
+        };
 
         let sel_start = editor
             .selection_anchor
@@ -473,152 +484,163 @@ impl Renderer {
             .unwrap_or(editor.cursor);
 
         // --- Одинаковые слова (Word Highlighting) ---
-        self.identical_words_cache.clear();
-        let mut target_word_str: Option<&str> = None;
-        let is_valid_word = |s: &str| -> bool {
-            s.chars().next().map_or(false, |c| !c.is_ascii_digit())
-                && s.as_bytes()
-                    .iter()
-                    .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
-        };
-
-        if sel_start != sel_end {
-            let slen = sel_end - sel_start;
-            if slen < 100 {
-                if sel_end <= first_len {
-                    if let Some(s) = first.get(sel_start..sel_end) {
-                        if is_valid_word(s) {
-                            target_word_str = Some(s);
-                        }
-                    }
-                } else if sel_start >= first_len {
-                    if let Some(s) = second.get((sel_start - first_len)..(sel_end - first_len)) {
-                        if is_valid_word(s) {
-                            target_word_str = Some(s);
-                        }
-                    }
-                }
-            }
-        } else {
-            let mut p_start = editor.cursor;
-            while p_start > 0 {
-                let b = editor.byte_at(p_start - 1);
-                if !(b.is_ascii_alphanumeric() || b == b'_') {
-                    break;
-                }
-                p_start -= 1;
-            }
-            let mut p_end = editor.cursor;
-            while p_end < len {
-                let b = editor.byte_at(p_end);
-                if !(b.is_ascii_alphanumeric() || b == b'_') {
-                    break;
-                }
-                p_end += 1;
-            }
-            if p_end > p_start {
-                if p_end <= first_len {
-                    if let Some(s) = first.get(p_start..p_end) {
-                        if is_valid_word(s) {
-                            target_word_str = Some(s);
-                        }
-                    }
-                } else if p_start >= first_len {
-                    if let Some(s) = second.get((p_start - first_len)..(p_end - first_len)) {
-                        if is_valid_word(s) {
-                            target_word_str = Some(s);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(word) = target_word_str {
-            let first_bytes = first.as_bytes();
-            let second_bytes = second.as_bytes();
-            let w_len = word.len();
-            let full_len = first.len() + second.len();
-
-            let get_byte = |idx: usize| -> u8 {
-                if idx < first.len() {
-                    first_bytes[idx]
-                } else {
-                    second_bytes[idx - first.len()]
-                }
+        if self.identical_words_cache_version != editor.version
+            || self.identical_words_cache_cursor != editor.cursor
+            || self.identical_words_cache_selection_anchor != editor.selection_anchor
+        {
+            self.identical_words_cache.clear();
+            let mut target_word_str: Option<&str> = None;
+            let is_valid_word = |s: &str| -> bool {
+                s.chars().next().map_or(false, |c| !c.is_ascii_digit())
+                    && s.as_bytes()
+                        .iter()
+                        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
             };
 
-            let mut start = 0;
-            while let Some(idx) = first[start..].find(word) {
-                let abs_idx = start + idx;
-                let left_ok = if abs_idx == 0 {
-                    true
-                } else {
-                    let b = first_bytes[abs_idx - 1];
-                    !(b.is_ascii_alphanumeric() || b == b'_')
-                };
-                let right_ok = if abs_idx + w_len == full_len {
-                    true
-                } else {
-                    let b = get_byte(abs_idx + w_len);
-                    !(b.is_ascii_alphanumeric() || b == b'_')
-                };
-                if left_ok && right_ok {
-                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
-                }
-                start = abs_idx + w_len;
-            }
-
-            let boundary_start = first.len().saturating_sub(w_len - 1);
-            for i in boundary_start..first.len() {
-                if i + w_len <= full_len {
-                    let mut matches = true;
-                    let w_bytes = word.as_bytes();
-                    for j in 0..w_len {
-                        if get_byte(i + j) != w_bytes[j] {
-                            matches = false;
-                            break;
+            if sel_start != sel_end {
+                let slen = sel_end - sel_start;
+                if slen < 100 {
+                    if sel_end <= first_len {
+                        if let Some(s) = first.get(sel_start..sel_end) {
+                            if is_valid_word(s) {
+                                target_word_str = Some(s);
+                            }
                         }
-                    }
-                    if matches {
-                        let left_ok = if i == 0 {
-                            true
-                        } else {
-                            let b = get_byte(i - 1);
-                            !(b.is_ascii_alphanumeric() || b == b'_')
-                        };
-                        let right_ok = if i + w_len == full_len {
-                            true
-                        } else {
-                            let b = get_byte(i + w_len);
-                            !(b.is_ascii_alphanumeric() || b == b'_')
-                        };
-                        if left_ok && right_ok {
-                            self.identical_words_cache.push((i, i + w_len));
+                    } else if sel_start >= first_len {
+                        if let Some(s) =
+                            second.get((sel_start - first_len)..(sel_end - first_len))
+                        {
+                            if is_valid_word(s) {
+                                target_word_str = Some(s);
+                            }
                         }
                     }
                 }
+            } else {
+                let mut p_start = editor.cursor;
+                while p_start > 0 {
+                    let b = editor.byte_at(p_start - 1);
+                    if !(b.is_ascii_alphanumeric() || b == b'_') {
+                        break;
+                    }
+                    p_start -= 1;
+                }
+                let mut p_end = editor.cursor;
+                while p_end < len {
+                    let b = editor.byte_at(p_end);
+                    if !(b.is_ascii_alphanumeric() || b == b'_') {
+                        break;
+                    }
+                    p_end += 1;
+                }
+                if p_end > p_start {
+                    if p_end <= first_len {
+                        if let Some(s) = first.get(p_start..p_end) {
+                            if is_valid_word(s) {
+                                target_word_str = Some(s);
+                            }
+                        }
+                    } else if p_start >= first_len {
+                        if let Some(s) = second.get((p_start - first_len)..(p_end - first_len)) {
+                            if is_valid_word(s) {
+                                target_word_str = Some(s);
+                            }
+                        }
+                    }
+                }
             }
 
-            let mut start = 0;
-            while let Some(idx) = second[start..].find(word) {
-                let abs_idx = first.len() + start + idx;
-                let left_ok = if abs_idx == 0 {
-                    true
-                } else {
-                    let b = get_byte(abs_idx - 1);
-                    !(b.is_ascii_alphanumeric() || b == b'_')
+            if let Some(word) = target_word_str {
+                let first_bytes = first.as_bytes();
+                let second_bytes = second.as_bytes();
+                let w_len = word.len();
+                let full_len = first.len() + second.len();
+
+                let get_byte = |idx: usize| -> u8 {
+                    if idx < first.len() {
+                        first_bytes[idx]
+                    } else {
+                        second_bytes[idx - first.len()]
+                    }
                 };
-                let right_ok = if abs_idx + w_len == full_len {
-                    true
-                } else {
-                    let b = second_bytes[start + idx + w_len];
-                    !(b.is_ascii_alphanumeric() || b == b'_')
-                };
-                if left_ok && right_ok {
-                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
+
+                let mut start = 0;
+                while let Some(idx) = first[start..].find(word) {
+                    let abs_idx = start + idx;
+                    let left_ok = if abs_idx == 0 {
+                        true
+                    } else {
+                        let b = first_bytes[abs_idx - 1];
+                        !(b.is_ascii_alphanumeric() || b == b'_')
+                    };
+                    let right_ok = if abs_idx + w_len == full_len {
+                        true
+                    } else {
+                        let b = get_byte(abs_idx + w_len);
+                        !(b.is_ascii_alphanumeric() || b == b'_')
+                    };
+                    if left_ok && right_ok {
+                        self.identical_words_cache.push((abs_idx, abs_idx + w_len));
+                    }
+                    start = abs_idx + w_len;
                 }
-                start = start + idx + w_len;
+
+                let boundary_start = first.len().saturating_sub(w_len - 1);
+                for i in boundary_start..first.len() {
+                    if i + w_len <= full_len {
+                        let mut matches = true;
+                        let w_bytes = word.as_bytes();
+                        for j in 0..w_len {
+                            if get_byte(i + j) != w_bytes[j] {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if matches {
+                            let left_ok = if i == 0 {
+                                true
+                            } else {
+                                let b = get_byte(i - 1);
+                                !(b.is_ascii_alphanumeric() || b == b'_')
+                            };
+                            let right_ok = if i + w_len == full_len {
+                                true
+                            } else {
+                                let b = get_byte(i + w_len);
+                                !(b.is_ascii_alphanumeric() || b == b'_')
+                            };
+                            if left_ok && right_ok {
+                                self.identical_words_cache.push((i, i + w_len));
+                            }
+                        }
+                    }
+                }
+
+                let mut start = 0;
+                while let Some(idx) = second[start..].find(word) {
+                    let abs_idx = first.len() + start + idx;
+                    let left_ok = if abs_idx == 0 {
+                        true
+                    } else {
+                        let b = get_byte(abs_idx - 1);
+                        !(b.is_ascii_alphanumeric() || b == b'_')
+                    };
+                    let right_ok = if abs_idx + w_len == full_len {
+                        true
+                    } else {
+                        let b = second_bytes[start + idx + w_len];
+                        !(b.is_ascii_alphanumeric() || b == b'_')
+                    };
+                    if left_ok && right_ok {
+                        self.identical_words_cache.push((abs_idx, abs_idx + w_len));
+                    }
+                    start = start + idx + w_len;
+                }
             }
+
+            self.identical_words_cache_version = editor.version;
+            self.identical_words_cache_cursor = editor.cursor;
+            self.identical_words_cache_selection_anchor = editor.selection_anchor;
         }
 
         let total_render_height = total_lines as f32 * self.line_height;
@@ -671,7 +693,6 @@ impl Renderer {
             spans,
             search_results,
             search_current_idx,
-            &unused_spans,
             first,
             second,
             indent_levels,
@@ -1039,7 +1060,7 @@ impl Renderer {
                 ide_panel,
                 lsp,
                 ui_registry,
-                !lsp_diagnostics.is_empty(),
+                has_lsp_diagnostics,
                 s,
                 mx,
                 my,

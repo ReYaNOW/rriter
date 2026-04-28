@@ -27,9 +27,11 @@ impl Renderer {
             }
         });
         let mut hovered_diag_type_target = None;
-        if !lsp_diagnostics.is_empty() {
+        if !self.lsp_diagnostic_indices.is_empty() {
             let render_scroll_x = scroll_x.round();
-            for (idx, diag) in lsp_diagnostics.iter().enumerate() {
+            for i in 0..self.lsp_diagnostic_indices.len() {
+                let idx = self.lsp_diagnostic_indices[i];
+                let diag = &lsp_diagnostics[idx];
                 // Цвет по severity
                 let color: [f32; 4] = match diag.severity {
                     crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.90],
@@ -244,7 +246,9 @@ impl Renderer {
                 if hover_line < editor.line_offsets.len() {
                     let mut found = None;
 
-                    for (idx, diag) in lsp_diagnostics.iter().enumerate() {
+                    for i in 0..self.lsp_diagnostic_indices.len() {
+                        let idx = self.lsp_diagnostic_indices[i];
+                        let diag = &lsp_diagnostics[idx];
                         if hover_line < diag.start_line as usize
                             || hover_line > diag.end_line as usize
                         {

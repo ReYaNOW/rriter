@@ -12,7 +12,6 @@ impl Renderer {
         spans: &[ColorSpan],
         search_results: &[(usize, usize)],
         search_current_idx: Option<usize>,
-        unused_spans: &[(usize, usize)],
         first: &str,
         second: &str,
         indent_levels: &[u8],
@@ -170,7 +169,9 @@ impl Renderer {
             let mut identical_idx = self
                 .identical_words_cache
                 .partition_point(|&(_, e)| e <= start_byte);
-            let mut unused_idx = unused_spans.partition_point(|&(_, e)| e <= start_byte);
+            let mut unused_idx = self
+                .unused_spans_cache
+                .partition_point(|&(_, e)| e <= start_byte);
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -220,8 +221,8 @@ impl Renderer {
                     {
                         identical_idx += 1;
                     }
-                    while unused_idx < unused_spans.len()
-                        && unused_spans[unused_idx].1 <= current_offset
+                    while unused_idx < self.unused_spans_cache.len()
+                        && self.unused_spans_cache[unused_idx].1 <= current_offset
                     {
                         unused_idx += 1;
                     }
@@ -249,8 +250,8 @@ impl Renderer {
                     let is_identical = identical_idx < self.identical_words_cache.len()
                         && current_offset >= self.identical_words_cache[identical_idx].0;
 
-                    let is_unused = unused_idx < unused_spans.len()
-                        && current_offset >= unused_spans[unused_idx].0;
+                    let is_unused = unused_idx < self.unused_spans_cache.len()
+                        && current_offset >= self.unused_spans_cache[unused_idx].0;
                     let is_ctrl_definition = ctrl_definition_range.is_some_and(|(start, end)| {
                         current_offset >= start && current_offset < end
                     });
