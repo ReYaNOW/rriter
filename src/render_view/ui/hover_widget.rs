@@ -16,6 +16,32 @@ thread_local! {
     static DIAG_CHARS: std::cell::RefCell<Vec<DiagChar>> = std::cell::RefCell::new(Vec::new());
 }
 
+fn normalize_diagnostic_message(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut chars = message.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\r' {
+            continue;
+        }
+        if c == '\\' {
+            match chars.peek().copied() {
+                Some('n') => {
+                    chars.next();
+                    out.push('\n');
+                }
+                Some('t') => {
+                    chars.next();
+                    out.push_str("    ");
+                }
+                _ => out.push(c),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn compute_hover_y_position(
     line_top_y: f32,
     line_height: f32,
@@ -390,22 +416,19 @@ impl Renderer {
 
         for (i, &(idx, _, _, _, _)) in hovered_diags_cache.iter().enumerate() {
             let diag = &lsp_diagnostics[idx];
-            let clean_msg = diag
-                .message
-                .replace('\r', "")
-                .replace("\\n", "\n")
-                .replace("\\t", "    ");
+            let clean_msg = normalize_diagnostic_message(&diag.message);
             if i > 0 {
                 popup_text.push_str("\n\n");
             }
             popup_text.push_str(&clean_msg);
 
-            let mut spans = TS_SPANS_CACHE.with(|cache| {
+            let spans = TS_SPANS_CACHE.with(|cache| {
                 let mut cache = cache.borrow_mut();
                 if let Some(cached) = cache.get(&clean_msg) {
                     cached.clone()
                 } else {
-                    let parsed = crate::lsp::highlight_diagnostic_message(&clean_msg);
+                    let mut parsed = crate::lsp::highlight_diagnostic_message(&clean_msg);
+                    parsed.sort_by_key(|s| s.start);
                     if cache.len() > 100 {
                         cache.clear();
                     }
@@ -413,8 +436,6 @@ impl Renderer {
                     parsed
                 }
             });
-
-            spans.sort_by_key(|s| s.start);
 
             let mut lines = Vec::new();
             let mut cur_line_w = 0.0;

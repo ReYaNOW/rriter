@@ -20,11 +20,16 @@ impl Renderer {
         let term_tab_h = 32.0 * s;
         let mut cx = panel_x + 8.0 * s;
         let cy = content_y + 6.0 * s;
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
 
         for i in 0..ide_panel.terminals.len() {
             let is_active = i == ide_panel.active_terminal;
-            let title = format!("{} {}", ide_panel.terminals[i].title, i + 1);
-            let title_w = self.measure_ui_width(&title, 0.9);
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(
+                &mut scratch,
+                format_args!("{} {}", ide_panel.terminals[i].title, i + 1),
+            );
+            let title_w = self.measure_ui_width(&scratch, 0.9);
             let tab_w = title_w + 32.0 * s + 24.0 * s;
 
             let is_hovered = mx >= cx && mx <= cx + tab_w && my >= cy && my <= cy + term_tab_h;
@@ -61,7 +66,7 @@ impl Renderer {
                 self.theme.line_num
             };
             self.draw_string_scaled(
-                &title,
+                &scratch,
                 cx + 12.0 * s,
                 cy + term_tab_h / 2.0 + 4.0 * s,
                 text_color,
@@ -114,6 +119,7 @@ impl Renderer {
 
             cx += tab_w + 4.0 * s;
         }
+        self.scratch_buffer = scratch;
 
         let add_sz = 20.0 * s;
         let add_y = (cy + (term_tab_h - add_sz) / 2.0).round();
@@ -539,7 +545,8 @@ impl Renderer {
 
             self.flush();
 
-            let text = ide_panel.term_search_editor.get_full_text();
+            let (first_text, second_text) = ide_panel.term_search_editor.text_parts();
+            let text_empty = first_text.is_empty() && second_text.is_empty();
             let text_y = input_y + input_h / 2.0 + 6.0 * s;
             let text_start_x = input_x + 5.0 * s;
             let mut current_x = text_start_x;
@@ -551,15 +558,17 @@ impl Renderer {
                     let end = anchor.max(cursor);
                     let mut sel_start_x = text_start_x;
                     let mut sel_w = 0.0;
-                    let mut byte_idx = 0;
-                    for c in text.chars() {
-                        let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                        if byte_idx < start {
-                            sel_start_x += adv;
-                        } else if byte_idx < end {
-                            sel_w += adv;
+                    for (part_start, part) in [(0usize, first_text), (first_text.len(), second_text)]
+                    {
+                        for (local_idx, c) in part.char_indices() {
+                            let byte_idx = part_start + local_idx;
+                            let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                            if byte_idx < start {
+                                sel_start_x += adv;
+                            } else if byte_idx < end {
+                                sel_w += adv;
+                            }
                         }
-                        byte_idx += c.len_utf8();
                     }
                     self.push_rounded_rect(
                         sel_start_x,
@@ -573,27 +582,29 @@ impl Renderer {
                 }
             }
 
-            for c in text.chars() {
-                let char_to_render = if c == '\n' { '↵' } else { c };
-                let adv = self
-                    .get_ui_glyph(char_to_render)
-                    .map(|g| g.advance)
-                    .unwrap_or(10.0);
-                if let Some(g) = self.get_ui_glyph(char_to_render) {
-                    self.push_quad(
-                        current_x + g.offset_x,
-                        text_y - g.offset_y,
-                        g.width,
-                        g.height,
-                        g.u,
-                        g.v,
-                        g.uw,
-                        g.vh,
-                        self.theme.fg,
-                        g.is_emoji,
-                    );
+            for part in [first_text, second_text] {
+                for c in part.chars() {
+                    let char_to_render = if c == '\n' { '↵' } else { c };
+                    let adv = self
+                        .get_ui_glyph(char_to_render)
+                        .map(|g| g.advance)
+                        .unwrap_or(10.0);
+                    if let Some(g) = self.get_ui_glyph(char_to_render) {
+                        self.push_quad(
+                            current_x + g.offset_x,
+                            text_y - g.offset_y,
+                            g.width,
+                            g.height,
+                            g.u,
+                            g.v,
+                            g.uw,
+                            g.vh,
+                            self.theme.fg,
+                            g.is_emoji,
+                        );
+                    }
+                    current_x += adv;
                 }
-                current_x += adv;
             }
 
             if ide_panel.term_search_focused {
@@ -695,28 +706,35 @@ impl Renderer {
                 false,
             );
 
-            let res_text = if ide_panel.term_search_results.is_empty() {
-                if text.is_empty() {
-                    String::new()
-                } else {
-                    "Нет".to_string()
+            if ide_panel.term_search_results.is_empty() {
+                if !text_empty {
+                    self.draw_string_mono_scaled(
+                        "Нет",
+                        input_x + input_w + 10.0 * s,
+                        text_y,
+                        [0.6, 0.6, 0.6, 1.0],
+                        0.9,
+                    );
                 }
             } else {
-                format!(
-                    "{}/{}",
-                    ide_panel.term_search_current_idx.unwrap_or(0) + 1,
-                    ide_panel.term_search_results.len()
-                )
-            };
-
-            if !res_text.is_empty() {
+                let mut scratch = std::mem::take(&mut self.scratch_buffer);
+                scratch.clear();
+                let _ = std::fmt::Write::write_fmt(
+                    &mut scratch,
+                    format_args!(
+                        "{}/{}",
+                        ide_panel.term_search_current_idx.unwrap_or(0) + 1,
+                        ide_panel.term_search_results.len()
+                    ),
+                );
                 self.draw_string_mono_scaled(
-                    &res_text,
+                    &scratch,
                     input_x + input_w + 10.0 * s,
                     text_y,
                     [0.6, 0.6, 0.6, 1.0],
                     0.9,
                 );
+                self.scratch_buffer = scratch;
             }
         }
     }

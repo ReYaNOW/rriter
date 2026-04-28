@@ -1,6 +1,53 @@
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+fn lsp_action_label<'a>(
+    item: &'a crate::app::LspActionItem,
+    scratch: &'a mut String,
+) -> std::borrow::Cow<'a, str> {
+    scratch.clear();
+    match item {
+        crate::app::LspActionItem::CodeAction(action) => {
+            if let Some(c) = &action.code {
+                let _ = std::fmt::Write::write_fmt(
+                    scratch,
+                    format_args!("Исправить ({}): {}", c, action.title),
+                );
+            } else {
+                let _ = std::fmt::Write::write_fmt(
+                    scratch,
+                    format_args!("Исправить: {}", action.title),
+                );
+            }
+            std::borrow::Cow::Borrowed(scratch.as_str())
+        }
+        crate::app::LspActionItem::AddNoqa { codes } => {
+            if codes.is_empty() {
+                std::borrow::Cow::Borrowed("Игнорировать ошибку (# noqa)")
+            } else {
+                scratch.push_str("Игнорировать ");
+                for (i, code) in codes.iter().enumerate() {
+                    if i > 0 {
+                        scratch.push_str(", ");
+                    }
+                    scratch.push_str(code);
+                }
+                scratch.push_str(" (# noqa)");
+                std::borrow::Cow::Borrowed(scratch.as_str())
+            }
+        }
+        crate::app::LspActionItem::AddNoqaAll => {
+            std::borrow::Cow::Borrowed("Игнорировать всё в файле (# noqa)")
+        }
+        crate::app::LspActionItem::FixAll => {
+            std::borrow::Cow::Borrowed("Исправить все доступные ошибки")
+        }
+        crate::app::LspActionItem::OrganizeImports => {
+            std::borrow::Cow::Borrowed("Упорядочить импорты")
+        }
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     /// Рисует содержимое панели LSP серверов (левая панель)
@@ -82,30 +129,26 @@ impl Renderer {
                 }
             };
 
-        let mut current_y = content_y + 8.0 * s - scroll_y;
         let mut total_h = 8.0 * s;
+        let mut log_sizes = Vec::with_capacity(servers.len());
 
         for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
             let mut logs_h = 0.0;
+            let mut inner_h = 0.0;
+            let mut inner_w = 0.0;
             if is_expanded {
-                let (inner_h, _) = get_inner_size(info, self);
+                (inner_h, inner_w) = get_inner_size(info, self);
                 logs_h = (inner_h + 20.0 * s).clamp(50.0 * s, 800.0 * s);
             }
+            log_sizes.push((logs_h, inner_h, inner_w));
             total_h += 136.0 * s + logs_h + 16.0 * s;
         }
 
+        let mut current_y = content_y + 8.0 * s - scroll_y;
         for (server_idx, info) in servers.iter().enumerate() {
             let is_expanded = expanded_logs.contains(info.name);
-            let mut logs_h = 0.0;
-            let mut inner_total_h = 0.0;
-            let mut inner_max_w = 0.0;
-            if is_expanded {
-                let (h, w) = get_inner_size(info, self);
-                inner_total_h = h;
-                inner_max_w = w;
-                logs_h = (inner_total_h + 20.0 * s).clamp(50.0 * s, 800.0 * s);
-            }
+            let (logs_h, inner_total_h, inner_max_w) = log_sizes[server_idx];
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
 
@@ -820,29 +863,9 @@ impl Renderer {
         let item_h = 36.0 * s;
 
         let mut max_item_w = 320.0 * s;
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
         for item in &menu.items {
-            let label_str = match item {
-                crate::app::LspActionItem::CodeAction(action) => {
-                    if let Some(c) = &action.code {
-                        format!("Исправить ({}): {}", c, action.title)
-                    } else {
-                        format!("Исправить: {}", action.title)
-                    }
-                }
-                crate::app::LspActionItem::AddNoqa { codes } => {
-                    if codes.is_empty() {
-                        "Игнорировать ошибку (# noqa)".to_string()
-                    } else {
-                        format!("Игнорировать {} (# noqa)", codes.join(", "))
-                    }
-                }
-                crate::app::LspActionItem::AddNoqaAll => {
-                    "Игнорировать всё в файле (# noqa)".to_string()
-                }
-                crate::app::LspActionItem::FixAll => "Исправить все доступные ошибки".to_string(),
-                crate::app::LspActionItem::OrganizeImports => "Упорядочить импорты".to_string(),
-            };
-
+            let label_str = lsp_action_label(item, &mut scratch);
             let w = self.measure_ui_width(&label_str, 0.9) + 40.0 * s;
             if w > max_item_w {
                 max_item_w = w;
@@ -951,40 +974,17 @@ impl Renderer {
                 group_color,
             );
 
-            let (label_str, label_color) = match item {
-                crate::app::LspActionItem::CodeAction(action) => {
-                    let s = if let Some(c) = &action.code {
-                        format!("Исправить ({}): {}", c, action.title)
-                    } else {
-                        format!("Исправить: {}", action.title)
-                    };
-                    (std::borrow::Cow::Owned(s), self.theme.fg)
-                }
-                crate::app::LspActionItem::AddNoqa { codes } => {
-                    let s = if codes.is_empty() {
-                        "Игнорировать ошибку (# noqa)".to_string()
-                    } else {
-                        format!("Игнорировать {} (# noqa)", codes.join(", "))
-                    };
-                    (std::borrow::Cow::Owned(s), self.theme.fg)
-                }
-                crate::app::LspActionItem::AddNoqaAll => (
-                    std::borrow::Cow::Borrowed("Игнорировать всё в файле (# noqa)"),
-                    self.theme.fg,
-                ),
-                crate::app::LspActionItem::FixAll => (
-                    std::borrow::Cow::Borrowed("Исправить все доступные ошибки"),
-                    group_color,
-                ),
-                crate::app::LspActionItem::OrganizeImports => (
-                    std::borrow::Cow::Borrowed("Упорядочить импорты"),
-                    group_color,
-                ),
+            let label_str = lsp_action_label(item, &mut scratch);
+            let label_color = match item {
+                crate::app::LspActionItem::FixAll
+                | crate::app::LspActionItem::OrganizeImports => group_color,
+                _ => self.theme.fg,
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;
             self.draw_string_scaled(&label_str, mx_pos + 18.0 * s, text_y, label_color, 0.9);
         }
+        self.scratch_buffer = scratch;
 
         self.flush();
         hovered

@@ -121,11 +121,9 @@ impl Renderer {
         }
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
-        for i in 0..tabs.len() {
-            let title = &display_titles[i];
+        for title in &display_titles {
             let title_w = self.measure_ui_width(title, 1.0);
-            let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
-            tab_widths.push((title.clone(), tab_w));
+            tab_widths.push(tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s);
         }
 
         let mut hovered_tab_path = None;
@@ -137,7 +135,7 @@ impl Renderer {
         let mut cx = x - tab_scroll_x;
         for i in 0..tabs.len() {
             initial_xs[i] = cx;
-            cx += tab_widths[i].1;
+            cx += tab_widths[i];
         }
 
         let mut order: Vec<usize> = (0..tabs.len()).collect();
@@ -149,7 +147,7 @@ impl Renderer {
         if let Some(drag) = tab_drag {
             if drag.threshold_passed {
                 let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
-                let dragged_w = tab_widths[drag.start_idx].1;
+                let dragged_w = tab_widths[drag.start_idx];
                 let dragged_center = dragged_x + dragged_w / 2.0;
                 let mut dst = drag.start_idx;
 
@@ -157,7 +155,7 @@ impl Renderer {
                     if i == drag.start_idx {
                         continue;
                     }
-                    let other_center = initial_xs[i] + tab_widths[i].1 / 2.0;
+                    let other_center = initial_xs[i] + tab_widths[i] / 2.0;
 
                     if i < drag.start_idx {
                         if dragged_center < other_center {
@@ -178,7 +176,7 @@ impl Renderer {
                     if idx != drag.start_idx {
                         actual_xs[idx] = cur_x;
                     }
-                    cur_x += tab_widths[idx].1;
+                    cur_x += tab_widths[idx];
                 }
                 actual_xs[drag.start_idx] = dragged_x;
             }
@@ -212,8 +210,8 @@ impl Renderer {
         for &i in &render_order {
             let tab = &tabs[i];
             let is_active = i == active_tab;
-            let (title, tab_w) = &tab_widths[i];
-            let tab_w = *tab_w;
+            let title = &display_titles[i];
+            let tab_w = tab_widths[i];
             let current_x = self.tab_x_anim[i];
             let is_last_in_order = order.last() == Some(&i);
 
@@ -370,7 +368,7 @@ impl Renderer {
             }
         }
 
-        let total_tabs_w: f32 = tab_widths.iter().map(|(_, w)| w).sum();
+        let total_tabs_w: f32 = tab_widths.iter().sum();
         self.max_tab_scroll_x = (total_tabs_w - w).max(0.0);
 
         self.flush();
