@@ -4,6 +4,49 @@ use crate::app::App;
 use crate::editor::Editor;
 use crate::ui_system::UiId;
 
+fn scrollbar_x_click_target(
+    mouse_x: f32,
+    track_x: f32,
+    track_w: f32,
+    current_scroll: f32,
+    max_scroll: f32,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    if track_w <= 0.0 || max_scroll <= 0.0 {
+        return None;
+    }
+    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w).max(40.0 * scale);
+    let scroll_ratio = (current_scroll / max_scroll).clamp(0.0, 1.0);
+    let thumb_x = track_x + scroll_ratio * (track_w - thumb_w);
+    if mouse_x >= thumb_x && mouse_x <= thumb_x + thumb_w {
+        Some((mouse_x - thumb_x, current_scroll))
+    } else {
+        let drag_offset = thumb_w / 2.0;
+        let ratio = (mouse_x - track_x - drag_offset) / (track_w - thumb_w).max(0.0001);
+        Some((drag_offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrollbar_x_click_target_drags_thumb_or_jumps_to_pointer() {
+        let on_thumb = scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 800.0, 1.0)
+            .expect("x scrollbar visible");
+        assert_eq!(on_thumb, (20.0, 0.0));
+
+        let jump = scrollbar_x_click_target(420.0, 100.0, 400.0, 0.0, 800.0, 1.0)
+            .expect("x scrollbar visible");
+        assert!(jump.0 > 0.0);
+        assert!(jump.1 > 0.0);
+        assert!(jump.1 <= 800.0);
+
+        assert!(scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 0.0, 1.0).is_none());
+    }
+}
+
 impl App {
     /// Обрабатывает клик по UI элементу
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -62,7 +105,9 @@ impl App {
                 {
                     term.grid.lock().unwrap().selection = None;
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::TerminalSearchNext => {
                 if !self.ide_panel.term_search_results.is_empty() {
@@ -92,7 +137,9 @@ impl App {
                     !self.ide_panel.term_search_case_sensitive;
                 self.update_terminal_search();
                 self.jump_to_terminal_search_result();
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::TerminalSearchInput => {
                 self.ide_panel.term_search_focused = true;
@@ -314,6 +361,20 @@ impl App {
                             lsp.disable_python();
                         }
                         self.ide_panel.lsp_servers = lsp.servers_info();
+                        if self.ide_panel.lsp_servers.iter().all(|info| {
+                            matches!(info.status, crate::lsp::LspServerStatus::Disabled)
+                        }) {
+                            if let Some(slot) = self
+                                .ide_panel
+                                .slots
+                                .iter_mut()
+                                .find(|slot| slot.id == crate::app::PanelId::LspServers)
+                            {
+                                slot.open = false;
+                            }
+                            self.ide_panel.lsp_logs_focused = None;
+                            crate::save_panel_state(&self.ide_panel);
+                        }
                     }
                 }
                 self.window.as_ref().unwrap().request_redraw();
@@ -322,6 +383,16 @@ impl App {
                 if let Some(lsp) = &mut self.lsp {
                     lsp.disable_python();
                     self.ide_panel.lsp_servers = lsp.servers_info();
+                    if let Some(slot) = self
+                        .ide_panel
+                        .slots
+                        .iter_mut()
+                        .find(|slot| slot.id == crate::app::PanelId::LspServers)
+                    {
+                        slot.open = false;
+                    }
+                    self.ide_panel.lsp_logs_focused = None;
+                    crate::save_panel_state(&self.ide_panel);
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -382,6 +453,16 @@ impl App {
             // Sidebar
             UiId::SidebarSlot(panel_id) => {
                 self.ide_panel.toggle(panel_id);
+                if panel_id == crate::app::PanelId::Terminal && self.ide_panel.is_open(panel_id) {
+                    self.ide_panel.terminal_focused = true;
+                    self.ide_panel.term_search_focused = false;
+                    if self.ide_panel.terminals.is_empty() {
+                        self.ide_panel
+                            .terminals
+                            .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
+                        self.ide_panel.active_terminal = 0;
+                    }
+                }
                 if panel_id == crate::app::PanelId::Explorer && self.ide_panel.is_open(panel_id) {
                     if self.ide_panel.file_tree_nodes.is_empty() {
                         self.refresh_file_tree();
@@ -638,6 +719,35 @@ impl App {
             }
             UiId::EditorScrollbarX => {
                 self.scroll_x.is_dragging = true;
+                if let Some(r) = self.renderer.as_mut() {
+                    let mx = r.last_mouse_x;
+                    let s = r.scale_factor;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
+                    let max_y = r.get_max_scroll(&self.editor, wh - tab_bar_h);
+                    let scrollbar_w = if max_y > 0.0 { 10.0 * s } else { 0.0 };
+                    let track_x = r.left_padding;
+                    let track_w = r.width - r.minimap_width - scrollbar_w - track_x;
+                    if let Some((drag_offset, target)) = scrollbar_x_click_target(
+                        mx,
+                        track_x,
+                        track_w,
+                        self.scroll_x.current,
+                        r.max_scroll_x,
+                        s,
+                    ) {
+                        self.scroll_x.drag_offset = drag_offset;
+                        self.scroll_x.target = target.round();
+                        self.scroll_x.current = self.scroll_x.target;
+                    }
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::EditorTextBody => {
                 self.is_dragging = true;

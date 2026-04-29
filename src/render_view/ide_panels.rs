@@ -2,8 +2,69 @@ use crate::renderer::Renderer;
 use crate::widgets::IconButton;
 use glow::HasContext;
 
+fn clipped_label_prefix_len<F>(
+    text: &str,
+    max_w: f32,
+    ellipsis_w: f32,
+    mut char_advance: F,
+) -> usize
+where
+    F: FnMut(char) -> f32,
+{
+    if max_w <= ellipsis_w {
+        return 0;
+    }
+    let mut used = 0.0;
+    let mut prefix_len = 0usize;
+    for (idx, ch) in text.char_indices() {
+        let adv = char_advance(ch);
+        if used + adv + ellipsis_w > max_w {
+            return prefix_len;
+        }
+        used += adv;
+        prefix_len = idx + ch.len_utf8();
+    }
+    text.len()
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_tree_label_clipped(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        max_w: f32,
+        color: [f32; 4],
+        scale: f32,
+        scratch: &mut String,
+    ) -> f32 {
+        if max_w <= 0.0 {
+            return 0.0;
+        }
+        let full_w = self.measure_ui_width(text, scale);
+        if full_w <= max_w {
+            self.draw_string_scaled(text, x, y, color, scale);
+            return full_w;
+        }
+
+        let ellipsis = "…";
+        let ellipsis_w = self.measure_ui_width(ellipsis, scale);
+        if ellipsis_w > max_w {
+            return 0.0;
+        }
+        let prefix_len = clipped_label_prefix_len(text, max_w, ellipsis_w, |ch| {
+            self.get_ui_glyph(ch)
+                .map(|g| g.advance * scale)
+                .unwrap_or(0.0)
+        });
+        scratch.clear();
+        scratch.push_str(&text[..prefix_len]);
+        scratch.push_str(ellipsis);
+        self.draw_string_scaled(scratch, x, y, color, scale);
+        self.measure_ui_width(scratch, scale).min(max_w)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_ide_side_panels(
         &mut self,
@@ -281,6 +342,7 @@ impl Renderer {
                     let first_vis = (scroll / row_h).floor() as usize;
                     let last_vis =
                         (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+                    let mut label_scratch = String::new();
 
                     for i in first_vis..last_vis {
                         let node = &ide_panel.file_tree_nodes[i];
@@ -362,21 +424,23 @@ impl Renderer {
                             let dir_icon_x = indent_x + 18.0 * s;
                             self.draw_file_icon(node.icon_key, true, dir_icon_x, icon_y, icon_size);
                             let text_x = dir_icon_x + icon_size + 4.0 * s;
-                            self.draw_string_scaled(
+                            let max_text_w = (panel_x + panel_left_w - 10.0 * s - text_x).max(0.0);
+                            let label_w = self.draw_tree_label_clipped(
                                 &node.name,
                                 text_x,
                                 text_y,
+                                max_text_w,
                                 color,
                                 tree_text_scale,
+                                &mut label_scratch,
                             );
                             if has_error || has_warn {
-                                let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
                                 let sq_color = if has_error {
                                     self.theme.diag_error
                                 } else {
                                     self.theme.diag_warn
                                 };
-                                self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                                self.push_squiggle(text_x, text_y + 2.0 * s, label_w, sq_color);
                             }
                         } else {
                             let file_icon_x = indent_x + 10.0 * s;
@@ -388,21 +452,23 @@ impl Renderer {
                                 icon_size,
                             );
                             let text_x = file_icon_x + icon_size + 4.0 * s;
-                            self.draw_string_scaled(
+                            let max_text_w = (panel_x + panel_left_w - 10.0 * s - text_x).max(0.0);
+                            let label_w = self.draw_tree_label_clipped(
                                 &node.name,
                                 text_x,
                                 text_y,
+                                max_text_w,
                                 color,
                                 tree_text_scale,
+                                &mut label_scratch,
                             );
                             if has_error || has_warn {
-                                let sq_w = self.measure_ui_width(&node.name, tree_text_scale);
                                 let sq_color = if has_error {
                                     self.theme.diag_error
                                 } else {
                                     self.theme.diag_warn
                                 };
-                                self.push_squiggle(text_x, text_y + 2.0 * s, sq_w, sq_color);
+                                self.push_squiggle(text_x, text_y + 2.0 * s, label_w, sq_color);
                             }
                         }
                     }
@@ -462,7 +528,7 @@ impl Renderer {
         mx: f32,
         my: f32,
         panel_bottom_h: f32,
-        is_ui_disabled: bool,
+        _is_ui_disabled: bool,
     ) {
         let sb_w = 48.0 * s;
         let panel_x = sb_w;
@@ -492,20 +558,17 @@ impl Renderer {
             panel_bg,
         );
 
-        // Непрозрачная панель полностью перехватывает мышь (курсор не меняется, клики не проваливаются)
-        if !is_terminal || is_ui_disabled {
-            let blocked = ui_registry.register_blocker(
-                crate::ui_system::UiId::BottomPanelBody,
-                panel_x,
-                panel_y,
-                panel_w,
-                panel_bottom_h,
-                mx,
-                my,
-            );
-            if blocked {
-                ui_registry.reset_cursor_state();
-            }
+        let blocked = ui_registry.register_blocker(
+            crate::ui_system::UiId::BottomPanelBody,
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_bottom_h,
+            mx,
+            my,
+        );
+        if blocked {
+            ui_registry.reset_cursor_state();
         }
 
         let tab_h = 32.0 * s;
@@ -608,5 +671,20 @@ impl Renderer {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary() {
+        assert_eq!(clipped_label_prefix_len("abcdef", 38.0, 8.0, |_| 10.0), 3);
+        assert_eq!(
+            clipped_label_prefix_len("абвг", 18.0, 8.0, |_| 5.0),
+            "аб".len()
+        );
+        assert_eq!(clipped_label_prefix_len("abc", 4.0, 8.0, |_| 3.0), 0);
     }
 }

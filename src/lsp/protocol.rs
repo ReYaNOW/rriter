@@ -807,6 +807,15 @@ fn completion_module(
         }
         return Some(full_name.to_string());
     }
+    let detail_is_field_type = completion_detail(v).is_some_and(|detail| {
+        detail.starts_with("(variable)")
+            || detail.starts_with("(parameter)")
+            || detail.starts_with("(property)")
+            || detail.starts_with("(field)")
+    });
+    if detail_is_field_type {
+        return None;
+    }
     if !matches!(
         kind,
         crate::highlighter::SymbolKind::Variable | crate::highlighter::SymbolKind::Parameter
@@ -1299,7 +1308,7 @@ mod tests {
 
         let data_module_type_attr = parse_completion_item_value(&serde_json::json!({
             "label": "car_wash",
-            "kind": 10,
+            "kind": 7,
             "data": {"module": "CarWashRead"},
             "detail": "(variable) car_wash: CarWashRead"
         }))

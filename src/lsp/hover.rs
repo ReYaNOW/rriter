@@ -137,6 +137,19 @@ fn preprocess_hover_text(msg: &str) -> String {
     out.trim_end().to_string()
 }
 
+fn normalize_special_form_repr(line: &str) -> Option<String> {
+    let unquoted = line.trim().trim_matches('`').trim();
+    let body = unquoted
+        .strip_prefix("<special-form '")?
+        .strip_suffix("'>")?
+        .trim();
+    if body.is_empty() {
+        return None;
+    }
+    let body = body.strip_prefix("typing.").unwrap_or(body);
+    Some(body.replace("<metadata>", "..."))
+}
+
 fn looks_like_python_hover(msg: &str) -> bool {
     if msg.contains("```python") || msg.contains("```py\n") {
         return true;
@@ -711,6 +724,11 @@ fn normalize_hover_text(msg: &str) -> (String, Vec<(usize, usize)>) {
             out.push('\n');
             continue;
         }
+        if let Some(normalized) = normalize_special_form_repr(trimmed) {
+            out.push_str(&normalized);
+            out.push('\n');
+            continue;
+        }
         if let Some((module_path, class_name)) = normalize_class_object_repr(trimmed) {
             if let Some(module_path) = module_path {
                 out.push_str("[[MODULE]] ");
@@ -1135,6 +1153,22 @@ Append object to the end of the list.";
         assert!(spans.iter().any(|s| s.start <= unknown_start
             && s.end >= unknown_start + "Unknown".len()
             && s.color == cyan));
+    }
+
+    #[test]
+    fn special_form_annotated_hover_is_normalized_and_highlighted() {
+        let raw = "<special-form 'typing.Annotated[DatabaseSession, <metadata>]'>";
+        let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+        assert_eq!(text, "Annotated[DatabaseSession, ...]");
+        let annotated_start = text.find("Annotated").unwrap();
+        let db_start = text.find("DatabaseSession").unwrap();
+
+        assert!(spans.iter().any(|s| s.start <= annotated_start
+            && s.end >= annotated_start + "Annotated".len()
+            && s.color == crate::highlighter::DRACULA_DARK_CYAN));
+        assert!(spans.iter().any(|s| s.start <= db_start
+            && s.end >= db_start + "DatabaseSession".len()
+            && s.color == crate::highlighter::DRACULA_DARK_CYAN));
     }
 
     #[test]

@@ -430,7 +430,7 @@ impl Renderer {
                     .unwrap_or(settings_ignore_editor.cursor)
                     .max(settings_ignore_editor.cursor);
 
-                let mut current_x = start_x - *settings_ignore_scroll_x;
+                let mut current_x = (start_x - *settings_ignore_scroll_x).round();
                 let mut byte_idx = 0;
                 let mut cursor_draw_x = current_x;
 
@@ -445,7 +445,7 @@ impl Renderer {
                         self.push_rect(
                             current_x,
                             (content_y + 4.0 * s).round(),
-                            adv,
+                            adv.ceil() + 1.0,
                             input_h - 8.0 * s,
                             [0.55, 0.35, 0.80, 0.50],
                         );
@@ -453,10 +453,10 @@ impl Renderer {
 
                     if let Some(g) = self.get_ui_glyph(c) {
                         self.push_quad(
-                            current_x + g.offset_x * text_scale_input,
-                            text_y_mid - g.offset_y * text_scale_input,
-                            g.width * text_scale_input,
-                            g.height * text_scale_input,
+                            (current_x + g.offset_x * text_scale_input).round(),
+                            (text_y_mid - g.offset_y * text_scale_input).round(),
+                            (g.width * text_scale_input).round(),
+                            (g.height * text_scale_input).round(),
                             g.u,
                             g.v,
                             g.uw,

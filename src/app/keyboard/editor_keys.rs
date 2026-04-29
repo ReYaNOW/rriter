@@ -658,6 +658,7 @@ impl App {
 
         if is_edit {
             self.lsp_actions_menu = None;
+            self.is_highlighted_once = true;
             if should_trigger_autocomplete {
                 if let Some(trigger) = ty_completion_trigger {
                     self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
@@ -718,6 +719,7 @@ impl App {
                     "py" | "pyi" | "rs" | "dart" => 1,
                     _ => 2,
                 };
+                let should_autofold_initial = false;
                 self.editor.foldable_lines.clear();
                 self.editor.foldable_ranges_bytes.clear();
                 for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
@@ -736,8 +738,7 @@ impl App {
                         .saturating_sub(1);
                     if el > sl {
                         self.editor.foldable_lines.insert(sl, el);
-                        if is_autofold && el - sl >= autofold_threshold && !self.is_highlighted_once
-                        {
+                        if is_autofold && el - sl >= autofold_threshold && should_autofold_initial {
                             self.editor.folded_lines.insert(sl);
                             self.editor
                                 .folded_start_bytes

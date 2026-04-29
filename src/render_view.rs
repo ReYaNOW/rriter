@@ -20,6 +20,11 @@ use std::time::Instant;
 
 pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 
+#[inline(always)]
+pub(crate) fn hover_trace_enabled() -> bool {
+    false && TELEMETRY_ENABLED.load(Ordering::Relaxed)
+}
+
 thread_local! {
     static TELEMETRY: RefCell<Telemetry> = RefCell::new(Telemetry::default());
 }
@@ -369,9 +374,7 @@ impl Renderer {
             self.last_mouse_y
         };
 
-        // Используем фактическую ширину панели, а не проверку any_top_open()
-        // Потому что панель может быть открыта через bottom группу
-        let panel_left_w = if is_ide_mode {
+        let panel_left_w = if is_ide_mode && ide_panel.any_top_open() {
             ide_panel.left_width * s
         } else {
             0.0
@@ -761,32 +764,52 @@ impl Renderer {
         let skip_visual_lines = 0;
         let end_visual_line = self.visual_lines.len();
 
-        self.draw_editor_visible_text(
-            editor,
-            spans,
-            search_results,
-            search_current_idx,
-            first,
-            second,
-            indent_levels,
-            first_len,
-            len,
-            bracket_pairs,
-            sel_start,
-            sel_end,
-            render_scroll_x,
-            render_scroll_y,
-            scrollbar_x,
-            blink_alpha,
-            dialog_window_open,
-            search_focused,
-            show_settings,
-            s,
-            skip_visual_lines,
-            end_visual_line,
-            ui_registry,
-            ctrl_definition_range,
-        );
+        let editor_clip_x = self.left_padding.round().max(0.0);
+        let editor_clip_y = tab_bar_h.round().max(0.0);
+        let editor_clip_w = (scrollbar_x - editor_clip_x).round().max(0.0);
+        let editor_clip_h = editor_height.round().max(0.0);
+        if editor_clip_w > 0.0 && editor_clip_h > 0.0 {
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    editor_clip_x as i32,
+                    (self.height - (editor_clip_y + editor_clip_h)).round() as i32,
+                    editor_clip_w as i32,
+                    editor_clip_h as i32,
+                );
+            }
+            self.draw_editor_visible_text(
+                editor,
+                spans,
+                search_results,
+                search_current_idx,
+                first,
+                second,
+                indent_levels,
+                first_len,
+                len,
+                bracket_pairs,
+                sel_start,
+                sel_end,
+                render_scroll_x,
+                render_scroll_y,
+                scrollbar_x,
+                blink_alpha,
+                dialog_window_open,
+                search_focused,
+                show_settings,
+                s,
+                skip_visual_lines,
+                end_visual_line,
+                ui_registry,
+                ctrl_definition_range,
+            );
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+        }
 
         self.flush();
         let mouse_in_popup = crate::app::mouse::HOVER_STATE.with(|s| {
@@ -939,7 +962,7 @@ impl Renderer {
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
             let track_h_bg = 14.0 * s;
-            let track_y_bg = real_height - track_h_bg;
+            let track_y_bg = real_height - panel_bottom_h - track_h_bg;
 
             self.push_rect(
                 self.left_padding,
@@ -1094,7 +1117,7 @@ impl Renderer {
             ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarX,
                 self.left_padding,
-                real_height - 14.0 * s,
+                real_height - panel_bottom_h - 14.0 * s,
                 track_w,
                 14.0 * s,
                 self.last_mouse_x,
@@ -1146,18 +1169,26 @@ impl Renderer {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
 
-        self.draw_hover_overlays(
-            editor,
-            lsp_diagnostics,
-            ide_panel,
-            ui_registry,
-            mx,
-            my,
-            scroll_x,
-            render_scroll_y,
-            hovered_diag_type_target,
-            &mut wants_pointer,
-        );
+        let hover_blocked_by_bottom_panel = is_ide_mode
+            && panel_bottom_h > 0.0
+            && ide_panel.bottom_panel_blocks_editor_hover()
+            && my >= self.height - panel_bottom_h;
+        if hover_blocked_by_bottom_panel {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if !is_ui_disabled {
+            self.draw_hover_overlays(
+                editor,
+                lsp_diagnostics,
+                ide_panel,
+                ui_registry,
+                mx,
+                my,
+                scroll_x,
+                render_scroll_y,
+                hovered_diag_type_target,
+                &mut wants_pointer,
+            );
+        }
 
         if let Some((path, tx, ty)) = tab_tooltip {
             self.draw_tab_tooltip(&path, tx, ty, s);

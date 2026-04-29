@@ -6,6 +6,13 @@ enum AboutWaitPlan {
     WaitUntil(Instant),
 }
 
+const DRAG_AUTOSCROLL_EDGE_PX: f32 = 58.0;
+const DRAG_AUTOSCROLL_BOTTOM_GAP_PX: f32 = 72.0;
+const DRAG_AUTOSCROLL_MIN_SPEED: f32 = 360.0;
+const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 7200.0;
+const DRAG_AUTOSCROLL_ACCEL: f32 = 0.40;
+const DRAG_AUTOSCROLL_TOP_BOOST: f32 = 1.22;
+
 fn update_sticky_animation(
     current: &mut Vec<(usize, usize)>,
     target: &[(usize, usize)],
@@ -49,6 +56,31 @@ fn update_sticky_animation(
     }
 
     needs_redraw
+}
+
+fn drag_autoscroll_delta(pos: f32, start: f32, end: f32, edge: f32) -> f32 {
+    if pos < start {
+        pos - start
+    } else if pos < start + edge {
+        pos - start - edge
+    } else if pos > end {
+        pos - end
+    } else if pos > end - edge {
+        pos - end + edge
+    } else {
+        0.0
+    }
+}
+
+fn drag_autoscroll_speed(delta: f32, is_top_edge: bool) -> f32 {
+    let amount = delta.abs();
+    let speed = (amount * amount * DRAG_AUTOSCROLL_ACCEL)
+        .clamp(DRAG_AUTOSCROLL_MIN_SPEED, DRAG_AUTOSCROLL_MAX_SPEED);
+    if is_top_edge {
+        (speed * DRAG_AUTOSCROLL_TOP_BOOST).min(DRAG_AUTOSCROLL_MAX_SPEED)
+    } else {
+        speed
+    }
 }
 
 fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Instant {
@@ -187,9 +219,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 );
                                 state.request_id =
                                     lsp.request_hover(&path, &app.file_extension, line, col);
-                                if crate::render_view::TELEMETRY_ENABLED
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                                {
+                                if crate::render_view::hover_trace_enabled() {
                                     println!(
                                         "[HOVER DEBUG] 0.34s expired. Sent hover request. id: {:?}",
                                         state.request_id
@@ -214,8 +244,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else if state.popup.is_some() || state.pending_popup.is_some() {
             state.timer += raw_dt;
             if state.timer >= 0.25 {
-                if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-                {
+                if crate::render_view::hover_trace_enabled() {
                     println!("[HOVER DEBUG] 0.25s hide timer expired. Clearing popup.");
                 }
                 state.popup = None;
@@ -404,32 +433,30 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             let mx = app.renderer.as_ref().unwrap().last_mouse_x;
             let minimap_w = app.renderer.as_ref().unwrap().minimap_width;
             let padding = app.renderer.as_ref().unwrap().left_padding;
+            let bottom_h = if app.is_ide_mode && app.ide_panel.any_bottom_open() {
+                app.ide_panel.bottom_height * s
+            } else {
+                0.0
+            };
+            let editor_top = tab_bar_h;
+            let bottom_gap = DRAG_AUTOSCROLL_BOTTOM_GAP_PX * s;
+            let editor_bottom = (wh - bottom_h - bottom_gap).max(editor_top + 24.0 * s);
+            let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
 
-            let mut drag_scroll_delta_y = 0.0;
-            if my < 0.0 {
-                drag_scroll_delta_y = my;
-            } else if my > wh {
-                drag_scroll_delta_y = my - wh;
-            }
+            let drag_scroll_delta_y = drag_autoscroll_delta(my, editor_top, editor_bottom, edge);
 
-            let mut drag_scroll_delta_x = 0.0;
             let view_right_edge = ww - minimap_w;
-            if mx < padding {
-                drag_scroll_delta_x = mx - padding;
-            } else if mx > view_right_edge {
-                drag_scroll_delta_x = mx - view_right_edge;
-            }
+            let drag_scroll_delta_x = drag_autoscroll_delta(mx, padding, view_right_edge, edge);
 
             if drag_scroll_delta_y != 0.0 || drag_scroll_delta_x != 0.0 {
                 if drag_scroll_delta_y != 0.0 {
-                    let drag_amount = drag_scroll_delta_y.abs();
-                    let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
+                    let speed =
+                        drag_autoscroll_speed(drag_scroll_delta_y, drag_scroll_delta_y < 0.0);
                     app.scroll_y.target += drag_scroll_delta_y.signum() * speed * dt;
                 }
 
                 if drag_scroll_delta_x != 0.0 {
-                    let drag_amount = drag_scroll_delta_x.abs();
-                    let speed = (drag_amount.powi(2) * 0.15).clamp(70.0, 4500.0);
+                    let speed = drag_autoscroll_speed(drag_scroll_delta_x, false);
                     app.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                 }
 
@@ -440,7 +467,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 };
                 app.editor.set_cursor_at_pos(
                     mx,
-                    my - tab_bar_h + app.scroll_y.current,
+                    my - tab_bar_h + app.scroll_y.target,
                     app.renderer.as_mut().unwrap(),
                     false,
                 );
@@ -632,25 +659,19 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
             crate::lsp::LspEvent::HoverResponse { request_id, text } => {
                 if let Some(ref t) = text {
-                    if crate::render_view::TELEMETRY_ENABLED
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                    {
+                    if crate::render_view::hover_trace_enabled() {
                         println!("--- HOVER TEXT ---\n{}\n------------------", t);
                     }
                 }
                 crate::app::mouse::HOVER_STATE.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.request_id == Some(request_id) {
-                        if crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                        {
+                        if crate::render_view::hover_trace_enabled() {
                             println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
                         }
                         state.request_id = None;
                         let Some(t) = text else {
-                            if crate::render_view::TELEMETRY_ENABLED
-                                .load(std::sync::atomic::Ordering::Relaxed)
-                            {
+                            if crate::render_view::hover_trace_enabled() {
                                 println!("[HOVER DEBUG] Text is empty. Clearing popup.");
                             }
                             state.popup = None;
@@ -748,16 +769,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 state.definition_request_id = None;
                             }
                             if state.definition_request_id.is_some() {
-                                if crate::render_view::TELEMETRY_ENABLED
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                                {
+                                if crate::render_view::hover_trace_enabled() {
                                     println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
                                 }
                                 state.pending_popup = Some(popup);
                             } else {
-                                if crate::render_view::TELEMETRY_ENABLED
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                                {
+                                if crate::render_view::hover_trace_enabled() {
                                     println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
                                 }
                                 state.finish_stale_combined_transition();
@@ -1056,6 +1073,17 @@ mod tests {
         ));
         assert_eq!(current, target);
         assert_eq!(progress, 1.0);
+    }
+
+    #[test]
+    fn drag_autoscroll_uses_inside_edge_band_and_outside_window_distance() {
+        assert_eq!(drag_autoscroll_delta(50.0, 100.0, 500.0, 40.0), -50.0);
+        assert_eq!(drag_autoscroll_delta(120.0, 100.0, 500.0, 40.0), -20.0);
+        assert_eq!(drag_autoscroll_delta(480.0, 100.0, 500.0, 40.0), 20.0);
+        assert_eq!(drag_autoscroll_delta(540.0, 100.0, 500.0, 40.0), 40.0);
+        assert_eq!(drag_autoscroll_delta(250.0, 100.0, 500.0, 40.0), 0.0);
+        assert!(drag_autoscroll_speed(30.0, false) >= DRAG_AUTOSCROLL_MIN_SPEED);
+        assert!(drag_autoscroll_speed(-30.0, true) > drag_autoscroll_speed(30.0, false));
     }
 
     #[test]

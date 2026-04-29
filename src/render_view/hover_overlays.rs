@@ -430,7 +430,7 @@ impl Renderer {
                 .should_show_stale_popup_while_target_loads(show_type)
         });
 
-        if crate::render_view::TELEMETRY_ENABLED.load(Ordering::Relaxed) {
+        if crate::render_view::hover_trace_enabled() {
             static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

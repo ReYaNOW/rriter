@@ -962,6 +962,16 @@ impl Editor {
         if self.cursor == 0 {
             return None;
         }
+        if self.cursor < self.len() {
+            let char_before = self.byte_at(self.cursor - 1);
+            let char_after = self.byte_at(self.cursor);
+            let is_pair = (char_before == b'(' && char_after == b')')
+                || (char_before == b'[' && char_after == b']')
+                || (char_before == b'{' && char_after == b'}');
+            if is_pair {
+                return self.backspace();
+            }
+        }
 
         let mut p = self.cursor;
         let is_space = self.byte_at(p - 1) == b' ';
@@ -1184,6 +1194,12 @@ mod tests {
         assert!(matches!(pair.redo(), Some(UndoRedoDelta::Delete(1, 2))));
         assert_eq!(pair.get_full_text(), "()");
 
+        let mut ctrl_pair = Editor::new(4);
+        ctrl_pair.insert_str("([])");
+        ctrl_pair.cursor = 2;
+        assert_eq!(ctrl_pair.delete_word_backward(), Some((1, 2)));
+        assert_eq!(ctrl_pair.get_full_text(), "()");
+
         let mut unicode = Editor::new(4);
         unicode.insert_str("a😀b");
         unicode.cursor = "a😀".len();
@@ -1337,6 +1353,17 @@ mod tests {
         let mut seen = Vec::new();
         editor.utf16_col_to_byte_advance(99, |ch, col, byte| seen.push((ch, col, byte)));
         assert_eq!(seen.first().copied(), Some((' ', 0, 0)));
+
+        let mut short_utf8 = Editor::new(8);
+        short_utf8.data = vec![b'a', 0xD1];
+        short_utf8.gap_start = 2;
+        short_utf8.gap_end = 2;
+        short_utf8.line_offsets = vec![0];
+        let mut short_seen = Vec::new();
+        short_utf8.utf16_col_to_byte_advance(0, |ch, col, byte| {
+            short_seen.push((ch, col, byte));
+        });
+        assert_eq!(short_seen, vec![('a', 0, 0)]);
 
         let mut folds = Editor::new(64);
         folds.insert_str("head\nchild\nlast");

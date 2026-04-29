@@ -364,8 +364,22 @@ impl App {
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
         let window_size = self.window.as_ref().unwrap().inner_size();
+        let bottom_panel_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
+        let in_blocking_bottom_panel = self.is_ide_mode
+            && bottom_panel_h > 0.0
+            && self.ide_panel.bottom_panel_blocks_editor_hover()
+            && position.y as f32 >= window_size.height as f32 - bottom_panel_h;
 
-        if !in_hover_popup || in_hover_source_line {
+        if in_blocking_bottom_panel {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+        }
+
+        if !in_blocking_bottom_panel && (!in_hover_popup || in_hover_source_line) {
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                 0.0
             } else {
@@ -542,9 +556,7 @@ impl App {
                             if state.byte_offset.is_some()
                                 && !state.should_keep_popup_through_empty_space()
                             {
-                                if crate::render_view::TELEMETRY_ENABLED
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                                {
+                                if crate::render_view::hover_trace_enabled() {
                                     println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
                                 }
                                 state.byte_offset = None;
@@ -576,9 +588,7 @@ impl App {
                     }
                     if !same_word && (!in_hover_popup || in_hover_source_line) {
                         let keep_visible_popup = state.popup.is_some();
-                        if crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                        {
+                        if crate::render_view::hover_trace_enabled() {
                             println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
                         }
                         clear_diag_popup = state.begin_type_hover_transition(byte_offset);
@@ -587,9 +597,7 @@ impl App {
                     if state.byte_offset.is_some()
                         && !state.should_keep_popup_through_empty_space()
                     {
-                        if crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                        {
+                        if crate::render_view::hover_trace_enabled() {
                             println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
                         }
                         state.byte_offset = None;

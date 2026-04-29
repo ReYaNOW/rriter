@@ -1116,7 +1116,7 @@ impl Renderer {
             width: w as f32,
             height: h as f32,
             offset_x: img.placement.left as f32,
-            offset_y: img.placement.top as f32,
+            offset_y: img.placement.top as f32 - self.scale_factor.round().max(1.0),
             advance: glyph_advance,
             is_emoji: if is_color { 1.0 } else { 0.0 },
         };

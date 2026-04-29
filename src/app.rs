@@ -19,6 +19,107 @@ use winit::event_loop::ActiveEventLoop;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
+const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
+
+fn apply_initial_import_folds(editor: &mut Editor, ext: &str, text: &str) {
+    let mut add_fold = |start_b: usize, end_b: usize| {
+        if editor
+            .foldable_ranges_bytes
+            .iter()
+            .any(|&(start, end, _)| start == start_b && end == end_b)
+        {
+            return;
+        }
+        editor.foldable_ranges_bytes.push((start_b, end_b, false));
+        let sl = editor
+            .line_offsets
+            .partition_point(|&x| x <= start_b)
+            .saturating_sub(1);
+        let el = editor
+            .line_offsets
+            .partition_point(|&x| x <= end_b)
+            .saturating_sub(1);
+        if el > sl {
+            editor.foldable_lines.insert(sl, el);
+            editor.folded_lines.insert(sl);
+            editor.folded_start_bytes.insert(editor.line_offsets[sl]);
+        }
+    };
+
+    match ext {
+        "py" | "pyi" => {
+            for block in crate::languages::python::import_blocks(text) {
+                add_fold(block.start, block.end);
+            }
+            for (start, end) in initial_python_bracket_folds(text) {
+                add_fold(start, end);
+            }
+        }
+        "rs" => {
+            for block in crate::languages::rust::import_blocks(text) {
+                add_fold(block.start, block.end);
+            }
+        }
+        "dart" => {
+            for block in crate::languages::dart::import_blocks(text) {
+                add_fold(block.start, block.end);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn initial_python_bracket_folds(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut folds = Vec::new();
+    let mut line_start = 0usize;
+    for raw_line in text.split_inclusive('\n') {
+        let line_end = line_start + raw_line.len();
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        let code = line.split('#').next().unwrap_or("").trim_end();
+        let Some(opener) = code.as_bytes().last().copied() else {
+            line_start = line_end;
+            continue;
+        };
+        let closer = match opener {
+            b'{' => b'}',
+            b'[' => b']',
+            _ => {
+                line_start = line_end;
+                continue;
+            }
+        };
+        let opener_byte = line_start + code.len().saturating_sub(1);
+        let mut depth = 0usize;
+        let mut p = opener_byte;
+        let mut close_byte = None;
+        while p < bytes.len() {
+            let b = bytes[p];
+            if b == opener {
+                depth += 1;
+            } else if b == closer {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    close_byte = Some(p);
+                    break;
+                }
+            }
+            p += 1;
+        }
+        if let Some(close_byte) = close_byte {
+            if text[line_start..close_byte].contains('\n') {
+                let end = text[close_byte..]
+                    .find('\n')
+                    .map(|rel| close_byte + rel)
+                    .unwrap_or(text.len());
+                folds.push((opener_byte, end));
+            }
+        }
+        line_start = line_end;
+    }
+    folds
+}
+
 fn is_python_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
 }
@@ -240,6 +341,14 @@ fn is_type_like_completion_source(text: &str) -> bool {
         )
 }
 
+fn is_class_like_type_name(text: &str) -> bool {
+    let name = text.rsplit('.').next().unwrap_or(text).trim();
+    !name.is_empty()
+        && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name.chars().any(|c| c.is_ascii_lowercase())
+}
+
 fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
     let Some(module) = item.module.as_deref() else {
         return false;
@@ -248,6 +357,43 @@ fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
         return false;
     };
     detail.contains(module) && detail.contains(&format!(".{}", item.word))
+}
+
+fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
+    if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter) {
+        return true;
+    }
+    if item.detail.as_deref().is_some_and(|detail| {
+        detail.starts_with("(variable)")
+            || detail.starts_with("(parameter)")
+            || detail.starts_with("(property)")
+            || detail.starts_with("(field)")
+    }) {
+        return true;
+    }
+    let lower_attr = item
+        .word
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
+    lower_attr
+        && item.module.as_deref().is_some_and(is_class_like_type_name)
+        && item.detail.as_deref().is_none_or(|detail| {
+            detail.contains(&format!(": {}", item.module.as_deref().unwrap_or("")))
+        })
+}
+
+fn completion_item_is_argument_like(item: &AutocompleteItem) -> bool {
+    matches!(item.kind, SymbolKind::Parameter)
+        || item
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with("(parameter)") || detail.contains("parameter"))
+        || item.word.ends_with('=')
+        || item
+            .insert_text
+            .as_deref()
+            .is_some_and(|text| text.contains('='))
 }
 
 fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
@@ -259,9 +405,7 @@ fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
         if is_type_like_completion_source(module) {
             continue;
         }
-        if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter)
-            && !completion_item_has_explicit_owner(item)
-        {
+        if completion_item_is_field_like(item) && !completion_item_has_explicit_owner(item) {
             continue;
         }
         *counts.entry(module.clone()).or_insert(0) += 1;
@@ -403,18 +547,31 @@ fn imported_python_class_source(
     class_name: &str,
 ) -> Option<String> {
     let module = imported_python_module_for_symbol(current_text, class_name)?;
-    let rel = module.replace('.', "/") + ".py";
+    let rel = module.replace('.', "/");
+    let candidates = [rel.clone() + ".py", rel + ".pyi"];
+    let first_segment = module.split('.').next().unwrap_or("");
     for ws in workspaces {
-        let path = ws.join(&rel);
-        if let Ok(source) = std::fs::read_to_string(path) {
-            return Some(source);
+        for rel in &candidates {
+            let path = ws.join(rel);
+            if let Ok(source) = std::fs::read_to_string(path) {
+                return Some(source);
+            }
+            if ws.file_name().and_then(|name| name.to_str()) == Some(first_segment) {
+                if let Some(parent) = ws.parent() {
+                    if let Ok(source) = std::fs::read_to_string(parent.join(rel)) {
+                        return Some(source);
+                    }
+                }
+            }
         }
     }
     if let Some(path) = current_path.and_then(Path::parent) {
         for root in path.ancestors() {
-            let candidate = root.join(&rel);
-            if let Ok(source) = std::fs::read_to_string(candidate) {
-                return Some(source);
+            for rel in &candidates {
+                let candidate = root.join(rel);
+                if let Ok(source) = std::fs::read_to_string(candidate) {
+                    return Some(source);
+                }
             }
         }
     }
@@ -504,12 +661,14 @@ impl App {
         }
 
         self.ide_panel = crate::load_panel_state();
+        self.ide_panel.enforce_single_open_per_group();
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
             self.ide_panel
                 .terminals
                 .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
             self.ide_panel.active_terminal = 0;
+            self.ide_panel.terminal_focused = true;
         }
 
         if self.lsp.is_none() {
@@ -563,11 +722,8 @@ impl App {
                     saved_active.min(self.tabs.len().saturating_sub(1))
                 };
                 self.switch_to_tab(target);
-                if self.highlighter.wait_for_first_result(
-                    self.editor.version,
-                    std::time::Duration::from_millis(50),
-                ) {
-                    self.apply_highlight_results();
+                if !self.is_highlighted_once {
+                    self.wait_for_current_highlight();
                 }
             }
         }
@@ -654,6 +810,17 @@ impl App {
         self.tabs[ai].icon_key = icon_key;
     }
 
+    fn next_tab_highlight_version(&self) -> u64 {
+        self.tabs
+            .iter()
+            .map(|t| t.editor.version)
+            .max()
+            .unwrap_or(0)
+            .max(self.editor.version)
+            .max(self.highlighter.current_version)
+            .saturating_add(1)
+    }
+
     pub fn switch_to_tab(&mut self, new_idx: usize) {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
@@ -669,14 +836,7 @@ impl App {
         self.active_tab = new_idx;
         self.sync_active_tab();
 
-        let highest = self
-            .tabs
-            .iter()
-            .map(|t| t.editor.version)
-            .max()
-            .unwrap_or(0)
-            .max(self.editor.version);
-        self.editor.version = highest + 1;
+        self.editor.version = self.next_tab_highlight_version();
 
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter.reset(
@@ -684,6 +844,7 @@ impl App {
             self.editor.get_full_text(),
             self.file_extension.clone(),
         );
+        self.wait_for_current_highlight();
 
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
@@ -757,15 +918,8 @@ impl App {
         }
 
         self.sync_active_tab();
-        let highest = self
-            .tabs
-            .iter()
-            .map(|t| t.editor.version)
-            .max()
-            .unwrap_or(0)
-            .max(self.editor.version);
         let mut new_editor = crate::editor::Editor::new(8192);
-        new_editor.version = highest + 1;
+        new_editor.version = self.next_tab_highlight_version();
         let new_tab = EditorTab {
             editor: new_editor,
             file_path: None,
@@ -816,20 +970,14 @@ impl App {
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
-            let highest = self
-                .tabs
-                .iter()
-                .map(|t| t.editor.version)
-                .max()
-                .unwrap_or(0)
-                .max(self.editor.version);
-            self.editor.version = highest + 1;
+            self.editor.version = self.next_tab_highlight_version();
             while let Ok(_) = self.highlighter.rx.try_recv() {}
             self.highlighter.reset(
                 self.editor.version,
                 self.editor.get_full_text(),
                 self.file_extension.clone(),
             );
+            self.wait_for_current_highlight();
             self.clear_ctrl_definition();
             crate::app::mouse::HOVER_STATE.with(|state| {
                 *state.borrow_mut() = crate::app::mouse::HoverState::default();
@@ -1405,7 +1553,7 @@ impl App {
         });
         for item in &mut items {
             if self.autocomplete_mode == AutocompleteMode::TyContext {
-                if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter) {
+                if completion_item_is_field_like(item) {
                     if !completion_item_has_explicit_owner(item) {
                         item.module = common_owner.as_ref().map(|owner| {
                             inherited_owner_source
@@ -1452,16 +1600,26 @@ impl App {
             matches.push((is_prefix, item.word.len(), item, indices));
         }
 
+        let prefer_call_arguments = self.autocomplete_mode == AutocompleteMode::TyContext
+            && cursor_inside_python_call_parens(&self.editor)
+            && !cursor_after_python_member_dot(&self.editor);
         matches.sort_unstable_by_key(|(is_prefix, len, item, _)| {
+            let arg_priority = if prefer_call_arguments && completion_item_is_argument_like(item) {
+                0
+            } else {
+                1
+            };
             let type_priority = match item.kind {
-                SymbolKind::Variable | SymbolKind::Parameter => 0,
-                SymbolKind::Function => 1,
-                SymbolKind::Class => 2,
-                SymbolKind::Keyword => 3,
-                SymbolKind::Unknown => 4,
+                SymbolKind::Parameter => 0,
+                SymbolKind::Variable => 1,
+                SymbolKind::Function => 2,
+                SymbolKind::Class => 3,
+                SymbolKind::Keyword => 4,
+                SymbolKind::Unknown => 5,
             };
             (
                 !*is_prefix,
+                arg_priority,
                 is_magic_python_name(&item.word),
                 type_priority,
                 *len,
@@ -2113,6 +2271,8 @@ impl App {
             "py" | "pyi" | "rs" | "dart" => 1,
             _ => 2,
         };
+        let should_autofold_initial =
+            !self.is_highlighted_once && self.editor.folded_start_bytes.is_empty();
         self.editor.foldable_lines.clear();
         self.editor.foldable_ranges_bytes.clear();
         for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
@@ -2131,7 +2291,7 @@ impl App {
                 .saturating_sub(1);
             if el > sl {
                 self.editor.foldable_lines.insert(sl, el);
-                if is_autofold && el - sl >= threshold && !self.is_highlighted_once {
+                if is_autofold && el - sl >= threshold && should_autofold_initial {
                     self.editor.folded_lines.insert(sl);
                     self.editor
                         .folded_start_bytes
@@ -2140,6 +2300,15 @@ impl App {
             }
         }
         self.is_highlighted_once = true;
+    }
+
+    fn wait_for_current_highlight(&mut self) {
+        if self
+            .highlighter
+            .wait_for_first_result(self.editor.version, FILE_OPEN_HIGHLIGHT_TIMEOUT)
+        {
+            self.apply_highlight_results();
+        }
     }
 
     pub fn load_file_internal(
@@ -2181,16 +2350,11 @@ impl App {
                     self.editor.get_full_text(),
                     self.file_extension.clone(),
                 );
+                apply_initial_import_folds(&mut self.editor, &self.file_extension, &content);
 
-                // Ждём до 50мс первого результата подсветки — убирает мерцание при открытии файла.
-                // Для малых файлов Tree-sitter укладывается в < 5мс, большие файлы — просто не ждут.
+                // Ждём до 150мс первого результата подсветки и fold-данных перед первым кадром.
                 if wait_highlight {
-                    if self.highlighter.wait_for_first_result(
-                        self.editor.version,
-                        std::time::Duration::from_millis(50),
-                    ) {
-                        self.apply_highlight_results();
-                    }
+                    self.wait_for_current_highlight();
                 }
 
                 self.scroll_y.current = 0.0;
@@ -2753,6 +2917,38 @@ mod app_behavior_tests {
     }
 
     #[test]
+    fn ty_context_prioritizes_call_argument_completions() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("repo.find_one(id, a");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "apple".to_string(),
+                kind: SymbolKind::Variable,
+                module: None,
+                detail: Some("(variable) apple: str".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "allow_none".to_string(),
+                kind: SymbolKind::Variable,
+                module: None,
+                detail: Some("(parameter) allow_none: bool = True".to_string()),
+                insert_text: Some("allow_none=".to_string()),
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        assert_eq!(app.autocomplete_options[0].0.word, "allow_none");
+    }
+
+    #[test]
     fn ty_context_preserves_explicit_owner_and_hides_attribute_types() {
         let Some(mut app) = test_app() else {
             return;
@@ -2791,7 +2987,7 @@ mod app_behavior_tests {
         app.update_ty_autocomplete(vec![
             crate::lsp::LspCompletionItem {
                 label: "id".to_string(),
-                kind: SymbolKind::Variable,
+                kind: SymbolKind::Class,
                 module: Some("int".to_string()),
                 detail: Some("(variable) id: int".to_string()),
                 insert_text: None,
@@ -2908,7 +3104,7 @@ mod app_behavior_tests {
             },
             crate::lsp::LspCompletionItem {
                 label: "car_wash".to_string(),
-                kind: SymbolKind::Variable,
+                kind: SymbolKind::Class,
                 module: Some("CarWashRead".to_string()),
                 detail: Some("(variable) car_wash: CarWashRead".to_string()),
                 insert_text: None,
@@ -3197,6 +3393,115 @@ mod app_behavior_tests {
     }
 
     #[test]
+    fn file_open_waits_for_tree_sitter_and_applies_folds_before_return() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-open-highlight-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("folds.py");
+        std::fs::write(&path, "import os\nimport sys\n\nprint('ready')\n").unwrap();
+        app.highlighter
+            .reset(1, "warmup = 1\n".to_string(), "py".to_string());
+        assert!(
+            app.highlighter
+                .wait_for_first_result(1, std::time::Duration::from_secs(2))
+        );
+        app.editor.version = 1;
+
+        app.load_file_internal(path.clone(), false, true);
+
+        assert!(app.is_highlighted_once);
+        assert!(!app.highlighter.spans.is_empty());
+        assert!(!app.editor.foldable_ranges_bytes.is_empty());
+        assert!(!app.editor.folded_lines.is_empty());
+
+        std::fs::remove_file(path).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn file_open_prefolds_imports_without_waiting_for_highlighter() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-open-prefold-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("folds.py");
+        std::fs::write(&path, "import os\nimport sys\n\nprint('ready')\n").unwrap();
+
+        app.load_file_internal(path.clone(), false, false);
+
+        assert!(!app.is_highlighted_once);
+        assert!(!app.editor.foldable_ranges_bytes.is_empty());
+        assert!(app.editor.folded_lines.contains(&0));
+        assert!(app.editor.folded_start_bytes.contains(&0));
+
+        std::fs::remove_file(path).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn file_open_prefolds_python_bracket_blocks_without_waiting_for_highlighter() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        let unique = format!(
+            "rriter-open-bracket-prefold-test-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("folds.py");
+        std::fs::write(
+            &path,
+            "handlers = [\n    AuthController,\n]\n\nexception_handlers={\n    Exception: handler,\n},  # ty\n",
+        )
+        .unwrap();
+
+        app.load_file_internal(path.clone(), false, false);
+
+        assert!(!app.is_highlighted_once);
+        assert!(app.editor.folded_lines.contains(&0));
+        assert!(app.editor.folded_lines.contains(&4));
+
+        std::fs::remove_file(path).ok();
+        std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn late_highlight_does_not_autofold_extra_blocks_after_prefolded_open() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("import os\nimport sys\n\ndef later():\n    return 1\n");
+        app.file_extension = "py".to_string();
+        let text = app.editor.get_full_text();
+        apply_initial_import_folds(&mut app.editor, &app.file_extension, &text);
+        assert!(app.editor.folded_lines.contains(&0));
+
+        let fn_start = text.find("def later").unwrap();
+        let fn_end = text.rfind("return 1").unwrap() + "return 1".len();
+        app.highlighter.foldable_ranges = vec![(fn_start, fn_end, true, false)];
+
+        app.apply_highlight_results();
+
+        assert!(app.is_highlighted_once);
+        assert!(!app.editor.folded_lines.contains(&3));
+    }
+
+    #[test]
     fn highlight_results_update_fold_maps_and_autofold_once() {
         let Some(mut app) = test_app() else {
             return;
@@ -3440,6 +3745,76 @@ mod app_behavior_tests {
         std::fs::remove_file(first).ok();
         std::fs::remove_file(second).ok();
         std::fs::remove_dir(dir).ok();
+    }
+
+    #[test]
+    fn switch_to_tab_waits_for_highlight_before_return() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.tabs.push(tab_with(
+            "first.py",
+            Some("/tmp/first.py"),
+            "print('first')\n",
+        ));
+        app.tabs.push(tab_with(
+            "second.py",
+            Some("/tmp/second.py"),
+            "from os import path\nprint(path)\n",
+        ));
+        app.active_tab = 0;
+        app.editor = editor_with("print('first')\n");
+        app.file_path = Some(PathBuf::from("/tmp/first.py"));
+        app.file_extension = "py".to_string();
+        app.base_title = "first.py".to_string();
+
+        app.switch_to_tab(1);
+
+        assert_eq!(
+            app.file_path.as_deref(),
+            Some(std::path::Path::new("/tmp/second.py"))
+        );
+        if !app.is_highlighted_once
+            && app
+                .highlighter
+                .wait_for_first_result(app.editor.version, std::time::Duration::from_secs(2))
+        {
+            app.apply_highlight_results();
+        }
+        assert!(app.is_highlighted_once);
+        assert_eq!(app.highlighter.current_version, app.editor.version);
+    }
+
+    #[test]
+    fn close_active_tab_uses_version_newer_than_removed_tab_highlighter_watermark() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.tabs.push(tab_with("first.py", Some("/tmp/first.py"), "print(1)\n"));
+        app.tabs.push(tab_with("second.py", Some("/tmp/second.py"), "print(2)\n"));
+        app.editor = editor_with("print(2)\n");
+        app.file_path = Some(PathBuf::from("/tmp/second.py"));
+        app.file_extension = "py".to_string();
+        app.base_title = "second.py".to_string();
+        app.active_tab = 1;
+        app.highlighter.current_version = 500;
+
+        app.close_tab_at(1);
+
+        assert_eq!(app.file_path.as_deref(), Some(Path::new("/tmp/first.py")));
+        assert!(app.editor.version > 500);
+        if app.highlighter.current_version != app.editor.version
+            && app
+                .highlighter
+                .wait_for_first_result(app.editor.version, std::time::Duration::from_secs(2))
+        {
+            app.apply_highlight_results();
+        }
+        assert_eq!(app.highlighter.current_version, app.editor.version);
+        assert!(app.is_highlighted_once);
     }
 
     #[test]

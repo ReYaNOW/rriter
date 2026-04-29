@@ -3,6 +3,125 @@ use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine};
 use glow::HasContext;
 
+fn code_end_before_line_comment(editor: &Editor, line_start: usize, line_end: usize) -> usize {
+    let mut p = line_start;
+    let mut code_end = line_end;
+    while p < line_end {
+        let b = editor.byte_at(p);
+        if b == b'#' {
+            code_end = p;
+            break;
+        }
+        if b == b'/' && p + 1 < line_end && editor.byte_at(p + 1) == b'/' {
+            code_end = p;
+            break;
+        }
+        p += 1;
+    }
+    while code_end > line_start {
+        let b = editor.byte_at(code_end - 1);
+        if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+            break;
+        }
+        code_end -= 1;
+    }
+    code_end
+}
+
+fn folded_block_suffix(editor: &Editor, phys_line: usize, fold_end: usize) -> ([char; 4], u8) {
+    let mut fold_suffix = ['\0'; 4];
+    let mut fold_suffix_len = 0;
+    let start_line_start = editor.line_offsets[phys_line];
+    let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
+        editor.line_offsets[phys_line + 1]
+    } else {
+        editor.len()
+    };
+    let start_code_end = code_end_before_line_comment(editor, start_line_start, start_line_end);
+
+    let mut p_start = start_code_end;
+    let mut last_start_char = 0;
+    while p_start > start_line_start {
+        p_start -= 1;
+        let b = editor.byte_at(p_start);
+        if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
+            last_start_char = b;
+            break;
+        }
+    }
+
+    if last_start_char != b'{' && last_start_char != b'[' && last_start_char != b'(' {
+        return (fold_suffix, fold_suffix_len);
+    }
+
+    let expected_close = match last_start_char {
+        b'{' => b'}',
+        b'[' => b']',
+        b'(' => b')',
+        _ => 0,
+    };
+
+    let end_line_start = editor.line_offsets[fold_end];
+    let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
+        editor.line_offsets[fold_end + 1]
+    } else {
+        editor.len()
+    };
+    let mut p_scan = code_end_before_line_comment(editor, end_line_start, end_line_end);
+    let mut suffix_bytes_rev = [0u8; 4];
+    let mut suffix_len = 0;
+    while p_scan > end_line_start && suffix_len < 4 {
+        p_scan -= 1;
+        let b = editor.byte_at(p_scan);
+        if b == b' ' || b == b'\t' {
+            break;
+        }
+        suffix_bytes_rev[suffix_len] = b;
+        suffix_len += 1;
+    }
+
+    if let Some(pos_in_rev) = suffix_bytes_rev[..suffix_len]
+        .iter()
+        .position(|&x| x == expected_close)
+    {
+        for i in (0..=pos_in_rev).rev() {
+            let b = suffix_bytes_rev[i];
+            if fold_suffix_len < 4 {
+                fold_suffix[fold_suffix_len as usize] = b as char;
+                fold_suffix_len += 1;
+            }
+        }
+    }
+    (fold_suffix, fold_suffix_len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editor_with_text(text: &str) -> Editor {
+        let mut editor = Editor::new(text.len() + 16);
+        let _ = editor.insert_str(text);
+        editor
+    }
+
+    #[test]
+    fn folded_block_suffix_keeps_comma_before_inline_comment() {
+        let editor = editor_with_text("exception_handlers={\n    Exception: handler,\n},  # ty\n");
+        let (suffix, len) = folded_block_suffix(&editor, 0, 2);
+        assert_eq!(len, 2);
+        assert_eq!(&suffix[..2], &['}', ',']);
+    }
+
+    #[test]
+    fn folded_block_suffix_keeps_plain_closer_and_comma() {
+        let editor = editor_with_text("type_encoders={\n    Any: encoder,\n},\n");
+        let (suffix, len) = folded_block_suffix(&editor, 0, 2);
+        assert_eq!(len, 2);
+        assert_eq!(&suffix[..2], &['}', ',']);
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn update_cache(
@@ -97,83 +216,15 @@ impl Renderer {
                     current += chunk.len();
                 }
 
-                let mut fold_suffix = ['\0'; 4];
-                let mut fold_suffix_len = 0;
-                if is_folded {
-                    if let Some(&fold_end) = editor.foldable_lines.get(&phys_line) {
-                        let start_line_start = editor.line_offsets[phys_line];
-                        let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
-                            editor.line_offsets[phys_line + 1]
-                        } else {
-                            editor.len()
-                        };
-
-                        let mut p_start = start_line_end;
-                        let mut last_start_char = 0;
-                        while p_start > start_line_start {
-                            p_start -= 1;
-                            let b = editor.byte_at(p_start);
-                            if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                last_start_char = b;
-                                break;
-                            }
-                        }
-
-                        if last_start_char == b'{'
-                            || last_start_char == b'['
-                            || last_start_char == b'('
-                        {
-                            let expected_close = match last_start_char {
-                                b'{' => b'}',
-                                b'[' => b']',
-                                b'(' => b')',
-                                _ => 0,
-                            };
-
-                            let end_line_start = editor.line_offsets[fold_end];
-                            let end_line_end = if fold_end + 1 < editor.line_offsets.len() {
-                                editor.line_offsets[fold_end + 1]
-                            } else {
-                                editor.len()
-                            };
-
-                            let mut p = end_line_end;
-                            while p > end_line_start {
-                                p -= 1;
-                                let b = editor.byte_at(p);
-                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                    p += 1;
-                                    break;
-                                }
-                            }
-                            let mut suffix_bytes_rev = [0u8; 4];
-                            let mut suffix_len = 0;
-                            let mut p_scan = p;
-                            while p_scan > end_line_start && suffix_len < 4 {
-                                p_scan -= 1;
-                                let b = editor.byte_at(p_scan);
-                                if b == b' ' || b == b'\t' {
-                                    break;
-                                }
-                                suffix_bytes_rev[suffix_len] = b;
-                                suffix_len += 1;
-                            }
-
-                            if let Some(pos_in_rev) = suffix_bytes_rev[..suffix_len]
-                                .iter()
-                                .position(|&x| x == expected_close)
-                            {
-                                for i in (0..=pos_in_rev).rev() {
-                                    let b = suffix_bytes_rev[i];
-                                    if fold_suffix_len < 4 {
-                                        fold_suffix[fold_suffix_len as usize] = b as char;
-                                        fold_suffix_len += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                let (fold_suffix, fold_suffix_len) = if is_folded {
+                    editor
+                        .foldable_lines
+                        .get(&phys_line)
+                        .map(|&fold_end| folded_block_suffix(editor, phys_line, fold_end))
+                        .unwrap_or((['\0'; 4], 0))
+                } else {
+                    (['\0'; 4], 0)
+                };
 
                 let dots_width = if is_folded {
                     let mut w = self.measure_ui_width("...", 1.0) + 10.0 * self.scale_factor;
@@ -259,78 +310,8 @@ impl Renderer {
                         let mut dots_w =
                             self.measure_ui_width("...", 1.0) + 10.0 * self.scale_factor;
 
-                        let end_line_start = editor.line_offsets[fold_end_line];
-                        let end_line_end = if fold_end_line + 1 < editor.line_offsets.len() {
-                            editor.line_offsets[fold_end_line + 1]
-                        } else {
-                            editor.len()
-                        };
-                        let mut fold_suffix = ['\0'; 4];
-                        let mut fold_suffix_len = 0;
-                        let start_line_start = editor.line_offsets[phys_line];
-                        let start_line_end = if phys_line + 1 < editor.line_offsets.len() {
-                            editor.line_offsets[phys_line + 1]
-                        } else {
-                            editor.len()
-                        };
-
-                        let mut p_start = start_line_end;
-                        let mut last_start_char = 0;
-                        while p_start > start_line_start {
-                            p_start -= 1;
-                            let b = editor.byte_at(p_start);
-                            if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                last_start_char = b;
-                                break;
-                            }
-                        }
-
-                        if last_start_char == b'{'
-                            || last_start_char == b'['
-                            || last_start_char == b'('
-                        {
-                            let expected_close = match last_start_char {
-                                b'{' => b'}',
-                                b'[' => b']',
-                                b'(' => b')',
-                                _ => 0,
-                            };
-
-                            let mut p = end_line_end;
-                            while p > end_line_start {
-                                p -= 1;
-                                let b = editor.byte_at(p);
-                                if b != b' ' && b != b'\t' && b != b'\r' && b != b'\n' {
-                                    p += 1;
-                                    break;
-                                }
-                            }
-                            let mut suffix_bytes_rev = [0u8; 4];
-                            let mut suffix_len = 0;
-                            let mut p_scan = p;
-                            while p_scan > end_line_start && suffix_len < 4 {
-                                p_scan -= 1;
-                                let b = editor.byte_at(p_scan);
-                                if b == b' ' || b == b'\t' {
-                                    break;
-                                }
-                                suffix_bytes_rev[suffix_len] = b;
-                                suffix_len += 1;
-                            }
-
-                            if let Some(pos_in_rev) = suffix_bytes_rev[..suffix_len]
-                                .iter()
-                                .position(|&x| x == expected_close)
-                            {
-                                for i in (0..=pos_in_rev).rev() {
-                                    let b = suffix_bytes_rev[i];
-                                    if fold_suffix_len < 4 {
-                                        fold_suffix[fold_suffix_len as usize] = b as char;
-                                        fold_suffix_len += 1;
-                                    }
-                                }
-                            }
-                        }
+                        let (fold_suffix, fold_suffix_len) =
+                            folded_block_suffix(editor, phys_line, fold_end_line);
                         for i in 0..fold_suffix_len {
                             dots_w += self.char_advance(fold_suffix[i as usize]);
                         }
@@ -627,6 +608,8 @@ impl Renderer {
     }
 
     pub fn draw_string(&mut self, text: &str, mut x: f32, y: f32, color: [f32; 4]) {
+        x = x.round();
+        let y = y.round();
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
@@ -650,6 +633,8 @@ impl Renderer {
         color: [f32; 4],
         scale: f32,
     ) {
+        x = x.round();
+        let y = y.round();
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
@@ -673,6 +658,8 @@ impl Renderer {
         color: [f32; 4],
         scale: f32,
     ) {
+        x = x.round();
+        let y = y.round();
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;

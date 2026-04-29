@@ -197,7 +197,7 @@ impl Editor {
         let mut pos = start;
         while pos < end {
             let b = self.byte_at(pos);
-            let char_len = if b < 0x80 {
+            let wanted_len = if b < 0x80 {
                 1
             } else if b < 0xE0 {
                 2
@@ -206,6 +206,7 @@ impl Editor {
             } else {
                 4
             };
+            let char_len = wanted_len.min(end - pos);
             let mut buf = [0u8; 4];
             for k in 0..char_len {
                 buf[k] = self.byte_at(pos + k);
@@ -216,7 +217,7 @@ impl Editor {
                     utf16 += ch.len_utf16() as u32;
                 }
             }
-            pos += char_len;
+            pos += char_len.max(1);
         }
     }
 

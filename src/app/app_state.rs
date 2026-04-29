@@ -284,8 +284,53 @@ impl IdePanelState {
             .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
     pub fn toggle(&mut self, id: PanelId) {
+        let mut opened = false;
+        let mut group = None;
         if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
             slot.open = !slot.open;
+            opened = slot.open;
+            group = Some(slot.group);
+        }
+        if opened {
+            if let Some(group) = group {
+                for slot in &mut self.slots {
+                    if slot.id != id && slot.group == group {
+                        slot.open = false;
+                    }
+                }
+            }
+        }
+        if id == PanelId::Terminal && opened {
+            self.terminal_focused = true;
+            self.term_search_focused = false;
+        } else if id == PanelId::Terminal && !opened {
+            self.terminal_focused = false;
+            self.term_search_focused = false;
+        } else if opened && id != PanelId::Terminal && group == Some(PanelGroup::Bottom) {
+            self.terminal_focused = false;
+            self.term_search_focused = false;
+        }
+    }
+    pub fn enforce_single_open_per_group(&mut self) {
+        let mut top_seen = false;
+        let mut bottom_seen = false;
+        for slot in &mut self.slots {
+            if !slot.open {
+                continue;
+            }
+            let seen = match slot.group {
+                PanelGroup::Top => &mut top_seen,
+                PanelGroup::Bottom => &mut bottom_seen,
+            };
+            if *seen {
+                slot.open = false;
+            } else {
+                *seen = true;
+            }
+        }
+        if !self.is_open(PanelId::Terminal) {
+            self.terminal_focused = false;
+            self.term_search_focused = false;
         }
     }
     pub fn is_open(&self, id: PanelId) -> bool {
@@ -294,6 +339,13 @@ impl IdePanelState {
             .find(|s| s.id == id)
             .map(|s| s.open)
             .unwrap_or(false)
+    }
+    pub fn bottom_panel_blocks_editor_hover(&self) -> bool {
+        self.slots.iter().any(|slot| {
+            slot.group == PanelGroup::Bottom
+                && slot.open
+                && (slot.id != PanelId::Terminal || self.terminal_focused)
+        })
     }
 }
 
@@ -494,12 +546,59 @@ mod tests {
 
         assert!(panels.is_open(PanelId::Explorer));
         assert!(panels.is_open(PanelId::Terminal));
+        assert!(panels.terminal_focused);
         assert!(panels.any_top_open());
         assert!(panels.any_bottom_open());
 
         panels.toggle(PanelId::Explorer);
         assert!(!panels.is_open(PanelId::Explorer));
         assert!(panels.any_bottom_open());
+    }
+
+    #[test]
+    fn panel_state_keeps_one_open_panel_per_group() {
+        let mut panels = IdePanelState::default();
+        panels.toggle(PanelId::Terminal);
+        panels.toggle(PanelId::Problems);
+        assert!(!panels.is_open(PanelId::Terminal));
+        assert!(panels.is_open(PanelId::Problems));
+        assert!(!panels.terminal_focused);
+
+        panels.toggle(PanelId::Explorer);
+        panels.toggle(PanelId::LspServers);
+        assert!(!panels.is_open(PanelId::Explorer));
+        assert!(panels.is_open(PanelId::LspServers));
+
+        panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::Terminal)
+            .unwrap()
+            .open = true;
+        panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::Problems)
+            .unwrap()
+            .open = true;
+        panels.enforce_single_open_per_group();
+        assert!(panels.is_open(PanelId::Terminal));
+        assert!(!panels.is_open(PanelId::Problems));
+    }
+
+    #[test]
+    fn bottom_panel_blocks_editor_hover_except_unfocused_terminal() {
+        let mut panels = IdePanelState::default();
+        assert!(!panels.bottom_panel_blocks_editor_hover());
+
+        panels.toggle(PanelId::Problems);
+        assert!(panels.bottom_panel_blocks_editor_hover());
+
+        panels.toggle(PanelId::Terminal);
+        assert!(panels.bottom_panel_blocks_editor_hover());
+
+        panels.terminal_focused = false;
+        assert!(!panels.bottom_panel_blocks_editor_hover());
     }
 
     #[test]

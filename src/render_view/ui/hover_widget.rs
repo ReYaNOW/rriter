@@ -1314,8 +1314,8 @@ impl Renderer {
                                     self.push_rect(
                                         draw_x,
                                         rounded_top,
-                                        adv,
-                                        cur_line_h.round(),
+                                        adv.ceil() + 1.0,
+                                        cur_line_h.ceil() + 1.0,
                                         self.theme.sel,
                                     );
                                 }
@@ -1378,8 +1378,8 @@ impl Renderer {
                                 self.push_rect(
                                     draw_x,
                                     rounded_top,
-                                    adv,
-                                    cur_line_h.round(),
+                                    adv.ceil() + 1.0,
+                                    cur_line_h.ceil() + 1.0,
                                     self.theme.sel,
                                 );
                             }
