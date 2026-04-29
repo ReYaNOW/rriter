@@ -520,11 +520,12 @@ impl App {
         } else {
             38.0 * s
         };
+        let visible_h = (wh - tab_bar_h).max(0.0);
         let max_scroll_y = self
             .renderer
             .as_mut()
             .unwrap()
-            .get_max_scroll(&self.editor, wh - tab_bar_h);
+            .get_max_scroll(&self.editor, visible_h);
         let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
 
         self.scroll_y.clamp_target(0.0, max_scroll_y);

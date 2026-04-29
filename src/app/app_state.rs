@@ -311,6 +311,15 @@ impl IdePanelState {
             self.term_search_focused = false;
         }
     }
+    pub fn open_terminal_exclusive(&mut self) {
+        for slot in &mut self.slots {
+            if slot.group == PanelGroup::Bottom {
+                slot.open = slot.id == PanelId::Terminal;
+            }
+        }
+        self.terminal_focused = true;
+        self.term_search_focused = false;
+    }
     pub fn enforce_single_open_per_group(&mut self) {
         let mut top_seen = false;
         let mut bottom_seen = false;
@@ -584,6 +593,20 @@ mod tests {
         panels.enforce_single_open_per_group();
         assert!(panels.is_open(PanelId::Terminal));
         assert!(!panels.is_open(PanelId::Problems));
+    }
+
+    #[test]
+    fn open_terminal_exclusive_closes_bottom_peers_and_focuses_terminal() {
+        let mut panels = IdePanelState::default();
+        panels.toggle(PanelId::Problems);
+        panels.term_search_focused = true;
+
+        panels.open_terminal_exclusive();
+
+        assert!(panels.is_open(PanelId::Terminal));
+        assert!(!panels.is_open(PanelId::Problems));
+        assert!(panels.terminal_focused);
+        assert!(!panels.term_search_focused);
     }
 
     #[test]

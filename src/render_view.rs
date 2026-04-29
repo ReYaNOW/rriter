@@ -407,6 +407,7 @@ impl Renderer {
             44.0 * s
         };
         let editor_height = real_height - tab_bar_h;
+        let editor_scroll_height = editor_height;
 
         let target_minimap_w = 119.0 * s;
 
@@ -720,7 +721,8 @@ impl Renderer {
         }
 
         let total_render_height = total_lines as f32 * self.line_height;
-        let raw_max = (total_render_height - editor_height + self.line_height * 2.0).max(0.0);
+        let raw_max =
+            (total_render_height - editor_scroll_height + self.line_height * 2.0).max(0.0);
         let max_scroll = (raw_max / self.line_height).ceil() * self.line_height;
 
         let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
@@ -735,7 +737,7 @@ impl Renderer {
             self.left_padding,
             tab_bar_h,
             scrollbar_x - self.left_padding,
-            editor_height,
+            editor_scroll_height,
             mx,
             my,
         );
@@ -945,7 +947,7 @@ impl Renderer {
             max_scroll,
             total_lines,
             visible_cursor_line,
-            editor_height,
+            editor_scroll_height,
             tab_bar_h,
         );
 
@@ -954,7 +956,7 @@ impl Renderer {
             minimap_x,
             tab_bar_h,
             minimap_w,
-            editor_height,
+            editor_scroll_height,
             mx,
             my,
         );
@@ -1090,9 +1092,10 @@ impl Renderer {
         if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
             let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
-            let thumb_h = (editor_height / total_content_height.max(editor_height) * editor_height)
+            let thumb_h = (editor_scroll_height / total_content_height.max(editor_scroll_height)
+                * editor_scroll_height)
                 .max(20.0 * s);
-            let thumb_y = tab_bar_h + scroll_ratio_y * (editor_height - thumb_h);
+            let thumb_y = tab_bar_h + scroll_ratio_y * (editor_scroll_height - thumb_h);
             self.push_rounded_rect(
                 scrollbar_x + 1.0 * s,
                 thumb_y,
@@ -1106,7 +1109,7 @@ impl Renderer {
                 scrollbar_x,
                 tab_bar_h,
                 scrollbar_width,
-                editor_height,
+                editor_scroll_height,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );

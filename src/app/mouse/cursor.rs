@@ -61,6 +61,22 @@ fn resized_bottom_height(py: f32, window_height: f32, scale: f32) -> f32 {
         .min(max_h.max(60.0))
 }
 
+fn cursor_position_allows_editor_hover(
+    px: f32,
+    py: f32,
+    window_width: f32,
+    window_height: f32,
+) -> bool {
+    px >= 0.0 && py >= 0.0 && px < window_width && py < window_height
+}
+
+fn should_suppress_editor_hover_for_scroll_drag(
+    scroll_y_dragging: bool,
+    scroll_x_dragging: bool,
+) -> bool {
+    scroll_y_dragging || scroll_x_dragging
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
@@ -68,6 +84,18 @@ impl App {
         self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
 
         if self.dialog_window.is_some() {
+            return;
+        }
+
+        let window_size = self.window.as_ref().unwrap().inner_size();
+        if !cursor_position_allows_editor_hover(
+            position.x as f32,
+            position.y as f32,
+            window_size.width as f32,
+            window_size.height as f32,
+        ) {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
             return;
         }
 
@@ -217,6 +245,15 @@ impl App {
             }
         }
 
+        let suppress_editor_hover = should_suppress_editor_hover_for_scroll_drag(
+            self.scroll_y.is_dragging,
+            self.scroll_x.is_dragging,
+        );
+        if suppress_editor_hover {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+        }
+
         // Hover над узлами дерева файлов
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let mut new_hover = self.file_tree_node_at(position.x as f32, position.y as f32);
@@ -363,7 +400,6 @@ impl App {
 
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
         let padding = self.renderer.as_ref().unwrap().left_padding;
-        let window_size = self.window.as_ref().unwrap().inner_size();
         let bottom_panel_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
             self.ide_panel.bottom_height * s
         } else {
@@ -379,7 +415,10 @@ impl App {
             self.update_ctrl_definition_hover(None);
         }
 
-        if !in_blocking_bottom_panel && (!in_hover_popup || in_hover_source_line) {
+        if !suppress_editor_hover
+            && !in_blocking_bottom_panel
+            && (!in_hover_popup || in_hover_source_line)
+        {
             let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                 0.0
             } else {
@@ -613,12 +652,17 @@ impl App {
             self.update_ctrl_definition_hover(ctrl_definition_byte);
         }
         let wh = window_size.height as f32;
-
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+            0.0
+        } else {
+            38.0 * s
+        };
+        let editor_visible_h = (wh - tab_bar_h).max(0.0);
         let max_scroll = self
             .renderer
             .as_mut()
             .unwrap()
-            .get_max_scroll(&self.editor, wh);
+            .get_max_scroll(&self.editor, editor_visible_h);
         let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
@@ -1197,5 +1241,33 @@ mod tests {
         assert_eq!(resized_bottom_height(2000.0, 900.0, 1.0), 60.0);
         assert_eq!(resized_bottom_height(600.0, 900.0, 1.0), 300.0);
         assert_eq!(resized_bottom_height(0.0, 900.0, 1.0), 850.0);
+    }
+
+    #[test]
+    fn cursor_hover_requires_pointer_inside_window() {
+        assert!(cursor_position_allows_editor_hover(0.0, 0.0, 800.0, 600.0));
+        assert!(cursor_position_allows_editor_hover(
+            799.0, 599.0, 800.0, 600.0
+        ));
+        assert!(!cursor_position_allows_editor_hover(
+            -1.0, 10.0, 800.0, 600.0
+        ));
+        assert!(!cursor_position_allows_editor_hover(
+            10.0, -1.0, 800.0, 600.0
+        ));
+        assert!(!cursor_position_allows_editor_hover(
+            800.0, 10.0, 800.0, 600.0
+        ));
+        assert!(!cursor_position_allows_editor_hover(
+            10.0, 600.0, 800.0, 600.0
+        ));
+    }
+
+    #[test]
+    fn editor_scrollbar_drag_suppresses_hover_only_while_dragging() {
+        assert!(!should_suppress_editor_hover_for_scroll_drag(false, false));
+        assert!(should_suppress_editor_hover_for_scroll_drag(true, false));
+        assert!(should_suppress_editor_hover_for_scroll_drag(false, true));
+        assert!(should_suppress_editor_hover_for_scroll_drag(true, true));
     }
 }

@@ -20,27 +20,11 @@ fn apply_terminal_alt_q_shortcut(
             panels.enforce_single_open_per_group();
             false
         } else {
-            if let Some(slot) = panels
-                .slots
-                .iter_mut()
-                .find(|s| s.id == crate::app::PanelId::Terminal)
-            {
-                slot.open = true;
-            }
-            panels.terminal_focused = true;
-            panels.enforce_single_open_per_group();
+            panels.open_terminal_exclusive();
             !has_terminal
         }
     } else if !is_open {
-        if let Some(slot) = panels
-            .slots
-            .iter_mut()
-            .find(|s| s.id == crate::app::PanelId::Terminal)
-        {
-            slot.open = true;
-        }
-        panels.terminal_focused = true;
-        panels.enforce_single_open_per_group();
+        panels.open_terminal_exclusive();
         !has_terminal
     } else {
         panels.terminal_focused = !panels.terminal_focused;
@@ -390,6 +374,12 @@ mod tests {
 
         panels.toggle(crate::app::PanelId::Problems);
         assert!(!apply_terminal_alt_q_shortcut(&mut panels, true, true));
+        assert!(panels.is_open(crate::app::PanelId::Terminal));
+        assert!(!panels.is_open(crate::app::PanelId::Problems));
+        assert!(panels.terminal_focused);
+
+        panels.toggle(crate::app::PanelId::Problems);
+        assert!(apply_terminal_alt_q_shortcut(&mut panels, true, false));
         assert!(panels.is_open(crate::app::PanelId::Terminal));
         assert!(!panels.is_open(crate::app::PanelId::Problems));
         assert!(panels.terminal_focused);

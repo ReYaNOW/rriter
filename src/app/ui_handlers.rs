@@ -629,7 +629,7 @@ impl App {
                         38.0 * s
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let editor_height = wh - tab_bar_h;
+                    let editor_height = (wh - tab_bar_h).max(0.0);
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {
@@ -678,7 +678,7 @@ impl App {
                         38.0 * s
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let editor_height = wh - tab_bar_h;
+                    let editor_height = (wh - tab_bar_h).max(0.0);
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {

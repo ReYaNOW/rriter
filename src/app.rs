@@ -2395,7 +2395,9 @@ impl App {
     pub fn check_external_changes(&mut self) {
         self.sync_active_tab();
         let mut needs_redraw = false;
-        for tab in &mut self.tabs {
+        let mut active_reloaded = false;
+        let active_idx = self.active_tab;
+        for (idx, tab) in self.tabs.iter_mut().enumerate() {
             if !tab.editor.is_dirty() {
                 if let Some(path) = &tab.file_path {
                     if let Ok(disk_text) = std::fs::read_to_string(path) {
@@ -2408,10 +2410,23 @@ impl App {
                             tab.editor.clear_history();
                             tab.editor.set_original_text();
                             tab.editor.sync_edits.clear();
-                            tab.spans.clear();
                             tab.completions.clear();
                             tab.foldable_ranges.clear();
                             tab.is_highlighted_once = false;
+                            if self.is_ide_mode {
+                                if let Some(lsp) = &mut self.lsp {
+                                    lsp.clear_diagnostics_for_path(path);
+                                    lsp.notify_change(
+                                        path,
+                                        &tab.file_extension,
+                                        &disk_text,
+                                        tab.editor.version as i32,
+                                    );
+                                }
+                            }
+                            if idx == active_idx {
+                                active_reloaded = true;
+                            }
                             needs_redraw = true;
                         }
                     }
@@ -2419,6 +2434,18 @@ impl App {
             }
         }
         self.sync_active_tab();
+        if active_reloaded {
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.highlighter.reset(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+            );
+            self.wait_for_current_highlight();
+            crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+            self.lsp_actions_menu = None;
+            self.last_sent_version = self.editor.version;
+        }
         if needs_redraw {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();
@@ -3539,15 +3566,15 @@ mod app_behavior_tests {
         );
         let dir = std::env::temp_dir().join(unique);
         std::fs::create_dir_all(&dir).unwrap();
-        let clean_path = dir.join("clean.txt");
+        let clean_path = dir.join("clean.py");
         let dirty_path = dir.join("dirty.txt");
-        std::fs::write(&clean_path, "new clean\n").unwrap();
+        std::fs::write(&clean_path, "def clean():\n    return 1\n").unwrap();
         std::fs::write(&dirty_path, "disk dirty\n").unwrap();
 
         let mut clean_tab = tab_with(
-            "clean.txt",
+            "clean.py",
             Some(clean_path.to_str().unwrap()),
-            "old clean\n",
+            "def clean():\n    return 0\n",
         );
         clean_tab.editor.set_original_text();
         let mut dirty_tab = tab_with(
@@ -3575,9 +3602,9 @@ mod app_behavior_tests {
             .iter()
             .find(|tab| tab.file_path.as_ref() == Some(&dirty_path))
             .unwrap();
-        assert_eq!(clean.editor.get_full_text(), "new clean\n");
-        assert!(clean.spans.is_empty());
-        assert!(!clean.is_highlighted_once);
+        assert_eq!(clean.editor.get_full_text(), "def clean():\n    return 1\n");
+        assert!(!clean.spans.is_empty());
+        assert!(clean.is_highlighted_once);
         assert!(dirty.editor.get_full_text().contains("local change"));
 
         std::fs::remove_file(clean_path).ok();
@@ -3793,8 +3820,10 @@ mod app_behavior_tests {
         };
         app.is_ide_mode = true;
         app.show_welcome = false;
-        app.tabs.push(tab_with("first.py", Some("/tmp/first.py"), "print(1)\n"));
-        app.tabs.push(tab_with("second.py", Some("/tmp/second.py"), "print(2)\n"));
+        app.tabs
+            .push(tab_with("first.py", Some("/tmp/first.py"), "print(1)\n"));
+        app.tabs
+            .push(tab_with("second.py", Some("/tmp/second.py"), "print(2)\n"));
         app.editor = editor_with("print(2)\n");
         app.file_path = Some(PathBuf::from("/tmp/second.py"));
         app.file_extension = "py".to_string();

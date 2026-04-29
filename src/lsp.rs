@@ -1204,6 +1204,21 @@ impl LspManager {
             .unwrap_or(&[])
     }
 
+    pub fn clear_diagnostics_for_path(&mut self, path: &PathBuf) {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.diagnostics.remove(&abs_path);
+        self.instant_diagnostics.remove(&abs_path);
+        self.ty_instant_diagnostics.remove(&abs_path);
+        self.merged_instant_diagnostics.remove(&abs_path);
+        self.dirty_diagnostics = false;
+    }
+
     pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
         let abs_path = if path.is_absolute() {
             path.clone()
@@ -2051,6 +2066,37 @@ mod tests {
 
         let manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
         manager.shutdown();
+    }
+
+    #[test]
+    fn clear_diagnostics_for_path_removes_abs_and_relative_entries() {
+        let path = PathBuf::from("/tmp/ws/app.py");
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.diagnostics.insert(
+            path.clone(),
+            vec![test_diag("stale", DiagSeverity::Error, None)],
+        );
+        manager.instant_diagnostics.insert(
+            path.clone(),
+            (1, vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        );
+        manager.ty_instant_diagnostics.insert(
+            path.clone(),
+            (2, vec![test_diag("ty", DiagSeverity::Info, None)]),
+        );
+        manager.merged_instant_diagnostics.insert(
+            path.clone(),
+            (2, vec![test_diag("merged", DiagSeverity::Hint, None)]),
+        );
+        manager.dirty_diagnostics = true;
+
+        manager.clear_diagnostics_for_path(&PathBuf::from("app.py"));
+
+        assert!(manager.get_diagnostics(&path).is_empty());
+        let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
+        assert_eq!(version, 0);
+        assert!(instant.is_empty());
+        assert!(!manager.dirty_diagnostics);
     }
 
     #[test]

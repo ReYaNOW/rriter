@@ -483,11 +483,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else {
             38.0 * s
         };
+        let visible_h = (w.inner_size().height as f32 - tab_bar_h).max(0.0);
         let max_scroll_y = app
             .renderer
             .as_mut()
             .unwrap()
-            .get_max_scroll(&app.editor, w.inner_size().height as f32 - tab_bar_h);
+            .get_max_scroll(&app.editor, visible_h);
         app.scroll_y.clamp_target(0.0, max_scroll_y);
         app.scroll_y.clamp_current(0.0, max_scroll_y);
 

@@ -908,11 +908,18 @@ impl App {
                         }
                         // Clamp scroll_y к новому max_scroll после изменения высоты панелей
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                            0.0
+                        } else {
+                            38.0 * s
+                        };
+                        let visible_h = (wh - tab_bar_h).max(0.0);
                         let max_scroll = self
                             .renderer
                             .as_mut()
                             .unwrap()
-                            .get_max_scroll(&self.editor, wh);
+                            .get_max_scroll(&self.editor, visible_h);
                         self.scroll_y.clamp_target(0.0, max_scroll);
                         self.scroll_y.clamp_current(0.0, max_scroll);
                     } else {
