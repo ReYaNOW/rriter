@@ -29,6 +29,13 @@ impl Renderer {
         let mut hovered_diag_type_target = None;
         if !self.lsp_diagnostic_indices.is_empty() {
             let render_scroll_x = scroll_x.round();
+            let hover_content_y = crate::app::mouse::hover_screen_y_to_content_y(
+                my,
+                render_scroll_y,
+                self.line_height,
+                self.baseline_offset,
+            )
+            .unwrap_or(-1.0);
             for i in 0..self.lsp_diagnostic_indices.len() {
                 let idx = self.lsp_diagnostic_indices[i];
                 let diag = &lsp_diagnostics[idx];
@@ -122,8 +129,7 @@ impl Renderer {
                 let is_under_panel = top_y > self.height - effective_bottom_h - self.line_height;
 
                 if !self.hide_popups_until_mouse_move && !is_under_panel {
-                    let squiggle_hit_y_top = top_y;
-                    let squiggle_hit_y_bottom = top_y + self.line_height;
+                    let squiggle_hit_y_top = v_line.y_offset;
 
                     if mouse_in_popup {
                         if crate::app::mouse::HOVER_STATE
@@ -133,8 +139,11 @@ impl Renderer {
                         }
                     } else if mx >= x_start
                         && mx <= x_start + squiggle_w
-                        && my >= squiggle_hit_y_top
-                        && my <= squiggle_hit_y_bottom
+                        && crate::app::mouse::hover_content_y_in_line_hitbox(
+                            hover_content_y,
+                            squiggle_hit_y_top,
+                            self.line_height,
+                        )
                     {
                         in_hitbox = true;
                     }

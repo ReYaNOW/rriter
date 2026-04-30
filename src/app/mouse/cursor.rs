@@ -428,11 +428,15 @@ impl App {
             let px = position.x as f32;
             let py = position.y as f32;
             let mut diag_hover_byte = None;
+            let line_h = self.renderer.as_ref().unwrap().line_height;
+            let baseline_offset = self.renderer.as_ref().unwrap().baseline_offset;
+            let hover_content_y =
+                hover_screen_y_to_content_y(py, render_scroll_y, line_h, baseline_offset)
+                    .unwrap_or(0.0);
 
             if let (Some(lsp), Some(path)) = (self.lsp.as_ref(), self.file_path.as_ref()) {
                 let (_, diagnostics) = lsp.get_instant_diagnostics_with_version(path);
                 let render_scroll_x = self.scroll_x.current.round();
-                let line_h = self.renderer.as_ref().unwrap().line_height;
                 let left_padding = self.renderer.as_ref().unwrap().left_padding;
                 let last_line = self.editor.line_offsets.len().saturating_sub(1);
 
@@ -449,10 +453,9 @@ impl App {
                             .get(line)
                             .copied()
                             .unwrap_or(0) as f32;
-                        let line_top_y = (vis_line_idx * line_h) - render_scroll_y;
-                        let line_bottom_y = line_top_y + line_h;
+                        let line_top_y = vis_line_idx * line_h;
 
-                        if py < line_top_y || py > line_bottom_y {
+                        if !hover_content_y_in_line_hitbox(hover_content_y, line_top_y, line_h) {
                             continue;
                         }
 
@@ -535,11 +538,16 @@ impl App {
             let byte_offset = if let Some(byte) = diag_hover_byte {
                 byte
             } else {
-                self.renderer.as_mut().unwrap().get_byte_at_xy(
-                    &self.editor,
-                    px,
-                    py + render_scroll_y,
-                )
+                let line_top_y = (hover_content_y / line_h).floor() * line_h;
+                if hover_content_y_in_line_hitbox(hover_content_y, line_top_y, line_h) {
+                    self.renderer.as_mut().unwrap().get_byte_at_xy(
+                        &self.editor,
+                        px,
+                        hover_content_y,
+                    )
+                } else {
+                    self.editor.len()
+                }
             };
             let in_diag_popup = HOVER_STATE
                 .with(|s| s.borrow().diag_rect)

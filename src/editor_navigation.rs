@@ -13,20 +13,10 @@ fn line_bounds(editor: &Editor, line: usize) -> (usize, usize) {
 fn trim_ascii_ws(editor: &Editor, start: usize, end: usize) -> (usize, usize) {
     let mut l = start;
     let mut r = end;
-    while l < r
-        && matches!(
-            editor.byte_at(l),
-            b' ' | b'\t' | b'\n' | b'\r'
-        )
-    {
+    while l < r && matches!(editor.byte_at(l), b' ' | b'\t' | b'\n' | b'\r') {
         l += 1;
     }
-    while r > l
-        && matches!(
-            editor.byte_at(r - 1),
-            b' ' | b'\t' | b'\n' | b'\r'
-        )
-    {
+    while r > l && matches!(editor.byte_at(r - 1), b' ' | b'\t' | b'\n' | b'\r') {
         r -= 1;
     }
     (l, r)

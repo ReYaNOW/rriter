@@ -4,9 +4,10 @@ mod tests {
         compute_hover_visibility, compute_hover_visibility_from_matches,
         diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
         diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
-        hover_byte_on_line_at_x, hover_bytes_share_token, hover_source_line_y_band,
-        hover_token_bounds, hover_token_text, is_hover_target_byte, is_in_hover_popup_or_bridge,
-        is_python_hover_keyword, normalize_hover_byte, suppress_hover_popup_until_mouse_move,
+        hover_byte_on_line_at_x, hover_bytes_share_token, hover_screen_y_to_content_y,
+        hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
+        is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte,
+        suppress_hover_popup_until_mouse_move, type_hover_screen_y_matches_byte_line,
     };
 
     #[test]
@@ -1595,6 +1596,103 @@ mod tests {
         let (top, bottom) = hover_source_line_y_band(354.0, 1.0);
 
         assert_eq!((top, bottom), (344.0, 364.0));
+    }
+
+    #[test]
+    fn type_hover_y_hitbox_uses_middle_half_of_rendered_line() {
+        let mut editor = crate::editor::Editor::new(64);
+        editor.insert_str("alpha\nbeta\ngamma\n");
+        let text = editor.get_full_text();
+        let beta = text.find("beta").expect("beta token");
+        let phys_to_visual = vec![0, 1, 2, 3];
+        let line_h = 26.0;
+        let baseline_offset = 19.0;
+        let text_bias = baseline_offset - line_h * 0.5;
+        let active_top = line_h + text_bias + line_h * 0.25;
+        let active_bottom = line_h + text_bias + line_h * 0.75;
+
+        assert!(!type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            active_top - 0.1,
+        ));
+        assert!(type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            active_top,
+        ));
+        assert!(type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            active_bottom - 0.1,
+        ));
+        assert!(!type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            active_bottom,
+        ));
+        assert!(!type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            line_h + text_bias,
+        ));
+        assert!(!type_hover_screen_y_matches_byte_line(
+            &editor,
+            beta,
+            &phys_to_visual,
+            0.0,
+            line_h,
+            baseline_offset,
+            line_h + text_bias + line_h - 0.1,
+        ));
+    }
+
+    #[test]
+    fn type_hover_y_hitbox_shrinks_first_line_after_top_clamp() {
+        let mut editor = crate::editor::Editor::new(32);
+        editor.insert_str("alpha\nbeta\n");
+        let alpha = 0;
+        let phys_to_visual = vec![0, 1, 2];
+
+        assert_eq!(hover_screen_y_to_content_y(2.0, 0.0, 26.0, 19.0), Some(0.0));
+        assert!(!type_hover_screen_y_matches_byte_line(
+            &editor,
+            alpha,
+            &phys_to_visual,
+            0.0,
+            26.0,
+            19.0,
+            2.0,
+        ));
+        assert!(type_hover_screen_y_matches_byte_line(
+            &editor,
+            alpha,
+            &phys_to_visual,
+            0.0,
+            26.0,
+            19.0,
+            13.0,
+        ));
     }
 
     #[test]

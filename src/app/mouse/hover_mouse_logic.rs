@@ -581,6 +581,59 @@ pub(crate) fn hover_bytes_share_token(
     }
 }
 
+pub(crate) fn hover_screen_y_to_content_y(
+    cursor_y: f32,
+    render_scroll_y: f32,
+    line_height: f32,
+    baseline_offset: f32,
+) -> Option<f32> {
+    if line_height <= 0.0 {
+        return None;
+    }
+    let text_top_bias = (baseline_offset - line_height * 0.5).clamp(0.0, line_height * 0.5);
+    Some((cursor_y + render_scroll_y - text_top_bias).max(0.0))
+}
+
+pub(crate) fn hover_content_y_in_line_hitbox(
+    content_y: f32,
+    line_top_y: f32,
+    line_height: f32,
+) -> bool {
+    if line_height <= 0.0 {
+        return false;
+    }
+    let inset = line_height * 0.25;
+    content_y >= line_top_y + inset && content_y < line_top_y + line_height - inset
+}
+
+#[cfg(test)]
+pub(crate) fn type_hover_screen_y_matches_byte_line(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    phys_to_visual: &[usize],
+    render_scroll_y: f32,
+    line_height: f32,
+    baseline_offset: f32,
+    cursor_y: f32,
+) -> bool {
+    if editor.line_offsets.is_empty() || byte_offset >= editor.len() {
+        return false;
+    }
+
+    let Some(content_y) =
+        hover_screen_y_to_content_y(cursor_y, render_scroll_y, line_height, baseline_offset)
+    else {
+        return false;
+    };
+    let phys_line = editor
+        .line_offsets
+        .partition_point(|&offset| offset <= byte_offset)
+        .saturating_sub(1);
+    let visual_line = phys_to_visual.get(phys_line).copied().unwrap_or(phys_line) as f32;
+    let line_top_y = visual_line * line_height;
+    hover_content_y_in_line_hitbox(content_y, line_top_y, line_height)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn hover_anchor_for_byte(
     renderer: &mut crate::renderer::Renderer,

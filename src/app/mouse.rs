@@ -22,10 +22,12 @@ pub use hover_mouse_logic::{
 pub(super) use hover_mouse_logic::{
     compute_hover_visibility, diagnostic_hover_range_on_line, diagnostic_hover_target_byte_on_line,
     hover_byte_on_line_at_x, hover_token_text, is_hover_target_byte, is_python_hover_keyword,
+    type_hover_screen_y_matches_byte_line,
 };
 pub(crate) use hover_mouse_logic::{
     diagnostic_hover_byte_range_on_line, diagnostic_hover_type_target_at_x,
-    hover_bytes_share_token, hover_token_bounds, normalize_hover_byte,
+    hover_bytes_share_token, hover_content_y_in_line_hitbox, hover_screen_y_to_content_y,
+    hover_token_bounds, normalize_hover_byte,
 };
 pub use hover_state_core::{
     HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,

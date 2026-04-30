@@ -1547,16 +1547,7 @@ mod tests {
         };
         let (x, y, w, h) = glyph_quad_rect(10.0, 100.0, glyph, 1.0);
         let vertices = quad_vertices(
-            x,
-            y,
-            w,
-            h,
-            glyph.u,
-            glyph.v,
-            glyph.uw,
-            glyph.vh,
-            [1.0; 4],
-            0.0,
+            x, y, w, h, glyph.u, glyph.v, glyph.uw, glyph.vh, [1.0; 4], 0.0,
         );
 
         assert_eq!(vertices[0].pos[1], 87.0);

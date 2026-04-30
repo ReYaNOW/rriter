@@ -292,12 +292,7 @@ fn prev_char_start(text: &str, mut offset: usize) -> usize {
     offset
 }
 
-fn push_ast_select_range(
-    ranges: &mut Vec<(usize, usize)>,
-    text: &str,
-    start: usize,
-    end: usize,
-) {
+fn push_ast_select_range(ranges: &mut Vec<(usize, usize)>, text: &str, start: usize, end: usize) {
     if start >= end
         || end > text.len()
         || !text.is_char_boundary(start)
@@ -379,7 +374,10 @@ pub fn ast_select_expand_range(
 
     let cursor = cursor.min(text.len());
     let (sel_start, sel_end) = if let Some(anchor) = selection_anchor {
-        (anchor.min(cursor).min(text.len()), anchor.max(cursor).min(text.len()))
+        (
+            anchor.min(cursor).min(text.len()),
+            anchor.max(cursor).min(text.len()),
+        )
     } else {
         (cursor, cursor)
     };
@@ -1573,8 +1571,7 @@ mod tests {
         let (start, end) = ast_select_expand_range(source, "rs", cursor, None).unwrap();
         assert_eq!(&source[start..end], "value");
 
-        let (start, end) =
-            ast_select_expand_range(source, "rs", end, Some(start)).unwrap();
+        let (start, end) = ast_select_expand_range(source, "rs", end, Some(start)).unwrap();
         assert!(source[start..end].starts_with("let value = call(1)"));
 
         assert!(ast_select_expand_range(source, "txt", cursor, None).is_none());

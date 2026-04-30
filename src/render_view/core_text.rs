@@ -616,18 +616,7 @@ impl Renderer {
             }
             if let Some(g) = self.get_glyph(c) {
                 let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, 1.0);
-                self.push_quad(
-                    q_x,
-                    q_y,
-                    q_w,
-                    q_h,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    color,
-                    g.is_emoji,
-                );
+                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
                 x += g.advance;
             }
         }
@@ -649,18 +638,7 @@ impl Renderer {
             }
             if let Some(g) = self.get_ui_glyph(c) {
                 let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
-                self.push_quad(
-                    q_x,
-                    q_y,
-                    q_w,
-                    q_h,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    color,
-                    g.is_emoji,
-                );
+                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
                 x += g.advance * scale;
             }
         }
@@ -682,18 +660,7 @@ impl Renderer {
             }
             if let Some(g) = self.get_glyph(c) {
                 let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
-                self.push_quad(
-                    q_x,
-                    q_y,
-                    q_w,
-                    q_h,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    color,
-                    g.is_emoji,
-                );
+                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
                 x += g.advance * scale;
             }
         }
