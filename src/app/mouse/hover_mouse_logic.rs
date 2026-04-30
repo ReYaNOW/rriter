@@ -139,6 +139,16 @@ pub fn clear_hover_popup(_renderer: Option<&mut crate::renderer::Renderer>) -> b
     })
 }
 
+pub fn suppress_hover_popup_until_mouse_move(
+    renderer: Option<&mut crate::renderer::Renderer>,
+) -> bool {
+    let had_popup = clear_hover_popup(None);
+    if let Some(renderer) = renderer {
+        renderer.hide_popups_until_mouse_move = true;
+    }
+    had_popup
+}
+
 pub(crate) fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> bool {
     if byte_offset >= editor.len() {
         return false;

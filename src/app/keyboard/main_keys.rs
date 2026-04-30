@@ -32,6 +32,22 @@ fn apply_terminal_alt_q_shortcut(
     }
 }
 
+fn should_suppress_hover_for_keyboard(physical_key: PhysicalKey, ctrl: bool, alt: bool) -> bool {
+    if alt && physical_key == PhysicalKey::Code(KeyCode::Tab) {
+        return true;
+    }
+    if alt {
+        return false;
+    }
+    if matches!(
+        physical_key,
+        PhysicalKey::Code(KeyCode::AltLeft | KeyCode::AltRight)
+    ) {
+        return false;
+    }
+    !(ctrl && physical_key == PhysicalKey::Code(KeyCode::KeyC))
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
@@ -39,8 +55,23 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let alt = self.modifiers.alt_key();
+
         if key_event.state == ElementState::Pressed
-            && self.modifiers.alt_key()
+            && should_suppress_hover_for_keyboard(key_event.physical_key, ctrl, alt)
+        {
+            let had_hover =
+                crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+            if had_hover {
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
+            }
+        }
+
+        if key_event.state == ElementState::Pressed
+            && alt
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)
         {
             if self.is_ide_mode {
@@ -383,5 +414,34 @@ mod tests {
         assert!(panels.is_open(crate::app::PanelId::Terminal));
         assert!(!panels.is_open(crate::app::PanelId::Problems));
         assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn hover_keyboard_suppression_preserves_copy_and_alt_except_alt_tab() {
+        assert!(!should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::KeyC),
+            true,
+            false,
+        ));
+        assert!(!should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::KeyQ),
+            false,
+            true,
+        ));
+        assert!(!should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::AltLeft),
+            false,
+            false,
+        ));
+        assert!(should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::Tab),
+            false,
+            true,
+        ));
+        assert!(should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::KeyW),
+            true,
+            false,
+        ));
     }
 }

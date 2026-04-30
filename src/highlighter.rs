@@ -243,6 +243,186 @@ fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
     })
 }
 
+fn lang_name_for_ext_and_text(ext: &str, text: &str) -> &'static str {
+    let actual_ext = if ext.is_empty() && text.starts_with("#!") {
+        if text.contains("bash") {
+            "bash"
+        } else if text.contains("sh") {
+            "sh"
+        } else if text.contains("python") {
+            "py"
+        } else {
+            ""
+        }
+    } else {
+        ext
+    };
+
+    match actual_ext {
+        "sh" | "bash" => "bash",
+        "rs" => "rs",
+        "py" | "pyi" => "py",
+        "toml" => "toml",
+        "go" => "go",
+        "js" | "jsx" | "mjs" | "cjs" => "js",
+        "ts" => "ts",
+        "tsx" => "tsx",
+        "regex" => "regex",
+        "java" => "java",
+        "cs" => "cs",
+        "dart" => "dart",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "json" => "json",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" => "cpp",
+        "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
+        _ => "",
+    }
+}
+
+fn prev_char_start(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    if offset > 0 {
+        offset -= 1;
+    }
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+fn push_ast_select_range(
+    ranges: &mut Vec<(usize, usize)>,
+    text: &str,
+    start: usize,
+    end: usize,
+) {
+    if start >= end
+        || end > text.len()
+        || !text.is_char_boundary(start)
+        || !text.is_char_boundary(end)
+    {
+        return;
+    }
+
+    let bytes = text.as_bytes();
+    let inner = match (bytes[start], bytes[end - 1]) {
+        (b'(', b')') | (b'[', b']') | (b'{', b'}') | (b'"', b'"') | (b'\'', b'\'')
+            if start + 1 < end - 1 =>
+        {
+            Some((start + 1, end - 1))
+        }
+        _ => None,
+    };
+    if let Some((l, r)) = inner {
+        ranges.push((l, r));
+    }
+
+    let mut trimmed_start = start;
+    let mut trimmed_end = end;
+    while trimmed_start < trimmed_end && bytes[trimmed_start].is_ascii_whitespace() {
+        trimmed_start += 1;
+    }
+    while trimmed_end > trimmed_start && bytes[trimmed_end - 1].is_ascii_whitespace() {
+        trimmed_end -= 1;
+    }
+    if trimmed_start < trimmed_end && (trimmed_start != start || trimmed_end != end) {
+        ranges.push((trimmed_start, trimmed_end));
+    }
+
+    ranges.push((start, end));
+}
+
+fn push_ast_select_line_range(
+    ranges: &mut Vec<(usize, usize)>,
+    text: &str,
+    sel_start: usize,
+    sel_end: usize,
+) {
+    let bytes = text.as_bytes();
+    let mut start = sel_start.min(text.len());
+    while start > 0 && bytes[start - 1] != b'\n' {
+        start -= 1;
+    }
+
+    let mut end = sel_end.min(text.len());
+    while end < text.len() && bytes[end] != b'\n' {
+        end += 1;
+    }
+
+    if start < end {
+        ranges.push((start, end));
+    }
+}
+
+pub fn ast_select_expand_range(
+    text: &str,
+    ext: &str,
+    cursor: usize,
+    selection_anchor: Option<usize>,
+) -> Option<(usize, usize)> {
+    if text.is_empty() || ext == "log" || text.len() > 500_000 {
+        return None;
+    }
+
+    let lang_name = lang_name_for_ext_and_text(ext, text);
+    let Some((lang, _)) = get_ts_config(lang_name) else {
+        return None;
+    };
+
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&lang).is_err() {
+        return None;
+    }
+    let tree = parser.parse(text, None)?;
+
+    let cursor = cursor.min(text.len());
+    let (sel_start, sel_end) = if let Some(anchor) = selection_anchor {
+        (anchor.min(cursor).min(text.len()), anchor.max(cursor).min(text.len()))
+    } else {
+        (cursor, cursor)
+    };
+
+    let probe = if sel_start == sel_end {
+        let bytes = text.as_bytes();
+        if cursor < text.len() && !bytes[cursor].is_ascii_whitespace() {
+            cursor
+        } else {
+            prev_char_start(text, cursor)
+        }
+    } else {
+        sel_start
+    };
+
+    let root = tree.root_node();
+    let mut node = root.descendant_for_byte_range(probe, probe)?;
+    let mut ranges = Vec::new();
+    push_ast_select_line_range(&mut ranges, text, sel_start, sel_end);
+    loop {
+        if node.parent().is_some() {
+            push_ast_select_range(&mut ranges, text, node.start_byte(), node.end_byte());
+        }
+        let Some(parent) = node.parent() else {
+            break;
+        };
+        node = parent;
+    }
+
+    let mut best = None;
+    let mut best_len = usize::MAX;
+    for (start, end) in ranges {
+        if start <= sel_start && end >= sel_end && (start < sel_start || end > sel_end) {
+            let len = end - start;
+            if len < best_len {
+                best_len = len;
+                best = Some((start, end));
+            }
+        }
+    }
+    best
+}
+
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
@@ -400,41 +580,7 @@ impl Highlighter {
 
                 let is_log_or_huge = ext == "log" || text.len() > 500_000;
 
-                let actual_ext = if ext.is_empty() && text.starts_with("#!") {
-                    if text.contains("bash") {
-                        "bash".to_string()
-                    } else if text.contains("sh") {
-                        "sh".to_string()
-                    } else if text.contains("python") {
-                        "py".to_string()
-                    } else {
-                        ext.clone()
-                    }
-                } else {
-                    ext.clone()
-                };
-
-                let lang_name = match actual_ext.as_str() {
-                    "sh" | "bash" => "bash",
-                    "rs" => "rs",
-                    "py" | "pyi" => "py",
-                    "toml" => "toml",
-                    "go" => "go",
-                    "js" | "jsx" | "mjs" | "cjs" => "js",
-                    "ts" => "ts",
-                    "tsx" => "tsx",
-                    "regex" => "regex",
-                    "java" => "java",
-                    "cs" => "cs",
-                    "dart" => "dart",
-                    "html" | "htm" => "html",
-                    "css" => "css",
-                    "json" => "json",
-                    "c" | "h" => "c",
-                    "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                    "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
-                    _ => "",
-                };
+                let lang_name = lang_name_for_ext_and_text(ext, text);
 
                 let mut spans = Vec::new();
                 let mut completions_map: HashMap<(String, usize, usize), SymbolKind> =
@@ -1417,6 +1563,40 @@ mod tests {
                 "{name} must not be parameter-orange in class body"
             );
         }
+    }
+
+    #[test]
+    fn ast_select_expand_uses_tree_sitter_then_grows_to_parent() {
+        let source = "fn main() {\n    let value = call(1);\n}\n";
+        let cursor = source.find("value").unwrap() + 2;
+
+        let (start, end) = ast_select_expand_range(source, "rs", cursor, None).unwrap();
+        assert_eq!(&source[start..end], "value");
+
+        let (start, end) =
+            ast_select_expand_range(source, "rs", end, Some(start)).unwrap();
+        assert!(source[start..end].starts_with("let value = call(1)"));
+
+        assert!(ast_select_expand_range(source, "txt", cursor, None).is_none());
+    }
+
+    #[test]
+    fn ctrl_w_ast_expand_keeps_python_keyword_argument_line_before_argument_list() {
+        let source = "app.state.pool = await asyncpg.create_pool(\n        config.database_url,\n        max_size=40,\n        command_timeout=60,\n        init=init_connection,\n    )\n";
+        let cursor = source.find("command_timeout").unwrap() + "command".len();
+
+        let (start, end) = ast_select_expand_range(source, "py", cursor, None).unwrap();
+        assert_eq!(&source[start..end], "command_timeout");
+
+        let (start, end) = ast_select_expand_range(source, "py", end, Some(start)).unwrap();
+        assert_eq!(&source[start..end], "command_timeout=60");
+
+        let (start, end) = ast_select_expand_range(source, "py", end, Some(start)).unwrap();
+        assert_eq!(&source[start..end], "        command_timeout=60,");
+
+        let (start, end) = ast_select_expand_range(source, "py", end, Some(start)).unwrap();
+        assert!(source[start..end].contains("config.database_url"));
+        assert!(source[start..end].contains("init=init_connection"));
     }
 
     #[test]

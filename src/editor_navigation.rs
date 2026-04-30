@@ -1,5 +1,52 @@
 use super::*;
 
+fn line_bounds(editor: &Editor, line: usize) -> (usize, usize) {
+    let start = editor.line_offsets.get(line).copied().unwrap_or(0);
+    let end = editor
+        .line_offsets
+        .get(line + 1)
+        .map(|&offset| offset.saturating_sub(1))
+        .unwrap_or(editor.len());
+    (start, end)
+}
+
+fn trim_ascii_ws(editor: &Editor, start: usize, end: usize) -> (usize, usize) {
+    let mut l = start;
+    let mut r = end;
+    while l < r
+        && matches!(
+            editor.byte_at(l),
+            b' ' | b'\t' | b'\n' | b'\r'
+        )
+    {
+        l += 1;
+    }
+    while r > l
+        && matches!(
+            editor.byte_at(r - 1),
+            b' ' | b'\t' | b'\n' | b'\r'
+        )
+    {
+        r -= 1;
+    }
+    (l, r)
+}
+
+fn line_indent_and_blank(editor: &Editor, line: usize) -> (usize, bool) {
+    let (start, end) = line_bounds(editor, line);
+    let mut indent = 0usize;
+    let mut pos = start;
+    while pos < end {
+        match editor.byte_at(pos) {
+            b' ' => indent += 1,
+            b'\t' => indent = (indent / 4 + 1) * 4,
+            _ => return (indent, false),
+        }
+        pos += 1;
+    }
+    (indent, true)
+}
+
 impl Editor {
     pub fn select_expand(&mut self) {
         let (start, end) = if let Some(anchor) = self.selection_anchor {
@@ -104,6 +151,43 @@ impl Editor {
                 }
             }
             q_l += 1;
+        }
+
+        let current_line = self
+            .line_offsets
+            .partition_point(|&offset| offset <= start)
+            .saturating_sub(1);
+        let (current_indent, current_blank) = line_indent_and_blank(self, current_line);
+        if !current_blank && current_indent > 0 {
+            let mut first_line = current_line;
+            while first_line > 0 {
+                let (indent, blank) = line_indent_and_blank(self, first_line - 1);
+                if blank || indent >= current_indent {
+                    first_line -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            let mut last_line = current_line;
+            while last_line + 1 < self.line_offsets.len() {
+                let (indent, blank) = line_indent_and_blank(self, last_line + 1);
+                if blank || indent >= current_indent {
+                    last_line += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if first_line < last_line {
+                let (block_l, _) = line_bounds(self, first_line);
+                let (_, block_r) = line_bounds(self, last_line);
+                let (trim_l, trim_r) = trim_ascii_ws(self, block_l, block_r);
+                if trim_l < trim_r {
+                    candidates.push((trim_l, trim_r));
+                }
+                candidates.push((block_l, block_r));
+            }
         }
 
         candidates.push((0, self.len()));

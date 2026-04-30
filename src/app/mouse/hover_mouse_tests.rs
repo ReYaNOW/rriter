@@ -6,7 +6,7 @@ mod tests {
         diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
         hover_byte_on_line_at_x, hover_bytes_share_token, hover_source_line_y_band,
         hover_token_bounds, hover_token_text, is_hover_target_byte, is_in_hover_popup_or_bridge,
-        is_python_hover_keyword, normalize_hover_byte,
+        is_python_hover_keyword, normalize_hover_byte, suppress_hover_popup_until_mouse_move,
     };
 
     #[test]
@@ -260,6 +260,27 @@ mod tests {
             assert!(state.diag_selection_cursor.is_none());
             assert!(!state.diag_selecting);
             assert!(state.diag_text.is_empty());
+        });
+    }
+
+    #[test]
+    fn keyboard_suppression_clears_hover_timer_and_target() {
+        HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.timer = 0.33;
+            state.byte_offset = Some(42);
+            state.request_id = Some(7);
+            state.definition_request_id = Some(8);
+        });
+
+        assert!(suppress_hover_popup_until_mouse_move(None));
+
+        HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            assert_eq!(state.timer, 0.0);
+            assert!(state.byte_offset.is_none());
+            assert!(state.request_id.is_none());
+            assert!(state.definition_request_id.is_none());
         });
     }
 

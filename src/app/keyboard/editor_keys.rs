@@ -282,6 +282,22 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
+            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+                let text = self.editor.get_full_text();
+                if let Some((start, end)) = crate::highlighter::ast_select_expand_range(
+                    &text,
+                    &self.file_extension,
+                    self.editor.cursor,
+                    self.editor.selection_anchor,
+                ) {
+                    self.editor.selection_anchor = Some(start);
+                    self.editor.cursor = end;
+                } else {
+                    self.editor.select_expand();
+                }
+                self.close_autocomplete();
+                cursor_moved = true;
+            }
             PhysicalKey::Code(KeyCode::Escape) => {
                 if self.show_search {
                     self.show_search = false;
