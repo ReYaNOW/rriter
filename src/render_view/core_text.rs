@@ -1,6 +1,6 @@
 use super::editor_text_layer::folded_import_display_end;
 use crate::editor::Editor;
-use crate::renderer::{Renderer, Vertex, VisualLine};
+use crate::renderer::{Renderer, Vertex, VisualLine, glyph_quad_rect};
 use glow::HasContext;
 
 fn code_end_before_line_comment(editor: &Editor, line_start: usize, line_end: usize) -> usize {
@@ -615,11 +615,12 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
+                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, 1.0);
                 self.push_quad(
-                    x + g.offset_x,
-                    y - g.offset_y,
-                    g.width,
-                    g.height,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,
@@ -647,11 +648,12 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
+                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
                 self.push_quad(
-                    x + g.offset_x * scale,
-                    y - g.offset_y * scale,
-                    g.width * scale,
-                    g.height * scale,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,
@@ -679,11 +681,12 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
+                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
                 self.push_quad(
-                    x + g.offset_x * scale,
-                    y - g.offset_y * scale,
-                    g.width * scale,
-                    g.height * scale,
+                    q_x,
+                    q_y,
+                    q_w,
+                    q_h,
                     g.u,
                     g.v,
                     g.uw,

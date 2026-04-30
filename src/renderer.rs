@@ -273,6 +273,20 @@ fn quad_vertices(
     [v1, v2, v3, v1, v3, v4]
 }
 
+pub(crate) fn glyph_quad_rect(
+    x: f32,
+    y: f32,
+    glyph: GlyphInfo,
+    scale: f32,
+) -> (f32, f32, f32, f32) {
+    (
+        x + glyph.offset_x * scale,
+        y - glyph.offset_y * scale,
+        glyph.width * scale,
+        glyph.height * scale,
+    )
+}
+
 fn squiggle_vertices(
     scale_factor: f32,
     x: f32,
@@ -1515,6 +1529,39 @@ mod tests {
         assert_eq!(vertices[0].color, color);
         assert_eq!(vertices[0].mode, 5.0);
         assert_eq!(vertices[0].sdf_params, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn glyph_quad_rect_keeps_scaled_edges_for_consistent_baseline_rounding() {
+        let glyph = GlyphInfo {
+            u: 0.0,
+            v: 0.0,
+            uw: 0.1,
+            vh: 0.1,
+            width: 7.25,
+            height: 10.49,
+            offset_x: 0.0,
+            offset_y: 12.51,
+            advance: 8.0,
+            is_emoji: 0.0,
+        };
+        let (x, y, w, h) = glyph_quad_rect(10.0, 100.0, glyph, 1.0);
+        let vertices = quad_vertices(
+            x,
+            y,
+            w,
+            h,
+            glyph.u,
+            glyph.v,
+            glyph.uw,
+            glyph.vh,
+            [1.0; 4],
+            0.0,
+        );
+
+        assert_eq!(vertices[0].pos[1], 87.0);
+        assert_eq!(vertices[2].pos[1], 98.0);
+        assert_eq!(y.round() + h.round(), 97.0);
     }
 
     #[test]

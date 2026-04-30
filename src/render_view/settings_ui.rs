@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, glyph_quad_rect};
 use glow::HasContext;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -452,11 +452,13 @@ impl Renderer {
                     }
 
                     if let Some(g) = self.get_ui_glyph(c) {
+                        let (q_x, q_y, q_w, q_h) =
+                            glyph_quad_rect(current_x, text_y_mid, g, text_scale_input);
                         self.push_quad(
-                            current_x + g.offset_x * text_scale_input,
-                            text_y_mid - g.offset_y * text_scale_input,
-                            g.width * text_scale_input,
-                            g.height * text_scale_input,
+                            q_x,
+                            q_y,
+                            q_w,
+                            q_h,
                             g.u,
                             g.v,
                             g.uw,
