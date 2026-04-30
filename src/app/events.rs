@@ -257,6 +257,9 @@ impl ApplicationHandler for App {
                 self.modifiers = winit::keyboard::ModifiersState::empty();
                 if focused {
                     self.render_suspended = false;
+                    if let Some(r) = self.renderer.as_mut() {
+                        r.hide_popups_until_mouse_move = true;
+                    }
                     if let Some(dw) = self.dialog_window.as_ref() {
                         // НЕ вызываем focus_window() здесь.
                         // Это - главная причина "мерцания" при Alt+Tab, т.к. приложение
@@ -273,7 +276,9 @@ impl ApplicationHandler for App {
                     self.is_dragging = false;
                     self.scroll_x.is_dragging = false;
                     self.scroll_y.is_dragging = false;
-                    crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                    crate::app::mouse::suppress_hover_popup_until_mouse_move(
+                        self.renderer.as_mut(),
+                    );
                 }
             }
             WindowEvent::Occluded(occluded) => {

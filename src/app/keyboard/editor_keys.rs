@@ -25,6 +25,37 @@ fn autocomplete_key_action(physical_key: PhysicalKey) -> AutocompleteKeyAction {
     }
 }
 
+fn autocomplete_next_index(current: usize, len: usize, reverse: bool, jump: bool) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if jump && reverse {
+        return if current == 0 {
+            len - 1
+        } else if current < 5 {
+            0
+        } else {
+            current - 5
+        };
+    }
+    if jump {
+        return if current + 1 == len {
+            0
+        } else {
+            (current + 5).min(len - 1)
+        };
+    }
+    if reverse {
+        if current == 0 {
+            len - 1
+        } else {
+            current - 1
+        }
+    } else {
+        (current + 1) % len
+    }
+}
+
 fn sync_edit_line_range(
     edits: &[crate::highlighter::SyncEdit],
     line_offsets: &[usize],
@@ -123,8 +154,12 @@ impl App {
                 }
                 AutocompleteKeyAction::MoveDown => {
                     if !self.autocomplete_options.is_empty() {
-                        self.autocomplete_selected_idx =
-                            (self.autocomplete_selected_idx + 1) % self.autocomplete_options.len();
+                        self.autocomplete_selected_idx = autocomplete_next_index(
+                            self.autocomplete_selected_idx,
+                            self.autocomplete_options.len(),
+                            false,
+                            ctrl,
+                        );
                         self.autocomplete_hovered_idx = None;
                         self.ensure_autocomplete_visible();
                         self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
@@ -134,11 +169,12 @@ impl App {
                 }
                 AutocompleteKeyAction::MoveUp => {
                     if !self.autocomplete_options.is_empty() {
-                        if self.autocomplete_selected_idx == 0 {
-                            self.autocomplete_selected_idx = self.autocomplete_options.len() - 1;
-                        } else {
-                            self.autocomplete_selected_idx -= 1;
-                        }
+                        self.autocomplete_selected_idx = autocomplete_next_index(
+                            self.autocomplete_selected_idx,
+                            self.autocomplete_options.len(),
+                            true,
+                            ctrl,
+                        );
                         self.autocomplete_hovered_idx = None;
                         self.ensure_autocomplete_visible();
                         self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
@@ -900,6 +936,28 @@ mod tests {
             autocomplete_key_action(PhysicalKey::Code(KeyCode::KeyA)),
             AutocompleteKeyAction::None
         );
+    }
+
+    #[test]
+    fn autocomplete_ctrl_navigation_jumps_five_items() {
+        assert_eq!(autocomplete_next_index(0, 10, false, false), 1);
+        assert_eq!(autocomplete_next_index(0, 10, false, true), 5);
+        assert_eq!(autocomplete_next_index(2, 10, true, false), 1);
+        assert_eq!(autocomplete_next_index(7, 10, true, true), 2);
+        assert_eq!(autocomplete_next_index(0, 0, false, true), 0);
+    }
+
+    #[test]
+    fn autocomplete_ctrl_navigation_stops_at_edge_before_wrapping() {
+        assert_eq!(autocomplete_next_index(2, 10, true, true), 0);
+        assert_eq!(autocomplete_next_index(3, 10, true, true), 0);
+        assert_eq!(autocomplete_next_index(4, 10, true, true), 0);
+        assert_eq!(autocomplete_next_index(0, 10, true, true), 9);
+
+        assert_eq!(autocomplete_next_index(5, 10, false, true), 9);
+        assert_eq!(autocomplete_next_index(6, 10, false, true), 9);
+        assert_eq!(autocomplete_next_index(7, 10, false, true), 9);
+        assert_eq!(autocomplete_next_index(9, 10, false, true), 0);
     }
 
     #[test]

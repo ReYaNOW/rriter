@@ -13,13 +13,18 @@ fn autocomplete_drag_target(
     let total_items = total_items as f32;
     let visible_items = total_items.min(7.0);
 
-    let track_h = rect_h - 8.0 * scale;
-    let total_h = total_items * step + 16.0 * scale;
+    let track_margin = autocomplete_scrollbar_track_margin(scale);
+    let track_h = (rect_h - track_margin * 2.0).max(1.0);
+    let total_h = total_items * step;
     let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
     let max_scroll = ((total_items - visible_items) * step).max(0.0);
 
-    let ratio = (py - rect_y - 4.0 * scale - drag_offset) / (track_h - thumb_h).max(1.0);
+    let ratio = (py - rect_y - track_margin - drag_offset) / (track_h - thumb_h).max(1.0);
     (ratio * max_scroll).clamp(0.0, max_scroll)
+}
+
+fn autocomplete_scrollbar_track_margin(scale: f32) -> f32 {
+    3.0 * scale
 }
 
 fn autocomplete_hovered_index(
@@ -40,7 +45,7 @@ fn autocomplete_hovered_index(
         return None;
     }
     let item_h = 36.0 * scale;
-    let content_y = py - ry + current_scroll - (4.0 * scale);
+    let content_y = py - ry + current_scroll;
     if content_y < 0.0 {
         return None;
     }
@@ -1202,6 +1207,7 @@ mod tests {
 
     #[test]
     fn autocomplete_drag_target_clamps_to_available_scroll() {
+        assert_eq!(autocomplete_scrollbar_track_margin(1.0), 3.0);
         assert_eq!(autocomplete_drag_target(0.0, 10.0, 200.0, 0.0, 4, 1.0), 0.0);
 
         let mid = autocomplete_drag_target(100.0, 10.0, 200.0, 0.0, 12, 1.0);

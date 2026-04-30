@@ -65,12 +65,14 @@ pub fn flatten_color_spans_prefer_specific(
     out
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     Variable,
     Function,
     Class,
     Parameter,
+    Property,
+    Module,
     Keyword,
     Unknown,
 }

@@ -78,7 +78,7 @@ fn autocomplete_item_index_at(
     if px >= rx + rw - 14.0 * scale {
         return None;
     }
-    let content_y = py - ry + current_scroll - 4.0 * scale;
+    let content_y = py - ry + current_scroll;
     if content_y < 0.0 {
         return None;
     }
@@ -98,23 +98,24 @@ fn autocomplete_scroll_click_target(
     let step = 36.0 * scale;
     let total_items = total_items as f32;
     let visible_items = total_items.min(7.0);
-    let total_h = total_items * step + 16.0 * scale;
+    let total_h = total_items * step;
     if total_h <= rect_h {
         return None;
     }
 
     let max_scroll = ((total_items - visible_items) * step).max(0.0);
     let scroll_ratio = (current_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
-    let track_h = rect_h - 8.0 * scale;
+    let track_margin = 3.0 * scale;
+    let track_h = (rect_h - track_margin * 2.0).max(1.0);
     let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
-    let thumb_start_y = rect_y + 4.0 * scale + scroll_ratio * (track_h - thumb_h);
+    let thumb_start_y = rect_y + track_margin + scroll_ratio * (track_h - thumb_h);
 
     if mouse_y >= thumb_start_y && mouse_y <= thumb_start_y + thumb_h {
         Some((mouse_y - thumb_start_y, current_scroll))
     } else {
         let drag_offset = thumb_h / 2.0;
         let new_ratio =
-            (mouse_y - rect_y - 4.0 * scale - drag_offset) / (track_h - thumb_h).max(1.0);
+            (mouse_y - rect_y - track_margin - drag_offset) / (track_h - thumb_h).max(1.0);
         Some((drag_offset, (new_ratio * max_scroll).clamp(0.0, max_scroll)))
     }
 }
@@ -1118,8 +1119,8 @@ mod tests {
         );
 
         let (drag_offset, target) =
-            autocomplete_scroll_click_target(20.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
-        assert!(drag_offset >= 0.0);
+            autocomplete_scroll_click_target(13.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
+        assert_eq!(drag_offset, 0.0);
         assert_eq!(target, 0.0);
 
         let (_, paged_target) =
@@ -1130,6 +1131,10 @@ mod tests {
     #[test]
     fn autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll() {
         let rect = (10.0, 20.0, 200.0, 260.0);
+        assert_eq!(
+            autocomplete_item_index_at(20.0, 20.0, rect, 0.0, 10, 1.0),
+            Some(0)
+        );
         assert_eq!(
             autocomplete_item_index_at(20.0, 60.0, rect, 0.0, 10, 1.0),
             Some(1)

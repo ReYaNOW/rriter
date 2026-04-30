@@ -1,10 +1,138 @@
 use crate::renderer::Renderer;
 use glow::HasContext;
+use std::borrow::Cow;
 
 mod hover_widget;
 mod problems_panel;
 
 pub(crate) use hover_widget::diag_popup_byte_at;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AutocompleteBadgeStyle {
+    letter: char,
+    bg: [f32; 4],
+    fg: [f32; 4],
+}
+
+fn autocomplete_badge_style(kind: crate::highlighter::SymbolKind) -> AutocompleteBadgeStyle {
+    match kind {
+        crate::highlighter::SymbolKind::Class => AutocompleteBadgeStyle {
+            letter: 'C',
+            bg: [0.14, 0.33, 0.42, 1.0],
+            fg: [0.58, 0.88, 1.0, 1.0],
+        },
+        crate::highlighter::SymbolKind::Function => AutocompleteBadgeStyle {
+            letter: 'F',
+            bg: [0.19, 0.36, 0.22, 1.0],
+            fg: [0.66, 0.94, 0.68, 1.0],
+        },
+        crate::highlighter::SymbolKind::Variable => AutocompleteBadgeStyle {
+            letter: 'V',
+            bg: [0.32, 0.23, 0.42, 1.0],
+            fg: [0.78, 0.64, 1.0, 1.0],
+        },
+        crate::highlighter::SymbolKind::Parameter => AutocompleteBadgeStyle {
+            letter: 'P',
+            bg: [0.42, 0.31, 0.16, 1.0],
+            fg: [1.0, 0.79, 0.42, 1.0],
+        },
+        crate::highlighter::SymbolKind::Property => AutocompleteBadgeStyle {
+            letter: 'P',
+            bg: [0.35, 0.25, 0.14, 1.0],
+            fg: [1.0, 0.72, 0.38, 1.0],
+        },
+        crate::highlighter::SymbolKind::Module => AutocompleteBadgeStyle {
+            letter: 'M',
+            bg: [0.17, 0.28, 0.43, 1.0],
+            fg: [0.62, 0.78, 1.0, 1.0],
+        },
+        crate::highlighter::SymbolKind::Keyword => AutocompleteBadgeStyle {
+            letter: 'K',
+            bg: [0.43, 0.20, 0.30, 1.0],
+            fg: [1.0, 0.61, 0.80, 1.0],
+        },
+        crate::highlighter::SymbolKind::Unknown => AutocompleteBadgeStyle {
+            letter: 'U',
+            bg: [0.25, 0.26, 0.29, 1.0],
+            fg: [0.70, 0.72, 0.76, 1.0],
+        },
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AutocompleteRowEdges {
+    top: bool,
+    bottom: bool,
+}
+
+fn autocomplete_row_edges(row_y: f32, popup_y: f32, row_h: f32, popup_h: f32) -> AutocompleteRowEdges {
+    let eps = 0.5;
+    AutocompleteRowEdges {
+        top: row_y <= popup_y + eps,
+        bottom: row_y + row_h >= popup_y + popup_h - eps,
+    }
+}
+
+fn autocomplete_scrollbar_track_margin(scale: f32) -> f32 {
+    3.0 * scale
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::highlighter::SymbolKind;
+
+    #[test]
+    fn autocomplete_badges_match_lapce_style_letters() {
+        assert_eq!(autocomplete_badge_style(SymbolKind::Class).letter, 'C');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Function).letter, 'F');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Variable).letter, 'V');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Parameter).letter, 'P');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Property).letter, 'P');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Module).letter, 'M');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Keyword).letter, 'K');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Unknown).letter, 'U');
+    }
+
+    #[test]
+    fn autocomplete_row_edges_mark_visible_popup_corners() {
+        assert_eq!(
+            autocomplete_row_edges(20.0, 20.0, 36.0, 108.0),
+            AutocompleteRowEdges {
+                top: true,
+                bottom: false
+            }
+        );
+        assert_eq!(
+            autocomplete_row_edges(56.0, 20.0, 36.0, 108.0),
+            AutocompleteRowEdges {
+                top: false,
+                bottom: false
+            }
+        );
+        assert_eq!(
+            autocomplete_row_edges(92.0, 20.0, 36.0, 108.0),
+            AutocompleteRowEdges {
+                top: false,
+                bottom: true
+            }
+        );
+        assert_eq!(
+            autocomplete_row_edges(20.0, 20.0, 36.0, 36.0),
+            AutocompleteRowEdges {
+                top: true,
+                bottom: true
+            }
+        );
+    }
+
+    #[test]
+    fn autocomplete_scrollbar_track_margin_stays_close_to_popup_edges() {
+        assert_eq!(autocomplete_scrollbar_track_margin(1.0), 3.0);
+        assert_eq!(autocomplete_scrollbar_track_margin(2.0), 6.0);
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
@@ -142,6 +270,54 @@ impl Renderer {
 
     // (функции удалены)
 
+    fn push_autocomplete_row_bg(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        color: [f32; 4],
+        edges: AutocompleteRowEdges,
+    ) {
+        if !edges.top && !edges.bottom {
+            self.push_rect(x, y, w, h, color);
+            return;
+        }
+        let r = radius.min(h * 0.5).min(w * 0.5);
+        self.push_rounded_rect(x, y, w, h, r, color);
+        if !edges.top {
+            self.push_rect(x, y, w, r, color);
+        }
+        if !edges.bottom {
+            self.push_rect(x, y + h - r, w, r, color);
+        }
+    }
+
+    fn push_autocomplete_badge_bg(
+        &mut self,
+        x: f32,
+        y: f32,
+        size: f32,
+        radius: f32,
+        color: [f32; 4],
+        edges: AutocompleteRowEdges,
+    ) {
+        if !edges.top && !edges.bottom {
+            self.push_rect(x, y, size, size, color);
+            return;
+        }
+        let r = radius.min(size * 0.5);
+        self.push_rounded_rect(x, y, size, size, r, color);
+        self.push_rect(x + r, y, size - r, size, color);
+        if !edges.top {
+            self.push_rect(x, y, r, r, color);
+        }
+        if !edges.bottom {
+            self.push_rect(x, y + size - r, r, r, color);
+        }
+    }
+
     pub fn draw_autocomplete(
         &mut self,
         x: f32,
@@ -161,20 +337,20 @@ impl Renderer {
 
         let step = 36.0 * scale;
         let item_h = 28.0 * scale;
-        let padding_top = 8.0 * scale;
-        let padding_bottom = 8.0 * scale;
+        let padding_top = 0.0;
+        let padding_bottom = 0.0;
 
-        let left_pad = 12.0 * scale;
-        let icon_sz = 20.0 * scale;
+        let icon_sz = step;
         let icon_gap = 8.0 * scale;
         let right_pad = 18.0 * scale;
-        let content_start_offset = left_pad + icon_sz + icon_gap;
+        let content_start_offset = icon_sz + icon_gap;
+        let module_scale = 0.92;
         let mut max_w = 195.0 * scale;
         for (opt, _) in options {
             let w = self.measure_width(opt.word.as_str(), "", 0, opt.word.len());
             max_w = max_w.max(content_start_offset + w + right_pad);
             if let Some(module) = &opt.module {
-                let module_w = self.measure_width(module, "", 0, module.len());
+                let module_w = self.measure_ui_width(module, module_scale);
                 let ratio_w = (w / 0.45).max(module_w / 0.55);
                 max_w = max_w.max(content_start_offset + ratio_w + right_pad + 10.0 * scale);
             }
@@ -255,46 +431,46 @@ impl Renderer {
                 continue;
             }
 
-            let sel_rect_y = (current_y + (step - item_h) / 2.0).round();
+            let row_y = current_y.round();
+            let row_edges = autocomplete_row_edges(row_y, y, step, current_h);
 
             if i == selected_idx {
-                self.push_rounded_rect(
-                    x + 4.0 * scale,
-                    sel_rect_y,
-                    max_w - 8.0 * scale,
-                    item_h,
+                self.push_autocomplete_row_bg(
+                    x,
+                    row_y,
+                    max_w,
+                    step,
                     4.0 * scale,
                     [0.25, 0.27, 0.35, 1.0],
+                    row_edges,
                 );
             } else if Some(i) == hovered_idx {
-                self.push_rounded_rect(
-                    x + 4.0 * scale,
-                    sel_rect_y,
-                    max_w - 8.0 * scale,
-                    item_h,
+                self.push_autocomplete_row_bg(
+                    x,
+                    row_y,
+                    max_w,
+                    step,
                     4.0 * scale,
                     [0.20, 0.21, 0.28, 1.0],
+                    row_edges,
                 );
             }
 
-            let mut cx = x + left_pad;
-
-            let (icon_char, icon_fg) = match item.kind {
-                crate::highlighter::SymbolKind::Class => ("\u{f03d7}", [0.8, 0.9, 1.0, 1.0]),
-                crate::highlighter::SymbolKind::Function => ("\u{f0295}", [0.8, 1.0, 0.8, 1.0]),
-                crate::highlighter::SymbolKind::Variable => ("\u{f0ae7}", [0.9, 0.8, 1.0, 1.0]),
-                crate::highlighter::SymbolKind::Parameter => ("\u{f03ea}", [1.0, 0.9, 0.8, 1.0]),
-                crate::highlighter::SymbolKind::Keyword => ("\u{f030b}", [1.0, 0.8, 0.9, 1.0]),
-                crate::highlighter::SymbolKind::Unknown => ("\u{f03d7}", [0.65, 0.65, 0.65, 1.0]),
-            };
-
-            if let Some(g) = self.get_glyph(icon_char.chars().next().unwrap()) {
-                let char_scale = 0.8;
-                let actual_w = g.width * char_scale * scale;
-                let actual_h = g.height * char_scale * scale;
-
-                let char_x = cx + (icon_sz - actual_w) / 2.0;
-                let char_y = sel_rect_y + (item_h - actual_h) / 2.0;
+            let badge = autocomplete_badge_style(item.kind);
+            self.push_autocomplete_badge_bg(
+                x,
+                row_y,
+                icon_sz,
+                4.0 * scale,
+                badge.bg,
+                row_edges,
+            );
+            if let Some(g) = self.get_ui_glyph(badge.letter) {
+                let char_scale = 0.82;
+                let actual_w = g.width * char_scale;
+                let actual_h = g.height * char_scale;
+                let char_x = x + (icon_sz - actual_w) / 2.0;
+                let char_y = row_y + (step - actual_h) / 2.0;
 
                 self.push_quad(
                     char_x.round(),
@@ -305,21 +481,21 @@ impl Renderer {
                     g.v,
                     g.uw,
                     g.vh,
-                    icon_fg,
+                    badge.fg,
                     0.0,
                 );
             }
-            cx += icon_sz + icon_gap;
+            let mut cx = x + icon_sz + icon_gap;
 
-            let cy = sel_rect_y + item_h * 0.72;
+            let cy = row_y + item_h * 0.72 + (step - item_h) * 0.5;
 
             let module_metrics = item.module.as_ref().map(|module| {
                 let content_w = max_w - content_start_offset - right_pad;
                 let module_limit = content_w * 0.55;
                 let mut end = module.len();
-                let ellipsis_w = self.measure_width("...", "", 0, 3);
+                let ellipsis_w = self.measure_ui_width("...", module_scale);
                 while end > 0
-                    && self.measure_width(&module[..end], "", 0, end)
+                    && self.measure_ui_width(&module[..end], module_scale)
                         + if end < module.len() { ellipsis_w } else { 0.0 }
                         > module_limit
                 {
@@ -332,11 +508,11 @@ impl Renderer {
                     let mut s = String::with_capacity(end + 3);
                     s.push_str(&module[..end]);
                     s.push_str("...");
-                    s
+                    Cow::Owned(s)
                 } else {
-                    module.clone()
+                    Cow::Borrowed(module.as_str())
                 };
-                let shown_w = self.measure_width(&shown, "", 0, shown.len());
+                let shown_w = self.measure_ui_width(shown.as_ref(), module_scale);
                 let module_x = x + max_w - right_pad - shown_w;
                 (module_x, shown)
             });
@@ -387,11 +563,11 @@ impl Renderer {
 
             if let Some((module_x, module)) = module_metrics {
                 self.draw_string_scaled(
-                    &module,
+                    module.as_ref(),
                     module_x.round(),
-                    cy.round(),
+                    (cy - 1.5 * scale).round(),
                     [0.50, 0.72, 0.82, 1.0],
-                    0.82,
+                    module_scale,
                 );
             }
 
@@ -408,7 +584,7 @@ impl Renderer {
             let max_scroll = (total_h - target_h).max(0.0);
             let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
 
-            let track_margin = 8.0 * scale;
+            let track_margin = autocomplete_scrollbar_track_margin(scale);
             let track_h = current_h - track_margin * 2.0;
             let thumb_h = (current_h / total_h * track_h).max(20.0 * scale);
             let thumb_y = y + track_margin + scroll_ratio * (track_h - thumb_h);

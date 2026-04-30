@@ -768,24 +768,58 @@ pub(super) fn parse_code_action_value(v: &serde_json::Value) -> Option<CodeActio
 fn completion_kind(kind: Option<u64>) -> crate::highlighter::SymbolKind {
     match kind {
         Some(2 | 3 | 4) => crate::highlighter::SymbolKind::Function,
-        Some(5 | 6 | 10 | 12 | 13) => crate::highlighter::SymbolKind::Variable,
-        Some(7 | 8 | 9 | 22 | 25) => crate::highlighter::SymbolKind::Class,
+        Some(10) => crate::highlighter::SymbolKind::Property,
+        Some(5 | 6 | 12 | 13 | 21) => crate::highlighter::SymbolKind::Variable,
+        Some(7 | 8 | 22 | 25) => crate::highlighter::SymbolKind::Class,
+        Some(9) => crate::highlighter::SymbolKind::Module,
         Some(14) => crate::highlighter::SymbolKind::Keyword,
         _ => crate::highlighter::SymbolKind::Unknown,
+    }
+}
+
+fn refine_completion_kind(
+    kind: crate::highlighter::SymbolKind,
+    label: &str,
+    detail: Option<&str>,
+    insert_text: Option<&str>,
+) -> crate::highlighter::SymbolKind {
+    let Some(detail) = detail else {
+        return if label.ends_with('=') || insert_text.is_some_and(|text| text.contains('=')) {
+            crate::highlighter::SymbolKind::Parameter
+        } else {
+            kind
+        };
+    };
+    if detail.starts_with("(parameter)")
+        || label.ends_with('=')
+        || insert_text.is_some_and(|text| text.contains('='))
+    {
+        crate::highlighter::SymbolKind::Parameter
+    } else if detail.starts_with("(property)") || detail.starts_with("(field)") {
+        crate::highlighter::SymbolKind::Property
+    } else if detail.starts_with("(function)")
+        || detail.starts_with("(method)")
+        || detail.starts_with("def ")
+        || detail.starts_with("async def ")
+    {
+        crate::highlighter::SymbolKind::Function
+    } else if detail.starts_with("class ") || detail.starts_with("type[") {
+        crate::highlighter::SymbolKind::Class
+    } else {
+        kind
     }
 }
 
 fn completion_module(
     v: &serde_json::Value,
     kind: &crate::highlighter::SymbolKind,
+    detail: Option<&str>,
 ) -> Option<String> {
     let label = v
         .get("label")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if let Some(owner) =
-        completion_detail(v).and_then(|detail| owner_from_completion_detail(label, &detail))
-    {
+    if let Some(owner) = detail.and_then(|detail| owner_from_completion_detail(label, detail)) {
         return Some(owner);
     }
     if let Some(owner) = v
@@ -807,7 +841,7 @@ fn completion_module(
         }
         return Some(full_name.to_string());
     }
-    let detail_is_field_type = completion_detail(v).is_some_and(|detail| {
+    let detail_is_field_type = detail.is_some_and(|detail| {
         detail.starts_with("(variable)")
             || detail.starts_with("(parameter)")
             || detail.starts_with("(property)")
@@ -818,7 +852,9 @@ fn completion_module(
     }
     if !matches!(
         kind,
-        crate::highlighter::SymbolKind::Variable | crate::highlighter::SymbolKind::Parameter
+        crate::highlighter::SymbolKind::Variable
+            | crate::highlighter::SymbolKind::Parameter
+            | crate::highlighter::SymbolKind::Property
     ) {
         if let Some(module) = v
             .pointer("/data/module")
@@ -836,7 +872,9 @@ fn completion_module(
     {
         if matches!(
             kind,
-            crate::highlighter::SymbolKind::Variable | crate::highlighter::SymbolKind::Parameter
+            crate::highlighter::SymbolKind::Variable
+                | crate::highlighter::SymbolKind::Parameter
+                | crate::highlighter::SymbolKind::Property
         ) {
             return None;
         }
@@ -913,12 +951,18 @@ pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCo
         .map(|items| items.iter().filter_map(parse_text_edit_value).collect())
         .unwrap_or_default();
 
-    let kind = completion_kind(v.get("kind").and_then(|value| value.as_u64()));
+    let detail = completion_detail(v);
+    let kind = refine_completion_kind(
+        completion_kind(v.get("kind").and_then(|value| value.as_u64())),
+        &label,
+        detail.as_deref(),
+        insert_text.as_deref(),
+    );
     Some(LspCompletionItem {
         label,
-        module: completion_module(v, &kind),
+        module: completion_module(v, &kind, detail.as_deref()),
         kind,
-        detail: completion_detail(v),
+        detail,
         insert_text,
         text_edit,
         additional_text_edits,
@@ -1314,6 +1358,35 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(data_module_type_attr.module, None);
+    }
+
+    #[test]
+    fn completion_kind_uses_ty_detail_for_property_parameter_and_type() {
+        let property = parse_completion_item_value(&serde_json::json!({
+            "label": "status",
+            "kind": 10,
+            "detail": "(property) status: str"
+        }))
+        .unwrap();
+        assert_eq!(property.kind, crate::highlighter::SymbolKind::Property);
+
+        let parameter = parse_completion_item_value(&serde_json::json!({
+            "label": "timeout",
+            "kind": 6,
+            "detail": "(parameter) timeout: float",
+            "insertText": "timeout="
+        }))
+        .unwrap();
+        assert_eq!(parameter.kind, crate::highlighter::SymbolKind::Parameter);
+
+        let inferred_type = parse_completion_item_value(&serde_json::json!({
+            "label": "Path",
+            "detail": "type[Path]",
+            "labelDetails": {"description": "pathlib"}
+        }))
+        .unwrap();
+        assert_eq!(inferred_type.kind, crate::highlighter::SymbolKind::Class);
+        assert_eq!(inferred_type.module.as_deref(), Some("pathlib"));
     }
 
     #[test]

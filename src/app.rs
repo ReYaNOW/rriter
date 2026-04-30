@@ -360,7 +360,10 @@ fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
 }
 
 fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
-    if matches!(item.kind, SymbolKind::Variable | SymbolKind::Parameter) {
+    if matches!(
+        item.kind,
+        SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+    ) {
         return true;
     }
     if item.detail.as_deref().is_some_and(|detail| {
@@ -394,6 +397,19 @@ fn completion_item_is_argument_like(item: &AutocompleteItem) -> bool {
             .insert_text
             .as_deref()
             .is_some_and(|text| text.contains('='))
+}
+
+fn normalize_ty_import_kind(item: &mut AutocompleteItem) {
+    if item.kind != SymbolKind::Unknown {
+        return;
+    }
+    let Some(module) = item.module.as_deref() else {
+        return;
+    };
+    if module.is_empty() {
+        return;
+    }
+    item.kind = SymbolKind::Module;
 }
 
 fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
@@ -1552,7 +1568,13 @@ impl App {
             )
         });
         for item in &mut items {
+            if self.autocomplete_mode == AutocompleteMode::TyImports {
+                normalize_ty_import_kind(item);
+            }
             if self.autocomplete_mode == AutocompleteMode::TyContext {
+                if completion_item_is_argument_like(item) {
+                    item.kind = SymbolKind::Parameter;
+                }
                 if completion_item_is_field_like(item) {
                     if !completion_item_has_explicit_owner(item) {
                         item.module = common_owner.as_ref().map(|owner| {
@@ -1611,9 +1633,9 @@ impl App {
             };
             let type_priority = match item.kind {
                 SymbolKind::Parameter => 0,
-                SymbolKind::Variable => 1,
+                SymbolKind::Property | SymbolKind::Variable => 1,
                 SymbolKind::Function => 2,
-                SymbolKind::Class => 3,
+                SymbolKind::Class | SymbolKind::Module => 3,
                 SymbolKind::Keyword => 4,
                 SymbolKind::Unknown => 5,
             };
@@ -1729,9 +1751,9 @@ impl App {
 
         matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
             let type_priority = match comp.kind {
-                SymbolKind::Variable | SymbolKind::Parameter => 0,
+                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property => 0,
                 SymbolKind::Function => 1,
-                SymbolKind::Class => 2,
+                SymbolKind::Class | SymbolKind::Module => 2,
                 SymbolKind::Keyword => 3,
                 SymbolKind::Unknown => 4,
             };
@@ -2742,6 +2764,28 @@ mod app_behavior_tests {
             app.autocomplete_options[0].0.module.as_deref(),
             Some("pathlib")
         );
+    }
+
+    #[test]
+    fn ty_import_autocomplete_promotes_unknown_items_with_module() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("pa");
+        app.autocomplete_mode = AutocompleteMode::TyImports;
+
+        app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+            label: "pathlib".to_string(),
+            kind: SymbolKind::Unknown,
+            module: Some("stdlib".to_string()),
+            detail: None,
+            insert_text: Some("pathlib".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+
+        assert_eq!(app.autocomplete_options.len(), 1);
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Module);
     }
 
     #[test]
