@@ -482,14 +482,6 @@ impl Highlighter {
                                         tree_sitter::Query::new(&lang, fold_query_str)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) =
-                                            (final_edit_start_byte, final_edit_end_byte)
-                                        {
-                                            // Expand bounds to ensure we capture whole nodes/statements
-                                            let exp_sb = sb.saturating_sub(1000);
-                                            let exp_eb = (eb + 1000).min(text.len());
-                                            cursor.set_byte_range(exp_sb..exp_eb);
-                                        }
                                         let mut matches = cursor.matches(
                                             &fold_query,
                                             tree.root_node(),
@@ -1425,6 +1417,49 @@ mod tests {
                 "{name} must not be parameter-orange in class body"
             );
         }
+    }
+
+    #[test]
+    fn highlighter_keeps_fold_map_after_far_incremental_edit() {
+        let mut highlighter = Highlighter::new();
+        let filler = "# pad\n".repeat(260);
+        let source = format!("items = [\n    1,\n    2,\n]\n{filler}tail = 1\n");
+
+        highlighter.reset(1, source.clone(), "py".to_string());
+        wait(&mut highlighter, 1);
+
+        let list_start = source.find('[').unwrap();
+        assert!(
+            highlighter
+                .foldable_ranges
+                .iter()
+                .any(|(start, end, is_autofold, _)| {
+                    *is_autofold && *start == list_start && *end > list_start
+                }),
+            "initial list fold missing"
+        );
+
+        let delete_offset = source.rfind("tail").unwrap();
+        highlighter.apply_edits(
+            2,
+            vec![SyncEdit::Delete {
+                offset: delete_offset,
+                len: 1,
+            }],
+            Some(delete_offset),
+            Some(delete_offset),
+        );
+        wait(&mut highlighter, 2);
+
+        assert!(
+            highlighter
+                .foldable_ranges
+                .iter()
+                .any(|(start, end, is_autofold, _)| {
+                    *is_autofold && *start == list_start && *end > list_start
+                }),
+            "far edit must not drop existing fold ranges"
+        );
     }
 
     #[test]
