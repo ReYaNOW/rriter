@@ -19,10 +19,48 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
+pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
 
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
     false && TELEMETRY_ENABLED.load(Ordering::Relaxed)
+}
+
+#[inline(always)]
+pub(crate) fn editor_bottom_blank_lines(viewport_height: f32, line_height: f32) -> f32 {
+    if line_height <= 0.0 {
+        return 0.0;
+    }
+    (viewport_height.max(0.0) / line_height - EDITOR_BOTTOM_MIN_VISIBLE_LINES).max(0.0)
+}
+
+#[inline(always)]
+pub(crate) fn editor_scroll_content_height(
+    lines_count: usize,
+    line_height: f32,
+    viewport_height: f32,
+) -> f32 {
+    if line_height <= 0.0 {
+        return viewport_height.max(0.0);
+    }
+    (lines_count.max(1) as f32 + editor_bottom_blank_lines(viewport_height, line_height))
+        * line_height
+}
+
+#[inline(always)]
+pub(crate) fn editor_max_scroll_for_lines(
+    lines_count: usize,
+    line_height: f32,
+    viewport_height: f32,
+) -> f32 {
+    if line_height <= 0.0 {
+        return 0.0;
+    }
+    let raw_max =
+        (editor_scroll_content_height(lines_count, line_height, viewport_height)
+            - viewport_height.max(0.0))
+        .max(0.0);
+    (raw_max / line_height).ceil() * line_height
 }
 
 thread_local! {
@@ -90,6 +128,25 @@ mod tests {
         assert!(telemetry.last_print >= before);
         assert!(telemetry.last_print <= after);
         assert!(!TELEMETRY_ENABLED.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn editor_max_scroll_keeps_five_text_lines_at_bottom() {
+        assert_eq!(editor_bottom_blank_lines(400.0, 10.0), 35.0);
+        assert_eq!(editor_max_scroll_for_lines(100, 10.0, 400.0), 950.0);
+        assert_eq!(
+            editor_scroll_content_height(100, 10.0, 400.0),
+            1350.0
+        );
+    }
+
+    #[test]
+    fn editor_max_scroll_handles_short_files_and_tiny_viewports() {
+        assert_eq!(editor_max_scroll_for_lines(5, 10.0, 400.0), 0.0);
+        assert_eq!(editor_max_scroll_for_lines(4, 10.0, 400.0), 0.0);
+        assert_eq!(editor_bottom_blank_lines(30.0, 10.0), 0.0);
+        assert_eq!(editor_max_scroll_for_lines(100, 10.0, 30.0), 970.0);
+        assert_eq!(editor_max_scroll_for_lines(100, 0.0, 400.0), 0.0);
     }
 
     #[test]
@@ -720,10 +777,8 @@ impl Renderer {
             self.identical_words_cache_selection_anchor = editor.selection_anchor;
         }
 
-        let total_render_height = total_lines as f32 * self.line_height;
-        let raw_max =
-            (total_render_height - editor_scroll_height + self.line_height * 2.0).max(0.0);
-        let max_scroll = (raw_max / self.line_height).ceil() * self.line_height;
+        let max_scroll =
+            editor_max_scroll_for_lines(total_lines, self.line_height, editor_scroll_height);
 
         let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
         let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
@@ -1091,7 +1146,8 @@ impl Renderer {
 
         if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
-            let total_content_height = (total_lines as f32 + 2.0) * self.line_height;
+            let total_content_height =
+                editor_scroll_content_height(total_lines, self.line_height, editor_scroll_height);
             let thumb_h = (editor_scroll_height / total_content_height.max(editor_scroll_height)
                 * editor_scroll_height)
                 .max(20.0 * s);

@@ -464,10 +464,11 @@ impl Renderer {
     }
 
     pub fn get_max_scroll(&mut self, editor: &Editor, window_height: f32) -> f32 {
-        let lines_count = editor.get_visible_lines_count();
-        let total_height = lines_count as f32 * self.line_height;
-        let raw_max = (total_height - window_height + self.line_height * 2.0).max(0.0);
-        (raw_max / self.line_height).ceil() * self.line_height
+        super::editor_max_scroll_for_lines(
+            editor.get_visible_lines_count(),
+            self.line_height,
+            window_height,
+        )
     }
 
     pub fn flush(&mut self) {

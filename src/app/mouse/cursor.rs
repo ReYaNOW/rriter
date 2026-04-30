@@ -1,4 +1,5 @@
 use super::*;
+use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
 
 fn autocomplete_drag_target(
     py: f32,
@@ -1091,14 +1092,19 @@ impl App {
 
                 let thumb_h = if is_minimap_drag {
                     let total_lines_f32 = self.editor.line_offsets.len() as f32;
+                    let bottom_blank_lines = editor_bottom_blank_lines(editor_height, r.line_height);
                     let visible_minimap_lines = total_lines_f32.min(900.0);
                     let minimap_line_h =
-                        (editor_height / (visible_minimap_lines + 2.0).max(1.0)).max(1.5);
+                        (editor_height / (visible_minimap_lines + bottom_blank_lines).max(1.0))
+                            .max(1.5);
                     let visible_lines = editor_height / r.line_height;
                     (visible_lines * minimap_line_h).max(4.0)
                 } else {
-                    let total_content_height =
-                        (self.editor.line_offsets.len() as f32 + 2.0) * r.line_height;
+                    let total_content_height = editor_scroll_content_height(
+                        self.editor.get_visible_lines_count(),
+                        r.line_height,
+                        editor_height,
+                    );
                     (editor_height / total_content_height.max(editor_height) * editor_height)
                         .max(20.0 * s)
                 };
