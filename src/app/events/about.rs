@@ -83,6 +83,11 @@ fn drag_autoscroll_speed(delta: f32, is_top_edge: bool) -> f32 {
     }
 }
 
+fn drag_autoscroll_editor_bottom(window_height: f32, editor_top: f32, scale: f32) -> f32 {
+    let bottom_gap = DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale;
+    (window_height - bottom_gap).max(editor_top + 24.0 * scale)
+}
+
 fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Instant {
     let mut wake_at = base;
     if let Some(t) = a {
@@ -433,14 +438,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             let mx = app.renderer.as_ref().unwrap().last_mouse_x;
             let minimap_w = app.renderer.as_ref().unwrap().minimap_width;
             let padding = app.renderer.as_ref().unwrap().left_padding;
-            let bottom_h = if app.is_ide_mode && app.ide_panel.any_bottom_open() {
-                app.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
             let editor_top = tab_bar_h;
-            let bottom_gap = DRAG_AUTOSCROLL_BOTTOM_GAP_PX * s;
-            let editor_bottom = (wh - bottom_h - bottom_gap).max(editor_top + 24.0 * s);
+            let editor_bottom = drag_autoscroll_editor_bottom(wh, editor_top, s);
             let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
 
             let drag_scroll_delta_y = drag_autoscroll_delta(my, editor_top, editor_bottom, edge);
@@ -1085,6 +1084,29 @@ mod tests {
         assert_eq!(drag_autoscroll_delta(250.0, 100.0, 500.0, 40.0), 0.0);
         assert!(drag_autoscroll_speed(30.0, false) >= DRAG_AUTOSCROLL_MIN_SPEED);
         assert!(drag_autoscroll_speed(-30.0, true) > drag_autoscroll_speed(30.0, false));
+    }
+
+    #[test]
+    fn drag_autoscroll_bottom_edge_ignores_open_bottom_panel() {
+        let scale = 1.0;
+        let window_height = 900.0;
+        let editor_top = 38.0;
+        let bottom_panel_h = 260.0;
+        let edge = DRAG_AUTOSCROLL_EDGE_PX * scale;
+
+        let editor_bottom = drag_autoscroll_editor_bottom(window_height, editor_top, scale);
+        let old_panel_sensitive_bottom =
+            window_height - bottom_panel_h - DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale;
+        let y_near_old_panel_edge = old_panel_sensitive_bottom + edge + 1.0;
+
+        assert_eq!(
+            editor_bottom,
+            window_height - DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale
+        );
+        assert_eq!(
+            drag_autoscroll_delta(y_near_old_panel_edge, editor_top, editor_bottom, edge),
+            0.0
+        );
     }
 
     #[test]
