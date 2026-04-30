@@ -615,11 +615,18 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
-                let q_x = (x + g.offset_x).round();
-                let q_y = (y - g.offset_y).round();
-                let q_w = g.width.round();
-                let q_h = g.height.round();
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                self.push_quad(
+                    x + g.offset_x,
+                    y - g.offset_y,
+                    g.width,
+                    g.height,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    color,
+                    g.is_emoji,
+                );
                 x += g.advance;
             }
         }
@@ -640,11 +647,18 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
-                let q_x = (x + g.offset_x * scale).round();
-                let q_y = (y - g.offset_y * scale).round();
-                let q_w = (g.width * scale).round();
-                let q_h = (g.height * scale).round();
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                self.push_quad(
+                    x + g.offset_x * scale,
+                    y - g.offset_y * scale,
+                    g.width * scale,
+                    g.height * scale,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    color,
+                    g.is_emoji,
+                );
                 x += g.advance * scale;
             }
         }
@@ -665,11 +679,18 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_glyph(c) {
-                let q_x = (x + g.offset_x * scale).round();
-                let q_y = (y - g.offset_y * scale).round();
-                let q_w = (g.width * scale).round();
-                let q_h = (g.height * scale).round();
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                self.push_quad(
+                    x + g.offset_x * scale,
+                    y - g.offset_y * scale,
+                    g.width * scale,
+                    g.height * scale,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    color,
+                    g.is_emoji,
+                );
                 x += g.advance * scale;
             }
         }

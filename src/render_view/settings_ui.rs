@@ -453,10 +453,10 @@ impl Renderer {
 
                     if let Some(g) = self.get_ui_glyph(c) {
                         self.push_quad(
-                            (current_x + g.offset_x * text_scale_input).round(),
-                            (text_y_mid - g.offset_y * text_scale_input).round(),
-                            (g.width * text_scale_input).round(),
-                            (g.height * text_scale_input).round(),
+                            current_x + g.offset_x * text_scale_input,
+                            text_y_mid - g.offset_y * text_scale_input,
+                            g.width * text_scale_input,
+                            g.height * text_scale_input,
                             g.u,
                             g.v,
                             g.uw,

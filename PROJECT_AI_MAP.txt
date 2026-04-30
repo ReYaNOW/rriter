@@ -843,10 +843,10 @@ F|785|32|473|p|Renderer.flush||&mut self|gl,height,proj_loc,vbo,width|vertices.c
 F|786|32|514|p|Renderer.push_vertical_gradient||&mut self|vertices|
 F|787|32|562|p|Renderer.push_horizontal_gradient||&mut self|vertices|
 F|788|32|610|p|Renderer.draw_string||&mut self||
-F|789|32|628|p|Renderer.draw_string_scaled||&mut self||
-F|790|32|653|p|Renderer.draw_string_mono_scaled||&mut self||
-F|791|32|678|p|Renderer.measure_mono_width|f32|&mut self||
-F|792|32|689|p|Renderer.push_rounded_rect||&mut self|vertices|
+F|789|32|635|p|Renderer.draw_string_scaled||&mut self||
+F|790|32|667|p|Renderer.draw_string_mono_scaled||&mut self||
+F|791|32|699|p|Renderer.measure_mono_width|f32|&mut self||
+F|792|32|710|p|Renderer.push_rounded_rect||&mut self|vertices|
 F|793|33|6||folded_import_keyword_range|Option<(usize, usize)>|||
 F|794|33|53|p|folded_import_display_end|usize|||
 F|795|33|63||starts_with_word|bool|||
