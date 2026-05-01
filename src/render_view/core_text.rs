@@ -721,4 +721,31 @@ impl Renderer {
 
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
+
+    pub fn push_rounded_rect_border(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        border_w: f32,
+        border_color: [f32; 4],
+        fill_color: [f32; 4],
+    ) {
+        let x = x.round();
+        let y = y.round();
+        let w = w.round();
+        let h = h.round();
+        let border_w = border_w.round().max(1.0);
+        self.push_rounded_rect(x, y, w, h, r.round(), border_color);
+        self.push_rounded_rect(
+            x + border_w,
+            y + border_w,
+            (w - border_w * 2.0).max(0.0),
+            (h - border_w * 2.0).max(0.0),
+            (r.round() - border_w).max(1.0),
+            fill_color,
+        );
+    }
 }

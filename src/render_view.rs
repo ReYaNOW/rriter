@@ -56,10 +56,9 @@ pub(crate) fn editor_max_scroll_for_lines(
     if line_height <= 0.0 {
         return 0.0;
     }
-    let raw_max =
-        (editor_scroll_content_height(lines_count, line_height, viewport_height)
-            - viewport_height.max(0.0))
-        .max(0.0);
+    let raw_max = (editor_scroll_content_height(lines_count, line_height, viewport_height)
+        - viewport_height.max(0.0))
+    .max(0.0);
     (raw_max / line_height).ceil() * line_height
 }
 
@@ -109,6 +108,15 @@ fn diagnostic_overlaps_transient_member_dot(
     dot_byte.is_some_and(|dot_byte| diag_start <= cursor && diag_end.saturating_add(1) >= dot_byte)
 }
 
+#[inline(always)]
+fn should_draw_empty_ide_file_tree_overlay(
+    is_ide_mode: bool,
+    tabs_empty: bool,
+    file_tree_overlay_open: bool,
+) -> bool {
+    is_ide_mode && tabs_empty && file_tree_overlay_open
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,10 +142,7 @@ mod tests {
     fn editor_max_scroll_keeps_five_text_lines_at_bottom() {
         assert_eq!(editor_bottom_blank_lines(400.0, 10.0), 35.0);
         assert_eq!(editor_max_scroll_for_lines(100, 10.0, 400.0), 950.0);
-        assert_eq!(
-            editor_scroll_content_height(100, 10.0, 400.0),
-            1350.0
-        );
+        assert_eq!(editor_scroll_content_height(100, 10.0, 400.0), 1350.0);
     }
 
     #[test]
@@ -147,6 +152,14 @@ mod tests {
         assert_eq!(editor_bottom_blank_lines(30.0, 10.0), 0.0);
         assert_eq!(editor_max_scroll_for_lines(100, 10.0, 30.0), 970.0);
         assert_eq!(editor_max_scroll_for_lines(100, 0.0, 400.0), 0.0);
+    }
+
+    #[test]
+    fn empty_ide_still_draws_file_tree_overlay() {
+        assert!(should_draw_empty_ide_file_tree_overlay(true, true, true));
+        assert!(!should_draw_empty_ide_file_tree_overlay(false, true, true));
+        assert!(!should_draw_empty_ide_file_tree_overlay(true, false, true));
+        assert!(!should_draw_empty_ide_file_tree_overlay(true, true, false));
     }
 
     #[test]
@@ -551,6 +564,16 @@ impl Renderer {
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
         if is_ide_mode && tabs.is_empty() {
             self.draw_empty_ide(panel_left_w);
+            if should_draw_empty_ide_file_tree_overlay(
+                is_ide_mode,
+                tabs.is_empty(),
+                crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel),
+            ) {
+                let wants_pointer =
+                    self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+                self.flush();
+                return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
+            }
             return (false, Vec::new());
         } else {
             self.was_empty_ide = false;
@@ -1234,7 +1257,11 @@ impl Renderer {
             && panel_bottom_h > 0.0
             && ide_panel.bottom_panel_blocks_editor_hover()
             && my >= self.height - panel_bottom_h;
+        let file_tree_overlay_open =
+            crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         if hover_blocked_by_bottom_panel {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if !is_ui_disabled {
             self.draw_hover_overlays(
@@ -1253,6 +1280,11 @@ impl Renderer {
 
         if let Some((path, tx, ty)) = tab_tooltip {
             self.draw_tab_tooltip(&path, tx, ty, s);
+        }
+
+        if is_ide_mode {
+            wants_pointer |=
+                self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
         }
 
         self.flush();

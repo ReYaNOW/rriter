@@ -70,6 +70,10 @@ impl App {
             }
         }
 
+        if self.handle_file_tree_modal_keyboard(&key_event) {
+            return;
+        }
+
         if key_event.state == ElementState::Pressed
             && alt
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)
@@ -323,6 +327,8 @@ impl App {
                 && self.ide_panel.is_open(crate::app::PanelId::Terminal)
             {
                 self.handle_terminal_keyboard_input(key_event);
+            } else if self.handle_file_tree_shortcut(key_event.physical_key, ctrl) {
+                return;
             } else {
                 self.handle_editor_keyboard_input(event_loop, key_event);
             }

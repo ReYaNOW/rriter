@@ -64,15 +64,7 @@ impl Button {
 
         let r = 4.0 * scale;
         let bw = (1.0 * scale).round().max(1.0);
-        renderer.push_rounded_rect(x, y, w, h, r, border_color);
-        renderer.push_rounded_rect(
-            x + bw,
-            y + bw,
-            w - bw * 2.0,
-            h - bw * 2.0,
-            (r - bw).max(1.0),
-            bg_color,
-        );
+        renderer.push_rounded_rect_border(x, y, w, h, r, bw, border_color, bg_color);
 
         let icon_size = self.icon_size;
         let text_scale = self.text_scale;

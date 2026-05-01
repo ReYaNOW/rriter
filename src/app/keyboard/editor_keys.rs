@@ -46,11 +46,7 @@ fn autocomplete_next_index(current: usize, len: usize, reverse: bool, jump: bool
         };
     }
     if reverse {
-        if current == 0 {
-            len - 1
-        } else {
-            current - 1
-        }
+        if current == 0 { len - 1 } else { current - 1 }
     } else {
         (current + 1) % len
     }

@@ -27,6 +27,42 @@ where
     text.len()
 }
 
+fn centered_dialog_button_positions(x: f32, w: f32, btn_w: f32, gap: f32) -> (f32, f32) {
+    let total_w = btn_w * 2.0 + gap;
+    let first_x = x + (w - total_w) / 2.0;
+    (first_x, first_x + btn_w + gap)
+}
+
+fn file_tree_menu_group(action: crate::app::file_tree::FileTreeMenuAction) -> u8 {
+    match action {
+        crate::app::file_tree::FileTreeMenuAction::CreateFile
+        | crate::app::file_tree::FileTreeMenuAction::CreateDirectory
+        | crate::app::file_tree::FileTreeMenuAction::Paste => 0,
+        crate::app::file_tree::FileTreeMenuAction::Delete
+        | crate::app::file_tree::FileTreeMenuAction::Copy
+        | crate::app::file_tree::FileTreeMenuAction::Cut
+        | crate::app::file_tree::FileTreeMenuAction::Rename => 1,
+        crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder
+        | crate::app::file_tree::FileTreeMenuAction::CopyAbsolutePath
+        | crate::app::file_tree::FileTreeMenuAction::CopyRelativePath => 2,
+    }
+}
+
+fn file_tree_menu_separator_before(
+    entries: &[crate::app::file_tree::FileTreeMenuAction],
+    idx: usize,
+) -> bool {
+    idx > 0 && file_tree_menu_group(entries[idx - 1]) != file_tree_menu_group(entries[idx])
+}
+
+fn file_tree_menu_separator_count(
+    entries: &[crate::app::file_tree::FileTreeMenuAction],
+) -> usize {
+    (1..entries.len())
+        .filter(|&idx| file_tree_menu_separator_before(entries, idx))
+        .count()
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     fn draw_tree_label_clipped(
@@ -326,7 +362,7 @@ impl Renderer {
                 let content_h = real_height - title_h;
                 let total_nodes = ide_panel.file_tree_nodes.len();
 
-                let tree_text_scale = 17.0 / 18.0;
+                let tree_text_scale = 1.0;
                 if total_nodes == 0 {
                     let hint = "Нет папок в проекте";
                     let tw = self.measure_ui_width(hint, tree_text_scale);
@@ -361,6 +397,17 @@ impl Renderer {
                         let is_hovered = ide_panel.file_tree_hovered_idx == Some(i)
                             || ui_registry.hovered()
                                 == Some(crate::ui_system::UiId::FileTreeNode(i));
+                        let is_selected = ide_panel.file_tree_selection.contains(&node.path);
+
+                        if is_selected {
+                            self.push_rect(
+                                panel_x,
+                                row_y,
+                                panel_left_w,
+                                row_h,
+                                [0.60, 0.35, 0.85, 0.24],
+                            );
+                        }
 
                         if is_hovered && !is_ui_disabled {
                             self.push_rect(
@@ -414,6 +461,15 @@ impl Renderer {
                             let arrow_str = if node.is_expanded { "▼" } else { "▶" };
                             let arrow_x = indent_x - 2.0 * s;
                             let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::FileTreeArrow(i),
+                                arrow_x - 4.0 * s,
+                                row_y,
+                                18.0 * s,
+                                row_h,
+                                mx,
+                                my,
+                            );
                             let arrow_color = if node.is_ignored {
                                 [0.973, 0.584, 0.502, 0.6]
                             } else {
@@ -470,6 +526,57 @@ impl Renderer {
                                 };
                                 self.push_squiggle(text_x, text_y + 2.0 * s, label_w, sq_color);
                             }
+                        }
+                    }
+
+                    if let Some(drag) = &ide_panel.file_tree_drag {
+                        if drag.threshold_passed {
+                            if let Some(target_idx) = drag.target_idx {
+                                if target_idx < total_nodes {
+                                    let row_y = title_h + target_idx as f32 * row_h - scroll;
+                                    self.push_rect(
+                                        panel_x,
+                                        row_y,
+                                        panel_left_w,
+                                        row_h,
+                                        [0.52, 0.78, 0.58, 0.22],
+                                    );
+                                    self.push_rect(
+                                        panel_x,
+                                        row_y + row_h - 2.0,
+                                        panel_left_w,
+                                        2.0,
+                                        [0.52, 0.78, 0.58, 0.85],
+                                    );
+                                }
+                            }
+                            let label = if drag.paths.len() == 1 {
+                                drag.paths[0]
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or("1 элемент")
+                                    .to_string()
+                            } else {
+                                format!("{} элементов", drag.paths.len())
+                            };
+                            let ghost_w = self.measure_ui_width(&label, tree_text_scale) + 18.0 * s;
+                            let ghost_x = drag.current_x + 12.0 * s;
+                            let ghost_y = drag.current_y + 10.0 * s;
+                            self.push_rounded_rect(
+                                ghost_x,
+                                ghost_y,
+                                ghost_w,
+                                26.0 * s,
+                                5.0 * s,
+                                [0.12, 0.13, 0.18, 0.92],
+                            );
+                            self.draw_string_scaled(
+                                &label,
+                                ghost_x + 9.0 * s,
+                                ghost_y + 18.0 * s,
+                                self.theme.fg,
+                                tree_text_scale,
+                            );
                         }
                     }
 
@@ -672,6 +779,495 @@ impl Renderer {
             }
         }
     }
+
+    fn draw_file_tree_dialog_shell(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
+        let border = 2.0 * s;
+        self.push_rounded_rect_border(
+            x,
+            y,
+            w,
+            h,
+            10.0 * s,
+            border,
+            self.theme.sel,
+            [0.15, 0.16, 0.20, 1.0],
+        );
+    }
+
+    fn draw_file_tree_dialog_input(
+        &mut self,
+        editor: &crate::editor::Editor,
+        input_x: f32,
+        input_y: f32,
+        input_w: f32,
+        input_h: f32,
+        blink_alpha: f32,
+    ) {
+        let s = self.scale_factor;
+        let text_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+        let pad_x = 8.0 * s;
+        let text_y = input_y + 23.0 * s;
+        let text_start_x = input_x + pad_x;
+        let visible_width = (input_w - pad_x * 2.0).max(0.0);
+
+        self.push_rounded_rect(
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            5.0 * s,
+            [0.08, 0.09, 0.12, 1.0],
+        );
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (input_y + input_h);
+            self.gl.scissor(
+                input_x as i32,
+                scissor_y as i32,
+                input_w as i32,
+                input_h as i32,
+            );
+
+            let text = editor.get_full_text();
+            let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                &text,
+                editor.cursor,
+                visible_width,
+                |c| {
+                    let char_to_render = if c == '\n' { '↵' } else { c };
+                    self.get_ui_glyph(char_to_render)
+                        .map(|g| g.advance * text_scale)
+                        .unwrap_or(10.0 * text_scale)
+                },
+            );
+
+            let sel_start = editor
+                .selection_anchor
+                .unwrap_or(editor.cursor)
+                .min(editor.cursor);
+            let sel_end = editor
+                .selection_anchor
+                .unwrap_or(editor.cursor)
+                .max(editor.cursor);
+
+            let mut current_x = text_start_x - scroll_x;
+            let mut byte_idx = 0usize;
+            let mut cursor_draw_x = current_x;
+            for c in text.chars() {
+                if byte_idx == editor.cursor {
+                    cursor_draw_x = current_x;
+                }
+
+                let char_to_render = if c == '\n' { '↵' } else { c };
+                let adv = self
+                    .get_ui_glyph(char_to_render)
+                    .map(|g| g.advance * text_scale)
+                    .unwrap_or(10.0 * text_scale);
+
+                if byte_idx >= sel_start && byte_idx < sel_end {
+                    self.push_rect(
+                        current_x,
+                        input_y + 7.0 * s,
+                        adv,
+                        input_h - 14.0 * s,
+                        self.theme.sel,
+                    );
+                }
+
+                if current_x + adv >= input_x && current_x <= input_x + input_w {
+                    if let Some(g) = self.get_ui_glyph(char_to_render) {
+                        self.push_quad(
+                            current_x + g.offset_x * text_scale,
+                            text_y - g.offset_y * text_scale,
+                            g.width * text_scale,
+                            g.height * text_scale,
+                            g.u,
+                            g.v,
+                            g.uw,
+                            g.vh,
+                            self.theme.fg,
+                            g.is_emoji,
+                        );
+                    }
+                }
+
+                current_x += adv;
+                byte_idx += c.len_utf8();
+            }
+            if byte_idx == editor.cursor {
+                cursor_draw_x = current_x;
+            }
+
+            if sel_start == sel_end && blink_alpha > 0.5 {
+                self.push_rect(
+                    cursor_draw_x,
+                    input_y + 7.0 * s,
+                    2.0 * s,
+                    input_h - 14.0 * s,
+                    self.theme.fg,
+                );
+            }
+
+            self.flush();
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+
+    pub(crate) fn draw_file_tree_overlays(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        blink_alpha: f32,
+    ) -> bool {
+        let s = self.scale_factor;
+        let mut wants_pointer = false;
+        if crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel) {
+            ui_registry.mark_overlay_start();
+            ui_registry.reset_cursor_state();
+        }
+
+        if let Some(menu) = &ide_panel.file_tree_context_menu {
+            let row_h = 28.0 * s;
+            let pad_x = 12.0 * s;
+            let border = 2.0 * s;
+            let separator_h = 8.0 * s;
+            let mut menu_w = 190.0 * s;
+            for action in &menu.entries {
+                menu_w = menu_w.max(self.measure_ui_width(action.label(), 0.88) + pad_x * 2.0);
+            }
+            let menu_h = menu.entries.len() as f32 * row_h
+                + file_tree_menu_separator_count(&menu.entries) as f32 * separator_h
+                + border * 2.0;
+            let x = menu.x.min((self.width - menu_w - 6.0 * s).max(6.0 * s));
+            let y = menu.y.min((self.height - menu_h - 6.0 * s).max(6.0 * s));
+            let anim_progress = crate::app::file_tree::file_tree_context_menu_anim_progress(
+                menu.opened_at,
+                std::time::Instant::now(),
+            );
+            let visible_h = (menu_h * anim_progress).max(border * 2.0);
+            self.push_rounded_rect_border(
+                x,
+                y,
+                menu_w,
+                visible_h,
+                6.0 * s,
+                border,
+                self.theme.sel,
+                [0.09, 0.10, 0.14, 1.0],
+            );
+
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                let sy = (self.height - (y + visible_h)).round() as i32;
+                self.gl.scissor(
+                    x.round() as i32,
+                    sy,
+                    menu_w.round() as i32,
+                    visible_h.round() as i32,
+                );
+            }
+
+            let mut row_y = y + border;
+            let visible_bottom = y + visible_h;
+            for (idx, action) in menu.entries.iter().enumerate() {
+                if file_tree_menu_separator_before(&menu.entries, idx) {
+                    let line_y = row_y + separator_h / 2.0;
+                    self.push_rect(
+                        x + border + pad_x,
+                        line_y.round(),
+                        menu_w - border * 2.0 - pad_x * 2.0,
+                        1.0,
+                        [1.0, 1.0, 1.0, 0.16],
+                    );
+                    row_y += separator_h;
+                }
+                if row_y >= visible_bottom {
+                    break;
+                }
+                let visible_row_h = (visible_bottom - row_y).min(row_h).max(0.0);
+                let hovered = ui_registry.register_rect(
+                    crate::ui_system::UiId::FileTreeMenuItem(idx),
+                    x,
+                    row_y,
+                    menu_w,
+                    visible_row_h,
+                    mx,
+                    my,
+                );
+                if hovered {
+                    wants_pointer = true;
+                    self.push_rect(
+                        x + border,
+                        row_y,
+                        menu_w - border * 2.0,
+                        visible_row_h,
+                        [1.0, 1.0, 1.0, 0.10],
+                    );
+                }
+                self.draw_string_scaled(
+                    action.label(),
+                    x + pad_x,
+                    row_y + row_h / 2.0 + 5.0 * s,
+                    self.theme.fg,
+                    0.88,
+                );
+                row_y += row_h;
+            }
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_create_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s).min(self.width - 32.0 * s);
+            let h = 178.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                dialog.kind.title(),
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+
+            let input_x = x + side_pad;
+            let input_y = y + 66.0 * s;
+            let input_w = w - side_pad * 2.0;
+            let input_h = 34.0 * s;
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::FileTreeCreateInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                mx,
+                my,
+            );
+            self.draw_file_tree_dialog_input(
+                &dialog.editor,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                blink_alpha,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    input_x,
+                    input_y + input_h + 20.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 112.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            for (id, label, bx) in [
+                (
+                    crate::ui_system::UiId::FileTreeCreateConfirm,
+                    "Создать",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeCreateCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+            ] {
+                let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+                if hovered {
+                    wants_pointer = true;
+                }
+                let bg = if hovered {
+                    [0.30, 0.32, 0.38, 1.0]
+                } else {
+                    [0.22, 0.23, 0.28, 1.0]
+                };
+                self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+                let tw = self.measure_ui_width(label, 0.86);
+                self.draw_string_scaled(
+                    label,
+                    bx + (btn_w - tw) / 2.0,
+                    btn_y + 21.0 * s,
+                    self.theme.fg,
+                    0.86,
+                );
+            }
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_rename_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s).min(self.width - 32.0 * s);
+            let h = 178.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Переименовать",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+
+            let input_x = x + side_pad;
+            let input_y = y + 66.0 * s;
+            let input_w = w - side_pad * 2.0;
+            let input_h = 34.0 * s;
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::FileTreeRenameInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                mx,
+                my,
+            );
+            self.draw_file_tree_dialog_input(
+                &dialog.editor,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                blink_alpha,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    input_x,
+                    input_y + input_h + 20.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 130.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            for (id, label, bx) in [
+                (
+                    crate::ui_system::UiId::FileTreeRenameConfirm,
+                    "Переименовать",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeRenameCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+            ] {
+                let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+                if hovered {
+                    wants_pointer = true;
+                }
+                let bg = if hovered {
+                    [0.30, 0.32, 0.38, 1.0]
+                } else {
+                    [0.22, 0.23, 0.28, 1.0]
+                };
+                self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+                let tw = self.measure_ui_width(label, 0.86);
+                self.draw_string_scaled(
+                    label,
+                    bx + (btn_w - tw) / 2.0,
+                    btn_y + 21.0 * s,
+                    self.theme.fg,
+                    0.86,
+                );
+            }
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_move_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s)
+                .min(self.width - 32.0 * s);
+            let h = 154.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Подтвердить перемещение",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+            let message = crate::app::file_tree::file_tree_move_dialog_message(
+                &dialog.sources,
+                &dialog.target_dir,
+            );
+            self.draw_string_scaled(
+                &message,
+                x + side_pad,
+                y + 74.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.88,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    y + 100.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            for (id, label, bx) in [
+                (
+                    crate::ui_system::UiId::FileTreeMoveConfirm,
+                    "Переместить",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeMoveCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+            ] {
+                let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+                if hovered {
+                    wants_pointer = true;
+                }
+                let bg = if hovered {
+                    [0.30, 0.32, 0.38, 1.0]
+                } else {
+                    [0.22, 0.23, 0.28, 1.0]
+                };
+                self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+                let tw = self.measure_ui_width(label, 0.86);
+                self.draw_string_scaled(
+                    label,
+                    bx + (btn_w - tw) / 2.0,
+                    btn_y + 21.0 * s,
+                    self.theme.fg,
+                    0.86,
+                );
+            }
+        }
+
+        wants_pointer
+    }
 }
 
 #[cfg(test)]
@@ -686,5 +1282,35 @@ mod tests {
             "аб".len()
         );
         assert_eq!(clipped_label_prefix_len("abc", 4.0, 8.0, |_| 3.0), 0);
+    }
+
+    #[test]
+    fn centered_dialog_button_positions_keep_pair_centered() {
+        let (ok_x, cancel_x) = centered_dialog_button_positions(100.0, 420.0, 112.0, 10.0);
+
+        assert_eq!(ok_x, 193.0);
+        assert_eq!(cancel_x, 315.0);
+        assert_eq!((ok_x + cancel_x + 112.0) / 2.0, 310.0);
+    }
+
+    #[test]
+    fn file_tree_context_menu_groups_insert_logical_separators() {
+        use crate::app::file_tree::FileTreeMenuAction;
+
+        let entries = [
+            FileTreeMenuAction::CreateFile,
+            FileTreeMenuAction::CreateDirectory,
+            FileTreeMenuAction::Paste,
+            FileTreeMenuAction::Delete,
+            FileTreeMenuAction::Rename,
+            FileTreeMenuAction::OpenContainedFolder,
+            FileTreeMenuAction::CopyRelativePath,
+        ];
+
+        assert!(!file_tree_menu_separator_before(&entries, 0));
+        assert!(!file_tree_menu_separator_before(&entries, 2));
+        assert!(file_tree_menu_separator_before(&entries, 3));
+        assert!(file_tree_menu_separator_before(&entries, 5));
+        assert_eq!(file_tree_menu_separator_count(&entries), 2);
     }
 }

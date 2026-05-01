@@ -58,6 +58,7 @@ impl App {
                 self.is_dragging = true;
                 self.search_focused = false;
                 self.ide_panel.term_search_focused = false;
+                self.ide_panel.file_tree_focused = false;
                 let active = self.ide_panel.active_terminal;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     term.grid.lock().unwrap().selection = None;
@@ -476,7 +477,59 @@ impl App {
 
             // File tree
             UiId::FileTreeNode(idx) => {
-                self.handle_file_tree_click(idx);
+                self.handle_file_tree_left_click(idx, false);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeArrow(idx) => {
+                self.handle_file_tree_left_click(idx, true);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeMenuItem(idx) => {
+                self.handle_file_tree_context_item(idx);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeCreateInput => {
+                let kind = crate::app::file_tree::FileTreeDialogInputKind::Create;
+                if let Some(mx) = self.renderer.as_ref().map(|r| r.last_mouse_x) {
+                    if let Some(target_idx) = self.file_tree_dialog_input_index_at(kind, mx) {
+                        self.set_file_tree_dialog_input_cursor(kind, target_idx, true);
+                        self.ide_panel.file_tree_dialog_input_drag = Some(kind);
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeCreateConfirm => {
+                self.submit_file_tree_create_dialog();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeCreateCancel => {
+                self.ide_panel.file_tree_create_dialog = None;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeRenameInput => {
+                let kind = crate::app::file_tree::FileTreeDialogInputKind::Rename;
+                if let Some(mx) = self.renderer.as_ref().map(|r| r.last_mouse_x) {
+                    if let Some(target_idx) = self.file_tree_dialog_input_index_at(kind, mx) {
+                        self.set_file_tree_dialog_input_cursor(kind, target_idx, true);
+                        self.ide_panel.file_tree_dialog_input_drag = Some(kind);
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeRenameConfirm => {
+                self.submit_file_tree_rename_dialog();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeRenameCancel => {
+                self.ide_panel.file_tree_rename_dialog = None;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeMoveConfirm => {
+                self.finish_file_tree_move();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeMoveCancel => {
+                self.ide_panel.file_tree_move_dialog = None;
                 self.window.as_ref().unwrap().request_redraw();
             }
 
@@ -585,6 +638,7 @@ impl App {
             UiId::SearchInput => {
                 self.search_focused = true;
                 self.ide_panel.term_search_focused = false;
+                self.ide_panel.file_tree_focused = false;
                 self.is_dragging_search = true;
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;
@@ -693,10 +747,10 @@ impl App {
                         let minimap_line_h = (editor_height
                             / (visible_minimap_lines + bottom_blank_lines).max(1.0))
                         .max(1.5);
-                        let max_minimap_scroll =
-                            ((total_lines_f32 + bottom_blank_lines) * minimap_line_h
-                                - editor_height)
-                                .max(0.0);
+                        let max_minimap_scroll = ((total_lines_f32 + bottom_blank_lines)
+                            * minimap_line_h
+                            - editor_height)
+                            .max(0.0);
 
                         let scroll_ratio_y = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
                         let current_minimap_scroll = scroll_ratio_y * max_minimap_scroll;
@@ -760,6 +814,7 @@ impl App {
             }
             UiId::EditorTextBody => {
                 self.is_dragging = true;
+                self.ide_panel.file_tree_focused = false;
                 crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 if let Some(r) = self.renderer.as_mut() {
                     r.suppress_popups_until_next_mouse_move();

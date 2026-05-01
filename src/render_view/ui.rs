@@ -65,7 +65,12 @@ struct AutocompleteRowEdges {
     bottom: bool,
 }
 
-fn autocomplete_row_edges(row_y: f32, popup_y: f32, row_h: f32, popup_h: f32) -> AutocompleteRowEdges {
+fn autocomplete_row_edges(
+    row_y: f32,
+    popup_y: f32,
+    row_h: f32,
+    popup_h: f32,
+) -> AutocompleteRowEdges {
     let eps = 0.5;
     AutocompleteRowEdges {
         top: row_y <= popup_y + eps,
@@ -457,14 +462,7 @@ impl Renderer {
             }
 
             let badge = autocomplete_badge_style(item.kind);
-            self.push_autocomplete_badge_bg(
-                x,
-                row_y,
-                icon_sz,
-                4.0 * scale,
-                badge.bg,
-                row_edges,
-            );
+            self.push_autocomplete_badge_bg(x, row_y, icon_sz, 4.0 * scale, badge.bg, row_edges);
             if let Some(g) = self.get_ui_glyph(badge.letter) {
                 let char_scale = 0.82;
                 let actual_w = g.width * char_scale;

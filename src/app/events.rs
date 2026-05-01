@@ -763,6 +763,23 @@ impl ApplicationHandler for App {
                     winit::window::CursorIcon::EwResize
                 } else if self.ide_panel.is_resizing_bottom {
                     winit::window::CursorIcon::NsResize
+                } else if self.file_tree_overlay_active() {
+                    let (mx, my) = {
+                        let r = self.renderer.as_ref().unwrap();
+                        (r.last_mouse_x, r.last_mouse_y)
+                    };
+                    match self
+                        .ui_registry
+                        .find_at(mx, my)
+                        .filter(|id| crate::app::App::ui_id_is_file_tree_overlay(*id))
+                    {
+                        Some(crate::ui_system::UiId::FileTreeCreateInput)
+                        | Some(crate::ui_system::UiId::FileTreeRenameInput) => {
+                            winit::window::CursorIcon::Text
+                        }
+                        Some(_) => winit::window::CursorIcon::Pointer,
+                        None => winit::window::CursorIcon::Default,
+                    }
                 } else if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if !self.show_welcome {

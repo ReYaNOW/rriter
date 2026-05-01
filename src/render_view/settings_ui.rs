@@ -525,15 +525,16 @@ impl Renderer {
                 let bw = btn_add_w.round();
                 let bh = input_h.round();
 
-                self.push_rounded_rect(
+                self.push_rounded_rect_border(
                     bx - 1.0,
                     by - 1.0,
                     bw + 2.0,
                     bh + 2.0,
                     6.0 * s,
+                    1.0,
                     [0.20, 0.21, 0.26, 1.0],
+                    [0.15, 0.16, 0.20, 1.0],
                 );
-                self.push_rounded_rect(bx, by, bw, bh, 6.0 * s, [0.15, 0.16, 0.20, 1.0]);
 
                 let icon_sz = 15.0 * s;
                 let text_scale = 0.88;

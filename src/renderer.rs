@@ -10,8 +10,7 @@ const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
 
 #[inline(always)]
 fn popup_waiting_for_mouse_move(hide: bool, last_known: (f32, f32), x: f32, y: f32) -> bool {
-    hide
-        && (x - last_known.0).abs() <= POPUP_MOUSE_MOVE_EPS
+    hide && (x - last_known.0).abs() <= POPUP_MOUSE_MOVE_EPS
         && (y - last_known.1).abs() <= POPUP_MOUSE_MOVE_EPS
 }
 
@@ -414,7 +413,12 @@ impl Renderer {
 
     #[inline(always)]
     pub fn popups_waiting_for_mouse_move_at(&self, x: f32, y: f32) -> bool {
-        popup_waiting_for_mouse_move(self.hide_popups_until_mouse_move, self.last_known_mouse, x, y)
+        popup_waiting_for_mouse_move(
+            self.hide_popups_until_mouse_move,
+            self.last_known_mouse,
+            x,
+            y,
+        )
     }
 
     #[inline(always)]
@@ -1505,15 +1509,11 @@ mod tests {
     fn popup_mouse_move_gate_waits_for_real_motion_after_focus_restore() {
         let last_known = (120.0, 80.0);
 
-        assert!(popup_waiting_for_mouse_move(
-            true, last_known, 120.0, 80.0
-        ));
+        assert!(popup_waiting_for_mouse_move(true, last_known, 120.0, 80.0));
         assert!(popup_waiting_for_mouse_move(
             true, last_known, 120.25, 80.25
         ));
-        assert!(!popup_waiting_for_mouse_move(
-            true, last_known, 121.0, 80.0
-        ));
+        assert!(!popup_waiting_for_mouse_move(true, last_known, 121.0, 80.0));
         assert!(!popup_waiting_for_mouse_move(
             false, last_known, 120.0, 80.0
         ));

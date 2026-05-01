@@ -102,6 +102,19 @@ impl App {
             return;
         }
 
+        if self.file_tree_overlay_active() {
+            if let Some(kind) = self.ide_panel.file_tree_dialog_input_drag {
+                if let Some(target_idx) = self.file_tree_dialog_input_index_at(kind, px) {
+                    self.set_file_tree_dialog_input_cursor(kind, target_idx, false);
+                }
+            }
+            self.ide_panel.file_tree_hovered_idx = None;
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         let window_size = self.window.as_ref().unwrap().inner_size();
         if !cursor_position_allows_editor_hover(
             position.x as f32,
@@ -226,6 +239,22 @@ impl App {
         if self.is_ide_mode {
             let px = position.x as f32;
             let py = position.y as f32;
+
+            if self.ide_panel.file_tree_drag.is_some() {
+                let target_idx = self.file_tree_node_at(px, py);
+                if let Some(ref mut drag) = self.ide_panel.file_tree_drag {
+                    drag.current_x = px;
+                    drag.current_y = py;
+                    let dx = px - drag.start_x;
+                    let dy = py - drag.start_y;
+                    if dx * dx + dy * dy > (5.0 * s) * (5.0 * s) {
+                        drag.threshold_passed = true;
+                    }
+                    drag.target_idx = target_idx;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
 
             if let Some(ref mut drag) = self.ide_panel.drag {
                 drag.current_y = py;
@@ -1106,11 +1135,12 @@ impl App {
 
                 let thumb_h = if is_minimap_drag {
                     let total_lines_f32 = self.editor.line_offsets.len() as f32;
-                    let bottom_blank_lines = editor_bottom_blank_lines(editor_height, r.line_height);
+                    let bottom_blank_lines =
+                        editor_bottom_blank_lines(editor_height, r.line_height);
                     let visible_minimap_lines = total_lines_f32.min(900.0);
-                    let minimap_line_h =
-                        (editor_height / (visible_minimap_lines + bottom_blank_lines).max(1.0))
-                            .max(1.5);
+                    let minimap_line_h = (editor_height
+                        / (visible_minimap_lines + bottom_blank_lines).max(1.0))
+                    .max(1.5);
                     let visible_lines = editor_height / r.line_height;
                     (visible_lines * minimap_line_h).max(4.0)
                 } else {

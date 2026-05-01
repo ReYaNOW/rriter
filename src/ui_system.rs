@@ -40,6 +40,16 @@ pub enum UiId {
 
     // File tree
     FileTreeNode(usize),
+    FileTreeArrow(usize),
+    FileTreeMenuItem(usize),
+    FileTreeCreateInput,
+    FileTreeCreateConfirm,
+    FileTreeCreateCancel,
+    FileTreeRenameInput,
+    FileTreeRenameConfirm,
+    FileTreeRenameCancel,
+    FileTreeMoveConfirm,
+    FileTreeMoveCancel,
 
     // Search
     SearchClose,

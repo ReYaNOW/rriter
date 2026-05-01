@@ -377,6 +377,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
+    if let Some(menu) = &app.ide_panel.file_tree_context_menu {
+        if crate::app::file_tree::file_tree_context_menu_anim_progress(menu.opened_at, now) < 1.0 {
+            needs_redraw = true;
+        }
+    }
+
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut s = state.borrow_mut();
         if s.diag_rect.is_some() && s.diag_anim_progress < 1.0 {

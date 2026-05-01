@@ -135,6 +135,37 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+
+        if state == ElementState::Pressed && self.file_tree_overlay_active() {
+            match button {
+                winit::event::MouseButton::Left => {
+                    if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                        if crate::app::App::ui_id_is_file_tree_overlay(clicked_id) {
+                            self.handle_ui_click(clicked_id);
+                        } else if self.ide_panel.file_tree_context_menu.is_some() {
+                            self.ide_panel.file_tree_context_menu = None;
+                        }
+                    } else if self.ide_panel.file_tree_context_menu.is_some() {
+                        self.ide_panel.file_tree_context_menu = None;
+                    }
+                }
+                winit::event::MouseButton::Right if self.ide_panel.file_tree_context_menu.is_some() => {
+                    self.ide_panel.file_tree_context_menu = None;
+                }
+                _ => {}
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Right
+            && self.file_tree_panel_contains(mx, my)
+        {
+            self.open_file_tree_context_menu(mx, my);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             if self.autocomplete_active {
                 let in_main = self
@@ -729,6 +760,24 @@ impl App {
         if state == ElementState::Released {
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
+                if let Some(drag) = self.ide_panel.file_tree_drag.take() {
+                    if drag.threshold_passed {
+                        if let Some(target_dir) = self.file_tree_drop_target_dir(drag.target_idx) {
+                            let has_valid_move = drag.paths.iter().any(|src| {
+                                src.parent() != Some(target_dir.as_path())
+                                    && !(src.is_dir() && target_dir.starts_with(src))
+                            });
+                            if has_valid_move {
+                                self.ide_panel.file_tree_move_dialog =
+                                    Some(crate::app::file_tree::FileTreeMoveDialog {
+                                        sources: drag.paths,
+                                        target_dir,
+                                        error: None,
+                                    });
+                            }
+                        }
+                    }
+                }
                 if let Some(drag) = self.ide_panel.tab_drag.take() {
                     if drag.threshold_passed && self.tabs.len() > 1 {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -993,6 +1042,7 @@ impl App {
             self.ide_panel.is_dragging_terminal = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
+            self.ide_panel.file_tree_dialog_input_drag = None;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
             self.autocomplete_scroll.is_dragging = false;
