@@ -368,7 +368,12 @@ impl Renderer {
         let target_h = visible_items as f32 * step + padding_top + padding_bottom;
         let total_h = options.len().max(1) as f32 * step + padding_top + padding_bottom;
 
-        let current_h = target_h * anim_progress;
+        let anim_progress = anim_progress.clamp(0.0, 1.0);
+        let smooth_progress = anim_progress
+            * anim_progress
+            * anim_progress
+            * (anim_progress * (anim_progress * 6.0 - 15.0) + 10.0);
+        let current_h = target_h * smooth_progress;
 
         if y + target_h > self.height {
             y -= target_h + 10.0 * scale;
@@ -379,7 +384,7 @@ impl Renderer {
         // --- 1. Отрисовка Тени ---
         for i in 1..=5 {
             let offset = i as f32 * scale;
-            let alpha = (0.15 - (i as f32 * 0.03)) * anim_progress;
+            let alpha = (0.15 - (i as f32 * 0.03)) * smooth_progress;
             self.push_rounded_rect(
                 x - offset,
                 y - offset,
@@ -587,7 +592,7 @@ impl Renderer {
             let thumb_h = (current_h / total_h * track_h).max(20.0 * scale);
             let thumb_y = y + track_margin + scroll_ratio * (track_h - thumb_h);
 
-            let alpha = (anim_progress * 1.5).clamp(0.0, 0.8);
+            let alpha = (smooth_progress * 1.5).clamp(0.0, 0.8);
 
             self.push_rounded_rect(
                 x + max_w - 10.0 * scale,

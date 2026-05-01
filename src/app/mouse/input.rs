@@ -159,6 +159,14 @@ impl App {
         }
 
         if state == ElementState::Pressed
+            && button != winit::event::MouseButton::Left
+            && self.autocomplete_window_contains(mx, my)
+        {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if state == ElementState::Pressed
             && button == winit::event::MouseButton::Right
             && self.file_tree_panel_contains(mx, my)
         {

@@ -9,7 +9,7 @@ BUILD_STD = -Z build-std=core,alloc,std,panic_abort
 TARGET = x86_64-unknown-linux-gnu
 
 # Настройки для быстрой сборки (DEBUG=2 дает трейсбеки, PANIC=abort работает с RUST_BACKTRACE)
-FAST_PROFILE_OPTS = CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=256 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
+FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
 
 # Ультимативные флаги (Fat LTO, v0 mangling, Identical Code Folding, Linker O3)
 MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C lto=fat -C symbol-mangling-version=v0 -C link-arg=-Wl,--icf=all -C link-arg=-Wl,-O3
@@ -182,7 +182,7 @@ pgo: pgo-gen pgo-run pgo-merge pgo-max pgo-clean
 
 clean:
 	@echo "🧹 Очистка..."
-	cargo clean
+	cargo +nightly clean
 
 tree:
 	@tree --filelimit 25 -I 'target' || true

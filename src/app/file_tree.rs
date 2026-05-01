@@ -36,7 +36,8 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "*.swp",
     "*.swo",
 ];
-pub const FILE_TREE_CONTEXT_MENU_ANIM_SECS: f32 = 0.12;
+pub const FILE_TREE_CONTEXT_MENU_ANIM_SECS: f32 = 0.28;
+const FILE_TREE_UNDO_LIMIT: usize = 64;
 
 /// Проверяет, должен ли узел быть скрыт по паттернам.
 /// Поддерживает:
@@ -145,11 +146,7 @@ pub fn file_tree_context_menu_anim_progress(opened_at: Instant, now: Instant) ->
         .unwrap_or_default()
         .as_secs_f32();
     let progress = (elapsed / FILE_TREE_CONTEXT_MENU_ANIM_SECS).clamp(0.0, 1.0);
-    if progress > 0.98 {
-        1.0
-    } else {
-        progress
-    }
+    progress * progress * progress * (progress * (progress * 6.0 - 15.0) + 10.0)
 }
 
 pub struct FileTreeCreateDialog {
@@ -195,6 +192,33 @@ pub struct FileTreeMoveDialog {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct FileTreeDeleteDialog {
+    pub paths: Vec<PathBuf>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileTreeTrashEntry {
+    pub original_path: PathBuf,
+    pub trash_path: PathBuf,
+    pub info_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub enum FileTreeUndoAction {
+    Created { paths: Vec<PathBuf> },
+    Copied { paths: Vec<PathBuf> },
+    Moved { pairs: Vec<(PathBuf, PathBuf)> },
+    Renamed { old_path: PathBuf, new_path: PathBuf },
+    Trashed { entries: Vec<FileTreeTrashEntry> },
+}
+
+#[derive(Clone, Debug)]
+pub struct FileTreeUndoEntry {
+    pub action: FileTreeUndoAction,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileTreeDialogInputKind {
     Create,
@@ -217,17 +241,91 @@ pub fn file_tree_move_dialog_message(sources: &[PathBuf], target_dir: &Path) -> 
     }
 }
 
+pub fn file_tree_delete_dialog_message(paths: &[PathBuf]) -> String {
+    if paths.len() == 1 {
+        let name = paths[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| paths[0].to_str().unwrap_or("1 элемент"));
+        format!("Переместить '{name}' в корзину?")
+    } else {
+        format!("Переместить {} элементов в корзину?", paths.len())
+    }
+}
+
 pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState) -> bool {
     ide_panel.file_tree_context_menu.is_some()
         || ide_panel.file_tree_create_dialog.is_some()
         || ide_panel.file_tree_rename_dialog.is_some()
         || ide_panel.file_tree_move_dialog.is_some()
+        || ide_panel.file_tree_delete_dialog.is_some()
 }
 
 const FILE_TREE_NAME_INPUT_MAX_BYTES: usize = 255;
 pub(crate) const FILE_TREE_DIALOG_INPUT_TEXT_SCALE: f32 = 0.92;
 pub(crate) const FILE_TREE_DIALOG_W: f32 = 460.0;
 pub(crate) const FILE_TREE_DIALOG_SIDE_PAD: f32 = 28.0;
+pub(crate) const FILE_TREE_PATH_INPUT_MIN_W: f32 = 150.0;
+
+pub(crate) fn file_tree_parent_path_prefix(parent_dir: &Path) -> String {
+    let mut text = parent_dir.to_string_lossy().into_owned();
+    if !text.ends_with(std::path::MAIN_SEPARATOR) {
+        text.push(std::path::MAIN_SEPARATOR);
+    }
+    text
+}
+
+pub(crate) fn file_tree_clipped_path_suffix<F>(text: &str, max_w: f32, mut measure: F) -> String
+where
+    F: FnMut(&str) -> f32,
+{
+    if measure(text) <= max_w {
+        return text.to_string();
+    }
+    let ellipsis = "...";
+    let ellipsis_w = measure(ellipsis);
+    if ellipsis_w >= max_w {
+        return ellipsis.to_string();
+    }
+
+    let mut suffix_start = text.len();
+    for (idx, _) in text.char_indices().rev() {
+        if ellipsis_w + measure(&text[idx..]) > max_w {
+            break;
+        }
+        suffix_start = idx;
+    }
+    format!("{ellipsis}{}", &text[suffix_start..])
+}
+
+pub(crate) fn file_tree_path_input_layout<F>(
+    dialog_x: f32,
+    dialog_w: f32,
+    scale: f32,
+    parent_dir: &Path,
+    mut measure: F,
+) -> (String, f32, f32)
+where
+    F: FnMut(&str) -> f32,
+{
+    let side_pad = FILE_TREE_DIALOG_SIDE_PAD * scale;
+    let content_x = dialog_x + side_pad;
+    let content_w = dialog_w - side_pad * 2.0;
+    let gap = 6.0 * scale;
+    let min_input_w = (FILE_TREE_PATH_INPUT_MIN_W * scale)
+        .min(content_w * 0.58)
+        .max(80.0 * scale);
+    let max_prefix_w = (content_w - min_input_w - gap).max(0.0);
+    let prefix = file_tree_clipped_path_suffix(
+        &file_tree_parent_path_prefix(parent_dir),
+        max_prefix_w,
+        &mut measure,
+    );
+    let prefix_w = measure(&prefix).min(max_prefix_w);
+    let input_x = content_x + prefix_w + gap;
+    let input_w = (content_x + content_w - input_x).max(min_input_w.min(content_w));
+    (prefix, input_x, input_w)
+}
 
 pub(crate) fn file_tree_name_input_scroll_x<F>(
     text: &str,
@@ -778,6 +876,190 @@ fn delete_path(path: &Path) -> std::io::Result<()> {
     }
 }
 
+fn move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
+    if !src.exists() {
+        return Err(format!("Не найдено: {}", src.display()));
+    }
+    if dst.exists() && src != dst {
+        return Err(format!("Уже существует: {}", dst.display()));
+    }
+    if let Some(parent) = dst.parent() {
+        if !parent.is_dir() {
+            return Err(format!("Не найдена папка: {}", parent.display()));
+        }
+    }
+    if src == dst {
+        return Ok(());
+    }
+    match std::fs::rename(src, dst) {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            copy_path_recursive(src, dst).map_err(|err| err.to_string())?;
+            delete_path(src).map_err(|err| err.to_string())
+        }
+    }
+}
+
+fn prune_nested_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut sorted = paths.to_vec();
+    sorted.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    let mut pruned: Vec<PathBuf> = Vec::new();
+    for path in sorted {
+        if !pruned
+            .iter()
+            .any(|parent| path != *parent && path.starts_with(parent))
+        {
+            pruned.push(path);
+        }
+    }
+    pruned
+}
+
+fn trash_dirs() -> Result<(PathBuf, PathBuf), String> {
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/share"))
+        })
+        .ok_or_else(|| "Не удалось найти XDG trash".to_string())?;
+    let trash_dir = data_home.join("Trash");
+    Ok((trash_dir.join("files"), trash_dir.join("info")))
+}
+
+fn trash_info_path_value(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    let mut out = String::with_capacity(text.len());
+    for &byte in text.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'-' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+fn unix_days_to_ymd(days_since_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u32, day as u32)
+}
+
+fn trash_deletion_date() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let (year, month, day) = unix_days_to_ymd(days);
+    let hour = rem / 3_600;
+    let min = (rem % 3_600) / 60;
+    let sec = rem % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}")
+}
+
+fn trash_single_path(path: &Path, files_dir: &Path, info_dir: &Path) -> Result<FileTreeTrashEntry, String> {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Err("Не удалось прочитать имя".to_string());
+    };
+    let trash_path = unique_child_path(files_dir, name);
+    let trash_name = trash_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Не удалось создать имя в корзине".to_string())?;
+    let info_path = info_dir.join(format!("{trash_name}.trashinfo"));
+    move_path_exact(path, &trash_path)?;
+    let info = format!(
+        "[Trash Info]\nPath={}\nDeletionDate={}\n",
+        trash_info_path_value(path),
+        trash_deletion_date()
+    );
+    if let Err(err) = std::fs::write(&info_path, info) {
+        let _ = move_path_exact(&trash_path, path);
+        return Err(err.to_string());
+    }
+    Ok(FileTreeTrashEntry {
+        original_path: path.to_path_buf(),
+        trash_path,
+        info_path,
+    })
+}
+
+fn trash_paths(paths: &[PathBuf], workspaces: &[PathBuf]) -> Result<Vec<FileTreeTrashEntry>, String> {
+    let paths = prune_nested_paths(paths);
+    for path in &paths {
+        if !can_modify_path(path, workspaces) {
+            return Err("Можно удалять только элементы внутри workspace".to_string());
+        }
+    }
+    let (files_dir, info_dir) = trash_dirs()?;
+    std::fs::create_dir_all(&files_dir).map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&info_dir).map_err(|err| err.to_string())?;
+    let mut trashed = Vec::new();
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        match trash_single_path(&path, &files_dir, &info_dir) {
+            Ok(entry) => trashed.push(entry),
+            Err(err) => {
+                let _ = restore_trash_entries(&trashed);
+                return Err(err);
+            }
+        }
+    }
+    Ok(trashed)
+}
+
+fn restore_trash_entries(entries: &[FileTreeTrashEntry]) -> Result<Vec<PathBuf>, String> {
+    let mut restored = Vec::new();
+    for entry in entries.iter().rev() {
+        if !entry.trash_path.exists() {
+            return Err(format!("Не найдено в корзине: {}", entry.trash_path.display()));
+        }
+        let Some(parent) = entry.original_path.parent() else {
+            return Err("Не удалось найти исходную папку".to_string());
+        };
+        if !parent.is_dir() {
+            return Err(format!("Не найдена папка: {}", parent.display()));
+        }
+        let restore_path = if entry.original_path.exists() {
+            let Some(name) = entry
+                .original_path
+                .file_name()
+                .and_then(|name| name.to_str())
+            else {
+                return Err("Не удалось прочитать имя".to_string());
+            };
+            unique_child_path(parent, name)
+        } else {
+            entry.original_path.clone()
+        };
+        move_path_exact(&entry.trash_path, &restore_path)?;
+        let _ = std::fs::remove_file(&entry.info_path);
+        restored.push(restore_path);
+    }
+    restored.reverse();
+    Ok(restored)
+}
+
 fn move_path_to_dir(src: &Path, target_dir: &Path) -> Result<(PathBuf, PathBuf), String> {
     if !src.exists() {
         return Err(format!("Не найдено: {}", src.display()));
@@ -834,23 +1116,24 @@ fn path_after_rename(path: &Path, old_root: &Path, new_root: &Path) -> Option<Pa
 
 fn copy_paths_to_dir(paths: &[PathBuf], target_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut copied = Vec::new();
-    for src in paths {
+    for src in prune_nested_paths(paths) {
         if !src.exists() {
             return Err(format!("Не найдено: {}", src.display()));
         }
-        if src.is_dir() && target_dir.starts_with(src) {
+        if src.is_dir() && target_dir.starts_with(&src) {
             return Err("Нельзя копировать папку внутрь самой себя".to_string());
         }
         let Some(name) = src.file_name().and_then(|name| name.to_str()) else {
             return Err("Не удалось прочитать имя".to_string());
         };
         let dst = unique_child_path(target_dir, name);
-        copy_path_recursive(src, &dst).map_err(|err| err.to_string())?;
+        copy_path_recursive(&src, &dst).map_err(|err| err.to_string())?;
         copied.push(dst);
     }
     Ok(copied)
 }
 
+#[cfg(test)]
 fn delete_paths(paths: &[PathBuf], workspaces: &[PathBuf]) -> Result<(), String> {
     for path in paths {
         if !can_modify_path(path, workspaces) {
@@ -887,6 +1170,49 @@ fn selected_paths(
 // ---------------------------------------------------------------------------
 
 impl App {
+    fn push_file_tree_undo(&mut self, action: FileTreeUndoAction) {
+        self.ide_panel
+            .file_tree_undo_stack
+            .push(FileTreeUndoEntry { action });
+        if self.ide_panel.file_tree_undo_stack.len() > FILE_TREE_UNDO_LIMIT {
+            self.ide_panel.file_tree_undo_stack.remove(0);
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn undo_file_tree_operation(&mut self) -> Result<(), String> {
+        let Some(entry) = self.ide_panel.file_tree_undo_stack.pop() else {
+            return Ok(());
+        };
+        let mut selection = Vec::new();
+        match entry.action {
+            FileTreeUndoAction::Created { paths } | FileTreeUndoAction::Copied { paths } => {
+                let trashed = trash_paths(&paths, &self.ide_workspaces)?;
+                selection.extend(trashed.into_iter().map(|entry| entry.original_path));
+            }
+            FileTreeUndoAction::Moved { pairs } => {
+                for (old_path, new_path) in pairs.iter().rev() {
+                    move_path_exact(new_path, old_path)?;
+                    self.update_open_paths_after_file_tree_rename(new_path, old_path);
+                    selection.push(old_path.clone());
+                }
+                selection.reverse();
+            }
+            FileTreeUndoAction::Renamed { old_path, new_path } => {
+                move_path_exact(&new_path, &old_path)?;
+                self.update_open_paths_after_file_tree_rename(&new_path, &old_path);
+                selection.push(old_path);
+            }
+            FileTreeUndoAction::Trashed { entries } => {
+                selection = restore_trash_entries(&entries)?;
+            }
+        }
+        self.ide_panel.file_tree_selection.clear();
+        self.ide_panel.file_tree_selection.extend(selection);
+        self.refresh_file_tree();
+        Ok(())
+    }
+
     /// Запускает фоновый скан дерева. Вызывать при открытии Explorer,
     /// добавлении workspace или разворачивании папки.
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1139,7 +1465,7 @@ impl App {
             FileTreeMenuAction::Delete => {
                 if let Some(target_path) = menu.target_path {
                     let paths = self.file_tree_selected_paths_for(&target_path);
-                    let _ = self.delete_file_tree_paths(paths);
+                    self.open_file_tree_delete_dialog(paths);
                 }
             }
             FileTreeMenuAction::Copy => {
@@ -1257,7 +1583,8 @@ impl App {
             .file_tree_expanded
             .insert(dialog.parent_dir.clone());
         self.ide_panel.file_tree_selection.clear();
-        self.ide_panel.file_tree_selection.insert(path);
+        self.ide_panel.file_tree_selection.insert(path.clone());
+        self.push_file_tree_undo(FileTreeUndoAction::Created { paths: vec![path] });
         self.ide_panel.file_tree_create_dialog = None;
         self.refresh_file_tree();
     }
@@ -1273,7 +1600,8 @@ impl App {
             Ok(new_path) => {
                 self.update_open_paths_after_file_tree_rename(&old_path, &new_path);
                 self.ide_panel.file_tree_selection.clear();
-                self.ide_panel.file_tree_selection.insert(new_path);
+                self.ide_panel.file_tree_selection.insert(new_path.clone());
+                self.push_file_tree_undo(FileTreeUndoAction::Renamed { old_path, new_path });
                 self.ide_panel.file_tree_rename_dialog = None;
                 self.refresh_file_tree();
             }
@@ -1365,23 +1693,33 @@ impl App {
             FileTreeClipboardMode::Copy => {
                 let copied = copy_paths_to_dir(&clipboard.paths, &target_dir)?;
                 self.ide_panel.file_tree_selection.clear();
-                self.ide_panel.file_tree_selection.extend(copied);
+                self.ide_panel.file_tree_selection.extend(copied.clone());
+                if !copied.is_empty() {
+                    self.push_file_tree_undo(FileTreeUndoAction::Copied { paths: copied });
+                }
                 Ok(())
             }
             FileTreeClipboardMode::Cut => {
-                for path in &clipboard.paths {
+                let paths = prune_nested_paths(&clipboard.paths);
+                for path in &paths {
                     if !can_modify_path(path, &self.ide_workspaces) {
                         return Err("Можно вырезать только элементы внутри workspace".to_string());
                     }
                 }
                 let mut moved = Vec::new();
-                for src in &clipboard.paths {
-                    let (_, dst) = move_path_to_dir(src, &target_dir)?;
-                    moved.push(dst);
+                let mut pairs = Vec::new();
+                for src in &paths {
+                    let (old_path, dst) = move_path_to_dir(src, &target_dir)?;
+                    self.update_open_paths_after_file_tree_rename(&old_path, &dst);
+                    moved.push(dst.clone());
+                    pairs.push((old_path, dst));
                 }
                 self.ide_panel.file_tree_selection.clear();
                 self.ide_panel.file_tree_selection.extend(moved);
                 self.ide_panel.file_tree_clipboard = None;
+                if !pairs.is_empty() {
+                    self.push_file_tree_undo(FileTreeUndoAction::Moved { pairs });
+                }
                 Ok(())
             }
         };
@@ -1393,8 +1731,33 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn delete_file_tree_paths(&mut self, paths: Vec<PathBuf>) -> Result<(), String> {
-        delete_paths(&paths, &self.ide_workspaces)?;
+    pub fn open_file_tree_delete_dialog(&mut self, paths: Vec<PathBuf>) {
+        let paths = prune_nested_paths(&paths);
+        if paths.is_empty() {
+            return;
+        }
+        self.ide_panel.file_tree_delete_dialog = Some(FileTreeDeleteDialog { paths, error: None });
+        self.ide_panel.file_tree_context_menu = None;
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn confirm_file_tree_delete(&mut self) -> Result<(), String> {
+        let Some(dialog) = self.ide_panel.file_tree_delete_dialog.as_mut() else {
+            return Ok(());
+        };
+        let paths = dialog.paths.clone();
+        match trash_paths(&paths, &self.ide_workspaces) {
+            Ok(entries) => {
+                self.ide_panel.file_tree_delete_dialog = None;
+                if !entries.is_empty() {
+                    self.push_file_tree_undo(FileTreeUndoAction::Trashed { entries });
+                }
+            }
+            Err(err) => {
+                dialog.error = Some(err.clone());
+                return Err(err);
+            }
+        }
         self.ide_panel.file_tree_selection.clear();
         self.refresh_file_tree();
         Ok(())
@@ -1423,33 +1786,48 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn finish_file_tree_move(&mut self) {
-        let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() else {
+        let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_ref() else {
             return;
         };
-        if !is_workspace_path(&dialog.target_dir, &self.ide_workspaces) {
-            dialog.error = Some("Путь вне workspace".to_string());
+        let target_dir = dialog.target_dir.clone();
+        let sources = prune_nested_paths(&dialog.sources);
+        if !is_workspace_path(&target_dir, &self.ide_workspaces) {
+            if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
+                dialog.error = Some("Путь вне workspace".to_string());
+            }
             return;
         }
         let mut moved = Vec::new();
-        for src in &dialog.sources {
+        let mut pairs = Vec::new();
+        for src in &sources {
             if !can_modify_path(src, &self.ide_workspaces) {
-                dialog.error =
-                    Some("Можно перемещать только элементы внутри workspace".to_string());
+                if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
+                    dialog.error =
+                        Some("Можно перемещать только элементы внутри workspace".to_string());
+                }
                 return;
             }
-            match move_path_to_dir(src, &dialog.target_dir) {
-                Ok((_, dst)) => moved.push(dst),
+            match move_path_to_dir(src, &target_dir) {
+                Ok((old_path, dst)) => {
+                    self.update_open_paths_after_file_tree_rename(&old_path, &dst);
+                    moved.push(dst.clone());
+                    pairs.push((old_path, dst));
+                }
                 Err(err) => {
-                    dialog.error = Some(err);
+                    if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
+                        dialog.error = Some(err);
+                    }
                     return;
                 }
             }
         }
-        let target_dir = dialog.target_dir.clone();
         self.ide_panel.file_tree_move_dialog = None;
         self.ide_panel.file_tree_selection.clear();
         self.ide_panel.file_tree_selection.extend(moved);
         self.ide_panel.file_tree_expanded.insert(target_dir);
+        if !pairs.is_empty() {
+            self.push_file_tree_undo(FileTreeUndoAction::Moved { pairs });
+        }
         self.refresh_file_tree();
     }
 
@@ -1556,6 +1934,8 @@ impl App {
                 | crate::ui_system::UiId::FileTreeRenameCancel
                 | crate::ui_system::UiId::FileTreeMoveConfirm
                 | crate::ui_system::UiId::FileTreeMoveCancel
+                | crate::ui_system::UiId::FileTreeDeleteConfirm
+                | crate::ui_system::UiId::FileTreeDeleteCancel
         )
     }
 }
@@ -1567,14 +1947,22 @@ impl App {
         kind: FileTreeDialogInputKind,
         mx: f32,
     ) -> Option<usize> {
-        let (text, cursor) = match kind {
+        let (text, cursor, parent_dir) = match kind {
             FileTreeDialogInputKind::Create => {
                 let dialog = self.ide_panel.file_tree_create_dialog.as_ref()?;
-                (dialog.editor.get_full_text(), dialog.editor.cursor)
+                (
+                    dialog.editor.get_full_text(),
+                    dialog.editor.cursor,
+                    Some(dialog.parent_dir.clone()),
+                )
             }
             FileTreeDialogInputKind::Rename => {
                 let dialog = self.ide_panel.file_tree_rename_dialog.as_ref()?;
-                (dialog.editor.get_full_text(), dialog.editor.cursor)
+                (
+                    dialog.editor.get_full_text(),
+                    dialog.editor.cursor,
+                    dialog.path.parent().map(Path::to_path_buf),
+                )
             }
         };
 
@@ -1582,8 +1970,21 @@ impl App {
         let s = r.scale_factor;
         let w = (FILE_TREE_DIALOG_W * s).min(r.width - 32.0 * s);
         let x = ((r.width - w) / 2.0).round();
-        let input_x = x + FILE_TREE_DIALOG_SIDE_PAD * s;
-        let input_w = w - FILE_TREE_DIALOG_SIDE_PAD * 2.0 * s;
+        let (input_x, input_w) = if let Some(parent_dir) = parent_dir.as_ref() {
+            let (_, input_x, input_w) = file_tree_path_input_layout(
+                x,
+                w,
+                s,
+                parent_dir,
+                |text| r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE),
+            );
+            (input_x, input_w)
+        } else {
+            (
+                x + FILE_TREE_DIALOG_SIDE_PAD * s,
+                w - FILE_TREE_DIALOG_SIDE_PAD * 2.0 * s,
+            )
+        };
         let pad_x = 8.0 * s;
         let visible_width = (input_w - pad_x * 2.0).max(0.0);
         let scale = FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
@@ -1653,6 +2054,28 @@ impl App {
                 winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
                 | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
                     self.finish_file_tree_move();
+                }
+                _ => {}
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
+            return true;
+        }
+
+        if self.ide_panel.file_tree_delete_dialog.is_some() {
+            if key_event.state != winit::event::ElementState::Pressed {
+                return true;
+            }
+            match key_event.physical_key {
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                    self.ide_panel.file_tree_delete_dialog = None;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
+                    let _ = self.confirm_file_tree_delete();
                 }
                 _ => {}
             }
@@ -1795,8 +2218,30 @@ impl App {
         if !self.ide_panel.file_tree_focused || self.show_settings {
             return false;
         }
+        if ctrl
+            && physical_key
+                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
+        {
+            let _ = self.undo_file_tree_operation();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
+        }
         if self.ide_panel.file_tree_selection.is_empty() {
             return false;
+        }
+        if physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) {
+            let fallback = match self.ide_panel.file_tree_selection.iter().next() {
+                Some(path) => path.clone(),
+                None => return false,
+            };
+            let paths = self.file_tree_selected_paths_for(&fallback);
+            self.open_file_tree_delete_dialog(paths);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
         }
         if physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F2) {
             if let Some(path) = self.file_tree_single_selected_path() {
@@ -2196,13 +2641,70 @@ mod tests {
             error: None,
         });
         assert!(file_tree_overlay_active_for_panel(&panel));
+        panel.file_tree_move_dialog = None;
+
+        panel.file_tree_delete_dialog = Some(FileTreeDeleteDialog {
+            paths: vec![root.join("old.rs")],
+            error: None,
+        });
+        assert!(file_tree_overlay_active_for_panel(&panel));
 
         assert!(crate::app::App::ui_id_is_file_tree_overlay(
             crate::ui_system::UiId::FileTreeRenameInput
         ));
+        assert!(crate::app::App::ui_id_is_file_tree_overlay(
+            crate::ui_system::UiId::FileTreeDeleteConfirm
+        ));
         assert!(!crate::app::App::ui_id_is_file_tree_overlay(
             crate::ui_system::UiId::EditorTextBody
         ));
+    }
+
+    #[test]
+    fn file_tree_path_input_layout_clips_parent_and_preserves_input_width() {
+        let parent = PathBuf::from("/tmp/workspace/src/features/bookings");
+        let (prefix, input_x, input_w) =
+            file_tree_path_input_layout(100.0, 460.0, 1.0, &parent, |text| {
+                text.len() as f32 * 8.0
+            });
+
+        assert!(prefix.starts_with("..."));
+        assert!(prefix.ends_with("bookings/"));
+        assert!(input_x > 100.0 + FILE_TREE_DIALOG_SIDE_PAD);
+        assert!(input_w >= FILE_TREE_PATH_INPUT_MIN_W);
+
+        let short = PathBuf::from("/tmp/ws");
+        let (prefix, _, _) = file_tree_path_input_layout(0.0, 460.0, 1.0, &short, |text| {
+            text.len() as f32 * 4.0
+        });
+        assert_eq!(prefix, file_tree_parent_path_prefix(&short));
+    }
+
+    #[test]
+    fn file_tree_trash_single_path_and_restore_roundtrip() {
+        let root = test_root("file_tree_trash");
+        let _ = std::fs::remove_dir_all(&root);
+        let workspace = root.join("workspace");
+        let files_dir = root.join("trash").join("files");
+        let info_dir = root.join("trash").join("info");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&files_dir).unwrap();
+        std::fs::create_dir_all(&info_dir).unwrap();
+        let path = workspace.join("booking.py");
+        std::fs::write(&path, "box\n").unwrap();
+
+        let entry = trash_single_path(&path, &files_dir, &info_dir).unwrap();
+        assert!(!path.exists());
+        assert!(entry.trash_path.exists());
+        let info = std::fs::read_to_string(&entry.info_path).unwrap();
+        assert!(info.contains("[Trash Info]"));
+        assert!(info.contains("Path=/"));
+
+        let restored = restore_trash_entries(&[entry]).unwrap();
+        assert_eq!(restored, vec![path.clone()]);
+        assert!(path.exists());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

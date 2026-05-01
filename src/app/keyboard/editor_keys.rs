@@ -92,6 +92,25 @@ fn bounded_repeat_scroll_delta(delta_y: f32, line_height: f32) -> Option<f32> {
     (delta_y.abs() <= line_height * 2.0).then_some(delta_y)
 }
 
+fn key_text_for_editor_insert<'a>(
+    physical_key: winit::keyboard::PhysicalKey,
+    event_text: Option<&'a str>,
+    logical_text: Option<&'a str>,
+    shift: bool,
+) -> Option<&'a str> {
+    if let Some(text) = event_text {
+        return Some(text);
+    }
+    if let Some(text) = logical_text {
+        return Some(text);
+    }
+    match physical_key {
+        PhysicalKey::Code(KeyCode::Period) if !shift => Some("."),
+        PhysicalKey::Code(KeyCode::NumpadDecimal) if !shift => Some("."),
+        _ => None,
+    }
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_editor_keyboard_input(
@@ -649,7 +668,12 @@ impl App {
             }
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
-                    if let Some(txt) = key_event.logical_key.to_text() {
+                    if let Some(txt) = key_text_for_editor_insert(
+                        physical_key,
+                        key_event.text.as_deref(),
+                        key_event.logical_key.to_text(),
+                        shift,
+                    ) {
                         let insert_txt = match txt {
                             "(" => "()",
                             "[" => "[]",
@@ -1012,5 +1036,29 @@ mod tests {
     fn bounded_repeat_scroll_delta_ignores_stale_large_focus_jump() {
         assert_eq!(bounded_repeat_scroll_delta(22.0, 12.0), Some(22.0));
         assert_eq!(bounded_repeat_scroll_delta(-25.0, 12.0), None);
+    }
+
+    #[test]
+    fn period_key_falls_back_to_dot_text_on_press() {
+        assert_eq!(
+            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Period), None, None, false),
+            Some(".")
+        );
+        assert_eq!(
+            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Period), Some("."), None, false),
+            Some(".")
+        );
+        assert_eq!(
+            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::NumpadDecimal), None, None, false),
+            Some(".")
+        );
+        assert_eq!(
+            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Period), None, Some(">"), true),
+            Some(">")
+        );
+        assert_eq!(
+            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Period), None, None, true),
+            None
+        );
     }
 }

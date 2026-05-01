@@ -50,6 +50,8 @@ pub enum UiId {
     FileTreeRenameCancel,
     FileTreeMoveConfirm,
     FileTreeMoveCancel,
+    FileTreeDeleteConfirm,
+    FileTreeDeleteCancel,
 
     // Search
     SearchClose,

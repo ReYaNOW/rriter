@@ -690,6 +690,16 @@ impl ApplicationHandler for App {
                     self.autocomplete_detail_rect = None;
                 }
 
+                let popup_blocks_background = self.popup_blocks_background_at(mx, my);
+                if popup_blocks_background {
+                    self.ui_registry.reset_cursor_state();
+                    if self.autocomplete_window_contains(mx, my) {
+                        wants_pointer = self.autocomplete_hovered_idx.is_some();
+                    } else {
+                        wants_pointer = false;
+                    }
+                }
+
                 let mut settings_cursor_mode = 0;
                 if self.show_settings || self.settings_anim_progress > 0.0 {
                     // Помечаем границу: элементы оверлея регистрируются ниже.
@@ -716,7 +726,11 @@ impl ApplicationHandler for App {
 
                 // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
                 let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
-                if self.is_ide_mode && !self.show_welcome && !self.show_settings {
+                if self.is_ide_mode
+                    && !self.show_welcome
+                    && !self.show_settings
+                    && !popup_blocks_background
+                {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
@@ -782,6 +796,8 @@ impl ApplicationHandler for App {
                     }
                 } else if wants_pointer {
                     winit::window::CursorIcon::Pointer
+                } else if popup_blocks_background {
+                    winit::window::CursorIcon::Default
                 } else if !self.show_welcome {
                     let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
                     let window_height = self.window.as_ref().unwrap().inner_size().height as f32;

@@ -102,6 +102,13 @@ impl App {
             return;
         }
 
+        if !self.autocomplete_detail_selecting && self.autocomplete_window_contains(px, py) {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if self.file_tree_overlay_active() {
             if let Some(kind) = self.ide_panel.file_tree_dialog_input_drag {
                 if let Some(target_idx) = self.file_tree_dialog_input_index_at(kind, px) {

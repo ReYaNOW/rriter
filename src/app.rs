@@ -1379,6 +1379,23 @@ impl App {
         self.autocomplete_apply_pending_response = false;
     }
 
+    pub fn autocomplete_window_contains(&self, x: f32, y: f32) -> bool {
+        if !self.autocomplete_active {
+            return false;
+        }
+
+        [self.autocomplete_rect, self.autocomplete_detail_rect]
+            .into_iter()
+            .flatten()
+            .any(|(rx, ry, rw, rh)| {
+                rw > 0.0 && rh > 0.0 && x >= rx && x <= rx + rw && y >= ry && y <= ry + rh
+            })
+    }
+
+    pub fn popup_blocks_background_at(&self, x: f32, y: f32) -> bool {
+        self.file_tree_overlay_active() || self.autocomplete_window_contains(x, y)
+    }
+
     pub fn refresh_autocomplete_detail_popup(&mut self) {
         let idx = self.autocomplete_selected_idx;
         let Some((item, _)) = self.autocomplete_options.get(idx) else {
@@ -1529,6 +1546,7 @@ impl App {
             if hide_exact_match {
                 self.hide_autocomplete_popup_keep_request();
             } else if !self.autocomplete_active {
+                self.autocomplete_active = true;
                 self.autocomplete_anim_progress = 0.0;
                 self.autocomplete_scroll.current = 0.0;
                 self.autocomplete_scroll.target = 0.0;

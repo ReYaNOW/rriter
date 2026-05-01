@@ -191,6 +191,8 @@ pub struct IdePanelState {
     pub file_tree_clipboard: Option<crate::app::file_tree::FileTreeClipboard>,
     pub file_tree_drag: Option<crate::app::file_tree::FileTreeDragState>,
     pub file_tree_move_dialog: Option<crate::app::file_tree::FileTreeMoveDialog>,
+    pub file_tree_delete_dialog: Option<crate::app::file_tree::FileTreeDeleteDialog>,
+    pub file_tree_undo_stack: Vec<crate::app::file_tree::FileTreeUndoEntry>,
     pub file_tree_dialog_input_drag: Option<crate::app::file_tree::FileTreeDialogInputKind>,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
@@ -261,6 +263,8 @@ impl Default for IdePanelState {
             file_tree_clipboard: None,
             file_tree_drag: None,
             file_tree_move_dialog: None,
+            file_tree_delete_dialog: None,
+            file_tree_undo_stack: Vec::new(),
             file_tree_dialog_input_drag: None,
             lsp_servers: Vec::new(),
             lsp_logs_expanded: FxHashSet::default(),

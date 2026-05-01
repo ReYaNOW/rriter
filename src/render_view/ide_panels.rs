@@ -345,6 +345,8 @@ impl Renderer {
 
             // --- Дерево файлов проводника ---
             if ide_panel.is_open(crate::app::PanelId::Explorer) {
+                let file_tree_overlay_open =
+                    crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
                 self.flush();
                 unsafe {
                     self.gl.enable(glow::SCISSOR_TEST);
@@ -384,19 +386,22 @@ impl Renderer {
                         let node = &ide_panel.file_tree_nodes[i];
                         let row_y = title_h + i as f32 * row_h - scroll;
 
-                        ui_registry.register_rect(
-                            crate::ui_system::UiId::FileTreeNode(i),
-                            panel_x,
-                            row_y,
-                            panel_left_w,
-                            row_h,
-                            mx,
-                            my,
-                        );
+                        if !file_tree_overlay_open {
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::FileTreeNode(i),
+                                panel_x,
+                                row_y,
+                                panel_left_w,
+                                row_h,
+                                mx,
+                                my,
+                            );
+                        }
 
-                        let is_hovered = ide_panel.file_tree_hovered_idx == Some(i)
-                            || ui_registry.hovered()
-                                == Some(crate::ui_system::UiId::FileTreeNode(i));
+                        let is_hovered = !file_tree_overlay_open
+                            && (ide_panel.file_tree_hovered_idx == Some(i)
+                                || ui_registry.hovered()
+                                    == Some(crate::ui_system::UiId::FileTreeNode(i)));
                         let is_selected = ide_panel.file_tree_selection.contains(&node.path);
 
                         if is_selected {
@@ -461,15 +466,17 @@ impl Renderer {
                             let arrow_str = if node.is_expanded { "▼" } else { "▶" };
                             let arrow_x = indent_x - 2.0 * s;
                             let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::FileTreeArrow(i),
-                                arrow_x - 4.0 * s,
-                                row_y,
-                                18.0 * s,
-                                row_h,
-                                mx,
-                                my,
-                            );
+                            if !file_tree_overlay_open {
+                                ui_registry.register_rect(
+                                    crate::ui_system::UiId::FileTreeArrow(i),
+                                    arrow_x - 4.0 * s,
+                                    row_y,
+                                    18.0 * s,
+                                    row_h,
+                                    mx,
+                                    my,
+                                );
+                            }
                             let arrow_color = if node.is_ignored {
                                 [0.973, 0.584, 0.502, 0.6]
                             } else {
@@ -1040,10 +1047,24 @@ impl Renderer {
                 1.0,
             );
 
-            let input_x = x + side_pad;
+            let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+            let (path_prefix, input_x, input_w) =
+                crate::app::file_tree::file_tree_path_input_layout(
+                    x,
+                    w,
+                    s,
+                    &dialog.parent_dir,
+                    |text| self.measure_ui_width(text, path_scale),
+                );
             let input_y = y + 66.0 * s;
-            let input_w = w - side_pad * 2.0;
             let input_h = 34.0 * s;
+            self.draw_string_scaled(
+                &path_prefix,
+                x + side_pad,
+                input_y + 23.0 * s,
+                [0.55, 0.57, 0.64, 1.0],
+                path_scale,
+            );
             ui_registry.register_text_input(
                 crate::ui_system::UiId::FileTreeCreateInput,
                 input_x,
@@ -1064,7 +1085,7 @@ impl Renderer {
             if let Some(error) = &dialog.error {
                 self.draw_string_scaled(
                     error,
-                    input_x,
+                    x + side_pad,
                     input_y + input_h + 20.0 * s,
                     self.theme.diag_error,
                     0.8,
@@ -1124,10 +1145,30 @@ impl Renderer {
                 1.0,
             );
 
-            let input_x = x + side_pad;
+            let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+            let (path_prefix, input_x, input_w) =
+                if let Some(parent_dir) = dialog.path.parent() {
+                    crate::app::file_tree::file_tree_path_input_layout(
+                        x,
+                        w,
+                        s,
+                        parent_dir,
+                        |text| self.measure_ui_width(text, path_scale),
+                    )
+                } else {
+                    (String::new(), x + side_pad, w - side_pad * 2.0)
+                };
             let input_y = y + 66.0 * s;
-            let input_w = w - side_pad * 2.0;
             let input_h = 34.0 * s;
+            if !path_prefix.is_empty() {
+                self.draw_string_scaled(
+                    &path_prefix,
+                    x + side_pad,
+                    input_y + 23.0 * s,
+                    [0.55, 0.57, 0.64, 1.0],
+                    path_scale,
+                );
+            }
             ui_registry.register_text_input(
                 crate::ui_system::UiId::FileTreeRenameInput,
                 input_x,
@@ -1148,7 +1189,7 @@ impl Renderer {
             if let Some(error) = &dialog.error {
                 self.draw_string_scaled(
                     error,
-                    input_x,
+                    x + side_pad,
                     input_y + input_h + 20.0 * s,
                     self.theme.diag_error,
                     0.8,
@@ -1241,6 +1282,77 @@ impl Renderer {
                 ),
                 (
                     crate::ui_system::UiId::FileTreeMoveCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+            ] {
+                let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+                if hovered {
+                    wants_pointer = true;
+                }
+                let bg = if hovered {
+                    [0.30, 0.32, 0.38, 1.0]
+                } else {
+                    [0.22, 0.23, 0.28, 1.0]
+                };
+                self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+                let tw = self.measure_ui_width(label, 0.86);
+                self.draw_string_scaled(
+                    label,
+                    bx + (btn_w - tw) / 2.0,
+                    btn_y + 21.0 * s,
+                    self.theme.fg,
+                    0.86,
+                );
+            }
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_delete_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s)
+                .min(self.width - 32.0 * s);
+            let h = 154.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Удалить в корзину",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+            let message = crate::app::file_tree::file_tree_delete_dialog_message(&dialog.paths);
+            self.draw_string_scaled(
+                &message,
+                x + side_pad,
+                y + 74.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.88,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    y + 100.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            for (id, label, bx) in [
+                (
+                    crate::ui_system::UiId::FileTreeDeleteConfirm,
+                    "В корзину",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeDeleteCancel,
                     "Отмена",
                     cancel_x,
                 ),

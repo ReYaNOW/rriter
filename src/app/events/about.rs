@@ -370,8 +370,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     if app.autocomplete_active && app.autocomplete_anim_progress < 1.0 {
-        app.autocomplete_anim_progress += (1.0 - app.autocomplete_anim_progress) * 20.0 * dt;
-        if app.autocomplete_anim_progress > 0.99 {
+        app.autocomplete_anim_progress += (1.0 - app.autocomplete_anim_progress) * 10.0 * dt;
+        if app.autocomplete_anim_progress > 0.997 {
             app.autocomplete_anim_progress = 1.0;
         }
         needs_redraw = true;

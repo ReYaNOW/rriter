@@ -532,6 +532,14 @@ impl App {
                 self.ide_panel.file_tree_move_dialog = None;
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::FileTreeDeleteConfirm => {
+                let _ = self.confirm_file_tree_delete();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::FileTreeDeleteCancel => {
+                self.ide_panel.file_tree_delete_dialog = None;
+                self.window.as_ref().unwrap().request_redraw();
+            }
 
             // Search panel
             UiId::SearchClose => {
