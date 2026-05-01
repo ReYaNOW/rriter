@@ -1233,6 +1233,22 @@ impl LspManager {
             .unwrap_or((0, &[]))
     }
 
+    pub fn has_stale_instant_diagnostics(&self, path: &PathBuf, editor_version: u64) -> bool {
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+            diags
+                .get(&abs_path)
+                .is_some_and(|(version, _)| (*version as u64) < editor_version)
+        };
+        is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+    }
+
     /// Диагностики для текущего файла, отфильтрованные по строке
     pub fn diagnostics_for_line(&self, path: &PathBuf, line: u32) -> Vec<&Diagnostic> {
         self.get_diagnostics(path)
@@ -1814,6 +1830,8 @@ mod tests {
         let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
         assert_eq!(version, 5);
         assert_eq!(instant.len(), 2);
+        assert!(manager.has_stale_instant_diagnostics(&path, 5));
+        assert!(!manager.has_stale_instant_diagnostics(&path, 2));
         assert_eq!(manager.diagnostics_for_line(&path, 1).len(), 2);
         assert!(manager.diagnostics_for_line(&path, 99).is_empty());
 

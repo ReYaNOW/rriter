@@ -86,8 +86,17 @@ fn should_suppress_editor_hover_for_scroll_drag(
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        self.renderer.as_mut().unwrap().last_mouse_x = position.x as f32;
-        self.renderer.as_mut().unwrap().last_mouse_y = position.y as f32;
+        let px = position.x as f32;
+        let py = position.y as f32;
+        {
+            let renderer = self.renderer.as_mut().unwrap();
+            renderer.last_mouse_x = px;
+            renderer.last_mouse_y = py;
+            if renderer.popups_waiting_for_mouse_move_at(px, py) {
+                return;
+            }
+            renderer.update_popup_mouse_move_gate();
+        }
 
         if self.dialog_window.is_some() {
             return;
@@ -172,7 +181,7 @@ impl App {
         if editor_text_selecting {
             clear_hover_popup(self.renderer.as_mut());
             if let Some(r) = self.renderer.as_mut() {
-                r.hide_popups_until_mouse_move = true;
+                r.suppress_popups_until_next_mouse_move();
             }
         }
 

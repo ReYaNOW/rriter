@@ -6,6 +6,14 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith, image::Content};
 pub const MAX_VERTICES: usize = 32_768;
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
+const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
+
+#[inline(always)]
+fn popup_waiting_for_mouse_move(hide: bool, last_known: (f32, f32), x: f32, y: f32) -> bool {
+    hide
+        && (x - last_known.0).abs() <= POPUP_MOUSE_MOVE_EPS
+        && (y - last_known.1).abs() <= POPUP_MOUSE_MOVE_EPS
+}
 
 #[derive(Clone)]
 pub struct Theme {
@@ -398,6 +406,25 @@ fn rounded_rect_gradient_vertices(
 }
 
 impl Renderer {
+    #[inline(always)]
+    pub fn suppress_popups_until_next_mouse_move(&mut self) {
+        self.hide_popups_until_mouse_move = true;
+        self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
+    }
+
+    #[inline(always)]
+    pub fn popups_waiting_for_mouse_move_at(&self, x: f32, y: f32) -> bool {
+        popup_waiting_for_mouse_move(self.hide_popups_until_mouse_move, self.last_known_mouse, x, y)
+    }
+
+    #[inline(always)]
+    pub fn update_popup_mouse_move_gate(&mut self) {
+        if !self.popups_waiting_for_mouse_move_at(self.last_mouse_x, self.last_mouse_y) {
+            self.hide_popups_until_mouse_move = false;
+            self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
         unsafe {
@@ -1472,6 +1499,24 @@ mod tests {
         assert_eq!(font.data_slice(), b"font-bytes");
 
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn popup_mouse_move_gate_waits_for_real_motion_after_focus_restore() {
+        let last_known = (120.0, 80.0);
+
+        assert!(popup_waiting_for_mouse_move(
+            true, last_known, 120.0, 80.0
+        ));
+        assert!(popup_waiting_for_mouse_move(
+            true, last_known, 120.25, 80.25
+        ));
+        assert!(!popup_waiting_for_mouse_move(
+            true, last_known, 121.0, 80.0
+        ));
+        assert!(!popup_waiting_for_mouse_move(
+            false, last_known, 120.0, 80.0
+        ));
     }
 
     #[test]

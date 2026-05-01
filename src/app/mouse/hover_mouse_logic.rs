@@ -144,7 +144,7 @@ pub fn suppress_hover_popup_until_mouse_move(
 ) -> bool {
     let had_popup = clear_hover_popup(None);
     if let Some(renderer) = renderer {
-        renderer.hide_popups_until_mouse_move = true;
+        renderer.suppress_popups_until_next_mouse_move();
     }
     had_popup
 }

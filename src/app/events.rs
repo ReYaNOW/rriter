@@ -258,7 +258,7 @@ impl ApplicationHandler for App {
                 if focused {
                     self.render_suspended = false;
                     if let Some(r) = self.renderer.as_mut() {
-                        r.hide_popups_until_mouse_move = true;
+                        r.suppress_popups_until_next_mouse_move();
                     }
                     if let Some(dw) = self.dialog_window.as_ref() {
                         // НЕ вызываем focus_window() здесь.

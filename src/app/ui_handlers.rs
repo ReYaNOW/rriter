@@ -762,7 +762,7 @@ impl App {
                 self.is_dragging = true;
                 crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 if let Some(r) = self.renderer.as_mut() {
-                    r.hide_popups_until_mouse_move = true;
+                    r.suppress_popups_until_next_mouse_move();
                 }
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();

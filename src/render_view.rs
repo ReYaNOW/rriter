@@ -253,14 +253,19 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
-        let (diag_version, instant_raw) = if let Some(l) = lsp {
+        let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(l) = lsp {
             if let Some(p) = editor_path {
-                l.get_instant_diagnostics_with_version(p)
+                let (version, diagnostics) = l.get_instant_diagnostics_with_version(p);
+                (
+                    version,
+                    diagnostics,
+                    l.has_stale_instant_diagnostics(p, editor.version),
+                )
             } else {
-                (0, &[] as &[crate::lsp::Diagnostic])
+                (0, &[] as &[crate::lsp::Diagnostic], false)
             }
         } else {
-            (0, &[] as &[crate::lsp::Diagnostic])
+            (0, &[] as &[crate::lsp::Diagnostic], false)
         };
 
         let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
@@ -305,7 +310,7 @@ impl Renderer {
             let mut suppress = false;
 
             if diag_line == cursor_phys_line {
-                if (diag_version as u64) < editor.version {
+                if (diag_version as u64) < editor.version || stale_instant_diagnostics {
                     suppress = true;
                 }
 
@@ -443,16 +448,13 @@ impl Renderer {
         };
         let is_ui_disabled = is_ide_mode && ide_panel.terminal_focused;
 
-        if (self.last_mouse_x, self.last_mouse_y) != self.last_known_mouse {
-            self.hide_popups_until_mouse_move = false;
-            self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
-        }
+        self.update_popup_mouse_move_gate();
         if self.last_editor_version_for_typing != editor.version
             || self.last_cursor_for_popups != editor.cursor
             || (self.last_scroll_y - scroll_y).abs() > 0.1
             || (self.last_scroll_x - scroll_x).abs() > 0.1
         {
-            self.hide_popups_until_mouse_move = true;
+            self.suppress_popups_until_next_mouse_move();
             self.last_editor_version_for_typing = editor.version;
             self.last_cursor_for_popups = editor.cursor;
         }
