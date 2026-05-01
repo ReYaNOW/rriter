@@ -37,6 +37,10 @@ fn line_indent_and_blank(editor: &Editor, line: usize) -> (usize, bool) {
     (indent, true)
 }
 
+fn editor_click_content_y(target_y: f32, line_height: f32) -> f32 {
+    (target_y - line_height * 0.25).max(0.0)
+}
+
 impl Editor {
     pub fn select_expand(&mut self) {
         let (start, end) = if let Some(anchor) = self.selection_anchor {
@@ -567,7 +571,7 @@ impl Editor {
         renderer: &mut Renderer,
         is_click: bool,
     ) {
-        let target_y = (target_y - renderer.line_height * 0.5).max(0.0);
+        let target_y = editor_click_content_y(target_y, renderer.line_height);
         let idx = renderer.get_byte_at_xy(self, target_x, target_y);
         if is_click {
             self.selection_anchor = Some(idx);
@@ -587,5 +591,35 @@ impl Editor {
         self.handle_selection(shift);
         let (x, y) = renderer.get_cursor_xy(self);
         self.cursor = renderer.get_byte_at_xy(self, x, y + step);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::editor_click_content_y;
+
+    #[test]
+    fn editor_click_content_y_uses_ibeam_midpoint_without_top_edge_bias() {
+        let line_height = 24.0;
+        let second_line_midpoint = line_height * 1.5;
+
+        assert_eq!(
+            editor_click_content_y(second_line_midpoint, line_height),
+            second_line_midpoint - line_height * 0.25
+        );
+        assert_ne!(
+            editor_click_content_y(second_line_midpoint, line_height),
+            second_line_midpoint - line_height * 0.5
+        );
+        assert_ne!(
+            editor_click_content_y(second_line_midpoint, line_height),
+            second_line_midpoint
+        );
+    }
+
+    #[test]
+    fn editor_click_content_y_clamps_negative_positions_to_document_start() {
+        assert_eq!(editor_click_content_y(-8.0, 24.0), 0.0);
+        assert_eq!(editor_click_content_y(0.0, 24.0), 0.0);
     }
 }
