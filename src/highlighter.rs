@@ -73,6 +73,7 @@ pub enum SymbolKind {
     Parameter,
     Property,
     Module,
+    Builtin,
     Keyword,
     Unknown,
 }
@@ -1239,9 +1240,14 @@ impl Highlighter {
 
                 let mut inject_builtins = |items: &[(&str, SymbolKind)]| {
                     for &(word, ref kind) in items {
+                        let kind = if *kind == SymbolKind::Keyword {
+                            SymbolKind::Keyword
+                        } else {
+                            SymbolKind::Builtin
+                        };
                         completions_map
                             .entry((word.to_string(), 0, usize::MAX))
-                            .or_insert_with(|| kind.clone());
+                            .or_insert(kind);
                     }
                 };
 
@@ -1486,6 +1492,14 @@ mod tests {
                 .completions
                 .iter()
                 .any(|item| item.word == "print")
+        );
+        assert_eq!(
+            highlighter
+                .completions
+                .iter()
+                .find(|item| item.word == "print")
+                .map(|item| item.kind),
+            Some(SymbolKind::Builtin)
         );
         assert!(
             highlighter

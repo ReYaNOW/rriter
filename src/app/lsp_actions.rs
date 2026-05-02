@@ -1,5 +1,33 @@
 use crate::app::App;
 
+pub(crate) fn lsp_server_logs_h_for_content(inner_total_h: f32, content_h: f32, s: f32) -> f32 {
+    let max_fit = (content_h - 152.0 * s).max(0.0);
+    if max_fit < 68.0 * s {
+        return 0.0;
+    }
+    let max_h = (800.0 * s).min(max_fit);
+    let min_h = (84.0 * s).min(max_h);
+    (inner_total_h + 54.0 * s).clamp(min_h, max_h)
+}
+
+pub(crate) fn lsp_server_logs_h_for_row(
+    inner_total_h: f32,
+    content_y: f32,
+    content_h: f32,
+    row_y: f32,
+    s: f32,
+) -> f32 {
+    let panel_max = lsp_server_logs_h_for_content(inner_total_h, content_h, s);
+    let max_fit = (content_y + content_h - row_y - 140.0 * s)
+        .min(panel_max)
+        .max(0.0);
+    if max_fit < 68.0 * s {
+        return 0.0;
+    }
+    let min_h = (84.0 * s).min(max_fit);
+    (inner_total_h + 54.0 * s).clamp(min_h, max_fit)
+}
+
 fn build_noqa_comment(existing_noqa: Option<&str>, codes: &[String]) -> String {
     let prefix = if existing_noqa.is_some() {
         "# noqa"
@@ -92,7 +120,11 @@ impl App {
             return 0.0;
         }
         let (inner_total_h, _) = self.lsp_server_inner_size(info, s);
-        (inner_total_h + 20.0 * s).clamp(50.0 * s, 800.0 * s)
+        let content_h = self
+            .lsp_panel_bounds()
+            .map(|(_, _, _, h)| h)
+            .unwrap_or(952.0 * s);
+        lsp_server_logs_h_for_content(inner_total_h, content_h, s)
     }
 
     pub(crate) fn lsp_server_inner_size(

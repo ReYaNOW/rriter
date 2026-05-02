@@ -409,6 +409,23 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::LspServerClearLogs(idx) => {
+                if idx < self.ide_panel.lsp_servers.len() {
+                    let name = self.ide_panel.lsp_servers[idx].name.to_string();
+                    if let Some(lsp) = &mut self.lsp {
+                        lsp.clear_server_logs(&name);
+                        self.ide_panel.lsp_servers = lsp.servers_info();
+                    }
+                    self.ide_panel.lsp_log_editors.remove(&name);
+                    self.ide_panel.lsp_log_source_counts.remove(&name);
+                    self.ide_panel.lsp_logs_scroll_y.remove(&name);
+                    self.ide_panel.lsp_logs_scroll_x.remove(&name);
+                    if self.ide_panel.lsp_logs_focused.as_deref() == Some(name.as_str()) {
+                        self.ide_panel.lsp_logs_focused = None;
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
             UiId::LspServerFixAll(idx) => {
                 if let Some(lsp) = &mut self.lsp {
                     if idx < self.ide_panel.lsp_servers.len() {
@@ -920,6 +937,81 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
+            UiId::LspLogsFilterInput => {
+                self.ide_panel.lsp_log_filter_focused = true;
+                self.ide_panel.lsp_logs_focused = None;
+                let input_x = self
+                    .lsp_panel_bounds()
+                    .map(|(cx, _, _, _)| {
+                        let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+                        cx + 24.0 * s
+                    })
+                    .unwrap_or(0.0);
+                if let Some(r) = self.renderer.as_mut() {
+                    let mx = r.last_mouse_x;
+                    let s = r.scale_factor;
+                    let text = self.ide_panel.lsp_log_filter_editor.get_full_text();
+                    let x_offset = (mx - (input_x + 8.0 * s)).max(0.0);
+                    let mut current_x = 0.0;
+                    let mut target_idx = text.len();
+                    let mut byte_idx = 0;
+                    for c in text.chars() {
+                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.78;
+                        if x_offset <= current_x + adv / 2.0 {
+                            target_idx = byte_idx;
+                            break;
+                        }
+                        current_x += adv;
+                        byte_idx += c.len_utf8();
+                    }
+                    self.ide_panel.lsp_log_filter_editor.cursor = target_idx;
+                    self.ide_panel.lsp_log_filter_editor.selection_anchor = Some(target_idx);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspLogsFilterClear => {
+                let old_version = self.ide_panel.lsp_log_filter_editor.version;
+                self.ide_panel.lsp_log_filter_editor = Editor::new(256);
+                self.ide_panel.lsp_log_filter_editor.version = old_version + 1;
+                self.ide_panel.lsp_log_filter_dirty = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspLogsFilterCase => {
+                self.ide_panel.lsp_log_filter_case_sensitive =
+                    !self.ide_panel.lsp_log_filter_case_sensitive;
+                self.ide_panel.lsp_log_filter_dirty = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspLogsFilterSend => {
+                self.ide_panel.lsp_log_filter_show_send =
+                    !self.ide_panel.lsp_log_filter_show_send;
+                self.ide_panel.lsp_log_filter_dirty = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspLogsFilterRecv => {
+                self.ide_panel.lsp_log_filter_show_recv =
+                    !self.ide_panel.lsp_log_filter_show_recv;
+                self.ide_panel.lsp_log_filter_dirty = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspLogsFilterOther => {
+                self.ide_panel.lsp_log_filter_show_other =
+                    !self.ide_panel.lsp_log_filter_show_other;
+                self.ide_panel.lsp_log_filter_dirty = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::ProblemFileToggle(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if *diag_idx == usize::MAX {
@@ -1071,6 +1163,7 @@ impl App {
                 }
             }
             UiId::LspLogArea(server_idx) => {
+                self.ide_panel.lsp_log_filter_focused = false;
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     self.ide_panel.lsp_logs_focused =
                         Some(self.ide_panel.lsp_servers[server_idx].name.to_string());

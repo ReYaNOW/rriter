@@ -32,8 +32,15 @@ pub enum UiId {
     LspServerToggle(usize),
     LspServerStop(usize),
     LspServerLogs(usize),
+    LspServerClearLogs(usize),
     LspServerFixAll(usize),
     LspLogFoldToggle(usize, usize), // (server_idx, line_idx)
+    LspLogsFilterInput,
+    LspLogsFilterClear,
+    LspLogsFilterCase,
+    LspLogsFilterSend,
+    LspLogsFilterRecv,
+    LspLogsFilterOther,
 
     // Sidebar
     SidebarSlot(crate::app::PanelId),

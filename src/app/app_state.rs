@@ -120,6 +120,46 @@ pub struct LspActionsMenu {
     pub pending_request_id: Option<i32>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LspLogFilter {
+    pub query: String,
+    pub case_sensitive: bool,
+    pub show_send: bool,
+    pub show_recv: bool,
+    pub show_other: bool,
+}
+
+impl LspLogFilter {
+    pub fn matches(&self, log: &crate::lsp::LogEntry) -> bool {
+        let direction_ok = if log.text.starts_with("[LSP SEND]") {
+            self.show_send
+        } else if log.text.starts_with("[LSP RECV]") {
+            self.show_recv
+        } else {
+            self.show_other
+        };
+        if !direction_ok {
+            return false;
+        }
+
+        let query = self.query.trim();
+        if query.is_empty() {
+            return true;
+        }
+        if self.case_sensitive {
+            query
+                .split_whitespace()
+                .all(|part| log.text.contains(part))
+        } else {
+            let hay = log.text.to_lowercase();
+            query
+                .to_lowercase()
+                .split_whitespace()
+                .all(|part| hay.contains(part))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutocompleteMode {
     TreeSitter,
@@ -134,6 +174,7 @@ pub struct AutocompleteItem {
     pub scope_start: usize,
     pub scope_end: usize,
     pub module: Option<String>,
+    pub module_path: Option<String>,
     pub detail: Option<String>,
     pub insert_text: Option<String>,
     pub text_edit: Option<crate::lsp::TextChange>,
@@ -148,6 +189,7 @@ impl From<CompletionItem> for AutocompleteItem {
             scope_start: item.scope_start,
             scope_end: item.scope_end,
             module: None,
+            module_path: None,
             detail: None,
             insert_text: None,
             text_edit: None,
@@ -158,12 +200,14 @@ impl From<CompletionItem> for AutocompleteItem {
 
 impl From<crate::lsp::LspCompletionItem> for AutocompleteItem {
     fn from(item: crate::lsp::LspCompletionItem) -> Self {
+        let module = item.module;
         Self {
             word: item.label,
             kind: item.kind,
             scope_start: 0,
             scope_end: usize::MAX,
-            module: item.module,
+            module_path: module.clone(),
+            module,
             detail: item.detail,
             insert_text: item.insert_text,
             text_edit: item.text_edit,
@@ -203,6 +247,15 @@ pub struct IdePanelState {
     pub lsp_logs_scroll_y: FxHashMap<String, crate::scroll::ScrollState>,
     pub lsp_logs_scroll_x: FxHashMap<String, crate::scroll::ScrollState>,
     pub lsp_logs_focused: Option<String>,
+    pub lsp_log_filter_editor: Editor,
+    pub lsp_log_filter_focused: bool,
+    pub lsp_log_filter_case_sensitive: bool,
+    pub lsp_log_filter_show_send: bool,
+    pub lsp_log_filter_show_recv: bool,
+    pub lsp_log_filter_show_other: bool,
+    pub lsp_log_filter_dirty: bool,
+    pub lsp_log_filter_applied: Option<LspLogFilter>,
+    pub lsp_log_source_counts: FxHashMap<String, usize>,
     pub diag_copied_idx: Option<usize>,
     pub problems_tab: usize,
     pub flat_diags: Vec<(std::path::PathBuf, usize)>,
@@ -274,6 +327,15 @@ impl Default for IdePanelState {
             lsp_logs_scroll_y: FxHashMap::default(),
             lsp_logs_scroll_x: FxHashMap::default(),
             lsp_logs_focused: None,
+            lsp_log_filter_editor: crate::editor::Editor::new(256),
+            lsp_log_filter_focused: false,
+            lsp_log_filter_case_sensitive: false,
+            lsp_log_filter_show_send: true,
+            lsp_log_filter_show_recv: true,
+            lsp_log_filter_show_other: true,
+            lsp_log_filter_dirty: true,
+            lsp_log_filter_applied: None,
+            lsp_log_source_counts: FxHashMap::default(),
             diag_copied_idx: None,
             problems_tab: 0,
             flat_diags: Vec::new(),
@@ -295,6 +357,16 @@ impl Default for IdePanelState {
 }
 
 impl IdePanelState {
+    pub fn current_lsp_log_filter(&self) -> LspLogFilter {
+        LspLogFilter {
+            query: self.lsp_log_filter_editor.get_full_text(),
+            case_sensitive: self.lsp_log_filter_case_sensitive,
+            show_send: self.lsp_log_filter_show_send,
+            show_recv: self.lsp_log_filter_show_recv,
+            show_other: self.lsp_log_filter_show_other,
+        }
+    }
+
     pub fn any_top_open(&self) -> bool {
         self.slots
             .iter()
@@ -651,6 +723,48 @@ mod tests {
         assert_eq!(fuzzy_match("rtr", "RRiter"), Some(vec![0, 3, 5]));
         assert_eq!(fuzzy_match("IDE", "IntegratedDevEnv"), Some(vec![0, 9, 11]));
         assert_eq!(fuzzy_match("xyz", "RRiter"), None);
+    }
+
+    #[test]
+    fn lsp_log_filter_matches_text_direction_and_case_modes() {
+        let send = crate::lsp::LogEntry {
+            text: "[LSP SEND]\n{\"method\":\"textDocument/didChange\"}".to_string(),
+            spans: Vec::new(),
+            folds: Vec::new(),
+            created_at: std::time::Instant::now(),
+        };
+        let recv = crate::lsp::LogEntry {
+            text: "[LSP RECV]\n{\"method\":\"window/logMessage\"}".to_string(),
+            spans: Vec::new(),
+            folds: Vec::new(),
+            created_at: std::time::Instant::now(),
+        };
+        let other = crate::lsp::LogEntry {
+            text: "ruff stderr warning".to_string(),
+            spans: Vec::new(),
+            folds: Vec::new(),
+            created_at: std::time::Instant::now(),
+        };
+        let filter = LspLogFilter {
+            query: "change".to_string(),
+            case_sensitive: false,
+            show_send: true,
+            show_recv: false,
+            show_other: false,
+        };
+
+        assert!(filter.matches(&send));
+        assert!(!filter.matches(&recv));
+        assert!(!filter.matches(&other));
+
+        let case_filter = LspLogFilter {
+            query: "CHANGE".to_string(),
+            case_sensitive: true,
+            show_send: true,
+            show_recv: true,
+            show_other: true,
+        };
+        assert!(!case_filter.matches(&send));
     }
 
     #[test]

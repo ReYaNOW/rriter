@@ -127,6 +127,7 @@ impl Renderer {
         let expanded_logs = &ide_panel.lsp_logs_expanded;
         let lsp_log_editors = &ide_panel.lsp_log_editors;
         let lsp_logs_focused = &ide_panel.lsp_logs_focused;
+        let lsp_log_filter_text = ide_panel.lsp_log_filter_editor.get_full_text();
 
         self.flush();
         unsafe {
@@ -194,23 +195,36 @@ impl Renderer {
 
         for info in servers.iter() {
             let is_expanded = expanded_logs.contains(info.name);
-            let mut logs_h = 0.0;
+            let mut layout_logs_h = 0.0;
             let mut inner_h = 0.0;
             let mut inner_w = 0.0;
             if is_expanded {
                 (inner_h, inner_w) = get_inner_size(info, self);
-                logs_h = (inner_h + 20.0 * s).clamp(50.0 * s, 800.0 * s);
+                layout_logs_h =
+                    crate::app::lsp_actions::lsp_server_logs_h_for_content(inner_h, content_h, s);
             }
-            log_sizes.push((logs_h, inner_h, inner_w));
-            total_h += 136.0 * s + logs_h + 16.0 * s;
+            log_sizes.push((layout_logs_h, inner_h, inner_w));
+            total_h += 136.0 * s + layout_logs_h + 16.0 * s;
         }
 
         let mut current_y = content_y + 8.0 * s - scroll_y;
         for (server_idx, info) in servers.iter().enumerate() {
             let is_expanded = expanded_logs.contains(info.name);
-            let (logs_h, inner_total_h, inner_max_w) = log_sizes[server_idx];
+            let (layout_logs_h, inner_total_h, inner_max_w) = log_sizes[server_idx];
+            let logs_h = if is_expanded {
+                crate::app::lsp_actions::lsp_server_logs_h_for_row(
+                    inner_total_h,
+                    content_y,
+                    content_h,
+                    current_y,
+                    s,
+                )
+            } else {
+                0.0
+            };
             let base_h = 136.0 * s;
             let row_h = base_h + logs_h;
+            let layout_row_h = base_h + layout_logs_h;
 
             if current_y + row_h > content_y && current_y < content_y + content_h {
                 let card_x = content_x + 12.0 * s;
@@ -288,12 +302,15 @@ impl Renderer {
                     "Логи"
                 };
                 let label_fix_all = "Fix All";
+                let label_clear_logs = "Очистить";
 
                 let bw_restart = self.measure_ui_width(label_restart, 0.8) + btn_pad * 2.0;
                 let bw_toggle = self.measure_ui_width(label_toggle, 0.8) + btn_pad * 2.0;
                 let bw_stop = self.measure_ui_width(label_stop, 0.8) + btn_pad * 2.0;
                 let bw_logs = self.measure_ui_width(label_logs, 0.8) + btn_pad * 2.0;
                 let bw_fix_all = self.measure_ui_width(label_fix_all, 0.8) + btn_pad * 2.0;
+                let bw_clear_logs =
+                    self.measure_ui_width(label_clear_logs, 0.8) + btn_pad * 2.0;
 
                 let btn_x_restart = card_x + pad_x;
                 let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
@@ -301,6 +318,7 @@ impl Renderer {
 
                 let btn_x_fix_all = card_x + pad_x;
                 let btn_x_logs = btn_x_fix_all + bw_fix_all + 6.0 * s;
+                let btn_x_clear_logs = btn_x_logs + bw_logs + 6.0 * s;
 
                 let hover_restart = ui_registry.register_rect(
                     crate::ui_system::UiId::LspServerRestart(server_idx),
@@ -347,6 +365,21 @@ impl Renderer {
                     mx,
                     my,
                 );
+                let clear_logs_enabled = is_expanded && !info.logs.is_empty();
+                let clear_logs_fits = btn_x_clear_logs + bw_clear_logs <= card_x + card_w - pad_x;
+                let hover_clear_logs = if clear_logs_enabled && clear_logs_fits {
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::LspServerClearLogs(server_idx),
+                        btn_x_clear_logs,
+                        btn_y2,
+                        bw_clear_logs,
+                        btn_h,
+                        mx,
+                        my,
+                    )
+                } else {
+                    false
+                };
                 let fix_enabled = !is_stopped && fix_all_active;
                 let hover_fix_all = if fix_enabled {
                     ui_registry.register_rect(
@@ -377,6 +410,13 @@ impl Renderer {
                 } else {
                     [0.26, 0.26, 0.32, 1.0]
                 };
+                let btn_bg_clear_logs = if !clear_logs_enabled || !clear_logs_fits {
+                    [0.18, 0.18, 0.22, 0.6]
+                } else if hover_clear_logs {
+                    [0.36, 0.30, 0.20, 1.0]
+                } else {
+                    [0.28, 0.22, 0.16, 1.0]
+                };
                 let btn_bg_stop = if is_stopped {
                     [0.20, 0.20, 0.25, 0.6]
                 } else if hover_stop {
@@ -401,6 +441,11 @@ impl Renderer {
                     [0.40, 0.40, 0.44, 1.0]
                 } else {
                     [0.55, 0.95, 0.65, 1.0]
+                };
+                let text_color_clear_logs = if !clear_logs_enabled || !clear_logs_fits {
+                    [0.40, 0.40, 0.44, 1.0]
+                } else {
+                    [0.95, 0.78, 0.55, 1.0]
                 };
 
                 let text_y1 = (btn_y1 + btn_h / 2.0 + 4.0 * s).round();
@@ -471,12 +516,197 @@ impl Renderer {
                     [0.8, 0.85, 1.0, 1.0],
                     0.8,
                 );
-
                 if is_expanded {
+                    self.push_rounded_rect(
+                        btn_x_clear_logs,
+                        btn_y2,
+                        bw_clear_logs,
+                        btn_h,
+                        3.0 * s,
+                        btn_bg_clear_logs,
+                    );
+                    self.draw_string_scaled(
+                        label_clear_logs,
+                        (btn_x_clear_logs + btn_pad).round(),
+                        text_y2,
+                        text_color_clear_logs,
+                        0.8,
+                    );
+                }
+
+                if is_expanded && logs_h > 0.0 {
                     let log_bg_x = card_x + pad_x;
-                    let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+                    let filter_y = btn_y2 + btn_h + 10.0 * s;
+                    let filter_h = 30.0 * s;
+                    let filter_gap = 4.0 * s;
+                    let log_bg_y = filter_y + filter_h + filter_gap;
                     let log_bg_w = card_w - pad_x * 2.0;
-                    let log_bg_h = logs_h - 18.0 * s;
+                    let log_bg_h = logs_h - filter_h - filter_gap - 18.0 * s;
+
+                    let chip_h = 22.0 * s;
+                    let chip_y = filter_y + 4.0 * s;
+                    let mut chip_x = log_bg_x;
+                    let clear_w = 24.0 * s;
+                    let chip_pad = 8.0 * s;
+                    let label_case = if ide_panel.lsp_log_filter_case_sensitive {
+                        "Aa"
+                    } else {
+                        "aa"
+                    };
+                    let label_send = "SEND";
+                    let label_recv = "RECV";
+                    let label_other = "ERR";
+                    let case_w = self.measure_ui_width(label_case, 0.72) + chip_pad * 2.0;
+                    let send_w = self.measure_ui_width(label_send, 0.72) + chip_pad * 2.0;
+                    let recv_w = self.measure_ui_width(label_recv, 0.72) + chip_pad * 2.0;
+                    let other_w = self.measure_ui_width(label_other, 0.72) + chip_pad * 2.0;
+                    let chips_w =
+                        clear_w + case_w + send_w + recv_w + other_w + 5.0 * 6.0 * s;
+                    let input_w = (log_bg_w - chips_w).max(70.0 * s);
+                    let input_hover = ui_registry.register_text_input(
+                        crate::ui_system::UiId::LspLogsFilterInput,
+                        chip_x,
+                        filter_y,
+                        input_w,
+                        filter_h,
+                        mx,
+                        my,
+                    );
+                    let input_border = if ide_panel.lsp_log_filter_focused || input_hover {
+                        [0.44, 0.28, 0.75, 0.9]
+                    } else {
+                        [0.18, 0.18, 0.22, 1.0]
+                    };
+                    self.push_rounded_rect(
+                        chip_x - 1.0,
+                        filter_y - 1.0,
+                        input_w + 2.0,
+                        filter_h + 2.0,
+                        4.0 * s,
+                        input_border,
+                    );
+                    self.push_rounded_rect(
+                        chip_x,
+                        filter_y,
+                        input_w,
+                        filter_h,
+                        4.0 * s,
+                        [0.10, 0.10, 0.13, 1.0],
+                    );
+                    let mut clipped_filter = String::new();
+                    let filter_draw = if lsp_log_filter_text.is_empty() {
+                        "Фильтр"
+                    } else {
+                        let max_text_w = (input_w - 16.0 * s).max(0.0);
+                        let mut used_w = 0.0;
+                        for c in lsp_log_filter_text.chars() {
+                            let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0)
+                                * 0.78;
+                            if used_w + adv > max_text_w {
+                                clipped_filter.push('…');
+                                break;
+                            }
+                            clipped_filter.push(c);
+                            used_w += adv;
+                        }
+                        clipped_filter.as_str()
+                    };
+                    let filter_color = if lsp_log_filter_text.is_empty() {
+                        [0.45, 0.45, 0.50, 1.0]
+                    } else {
+                        self.theme.fg
+                    };
+                    self.draw_string_scaled(
+                        filter_draw,
+                        chip_x + 8.0 * s,
+                        filter_y + filter_h / 2.0 + 5.0 * s,
+                        filter_color,
+                        0.78,
+                    );
+                    chip_x += input_w + 5.0 * s;
+
+                    let draw_chip = |renderer: &mut Self,
+                                     ui_registry: &mut crate::ui_system::UiRegistry,
+                                     id: crate::ui_system::UiId,
+                                         label: &str,
+                                         active: bool,
+                                         x: f32,
+                                         w: f32| {
+                        let hovered = ui_registry.register_rect(id, x, chip_y, w, chip_h, mx, my);
+                        let bg = if active {
+                            if hovered {
+                                [0.28, 0.32, 0.42, 1.0]
+                            } else {
+                                [0.20, 0.24, 0.34, 1.0]
+                            }
+                        } else if hovered {
+                            [0.24, 0.24, 0.28, 1.0]
+                        } else {
+                            [0.14, 0.14, 0.17, 1.0]
+                        };
+                        renderer.push_rounded_rect(x, chip_y, w, chip_h, 3.0 * s, bg);
+                        renderer.draw_string_scaled(
+                            label,
+                            x + chip_pad,
+                            chip_y + chip_h / 2.0 + 4.0 * s,
+                            if active {
+                                [0.72, 0.86, 1.0, 1.0]
+                            } else {
+                                [0.52, 0.52, 0.57, 1.0]
+                            },
+                            0.72,
+                        );
+                    };
+
+                    draw_chip(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::LspLogsFilterClear,
+                        "×",
+                        !lsp_log_filter_text.is_empty(),
+                        chip_x,
+                        clear_w,
+                    );
+                    chip_x += clear_w + 5.0 * s;
+                    draw_chip(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::LspLogsFilterCase,
+                        label_case,
+                        ide_panel.lsp_log_filter_case_sensitive,
+                        chip_x,
+                        case_w,
+                    );
+                    chip_x += case_w + 5.0 * s;
+                    draw_chip(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::LspLogsFilterSend,
+                        label_send,
+                        ide_panel.lsp_log_filter_show_send,
+                        chip_x,
+                        send_w,
+                    );
+                    chip_x += send_w + 5.0 * s;
+                    draw_chip(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::LspLogsFilterRecv,
+                        label_recv,
+                        ide_panel.lsp_log_filter_show_recv,
+                        chip_x,
+                        recv_w,
+                    );
+                    chip_x += recv_w + 5.0 * s;
+                    draw_chip(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::LspLogsFilterOther,
+                        label_other,
+                        ide_panel.lsp_log_filter_show_other,
+                        chip_x,
+                        other_w,
+                    );
 
                     let border_color = if lsp_logs_focused.as_deref() == Some(info.name) {
                         [0.44, 0.28, 0.75, 0.8]
@@ -850,7 +1080,7 @@ impl Renderer {
                     }
                 }
             }
-            current_y += row_h + 16.0 * s;
+            current_y += layout_row_h + 16.0 * s;
         }
 
         let max_scroll_y = (total_h - content_h).max(0.0);

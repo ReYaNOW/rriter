@@ -120,6 +120,13 @@ pub enum LspEvent {
         #[allow(dead_code)]
         version: Option<i32>,
         items: Vec<Diagnostic>,
+        result_id: Option<String>,
+    },
+    ConfigurationServed {
+        name: &'static str,
+    },
+    WorkspaceDiagnosticsDone {
+        request_id: i32,
     },
     /// Ответ на запрос codeAction (исправления от ruff)
     CodeActions {
@@ -252,6 +259,10 @@ pub(super) enum Cmd {
         line: u32,
         col: u32,
         trigger: Option<String>,
+    },
+    WorkspaceDiagnostic {
+        id: i32,
+        previous_result_ids_json: String,
     },
 }
 
@@ -453,6 +464,17 @@ pub(super) fn make_completion(
         line,
         col,
         context
+    )
+    .into_bytes()
+}
+
+pub(super) fn make_workspace_diagnostic(
+    id: i32,
+    previous_result_ids_json: &str,
+) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"workspace/diagnostic","params":{{"identifier":"ty","previousResultIds":{}}}}}"#,
+        id, previous_result_ids_json
     )
     .into_bytes()
 }
@@ -795,6 +817,8 @@ fn refine_completion_kind(
         || insert_text.is_some_and(|text| text.contains('='))
     {
         crate::highlighter::SymbolKind::Parameter
+    } else if detail.starts_with("(variable)") {
+        crate::highlighter::SymbolKind::Variable
     } else if detail.starts_with("(property)") || detail.starts_with("(field)") {
         crate::highlighter::SymbolKind::Property
     } else if detail.starts_with("(function)")
@@ -819,17 +843,6 @@ fn completion_module(
         .get("label")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if let Some(owner) = detail.and_then(|detail| owner_from_completion_detail(label, detail)) {
-        return Some(owner);
-    }
-    if let Some(owner) = v
-        .pointer("/data/owner")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return Some(owner.to_string());
-    }
     if let Some(full_name) = v
         .pointer("/data/fullName")
         .and_then(|value| value.as_str())
@@ -841,6 +854,15 @@ fn completion_module(
         }
         return Some(full_name.to_string());
     }
+    if let Some(owner) = v
+        .pointer("/data/owner")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(owner.to_string());
+    }
+    let detail_owner = detail.and_then(|detail| owner_from_completion_detail(label, detail));
     let detail_is_field_type = detail.is_some_and(|detail| {
         detail.starts_with("(variable)")
             || detail.starts_with("(parameter)")
@@ -848,7 +870,7 @@ fn completion_module(
             || detail.starts_with("(field)")
     });
     if detail_is_field_type {
-        return None;
+        return detail_owner;
     }
     if !matches!(
         kind,
@@ -862,8 +884,16 @@ fn completion_module(
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
+            if let Some(owner) = detail_owner.as_deref().filter(|owner| {
+                looks_like_python_module_path(module) && !module.ends_with(&format!(".{owner}"))
+            }) {
+                return Some(format!("{module}.{owner}"));
+            }
             return Some(module.to_string());
         }
+    }
+    if let Some(owner) = detail_owner {
+        return Some(owner);
     }
     if let Some(desc) = v
         .pointer("/labelDetails/description")
@@ -875,12 +905,58 @@ fn completion_module(
             crate::highlighter::SymbolKind::Variable
                 | crate::highlighter::SymbolKind::Parameter
                 | crate::highlighter::SymbolKind::Property
-        ) {
+        ) && !looks_like_python_module_path(desc)
+        {
             return None;
         }
-        return Some(desc.trim().to_string());
+        return completion_description_source(desc);
     }
     None
+}
+
+fn looks_like_python_module_path(text: &str) -> bool {
+    let s = text.trim();
+    s.contains('.')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+fn completion_description_source(desc: &str) -> Option<String> {
+    let desc = desc.trim();
+    if desc.is_empty()
+        || desc.contains('/')
+        || desc.contains('\\')
+        || desc.contains('|')
+        || desc.contains('[')
+        || desc.contains(']')
+        || desc.contains("->")
+        || desc.starts_with("def ")
+        || desc.starts_with("async def ")
+        || desc.starts_with("overload[")
+        || desc.starts_with('(')
+        || !desc
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        || matches!(
+            desc,
+            "Any"
+                | "None"
+                | "bool"
+                | "bytes"
+                | "dict"
+                | "float"
+                | "int"
+                | "list"
+                | "set"
+                | "str"
+                | "tuple"
+                | "type"
+        )
+    {
+        None
+    } else {
+        Some(desc.to_string())
+    }
 }
 
 fn completion_detail(v: &serde_json::Value) -> Option<String> {
@@ -983,6 +1059,80 @@ pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompl
         .collect()
 }
 
+fn configuration_response_for(
+    server_name: &'static str,
+    item: &serde_json::Value,
+) -> serde_json::Value {
+    if server_name != TY_SERVER.program {
+        return serde_json::json!({});
+    }
+
+    match item.get("section").and_then(|v| v.as_str()).unwrap_or("ty") {
+        "ty.diagnosticMode" => serde_json::json!("workspace"),
+        "ty" | "" => serde_json::json!({ "diagnosticMode": "workspace" }),
+        _ => serde_json::json!({}),
+    }
+}
+
+fn emit_workspace_diagnostic_report(
+    uri: &str,
+    report: &serde_json::Value,
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+) {
+    let kind = report.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    if kind == "unchanged" {
+        return;
+    }
+
+    let Some(diags) = report.get("items").and_then(|v| v.as_array()) else {
+        return;
+    };
+
+    let items = diags
+        .iter()
+        .filter_map(parse_diagnostic_value)
+        .collect::<Vec<_>>();
+    let version = report
+        .get("version")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
+    let result_id = report
+        .get("resultId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    let _ = event_tx.send(LspEvent::Diagnostics {
+        server_name,
+        path: uri_to_path(uri),
+        version,
+        items,
+        result_id,
+    });
+}
+
+fn emit_workspace_diagnostics(
+    result: &serde_json::Value,
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+) {
+    let Some(items) = result.get("items").and_then(|v| v.as_array()) else {
+        return;
+    };
+
+    for item in items {
+        if let Some(uri) = item.get("uri").and_then(|v| v.as_str()) {
+            emit_workspace_diagnostic_report(uri, item, event_tx, server_name);
+        }
+
+        if let Some(related) = item.get("relatedDocuments").and_then(|v| v.as_object()) {
+            for (uri, report) in related {
+                emit_workspace_diagnostic_report(uri, report, event_tx, server_name);
+            }
+        }
+    }
+}
+
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
 pub(super) fn dispatch_frame(
@@ -1039,6 +1189,7 @@ pub(super) fn dispatch_frame(
                         path,
                         version,
                         items,
+                        result_id: None,
                     });
                 }
             }
@@ -1079,14 +1230,25 @@ pub(super) fn dispatch_frame(
         }
         Some("workspace/configuration") => {
             if let Some(req_id) = id {
-                let mut count = 1;
-                if let Some(items) = msg.pointer("/params/items").and_then(|v| v.as_array()) {
-                    count = items.len().max(1);
-                }
-                let config_obj = r#"{}"#;
-                let objs = vec![config_obj; count].join(",");
+                let objs = if let Some(items) =
+                    msg.pointer("/params/items").and_then(|v| v.as_array())
+                {
+                    let values = items
+                        .iter()
+                        .map(|item| configuration_response_for(server_name, item).to_string())
+                        .collect::<Vec<_>>();
+                    if values.is_empty() {
+                        configuration_response_for(server_name, &serde_json::Value::Null)
+                            .to_string()
+                    } else {
+                        values.join(",")
+                    }
+                } else {
+                    configuration_response_for(server_name, &serde_json::Value::Null).to_string()
+                };
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());
+                let _ = event_tx.send(LspEvent::ConfigurationServed { name: server_name });
             }
         }
         Some(m) => {
@@ -1106,11 +1268,21 @@ pub(super) fn dispatch_frame(
         }
         None => {
             if let Some(req_id) = id {
+                let pending_kind = pending_requests
+                    .lock()
+                    .ok()
+                    .and_then(|mut p| p.remove(&(req_id as i32)));
+
+                if msg.get("error").is_some() {
+                    if matches!(pending_kind, Some(PendingRequestKind::WorkspaceDiagnostic)) {
+                        let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
+                            request_id: req_id as i32,
+                        });
+                    }
+                    return;
+                }
+
                 if let Some(result) = msg.get("result") {
-                    let pending_kind = pending_requests
-                        .lock()
-                        .ok()
-                        .and_then(|mut p| p.remove(&(req_id as i32)));
                     match pending_kind {
                         Some(PendingRequestKind::Hover) => {
                             if result.get("contents").is_some() {
@@ -1149,6 +1321,12 @@ pub(super) fn dispatch_frame(
                             let _ = event_tx.send(LspEvent::CompletionResponse {
                                 request_id: req_id as i32,
                                 items,
+                            });
+                        }
+                        Some(PendingRequestKind::WorkspaceDiagnostic) => {
+                            emit_workspace_diagnostics(result, event_tx, server_name);
+                            let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
+                                request_id: req_id as i32,
                             });
                         }
                         None => {
@@ -1358,6 +1536,37 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(data_module_type_attr.module, None);
+
+        let signature_description = parse_completion_item_value(&serde_json::json!({
+            "label": "dir",
+            "kind": 3,
+            "labelDetails": {"description": "def dir(o: object = ..., /) -> list[str]"}
+        }))
+        .unwrap();
+        assert_eq!(signature_description.module, None);
+
+        let dotted_method = parse_completion_item_value(&serde_json::json!({
+            "label": "initialize_all",
+            "kind": 3,
+            "data": {"fullName": "car_wash.core.db.repo_base.RepoBase.initialize_all"},
+            "detail": "def RepoBase.initialize_all() -> None"
+        }))
+        .unwrap();
+        assert_eq!(
+            dotted_method.module.as_deref(),
+            Some("car_wash.core.db.repo_base.RepoBase")
+        );
+
+        let dotted_variable = parse_completion_item_value(&serde_json::json!({
+            "label": "RepoBase",
+            "kind": 6,
+            "labelDetails": {"description": "car_wash.core.db.repo_base"}
+        }))
+        .unwrap();
+        assert_eq!(
+            dotted_variable.module.as_deref(),
+            Some("car_wash.core.db.repo_base")
+        );
     }
 
     #[test]
@@ -1416,7 +1625,10 @@ mod tests {
     fn recv_non_log(rx: &mpsc::Receiver<LspEvent>) -> LspEvent {
         loop {
             let event = rx.recv().unwrap();
-            if !matches!(event, LspEvent::Log { .. }) {
+            if !matches!(
+                event,
+                LspEvent::Log { .. } | LspEvent::ConfigurationServed { .. }
+            ) {
                 return event;
             }
         }
@@ -1490,6 +1702,19 @@ mod tests {
         assert_eq!(completion["method"], "textDocument/completion");
         assert_eq!(completion["params"]["context"]["triggerKind"], 2);
         assert_eq!(completion["params"]["context"]["triggerCharacter"], ".");
+
+        let workspace_diag: serde_json::Value =
+            serde_json::from_slice(&make_workspace_diagnostic(
+                103,
+                r#"[{"uri":"file:///tmp/project/main.py","value":"r1"}]"#,
+            ))
+            .unwrap();
+        assert_eq!(workspace_diag["method"], "workspace/diagnostic");
+        assert_eq!(workspace_diag["params"]["identifier"], "ty");
+        assert_eq!(
+            workspace_diag["params"]["previousResultIds"][0]["value"],
+            "r1"
+        );
 
         let shutdown: serde_json::Value = serde_json::from_slice(&make_shutdown(101)).unwrap();
         assert_eq!(shutdown["method"], "shutdown");
@@ -1581,6 +1806,19 @@ mod tests {
         assert_eq!(reply["result"].as_array().unwrap().len(), 2);
 
         dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":560,"method":"workspace/configuration","params":{"items":[{"section":"ty"},{"section":"ty.diagnosticMode"},{"section":"other"}]}}"#,
+            &event_tx,
+            "ty",
+            &out_tx,
+            &pending,
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["id"], 560);
+        assert_eq!(reply["result"][0]["diagnosticMode"], "workspace");
+        assert_eq!(reply["result"][1], "workspace");
+        assert_eq!(reply["result"][2], serde_json::json!({}));
+
+        dispatch_frame(
             br#"{"jsonrpc":"2.0","id":57,"method":"unknown/request","params":{}}"#,
             &event_tx,
             "test",
@@ -1603,10 +1841,12 @@ mod tests {
                 path,
                 version,
                 items,
+                result_id,
             } => {
                 assert_eq!(server_name, "ruff");
                 assert_eq!(path, PathBuf::from("/tmp/a.py"));
                 assert_eq!(version, Some(3));
+                assert_eq!(result_id, None);
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].message, "boom");
             }
@@ -1653,6 +1893,7 @@ mod tests {
             (2, PendingRequestKind::Definition),
             (3, PendingRequestKind::Hover),
             (6, PendingRequestKind::Completion),
+            (7, PendingRequestKind::WorkspaceDiagnostic),
         ])));
 
         dispatch_frame(
@@ -1745,6 +1986,47 @@ mod tests {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].module.as_deref(), Some("pathlib"));
             }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        dispatch_frame(
+            br#"{"jsonrpc":"2.0","id":7,"result":{"items":[{"kind":"full","uri":"file:///tmp/workspace.py","version":4,"resultId":"r1","items":[{"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":3}},"message":"workspace boom","severity":1}],"relatedDocuments":{"file:///tmp/related.py":{"kind":"full","resultId":"r2","items":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"message":"related boom"}]}}},{"kind":"unchanged","uri":"file:///tmp/unchanged.py","resultId":"r3"}]}}"#,
+            &event_tx,
+            "ty",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::Diagnostics {
+                server_name,
+                path,
+                version,
+                items,
+                result_id,
+            } => {
+                assert_eq!(server_name, "ty");
+                assert_eq!(path, PathBuf::from("/tmp/workspace.py"));
+                assert_eq!(version, Some(4));
+                assert_eq!(items[0].message, "workspace boom");
+                assert_eq!(result_id.as_deref(), Some("r1"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match recv_non_log(&event_rx) {
+            LspEvent::Diagnostics {
+                path,
+                items,
+                result_id,
+                ..
+            } => {
+                assert_eq!(path, PathBuf::from("/tmp/related.py"));
+                assert_eq!(items[0].message, "related boom");
+                assert_eq!(result_id.as_deref(), Some("r2"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match recv_non_log(&event_rx) {
+            LspEvent::WorkspaceDiagnosticsDone { request_id } => assert_eq!(request_id, 7),
             other => panic!("unexpected event: {other:?}"),
         }
 

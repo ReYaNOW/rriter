@@ -46,6 +46,11 @@ fn autocomplete_badge_style(kind: crate::highlighter::SymbolKind) -> Autocomplet
             bg: [0.17, 0.28, 0.43, 1.0],
             fg: [0.62, 0.78, 1.0, 1.0],
         },
+        crate::highlighter::SymbolKind::Builtin => AutocompleteBadgeStyle {
+            letter: 'B',
+            bg: [0.29, 0.24, 0.48, 1.0],
+            fg: [0.74, 0.66, 1.0, 1.0],
+        },
         crate::highlighter::SymbolKind::Keyword => AutocompleteBadgeStyle {
             letter: 'K',
             bg: [0.43, 0.20, 0.30, 1.0],
@@ -82,6 +87,126 @@ fn autocomplete_scrollbar_track_margin(scale: f32) -> f32 {
     3.0 * scale
 }
 
+fn autocomplete_popup_width(screen_w: f32, x: f32, min_width: f32, scale: f32) -> f32 {
+    let min_w = 400.0 * scale;
+    let target_w = 590.0 * scale;
+    let max_w = 760.0 * scale;
+    let edge_margin = 8.0 * scale;
+    let available_w = (screen_w - x - edge_margin).max(195.0 * scale);
+    target_w.max(min_width).max(min_w).min(max_w).min(available_w)
+}
+
+fn autocomplete_source_is_type_or_signature(source: &str, class_repr: bool) -> bool {
+    if class_repr {
+        return false;
+    }
+    source.contains('|')
+        || source.contains('[')
+        || source.contains(']')
+        || source.contains("->")
+        || source.starts_with("def ")
+        || source.starts_with("async def ")
+        || source.starts_with("overload[")
+        || source.starts_with('(')
+        || matches!(
+            source,
+            "Any"
+                | "None"
+                | "bool"
+                | "bytes"
+                | "dict"
+                | "float"
+                | "int"
+                | "list"
+                | "set"
+                | "str"
+                | "tuple"
+                | "type"
+        )
+}
+
+fn autocomplete_source_label<'a>(source: &'a str, word: &str) -> Option<Cow<'a, str>> {
+    let source = source.trim();
+    let class_repr = source.starts_with("<class '");
+    let label = source
+        .strip_prefix("<class '")
+        .and_then(|s| s.strip_suffix("'>"))
+        .or_else(|| {
+            source
+                .strip_prefix("<module '")
+                .and_then(|s| s.strip_suffix("'>"))
+        })
+        .unwrap_or(source)
+        .trim();
+    if label.is_empty()
+        || label == word
+        || label.contains('/')
+        || label.contains('\\')
+        || !label
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        || autocomplete_source_is_type_or_signature(label, class_repr)
+    {
+        None
+    } else {
+        Some(Cow::Borrowed(label))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct AutocompleteModuleLayout<'a> {
+    x: f32,
+    width: f32,
+    text: Cow<'a, str>,
+}
+
+fn autocomplete_module_layout<'a>(
+    source: &'a str,
+    word: &str,
+    min_x: f32,
+    right_limit: f32,
+    scale: f32,
+    ellipsis_w: f32,
+    mut char_width: impl FnMut(char, f32) -> f32,
+) -> Option<AutocompleteModuleLayout<'a>> {
+    let label = autocomplete_source_label(source, word)?;
+    let limit = (right_limit - min_x).max(0.0);
+    if limit < 34.0 * scale {
+        return None;
+    }
+    let mut width = 0.0;
+    let mut end = label.len();
+    let mut truncated = false;
+    for (idx, c) in label.char_indices() {
+        if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+            continue;
+        }
+        let next_w = width + char_width(c, scale);
+        let next_idx = idx + c.len_utf8();
+        let suffix_w = if next_idx < label.len() { ellipsis_w } else { 0.0 };
+        if next_w + suffix_w > limit {
+            end = idx;
+            truncated = true;
+            break;
+        }
+        width = next_w;
+    }
+    let text = if truncated {
+        let mut s = String::with_capacity(end + 3);
+        s.push_str(&label[..end]);
+        s.push_str("...");
+        width += ellipsis_w;
+        Cow::Owned(s)
+    } else {
+        label
+    };
+    Some(AutocompleteModuleLayout {
+        x: (right_limit - width).max(min_x),
+        width,
+        text,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,8 +220,39 @@ mod tests {
         assert_eq!(autocomplete_badge_style(SymbolKind::Parameter).letter, 'P');
         assert_eq!(autocomplete_badge_style(SymbolKind::Property).letter, 'P');
         assert_eq!(autocomplete_badge_style(SymbolKind::Module).letter, 'M');
+        assert_eq!(autocomplete_badge_style(SymbolKind::Builtin).letter, 'B');
         assert_eq!(autocomplete_badge_style(SymbolKind::Keyword).letter, 'K');
         assert_eq!(autocomplete_badge_style(SymbolKind::Unknown).letter, 'U');
+    }
+
+    #[test]
+    fn autocomplete_module_layout_right_aligns_and_truncates_to_slot() {
+        let layout = autocomplete_module_layout(
+            "car_wash.domains.washes.bookings.repositories.deep.output",
+            "BookingRead",
+            120.0,
+            160.0,
+            1.0,
+            3.0,
+            |_, _| 1.0,
+        )
+        .unwrap();
+        assert!(layout.text.ends_with("..."));
+        assert!(layout.x >= 120.0);
+        assert_eq!(layout.x + layout.width, 160.0);
+
+        let full = autocomplete_module_layout(
+            "car_wash.core",
+            "RepoBase",
+            80.0,
+            180.0,
+            1.0,
+            3.0,
+            |_, _| 1.0,
+        )
+        .unwrap();
+        assert_eq!(full.text.as_ref(), "car_wash.core");
+        assert_eq!(full.x + full.width, 180.0);
     }
 
     #[test]
@@ -135,6 +291,44 @@ mod tests {
     fn autocomplete_scrollbar_track_margin_stays_close_to_popup_edges() {
         assert_eq!(autocomplete_scrollbar_track_margin(1.0), 3.0);
         assert_eq!(autocomplete_scrollbar_track_margin(2.0), 6.0);
+    }
+
+    #[test]
+    fn autocomplete_popup_width_is_stable_before_details_arrive() {
+        assert_eq!(autocomplete_popup_width(1000.0, 100.0, 0.0, 1.0), 590.0);
+        assert_eq!(autocomplete_popup_width(1000.0, 100.0, 580.0, 1.0), 590.0);
+        assert_eq!(autocomplete_popup_width(1000.0, 100.0, 700.0, 1.0), 700.0);
+        assert_eq!(autocomplete_popup_width(430.0, 100.0, 0.0, 1.0), 322.0);
+    }
+
+    #[test]
+    fn autocomplete_source_label_strips_duplicate_python_class_repr() {
+        assert_eq!(
+            autocomplete_source_label("<class 'RepoBase'>", "RepoBase").as_deref(),
+            None
+        );
+        assert_eq!(
+            autocomplete_source_label("<class 'str'>", "strip").as_deref(),
+            Some("str")
+        );
+        assert_eq!(
+            autocomplete_source_label("car_wash.core.db.repo_base", "RepoBase").as_deref(),
+            Some("car_wash.core.db.repo_base")
+        );
+        assert_eq!(
+            autocomplete_source_label("def dir(o: object = ..., /) -> list[str]", "dir")
+                .as_deref(),
+            None
+        );
+        assert_eq!(
+            autocomplete_source_label("overload[(*values: object, sep: str) -> None]", "print")
+                .as_deref(),
+            None
+        );
+        assert_eq!(
+            autocomplete_source_label("builtins", "print").as_deref(),
+            Some("builtins")
+        );
     }
 }
 
@@ -350,18 +544,20 @@ impl Renderer {
         let right_pad = 18.0 * scale;
         let content_start_offset = icon_sz + icon_gap;
         let module_scale = 0.92;
-        let mut max_w = 195.0 * scale;
-        for (opt, _) in options {
-            let w = self.measure_width(opt.word.as_str(), "", 0, opt.word.len());
-            max_w = max_w.max(content_start_offset + w + right_pad);
-            if let Some(module) = &opt.module {
-                let module_w = self.measure_ui_width(module, module_scale);
-                let ratio_w = (w / 0.45).max(module_w / 0.55);
-                max_w = max_w.max(content_start_offset + ratio_w + right_pad + 10.0 * scale);
-            }
+        let mut max_name_w: f32 = 0.0;
+        for (item, _) in options {
+            let name_w: f32 = item
+                .word
+                .chars()
+                .filter_map(|c| self.get_glyph(c).map(|glyph| glyph.advance))
+                .sum();
+            max_name_w = max_name_w.max(name_w);
         }
-
-        max_w = max_w.max(min_width).min(620.0 * scale);
+        let available_w = (self.width - x - 8.0 * scale).max(195.0 * scale);
+        let name_min_w = content_start_offset + max_name_w + right_pad + 20.0 * scale;
+        let max_w = autocomplete_popup_width(self.width, x, min_width, scale)
+            .max(name_min_w)
+            .min(available_w);
 
         let visible_items = options.len().max(1).min(7);
 
@@ -492,44 +688,33 @@ impl Renderer {
 
             let cy = row_y + item_h * 0.72 + (step - item_h) * 0.5;
 
-            let module_metrics = item.module.as_ref().map(|module| {
-                let content_w = max_w - content_start_offset - right_pad;
-                let module_limit = content_w * 0.55;
-                let mut end = module.len();
-                let ellipsis_w = self.measure_ui_width("...", module_scale);
-                while end > 0
-                    && self.measure_ui_width(&module[..end], module_scale)
-                        + if end < module.len() { ellipsis_w } else { 0.0 }
-                        > module_limit
-                {
-                    end -= 1;
-                    while end > 0 && !module.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                }
-                let shown = if end < module.len() {
-                    let mut s = String::with_capacity(end + 3);
-                    s.push_str(&module[..end]);
-                    s.push_str("...");
-                    Cow::Owned(s)
-                } else {
-                    Cow::Borrowed(module.as_str())
-                };
-                let shown_w = self.measure_ui_width(shown.as_ref(), module_scale);
-                let module_x = x + max_w - right_pad - shown_w;
-                (module_x, shown)
-            });
-            let right_limit = module_metrics
+            let name_w: f32 = item
+                .word
+                .chars()
+                .filter_map(|c| self.get_glyph(c).map(|glyph| glyph.advance))
+                .sum();
+            let module_gap = 14.0 * scale;
+            let module_min_x = cx + name_w + module_gap;
+            let right_limit = x + max_w - right_pad;
+            let ellipsis_w = self.measure_ui_width("...", module_scale);
+            let module_metrics = item
+                .module
                 .as_ref()
-                .map(|(module_x, _)| *module_x - 10.0 * scale)
-                .unwrap_or(x + max_w - 30.0 * scale);
-            let content_w = max_w - content_start_offset - right_pad;
-            let name_limit = if module_metrics.is_some() {
-                cx + content_w * 0.45
-            } else {
-                right_limit
-            };
-            let right_limit = right_limit.min(name_limit);
+                .and_then(|module| {
+                    autocomplete_module_layout(
+                        module,
+                        &item.word,
+                        module_min_x,
+                        right_limit,
+                        scale,
+                        ellipsis_w,
+                        |c, _| {
+                            self.get_ui_glyph(c)
+                                .map(|glyph| glyph.advance * module_scale)
+                                .unwrap_or(0.0)
+                        },
+                    )
+                });
             let mut truncated = false;
             for (j, c) in item.word.chars().enumerate() {
                 if let Some(g) = self.get_glyph(c) {
@@ -564,10 +749,10 @@ impl Renderer {
                 self.draw_string_scaled("...", cx.round(), cy.round(), [0.5, 0.5, 0.55, 1.0], 1.0);
             }
 
-            if let Some((module_x, module)) = module_metrics {
+            if let Some(module) = module_metrics {
                 self.draw_string_scaled(
-                    module.as_ref(),
-                    module_x.round(),
+                    module.text.as_ref(),
+                    module.x.round(),
                     (cy - 1.5 * scale).round(),
                     [0.50, 0.72, 0.82, 1.0],
                     module_scale,

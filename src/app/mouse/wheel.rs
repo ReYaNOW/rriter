@@ -367,21 +367,31 @@ impl App {
                     let mut current_y = cy + 8.0 * s - scroll_y;
                     for info in &self.ide_panel.lsp_servers {
                         let is_expanded = self.ide_panel.lsp_logs_expanded.contains(info.name);
-                        let logs_h = self.lsp_server_logs_h(info, s);
-                        let row_h = 136.0 * s + logs_h;
+                        let layout_logs_h = self.lsp_server_logs_h(info, s);
+                        let row_h = 136.0 * s + layout_logs_h;
 
                         if is_expanded {
+                            let (inner_total_h, inner_max_w) = self.lsp_server_inner_size(info, s);
+                            let logs_h = crate::app::lsp_actions::lsp_server_logs_h_for_row(
+                                inner_total_h,
+                                cy,
+                                ch,
+                                current_y,
+                                s,
+                            );
+                            if logs_h <= 0.0 {
+                                current_y += row_h + 16.0 * s;
+                                continue;
+                            }
                             let btn_y1 = current_y + 56.0 * s;
                             let btn_h = 24.0 * s;
                             let btn_y2 = btn_y1 + btn_h + 8.0 * s;
-                            let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+                            let log_bg_y = btn_y2 + btn_h + 44.0 * s;
                             let log_bg_x = cx + 24.0 * s;
                             let log_bg_w = cw - 48.0 * s;
-                            let log_bg_h = logs_h - 18.0 * s;
+                            let log_bg_h = logs_h - 52.0 * s;
 
                             if point_in_rect(mx, my, (log_bg_x, log_bg_y, log_bg_w, log_bg_h)) {
-                                let (inner_total_h, inner_max_w) =
-                                    self.lsp_server_inner_size(info, s);
                                 let name = info.name.to_string();
 
                                 let inner_y = self

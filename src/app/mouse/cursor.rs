@@ -756,23 +756,31 @@ impl App {
         } else if self.is_dragging_lsp_log {
             // Drag-selection в логах LSP
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
-                if let Some((cx, cy, _cw, _ch)) = self.lsp_panel_bounds() {
+                if let Some((cx, cy, _cw, ch)) = self.lsp_panel_bounds() {
                     let pad_x = 12.0 * s;
                     let btn_h = 24.0 * s;
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let mut cur_y = cy + 8.0 * s - scroll_y;
 
                     for srv in self.ide_panel.lsp_servers.clone().iter() {
-                        let logs_h = self.lsp_server_logs_h(srv, s);
+                        let layout_logs_h = self.lsp_server_logs_h(srv, s);
+                        let (inner_total_h, _) = self.lsp_server_inner_size(srv, s);
+                        let logs_h = crate::app::lsp_actions::lsp_server_logs_h_for_row(
+                            inner_total_h,
+                            cy,
+                            ch,
+                            cur_y,
+                            s,
+                        );
                         let is_exp = logs_h > 0.0;
-                        let row_h = 136.0 * s + logs_h;
+                        let row_h = 136.0 * s + layout_logs_h;
 
                         if srv.name == focused_name.as_str() && is_exp {
                             let card_x = cx + 12.0 * s;
                             let btn_y1 = cur_y + 56.0 * s;
                             let btn_y2 = btn_y1 + btn_h + 8.0 * s;
                             let log_bg_x = card_x + pad_x;
-                            let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+                            let log_bg_y = btn_y2 + btn_h + 44.0 * s;
 
                             let inner_scroll_y = self
                                 .ide_panel
@@ -1026,7 +1034,7 @@ impl App {
                     .unwrap_or(false);
 
                 if is_drag_y || is_drag_x {
-                    if let Some((cx, cy, cw, _ch)) = self.lsp_panel_bounds() {
+                    if let Some((cx, cy, cw, ch)) = self.lsp_panel_bounds() {
                         let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                         let mut current_y = cy + 8.0 * s - scroll_y;
                         for (i, srv) in self.ide_panel.lsp_servers.iter().enumerate() {
@@ -1037,16 +1045,24 @@ impl App {
                             current_y += 136.0 * s + logs_h + 16.0 * s;
                         }
 
-                        let logs_h = self.lsp_server_logs_h(info, s);
+                        let (inner_total_h, inner_max_w) = self.lsp_server_inner_size(info, s);
+                        let logs_h = crate::app::lsp_actions::lsp_server_logs_h_for_row(
+                            inner_total_h,
+                            cy,
+                            ch,
+                            current_y,
+                            s,
+                        );
+                        if logs_h <= 0.0 {
+                            continue;
+                        }
                         let btn_y1 = current_y + 56.0 * s;
                         let btn_h = 24.0 * s;
                         let btn_y2 = btn_y1 + btn_h + 8.0 * s;
-                        let log_bg_y = btn_y2 + btn_h + 10.0 * s;
+                        let log_bg_y = btn_y2 + btn_h + 44.0 * s;
                         let log_bg_x = cx + 24.0 * s;
                         let log_bg_w = cw - 48.0 * s;
-                        let log_bg_h = logs_h - 18.0 * s;
-
-                        let (inner_total_h, inner_max_w) = self.lsp_server_inner_size(info, s);
+                        let log_bg_h = logs_h - 52.0 * s;
 
                         if is_drag_y {
                             let max_y = (inner_total_h - log_bg_h).max(0.0);

@@ -310,8 +310,40 @@ fn is_magic_python_name(name: &str) -> bool {
     name.len() > 4 && name.starts_with("__") && name.ends_with("__")
 }
 
+fn normalized_completion_source(source: &str) -> &str {
+    let source = source.trim();
+    source
+        .strip_prefix("<class '")
+        .and_then(|s| s.strip_suffix("'>"))
+        .or_else(|| {
+            source
+                .strip_prefix("<module '")
+                .and_then(|s| s.strip_suffix("'>"))
+        })
+        .unwrap_or(source)
+        .trim()
+}
+
+fn is_plain_python_type_name(text: &str) -> bool {
+    matches!(
+        text,
+        "Any"
+            | "None"
+            | "bool"
+            | "bytes"
+            | "dict"
+            | "float"
+            | "int"
+            | "list"
+            | "set"
+            | "str"
+            | "tuple"
+            | "type"
+    )
+}
+
 fn is_type_like_completion_source(text: &str) -> bool {
-    let s = text.trim();
+    let s = normalized_completion_source(text);
     if s.is_empty() {
         return false;
     }
@@ -322,23 +354,11 @@ fn is_type_like_completion_source(text: &str) -> bool {
         || s.contains('[')
         || s.contains(']')
         || s.contains("->")
-        || s.chars()
-            .all(|c| c.is_ascii_lowercase() || c == '_' || c == '.')
-        || matches!(
-            s,
-            "Any"
-                | "None"
-                | "bool"
-                | "bytes"
-                | "dict"
-                | "float"
-                | "int"
-                | "list"
-                | "set"
-                | "str"
-                | "tuple"
-                | "type"
-        )
+        || s.starts_with("def ")
+        || s.starts_with("async def ")
+        || s.starts_with("overload[")
+        || s.starts_with('(')
+        || is_plain_python_type_name(s)
 }
 
 fn is_class_like_type_name(text: &str) -> bool {
@@ -353,10 +373,15 @@ fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
     let Some(module) = item.module.as_deref() else {
         return false;
     };
-    let Some(detail) = item.detail.as_deref() else {
+    let Some(owner) = item
+        .detail
+        .as_deref()
+        .and_then(|detail| completion_owner_from_detail(&item.word, detail))
+    else {
         return false;
     };
-    detail.contains(module) && detail.contains(&format!(".{}", item.word))
+    completion_owner_label_from_source(module).as_deref()
+        == Some(completion_owner_label_from_source(owner).as_deref().unwrap_or(owner))
 }
 
 fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
@@ -399,6 +424,166 @@ fn completion_item_is_argument_like(item: &AutocompleteItem) -> bool {
             .is_some_and(|text| text.contains('='))
 }
 
+fn completion_owner_from_detail<'a>(word: &str, detail: &'a str) -> Option<&'a str> {
+    if word.is_empty() {
+        return None;
+    }
+    let needle = format!(".{word}");
+    let idx = detail.find(&needle)?;
+    let before = &detail[..idx];
+    let owner_start = before
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '.'))
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .unwrap_or(0);
+    let owner = before[owner_start..].trim().trim_matches('`');
+    (!owner.is_empty()).then_some(owner)
+}
+
+fn completion_owner_label_from_source(source: &str) -> Option<String> {
+    let class_repr = source.trim().starts_with("<class '");
+    let source = normalized_completion_source(source);
+    if source.is_empty()
+        || !class_repr && is_type_like_completion_source(source)
+        || source.contains('/')
+        || source.contains('\\')
+        || !source
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+    {
+        return None;
+    }
+    let owner = source.rsplit('.').next().unwrap_or(source).trim();
+    (!owner.is_empty()).then(|| owner.to_string())
+}
+
+fn completion_source_label_is_clean(source: &str) -> bool {
+    let source = normalized_completion_source(source);
+    !source.is_empty()
+        && !is_type_like_completion_source(source)
+        && !source.contains('/')
+        && !source.contains('\\')
+        && source
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+fn completion_source_is_module_path(source: &str) -> bool {
+    let source = normalized_completion_source(source);
+    completion_source_label_is_clean(source)
+        && !is_plain_python_type_name(source)
+        && (source.contains('.')
+            || source
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_lowercase()))
+}
+
+fn completion_item_source_is_field_type(item: &AutocompleteItem) -> bool {
+    let Some(source) = item.module.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Some(detail) = item.detail.as_deref() else {
+        return false;
+    };
+    detail
+        .rsplit_once(':')
+        .map(|(_, ty)| ty.trim())
+        .is_some_and(|ty| ty == source)
+}
+
+fn completion_item_owner_label(item: &AutocompleteItem) -> Option<String> {
+    if let Some(owner) = item
+        .detail
+        .as_deref()
+        .and_then(|detail| completion_owner_from_detail(&item.word, detail))
+    {
+        return completion_owner_label_from_source(owner).or_else(|| Some(owner.to_string()));
+    }
+    if completion_item_source_is_field_type(item) {
+        return None;
+    }
+    item.module
+        .as_deref()
+        .and_then(completion_owner_label_from_source)
+}
+
+fn completion_parent_module_label(item: &AutocompleteItem) -> Option<String> {
+    let source = item
+        .module_path
+        .as_deref()
+        .or(item.module.as_deref())
+        .map(normalized_completion_source)?;
+    if !completion_source_is_module_path(source) {
+        return None;
+    }
+    let suffix = format!(".{}", item.word);
+    Some(
+        source
+            .strip_suffix(&suffix)
+            .filter(|parent| !parent.is_empty())
+            .unwrap_or(source)
+            .to_string(),
+    )
+}
+
+fn set_completion_owner_source(
+    item: &mut AutocompleteItem,
+    owner: String,
+    imports: Option<&FxHashMap<String, String>>,
+    fallback_module: Option<&str>,
+) {
+    if item
+        .module_path
+        .as_deref()
+        .is_none_or(|source| !completion_source_is_module_path(source))
+        || completion_item_source_is_field_type(item)
+    {
+        item.module_path = imports
+            .and_then(|imports| imports.get(&owner))
+            .map(|module| format!("{module}.{owner}"))
+            .or_else(|| fallback_module.map(|module| format!("{module}.{owner}")));
+    }
+    item.module = Some(owner);
+}
+
+fn autocomplete_detail_module_path(item: &AutocompleteItem) -> Option<&str> {
+    item.module_path
+        .as_deref()
+        .filter(|source| completion_source_is_module_path(source))
+        .or_else(|| {
+            item.module
+                .as_deref()
+                .filter(|source| completion_source_is_module_path(source))
+        })
+}
+
+fn prepend_autocomplete_detail_module_path(
+    popup: &mut crate::app::mouse::HoverPopup,
+    module_path: &str,
+) {
+    crate::app::file_tree::pre_rasterize_icon("folder", true);
+    let prefix = format!("[[MODULE]] {module_path}\n");
+    if popup.text.starts_with(&prefix) {
+        return;
+    }
+    let shift = prefix.len();
+    popup.text.insert_str(0, &prefix);
+    for span in &mut popup.spans {
+        span.start += shift;
+        span.end += shift;
+    }
+    for (start, end) in &mut popup.inline_code_ranges {
+        *start += shift;
+        *end += shift;
+    }
+    let mut line_kinds = Vec::with_capacity(popup.line_kinds.len() + 1);
+    line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
+    line_kinds.extend(popup.line_kinds.iter().copied());
+    popup.line_kinds = line_kinds;
+}
+
 fn normalize_ty_import_kind(item: &mut AutocompleteItem) {
     if item.kind != SymbolKind::Unknown {
         return;
@@ -415,16 +600,13 @@ fn normalize_ty_import_kind(item: &mut AutocompleteItem) {
 fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
     let mut counts: FxHashMap<String, usize> = FxHashMap::default();
     for item in items {
-        let Some(module) = item.module.as_ref() else {
+        let Some(owner) = completion_item_owner_label(item) else {
             continue;
         };
-        if is_type_like_completion_source(module) {
-            continue;
-        }
         if completion_item_is_field_like(item) && !completion_item_has_explicit_owner(item) {
             continue;
         }
-        *counts.entry(module.clone()).or_insert(0) += 1;
+        *counts.entry(owner).or_insert(0) += 1;
     }
     counts
         .into_iter()
@@ -433,41 +615,174 @@ fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
 }
 
 fn imported_python_module_for_symbol(text: &str, symbol: &str) -> Option<String> {
+    imported_python_symbols(text).remove(symbol)
+}
+
+fn imported_python_symbols(text: &str) -> FxHashMap<String, String> {
+    let mut symbols = FxHashMap::default();
     let mut lines = text.lines().peekable();
     while let Some(line) = lines.next() {
         let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("from ") else {
-            continue;
-        };
-        let Some((module, imports)) = rest.split_once(" import ") else {
-            continue;
-        };
-        if imports.trim_start().starts_with('(') {
-            for import_line in lines.by_ref() {
-                let item = import_line
-                    .trim()
-                    .trim_end_matches(',')
-                    .split(" as ")
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                if item == ")" {
-                    break;
+        if let Some(rest) = trimmed.strip_prefix("from ") {
+            let Some((module, imports)) = rest.split_once(" import ") else {
+                continue;
+            };
+            let module = module.trim();
+            if module.is_empty() {
+                continue;
+            }
+            let mut add_import = |item: &str| {
+                let item = item.trim().trim_end_matches(',');
+                if item.is_empty() || item == ")" {
+                    return false;
                 }
-                if item == symbol {
-                    return Some(module.trim().to_string());
+                let mut parts = item.split(" as ");
+                let name = parts.next().unwrap_or("").trim();
+                let visible = parts.next().unwrap_or(name).trim();
+                if !visible.is_empty() && !name.is_empty() {
+                    symbols.insert(visible.to_string(), module.to_string());
+                }
+                false
+            };
+            if imports.trim_start().starts_with('(') {
+                for import_line in lines.by_ref() {
+                    if add_import(import_line.trim()) {
+                        break;
+                    }
+                    if import_line.trim() == ")" {
+                        break;
+                    }
+                }
+            } else {
+                for item in imports.split(',') {
+                    add_import(item);
                 }
             }
-        } else {
-            for item in imports.split(',') {
-                let name = item.trim().split(" as ").next().unwrap_or("").trim();
-                if name == symbol {
-                    return Some(module.trim().to_string());
-                }
+            continue;
+        }
+        let Some(imports) = trimmed.strip_prefix("import ") else {
+            continue;
+        };
+        for item in imports.split(',') {
+            let mut parts = item.trim().split(" as ");
+            let module = parts.next().unwrap_or("").trim();
+            if module.is_empty() {
+                continue;
+            }
+            let visible = parts
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| module.split('.').next().unwrap_or(module));
+            symbols.insert(visible.to_string(), module.to_string());
+        }
+    }
+    symbols
+}
+
+fn should_replace_completion_module(current: Option<&str>, incoming: &str) -> bool {
+    let incoming = incoming.trim();
+    if incoming.is_empty() {
+        return false;
+    }
+    let incoming_path = incoming.contains('.')
+        && incoming
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    match current {
+        None => true,
+        Some(current) => {
+            let current_path = current.contains('.')
+                && current
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+            incoming_path && !current_path
+        }
+    }
+}
+
+fn completion_detail_kind(kind: SymbolKind, detail: Option<&str>) -> SymbolKind {
+    let Some(detail) = detail else {
+        return kind;
+    };
+    if detail.starts_with("(parameter)") {
+        SymbolKind::Parameter
+    } else if detail.starts_with("(variable)") {
+        SymbolKind::Variable
+    } else if detail.starts_with("(property)") || detail.starts_with("(field)") {
+        SymbolKind::Property
+    } else {
+        kind
+    }
+}
+
+fn completion_source_is_builtin(source: &str) -> bool {
+    let source = normalized_completion_source(source);
+    source == "builtins" || source.starts_with("builtins.")
+}
+
+fn completion_item_source_is_builtin(item: &AutocompleteItem) -> bool {
+    item.module_path
+        .as_deref()
+        .or(item.module.as_deref())
+        .is_some_and(completion_source_is_builtin)
+}
+
+fn completion_word_starts_lower(word: &str) -> bool {
+    word.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+}
+
+fn completion_is_lowercase_type_source(
+    word: &str,
+    module: Option<&str>,
+    detail: Option<&str>,
+) -> bool {
+    let Some(module) = module else {
+        return false;
+    };
+    completion_word_starts_lower(word)
+        && is_class_like_type_name(module)
+        && detail.is_none_or(|detail| {
+            detail.contains(&format!(": {module}")) || !detail.starts_with("type[")
+        })
+}
+
+fn python_builtin_completion_module(word: &str) -> Option<&'static str> {
+    match word {
+        "print" | "len" | "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool"
+        | "float" | "sum" | "min" | "max" | "abs" | "isinstance" | "issubclass" | "hasattr"
+        | "getattr" | "setattr" | "delattr" | "dir" | "type" | "enumerate" | "zip"
+        | "map" | "filter" | "range" | "reversed" | "open" | "super" | "Exception"
+        | "ValueError" | "TypeError" | "KeyError" | "IndexError" | "AttributeError"
+        | "RuntimeError" | "KeyboardInterrupt" => Some("builtins"),
+        _ => None,
+    }
+}
+
+fn apply_import_modules_to_autocomplete_items(
+    items: &mut [(AutocompleteItem, Vec<usize>)],
+    imports: &FxHashMap<String, String>,
+) {
+    for (item, _) in items {
+        if let Some(module) = imports.get(&item.word) {
+            if should_replace_completion_module(item.module.as_deref(), module) {
+                item.module = Some(module.clone());
+            }
+            if item.module_path.is_none() {
+                item.module_path = Some(module.clone());
+            }
+            if item
+                .word
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            {
+                item.kind = SymbolKind::Class;
             }
         }
     }
-    None
 }
 
 fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<String>> {
@@ -1408,18 +1723,23 @@ impl App {
             self.autocomplete_detail_rect = None;
             return;
         };
+        let module_path = autocomplete_detail_module_path(item).map(str::to_string);
+        let detail_text = Self::autocomplete_detail_text(item, detail);
+        let expected_text = module_path
+            .as_ref()
+            .map(|module_path| format!("[[MODULE]] {module_path}\n{}", detail_text.as_ref()))
+            .unwrap_or_else(|| detail_text.to_string());
         let (text, spans, line_kinds, inline_code_ranges) = {
-            let detail_text = Self::autocomplete_detail_text(item, detail);
             if self
                 .autocomplete_detail_popup
                 .as_ref()
-                .is_some_and(|popup| popup.text == detail_text.as_ref())
+                .is_some_and(|popup| popup.text == expected_text)
             {
                 return;
             }
             crate::lsp::highlight_hover_text(detail_text.as_ref())
         };
-        self.autocomplete_detail_popup = Some(crate::app::mouse::HoverPopup {
+        let mut popup = crate::app::mouse::HoverPopup {
             text,
             spans,
             line_kinds,
@@ -1432,7 +1752,11 @@ impl App {
             anim_progress: self.autocomplete_anim_progress,
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
-        });
+        };
+        if let Some(module_path) = module_path {
+            prepend_autocomplete_detail_module_path(&mut popup, &module_path);
+        }
+        self.autocomplete_detail_popup = Some(popup);
         self.autocomplete_detail_rect = None;
         self.autocomplete_detail_placement = None;
         self.autocomplete_detail_max_scroll = 0.0;
@@ -1477,19 +1801,65 @@ impl App {
         let Some(target) = self.autocomplete_detail_word.clone() else {
             return;
         };
-        let resolved = items
-            .into_iter()
-            .find(|item| item.label == target)
-            .and_then(|item| item.detail.map(|detail| (detail, item.module)));
-        if let Some((detail, module)) = resolved {
-            for (item, _) in &mut self.autocomplete_options {
-                if item.word == target {
-                    item.detail = Some(detail.clone());
-                    if let Some(module) = module.as_ref() {
-                        item.module = Some(module.clone());
-                    }
-                }
+        let mut details: FxHashMap<
+            String,
+            (SymbolKind, Option<String>, Option<String>, Option<String>),
+        > = FxHashMap::default();
+        for item in items {
+            let module_path = item.module.clone();
+            details
+                .entry(item.label)
+                .or_insert((item.kind, item.detail, item.module, module_path));
+        }
+        let mut target_changed = false;
+        let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        for (item, _) in &mut self.autocomplete_options {
+            let Some((kind, detail, module, module_path)) = details.get(&item.word) else {
+                continue;
+            };
+            let incoming_kind = completion_detail_kind(*kind, detail.as_deref());
+            item.kind = incoming_kind;
+            if item.detail.is_none() && detail.is_some() {
+                item.detail = detail.clone();
             }
+            if !member_dot_context
+                && (matches!(
+                    incoming_kind,
+                    SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+                ) || completion_is_lowercase_type_source(
+                    &item.word,
+                    module.as_deref(),
+                    detail.as_deref()
+                ))
+            {
+                if completion_is_lowercase_type_source(
+                    &item.word,
+                    module.as_deref(),
+                    detail.as_deref(),
+                ) {
+                    item.kind = SymbolKind::Variable;
+                }
+                item.module = None;
+                item.module_path = None;
+                if item.word == target {
+                    target_changed = true;
+                }
+                continue;
+            }
+            if item.module_path.is_none() && module_path.is_some() {
+                item.module_path = module_path.clone();
+            }
+            if let Some(module) = module
+                .as_deref()
+                .filter(|module| should_replace_completion_module(item.module.as_deref(), module))
+            {
+                item.module = Some(module.to_string());
+            }
+            if item.word == target {
+                target_changed = true;
+            }
+        }
+        if target_changed {
             self.refresh_autocomplete_detail_popup();
         }
         self.autocomplete_detail_request_id = None;
@@ -1574,44 +1944,136 @@ impl App {
 
         let mut items: Vec<AutocompleteItem> =
             items.into_iter().map(AutocompleteItem::from).collect();
-        let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext)
+        let current_text = self.editor.get_full_text();
+        let imported_modules =
+            (self.file_extension == "py").then(|| imported_python_symbols(&current_text));
+        let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
+            && member_dot_context)
             .then(|| common_completion_owner(&items))
             .flatten();
+        let common_owner_module = common_owner.as_ref().and_then(|owner| {
+            imported_modules
+                .as_ref()
+                .and_then(|imports| imports.get(owner))
+                .map(String::as_str)
+        });
         let inherited_owner_source = common_owner.as_ref().and_then(|owner| {
             imported_python_class_source(
-                &self.editor.get_full_text(),
+                &current_text,
                 &self.ide_workspaces,
                 self.file_path.as_deref(),
                 owner,
             )
         });
         for item in &mut items {
+            item.kind = completion_detail_kind(item.kind, item.detail.as_deref());
             if self.autocomplete_mode == AutocompleteMode::TyImports {
                 normalize_ty_import_kind(item);
             }
             if self.autocomplete_mode == AutocompleteMode::TyContext {
+                if item
+                    .module_path
+                    .as_deref()
+                    .is_some_and(|source| !completion_source_is_module_path(source))
+                {
+                    item.module_path = None;
+                }
+                if item
+                    .module
+                    .as_deref()
+                    .is_some_and(|source| !completion_source_label_is_clean(source))
+                {
+                    item.module = None;
+                }
+                if !member_dot_context {
+                    if let Some(module) = imported_modules
+                        .as_ref()
+                        .and_then(|imports| imports.get(&item.word))
+                    {
+                        item.module = Some(module.clone());
+                        item.module_path.get_or_insert_with(|| module.clone());
+                    } else if item.module.is_none()
+                        && item.module_path.is_none()
+                        && item
+                            .detail
+                            .as_deref()
+                            .is_none_or(|detail| detail.starts_with("type["))
+                        && let Some(module) = python_builtin_completion_module(&item.word)
+                    {
+                        item.module = Some(module.to_string());
+                        item.module_path = Some(format!("{module}.{}", item.word));
+                        item.kind = SymbolKind::Builtin;
+                    }
+                }
                 if completion_item_is_argument_like(item) {
                     item.kind = SymbolKind::Parameter;
                 }
                 if completion_item_is_field_like(item) {
-                    if !completion_item_has_explicit_owner(item) {
-                        item.module = common_owner.as_ref().map(|owner| {
+                    if !member_dot_context {
+                        item.kind = SymbolKind::Variable;
+                        item.module = None;
+                        item.module_path = None;
+                    } else if let Some(owner) = item
+                        .detail
+                        .as_deref()
+                        .and_then(|detail| completion_owner_from_detail(&item.word, detail))
+                        .and_then(|owner| {
+                            completion_owner_label_from_source(owner)
+                                .or_else(|| Some(owner.to_string()))
+                        })
+                    {
+                        set_completion_owner_source(
+                            item,
+                            owner,
+                            imported_modules.as_ref(),
+                            common_owner_module,
+                        );
+                    } else if !completion_item_has_explicit_owner(item) {
+                        if let Some(owner) = common_owner.as_ref().map(|owner| {
                             inherited_owner_source
                                 .as_deref()
                                 .and_then(|source| {
                                     python_class_attr_owner_in_source(source, owner, &item.word)
                                 })
                                 .unwrap_or_else(|| owner.clone())
-                        });
+                        }) {
+                            set_completion_owner_source(
+                                item,
+                                owner,
+                                imported_modules.as_ref(),
+                                common_owner_module,
+                            );
+                        }
+                    }
+                    if item.module.as_deref().is_some_and(is_type_like_completion_source)
+                        || completion_item_source_is_field_type(item)
+                    {
+                        item.module = None;
                     }
                 } else {
-                    let has_type_source = item
+                    if !member_dot_context {
+                        if let Some(module) = completion_parent_module_label(item) {
+                            item.module = Some(module);
+                        }
+                    } else if let Some(owner) = completion_item_owner_label(item) {
+                        set_completion_owner_source(
+                            item,
+                            owner,
+                            imported_modules.as_ref(),
+                            common_owner_module,
+                        );
+                    } else if item
                         .module
                         .as_deref()
-                        .is_some_and(is_type_like_completion_source);
-                    if has_type_source || item.module.is_none() {
+                        .is_some_and(is_type_like_completion_source)
+                        || item.module.is_none()
+                    {
                         item.module = common_owner.clone();
                     }
+                }
+                if !member_dot_context && completion_item_source_is_builtin(item) {
+                    item.kind = SymbolKind::Builtin;
                 }
             }
         }
@@ -1654,8 +2116,9 @@ impl App {
                 SymbolKind::Property | SymbolKind::Variable => 1,
                 SymbolKind::Function => 2,
                 SymbolKind::Class | SymbolKind::Module => 3,
-                SymbolKind::Keyword => 4,
-                SymbolKind::Unknown => 5,
+                SymbolKind::Builtin => 4,
+                SymbolKind::Keyword => 5,
+                SymbolKind::Unknown => 6,
             };
             (
                 !*is_prefix,
@@ -1772,8 +2235,9 @@ impl App {
                 SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property => 0,
                 SymbolKind::Function => 1,
                 SymbolKind::Class | SymbolKind::Module => 2,
-                SymbolKind::Keyword => 3,
-                SymbolKind::Unknown => 4,
+                SymbolKind::Builtin => 3,
+                SymbolKind::Keyword => 4,
+                SymbolKind::Unknown => 5,
             };
 
             let match_priority = if *is_prefix { 0 } else { 1 };
@@ -1790,6 +2254,10 @@ impl App {
             .take(60)
             .map(|m| (m.2.into(), m.3))
             .collect();
+        if self.file_extension == "py" && !self.autocomplete_options.is_empty() {
+            let imports = imported_python_symbols(&self.editor.get_full_text());
+            apply_import_modules_to_autocomplete_items(&mut self.autocomplete_options, &imports);
+        }
 
         if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
@@ -2807,6 +3275,138 @@ mod app_behavior_tests {
     }
 
     #[test]
+    fn ty_context_top_level_variable_keeps_variable_kind_and_hides_type_source() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("bo");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+            label: "box".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("BoxRead".to_string()),
+            detail: Some("(variable) box: BoxRead".to_string()),
+            insert_text: Some("box".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+
+        assert_eq!(app.autocomplete_options.len(), 1);
+        assert_eq!(app.autocomplete_options[0].0.word, "box");
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Variable);
+        assert_eq!(app.autocomplete_options[0].0.module, None);
+        assert_eq!(app.autocomplete_options[0].0.module_path, None);
+    }
+
+    #[test]
+    fn ty_context_top_level_lowercase_type_source_is_variable_without_detail() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("bo");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+            label: "box".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("BoxRead".to_string()),
+            detail: None,
+            insert_text: Some("box".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+
+        assert_eq!(app.autocomplete_options.len(), 1);
+        assert_eq!(app.autocomplete_options[0].0.word, "box");
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Variable);
+        assert_eq!(app.autocomplete_options[0].0.module, None);
+        assert_eq!(app.autocomplete_options[0].0.module_path, None);
+    }
+
+    #[test]
+    fn autocomplete_detail_merge_does_not_flip_top_level_variable_to_type() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("bo");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_detail_word = Some("box".to_string());
+        app.autocomplete_options = vec![(
+            AutocompleteItem {
+                word: "box".to_string(),
+                kind: SymbolKind::Variable,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: None,
+                module_path: None,
+                detail: None,
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        )];
+
+        app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+            label: "box".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("BoxRead".to_string()),
+            detail: Some("(variable) box: BoxRead".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Variable);
+        assert_eq!(app.autocomplete_options[0].0.module, None);
+        assert_eq!(app.autocomplete_options[0].0.module_path, None);
+    }
+
+    #[test]
+    fn autocomplete_detail_merge_hides_lowercase_type_source_without_detail() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("bo");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_detail_word = Some("box".to_string());
+        app.autocomplete_options = vec![(
+            AutocompleteItem {
+                word: "box".to_string(),
+                kind: SymbolKind::Variable,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: None,
+                module_path: None,
+                detail: None,
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        )];
+
+        app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+            label: "box".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("BoxRead".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Variable);
+        assert_eq!(app.autocomplete_options[0].0.module, None);
+        assert_eq!(app.autocomplete_options[0].0.module_path, None);
+    }
+
+    #[test]
     fn autocomplete_orders_magic_names_after_regular_members_and_merges_lazy_detail() {
         let Some(mut app) = test_app() else {
             return;
@@ -2837,6 +3437,21 @@ mod app_behavior_tests {
             app.autocomplete_options[0].0.detail.as_deref(),
             Some("(chars: str | None = None) -> str")
         );
+
+        app.autocomplete_detail_word = Some("strip".to_string());
+        app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+            label: "strip".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("builtins.str".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }]);
+        assert_eq!(
+            app.autocomplete_options[0].0.module.as_deref(),
+            Some("builtins.str")
+        );
     }
 
     #[test]
@@ -2854,6 +3469,7 @@ mod app_behavior_tests {
                 scope_start: 0,
                 scope_end: usize::MAX,
                 module: Some("BoxReadPublic".to_string()),
+                module_path: None,
                 detail: Some("(variable) id: int".to_string()),
                 insert_text: None,
                 text_edit: None,
@@ -2872,6 +3488,41 @@ mod app_behavior_tests {
         assert_eq!(
             app.selected_autocomplete_detail_text().as_deref(),
             Some("BoxReadPublic")
+        );
+    }
+
+    #[test]
+    fn autocomplete_detail_popup_prepends_full_module_path() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.editor = editor_with("RepoBase.initialize_all");
+        app.autocomplete_active = true;
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+        app.autocomplete_options = vec![(
+            AutocompleteItem {
+                word: "initialize_all".to_string(),
+                kind: SymbolKind::Function,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: Some("RepoBase".to_string()),
+                module_path: Some("car_wash.core.db.repo_base.RepoBase".to_string()),
+                detail: Some("def RepoBase.initialize_all() -> None".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        )];
+
+        app.refresh_autocomplete_detail_popup();
+        let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+        assert!(popup
+            .text
+            .starts_with("[[MODULE]] car_wash.core.db.repo_base.RepoBase\n"));
+        assert_eq!(
+            popup.line_kinds.first().copied(),
+            Some(crate::lsp::HoverLineKindPublic::Text)
         );
     }
 
@@ -3057,7 +3708,7 @@ mod app_behavior_tests {
             crate::lsp::LspCompletionItem {
                 label: "model_dump".to_string(),
                 kind: SymbolKind::Function,
-                module: Some("BoxRead".to_string()),
+                module: Some("car_wash.domains.washes.boxes.output.BoxRead".to_string()),
                 detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
                 insert_text: None,
                 text_edit: None,
@@ -3070,6 +3721,12 @@ mod app_behavior_tests {
             .find(|(item, _)| item.word == "id")
             .unwrap();
         assert_eq!(id.0.module.as_deref(), Some("BoxReadPublic"));
+        let model_dump = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "model_dump")
+            .unwrap();
+        assert_eq!(model_dump.0.module.as_deref(), Some("BoxRead"));
 
         app.editor = editor_with("box.");
         app.autocomplete_mode = AutocompleteMode::TyContext;
@@ -3079,6 +3736,15 @@ mod app_behavior_tests {
                 kind: SymbolKind::Class,
                 module: Some("int".to_string()),
                 detail: Some("(variable) id: int".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "car_wash".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("CarWashRead".to_string()),
+                detail: Some("(variable) BoxRead.car_wash: CarWashRead".to_string()),
                 insert_text: None,
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -3099,6 +3765,12 @@ mod app_behavior_tests {
             .find(|(item, _)| item.word == "id")
             .unwrap();
         assert_eq!(typed_id.0.module.as_deref(), Some("BoxRead"));
+        let typed_car_wash = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "car_wash")
+            .unwrap();
+        assert_eq!(typed_car_wash.0.module.as_deref(), Some("BoxRead"));
 
         app.editor = editor_with("value");
         app.autocomplete_mode = AutocompleteMode::TyContext;
@@ -3112,6 +3784,174 @@ mod app_behavior_tests {
             additional_text_edits: Vec::new(),
         }]);
         assert!(!app.autocomplete_active);
+    }
+
+    #[test]
+    fn ty_context_sources_drop_types_and_signatures_without_fallback() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("d");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "dir".to_string(),
+                kind: SymbolKind::Function,
+                module: Some("def dir(o: object = ..., /) -> list[str]".to_string()),
+                detail: Some("def dir(o: object = ..., /) -> list[str]".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "data".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("str".to_string()),
+                detail: Some("(variable) data: str".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        let dir = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "dir")
+            .unwrap();
+        assert_eq!(dir.0.module, None);
+        assert_eq!(dir.0.module_path, None);
+
+        let data = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "data")
+            .unwrap();
+        assert_eq!(data.0.module, None);
+        assert_eq!(data.0.module_path, None);
+    }
+
+    #[test]
+    fn ty_context_top_level_sources_use_parent_module_and_hide_value_types() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("B");
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "bool".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("builtins.bool".to_string()),
+                detail: Some("type[bool]".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "BookingCreate".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("car_wash.domains.washes.bookings.BookingCreate".to_string()),
+                detail: Some("type[BookingCreate]".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "box".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) box: BoxRead".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        let bool_item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "bool")
+            .unwrap();
+        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
+
+        let booking = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "BookingCreate")
+            .unwrap();
+        assert_eq!(
+            booking.0.module.as_deref(),
+            Some("car_wash.domains.washes.bookings")
+        );
+
+        let box_value = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "box")
+            .unwrap();
+        assert_eq!(box_value.0.module, None);
+    }
+
+    #[test]
+    fn ty_context_top_level_uses_import_modules_and_builtin_fallbacks_when_ty_omits_source() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with(
+            "from car_wash.domains.washes.bookings.service import BookingService\nBo",
+        );
+        app.autocomplete_mode = AutocompleteMode::TyContext;
+
+        app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "BookingService".to_string(),
+                kind: SymbolKind::Class,
+                module: None,
+                detail: Some("type[BookingService]".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "bool".to_string(),
+                kind: SymbolKind::Class,
+                module: None,
+                detail: Some("type[bool]".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ]);
+
+        let service = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "BookingService")
+            .unwrap();
+        assert_eq!(
+            service.0.module.as_deref(),
+            Some("car_wash.domains.washes.bookings.service")
+        );
+        assert_eq!(
+            service.0.module_path.as_deref(),
+            Some("car_wash.domains.washes.bookings.service")
+        );
+
+        let bool_item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "bool")
+            .unwrap();
+        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
+        assert_eq!(bool_item.0.module_path.as_deref(), Some("builtins.bool"));
     }
 
     #[test]
@@ -3135,6 +3975,38 @@ mod app_behavior_tests {
         assert_eq!(
             imported_python_module_for_symbol(imports, "BoxRead").as_deref(),
             Some("car_wash.domains.washes.boxes.output")
+        );
+        let aliased = "from car_wash.core.db.repo_base import RepoBase as BaseRepo\nimport asyncpg, car_wash.core.db.repo_base as repo_base\n";
+        let imported = imported_python_symbols(aliased);
+        assert_eq!(
+            imported.get("BaseRepo").map(String::as_str),
+            Some("car_wash.core.db.repo_base")
+        );
+        assert_eq!(imported.get("asyncpg").map(String::as_str), Some("asyncpg"));
+        assert_eq!(
+            imported.get("repo_base").map(String::as_str),
+            Some("car_wash.core.db.repo_base")
+        );
+    }
+
+    #[test]
+    fn tree_sitter_autocomplete_shows_import_path_for_python_symbols() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with(
+            "from car_wash.core.db.repo_base import RepoBase\n\nRepoBase.initialize_all()\nR",
+        );
+        app.highlighter.completions = vec![completion("RepoBase", SymbolKind::Variable, 0, 200)];
+
+        app.update_autocomplete();
+
+        assert_eq!(app.autocomplete_options[0].0.word, "RepoBase");
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Class);
+        assert_eq!(
+            app.autocomplete_options[0].0.module.as_deref(),
+            Some("car_wash.core.db.repo_base")
         );
     }
 
@@ -3161,6 +4033,7 @@ mod app_behavior_tests {
         app.is_ide_mode = true;
         app.show_welcome = false;
         app.file_path = Some(current);
+        app.file_extension = "py".to_string();
         app.editor = editor_with("from car_wash.domains.washes.boxes.output import BoxRead\nbox.");
         app.autocomplete_mode = AutocompleteMode::TyContext;
         app.update_ty_autocomplete(vec![
@@ -3217,9 +4090,18 @@ mod app_behavior_tests {
             .iter()
             .find(|(item, _)| item.word == "car_wash")
             .and_then(|(item, _)| item.module.as_deref());
+        let id_module_path = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "id")
+            .and_then(|(item, _)| item.module_path.as_deref());
         assert_eq!(id_owner, Some("BoxReadPublic"));
         assert_eq!(created_at_owner, Some("BoxReadPublic"));
         assert_eq!(car_wash_owner, Some("BoxRead"));
+        assert_eq!(
+            id_module_path,
+            Some("car_wash.domains.washes.boxes.output.BoxReadPublic")
+        );
     }
 
     #[test]
@@ -3304,6 +4186,7 @@ mod app_behavior_tests {
                 scope_start: 0,
                 scope_end: usize::MAX,
                 module: Some("BoxRead".to_string()),
+                module_path: None,
                 detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
                 insert_text: None,
                 text_edit: None,

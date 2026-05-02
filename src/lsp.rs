@@ -31,7 +31,7 @@ pub use protocol::{
     highlight_diagnostic_message, offset_to_lsp_pos,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // ── Atomic request ID ─────────────────────────────────────────────────────────
 
@@ -56,7 +56,8 @@ pub enum LspServerStatus {
 pub struct LogEntry {
     pub text: String,
     pub spans: Vec<crate::highlighter::ColorSpan>,
-    pub folds: Vec<(usize, usize)>,
+    pub folds: Vec<(usize, usize, usize)>,
+    pub created_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -244,24 +245,7 @@ fn send_and_log(
     msg: Vec<u8>,
 ) -> Result<(), mpsc::SendError<Vec<u8>>> {
     if let Ok(s) = std::str::from_utf8(&msg) {
-        let log_msg =
-            if s.contains("\"textDocument/didOpen\"") || s.contains("\"textDocument/didChange\"") {
-                if let Some(idx) = s.find("\"text\":\"") {
-                    let mut temp = String::with_capacity(s.len().min(512));
-                    temp.push_str(&s[..idx + 8]);
-                    temp.push_str("<TRUNCATED>\"");
-                    if s.contains("didOpen") {
-                        temp.push_str("}}}}");
-                    } else {
-                        temp.push_str("}]}}");
-                    }
-                    format!("[LSP SEND] {}", temp)
-                } else {
-                    format!("[LSP SEND] {}", s)
-                }
-            } else {
-                format!("[LSP SEND] {}", s)
-            };
+        let log_msg = format!("[LSP SEND] {}", remove_sent_log_text_fields(s));
 
         let _ = event_tx.send(LspEvent::Log {
             name: server_name,
@@ -269,6 +253,50 @@ fn send_and_log(
         });
     }
     out_tx.send(msg)
+}
+
+fn remove_sent_log_text_fields(raw: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_string();
+    };
+    if remove_json_text_fields(&mut value) {
+        serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
+    } else {
+        raw.to_string()
+    }
+}
+
+fn remove_json_text_fields(value: &mut serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut changed = false;
+            let keys = map.keys().cloned().collect::<Vec<_>>();
+            for key in keys {
+                let remove = map
+                    .get(&key)
+                    .is_some_and(|child| key == "text" && child.is_string());
+                if remove {
+                    map.remove(&key);
+                    changed = true;
+                } else if let Some(child) = map.get_mut(&key) {
+                    if remove_json_text_fields(child) {
+                        changed = true;
+                    }
+                }
+            }
+            changed
+        }
+        serde_json::Value::Array(items) => {
+            let mut changed = false;
+            for child in items {
+                if remove_json_text_fields(child) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -454,6 +482,18 @@ fn run_supervisor(
                             break 'inner;
                         }
                     }
+                    Ok(Cmd::WorkspaceDiagnostic {
+                        id,
+                        previous_result_ids_json,
+                    }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::WorkspaceDiagnostic);
+                        }
+                        let msg = make_workspace_diagnostic(id, &previous_result_ids_json);
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
                     Ok(Cmd::CodeAction {
                         id,
                         uri,
@@ -508,7 +548,6 @@ pub struct LspProcess {
     current_uri: Option<String>,
     def: &'static LspServerDef,
     pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
-    workspace_scanned: bool,
 }
 
 impl LspProcess {
@@ -529,7 +568,6 @@ impl LspProcess {
             current_uri: None,
             def,
             open_file_data: None,
-            workspace_scanned: false,
         }
     }
 
@@ -540,33 +578,8 @@ impl LspProcess {
         path: &PathBuf,
         text: &str,
         version: i32,
-        workspace: Option<&PathBuf>,
+        _workspace: Option<&PathBuf>,
     ) {
-        if !self.workspace_scanned {
-            self.workspace_scanned = true;
-            if let Some(ws) = workspace {
-                let tx = self.cmd_tx.clone();
-                let lang = self.def.language_id;
-                let ws = ws.clone();
-                std::thread::spawn(move || {
-                    for entry in ignore::Walk::new(&ws).flatten() {
-                        let p = entry.path();
-                        if p.extension().and_then(|s| s.to_str()) == Some("py") {
-                            if let Ok(content) = std::fs::read_to_string(p) {
-                                let uri = path_to_uri(&p.to_string_lossy());
-                                let _ = tx.send(Cmd::Open {
-                                    uri,
-                                    lang,
-                                    version: 1,
-                                    text: content,
-                                });
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
         self.open_file_data = Some((self.def.language_id.to_string(), text.to_string()));
@@ -624,6 +637,15 @@ impl LspProcess {
             line,
             col,
             trigger: trigger.map(str::to_string),
+        });
+        id
+    }
+
+    pub fn request_workspace_diagnostics(&mut self, previous_result_ids_json: String) -> i32 {
+        let id = next_id();
+        let _ = self.cmd_tx.send(Cmd::WorkspaceDiagnostic {
+            id,
+            previous_result_ids_json,
         });
         id
     }
@@ -764,6 +786,9 @@ pub struct LspManager {
     pub instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
     pub merged_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    ty_diag_result_ids: HashMap<PathBuf, String>,
+    ty_workspace_diag_pending: Option<i32>,
+    ty_workspace_diag_dirty: bool,
     pub dirty_diagnostics: bool,
     pub last_change: Option<std::time::Instant>,
     current_path: Option<PathBuf>,
@@ -791,6 +816,9 @@ impl LspManager {
             instant_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
             merged_instant_diagnostics: HashMap::new(),
+            ty_diag_result_ids: HashMap::new(),
+            ty_workspace_diag_pending: None,
+            ty_workspace_diag_dirty: false,
             dirty_diagnostics: false,
             last_change: None,
             current_path: None,
@@ -812,6 +840,9 @@ impl LspManager {
         if self.ty_process.is_none() && !self.python_disabled {
             self.ty_status = LspServerStatus::Starting;
             self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
+            self.ty_diag_result_ids.clear();
+            self.ty_workspace_diag_pending = None;
+            self.ty_workspace_diag_dirty = true;
         }
     }
 
@@ -827,9 +858,15 @@ impl LspManager {
         if let Some(proc) = &mut self.ty_process {
             proc.restart();
             self.ty_status = LspServerStatus::Starting;
+            self.ty_diag_result_ids.clear();
+            self.ty_workspace_diag_pending = None;
+            self.ty_workspace_diag_dirty = true;
         } else if !self.python_disabled {
             self.ty_status = LspServerStatus::Starting;
             self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
+            self.ty_diag_result_ids.clear();
+            self.ty_workspace_diag_pending = None;
+            self.ty_workspace_diag_dirty = true;
         }
     }
 
@@ -848,6 +885,9 @@ impl LspManager {
         self.instant_diagnostics.clear();
         self.ty_instant_diagnostics.clear();
         self.merged_instant_diagnostics.clear();
+        self.ty_diag_result_ids.clear();
+        self.ty_workspace_diag_pending = None;
+        self.ty_workspace_diag_dirty = false;
         self.dirty_diagnostics = false;
         self.server_logs.clear();
     }
@@ -859,6 +899,9 @@ impl LspManager {
         self.ty_status = LspServerStatus::Starting;
         self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
         self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
+        self.ty_diag_result_ids.clear();
+        self.ty_workspace_diag_pending = None;
+        self.ty_workspace_diag_dirty = true;
         self.reopen_current_python_file();
     }
 
@@ -901,6 +944,10 @@ impl LspManager {
         ]
     }
 
+    pub fn clear_server_logs(&mut self, name: &str) {
+        self.server_logs.remove(name);
+    }
+
     /// Возвращает процесс для нужного расширения, запустив при необходимости
     fn process_for_ext(&mut self, ext: &str) -> Option<&mut LspProcess> {
         match ext {
@@ -933,6 +980,7 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_open(&abs_path, text, version, ws.as_ref());
             }
+            self.ty_workspace_diag_dirty = true;
         } else {
             self.current_python_file = None;
         }
@@ -959,6 +1007,7 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_change(&abs_path, text, version);
             }
+            self.ty_workspace_diag_dirty = true;
         }
     }
 
@@ -1051,6 +1100,48 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_close(&abs_path);
             }
+            self.ty_workspace_diag_dirty = true;
+        }
+    }
+
+    fn ty_workspace_result_ids_json(&self) -> String {
+        if self.ty_diag_result_ids.is_empty() {
+            return String::from("[]");
+        }
+
+        let mut items = Vec::with_capacity(self.ty_diag_result_ids.len());
+        for (path, value) in &self.ty_diag_result_ids {
+            let uri = path_to_uri(&path.to_string_lossy());
+            items.push(format!(
+                r#"{{"uri":"{}","value":"{}"}}"#,
+                json_escape(&uri),
+                json_escape(value)
+            ));
+        }
+        format!("[{}]", items.join(","))
+    }
+
+    fn request_ty_workspace_diagnostics_if_ready(&mut self) {
+        if !self.ty_workspace_diag_dirty
+            || self.ty_workspace_diag_pending.is_some()
+            || self.python_disabled
+            || self.suppress_diagnostics
+            || self.ty_status != LspServerStatus::Running
+        {
+            return;
+        }
+        if self
+            .last_change
+            .is_some_and(|last| last.elapsed().as_secs_f32() < 3.0)
+        {
+            return;
+        }
+
+        let previous_result_ids_json = self.ty_workspace_result_ids_json();
+        if let Some(proc) = &mut self.ty_process {
+            let id = proc.request_workspace_diagnostics(previous_result_ids_json);
+            self.ty_workspace_diag_pending = Some(id);
+            self.ty_workspace_diag_dirty = false;
         }
     }
 
@@ -1105,12 +1196,17 @@ impl LspManager {
                     path,
                     version,
                     items,
+                    result_id,
                     ..
                 } => {
                     if !self.suppress_diagnostics {
                         let v = version.unwrap_or(0);
 
                         if *server_name == TY_SERVER.program {
+                            if let Some(result_id) = result_id.as_ref() {
+                                self.ty_diag_result_ids
+                                    .insert(path.clone(), result_id.clone());
+                            }
                             self.ty_instant_diagnostics
                                 .insert(path.clone(), (v, items.clone()));
                         } else {
@@ -1133,30 +1229,42 @@ impl LspManager {
                 LspEvent::StatusChanged { name, status } => {
                     if *name == TY_SERVER.program {
                         self.ty_status = status.clone();
+                        if *status == LspServerStatus::Running {
+                            self.ty_workspace_diag_dirty = true;
+                        } else if *status == LspServerStatus::Starting
+                            || *status == LspServerStatus::Crashed
+                            || *status == LspServerStatus::Disabled
+                        {
+                            self.ty_workspace_diag_pending = None;
+                        }
                     } else {
                         self.python_status = status.clone();
                     }
                 }
-                LspEvent::Log { name, message } => {
-                    if message.len() > 5000 {
-                        let mut split_at = 5000;
-                        while split_at > 0 && !message.is_char_boundary(split_at) {
-                            split_at -= 1;
-                        }
-                        message.truncate(split_at);
-                        message.push_str("\n... [TRUNCATED TO SAVE RAM]");
+                LspEvent::ConfigurationServed { name } => {
+                    if *name == TY_SERVER.program {
+                        self.ty_workspace_diag_dirty = true;
                     }
+                }
+                LspEvent::WorkspaceDiagnosticsDone { request_id } => {
+                    if self.ty_workspace_diag_pending == Some(*request_id) {
+                        self.ty_workspace_diag_pending = None;
+                    }
+                }
+                LspEvent::Log { name, message } => {
                     let (final_text, spans, folds) = format_and_highlight_json(message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
+                    let now = Instant::now();
+                    logs.retain(|log| {
+                        now.duration_since(log.created_at) <= Duration::from_secs(300)
+                    });
                     logs.push(LogEntry {
                         text: final_text,
                         spans,
                         folds,
+                        created_at: now,
                     });
-                    if logs.len() > 30 {
-                        logs.remove(0);
-                    }
                 }
                 _ => {}
             }
@@ -1187,6 +1295,8 @@ impl LspManager {
             }
         }
 
+        self.request_ty_workspace_diagnostics_if_ready();
+
         all
     }
 
@@ -1216,6 +1326,7 @@ impl LspManager {
         self.instant_diagnostics.remove(&abs_path);
         self.ty_instant_diagnostics.remove(&abs_path);
         self.merged_instant_diagnostics.remove(&abs_path);
+        self.ty_diag_result_ids.remove(&abs_path);
         self.dirty_diagnostics = false;
     }
 
@@ -1353,7 +1464,7 @@ pub fn format_and_highlight_json(
 ) -> (
     String,
     Vec<crate::highlighter::ColorSpan>,
-    Vec<(usize, usize)>,
+    Vec<(usize, usize, usize)>,
 ) {
     let (prefix, content) = if raw_text.starts_with("[LSP RECV] ") {
         ("[LSP RECV]\n", &raw_text[11..])
@@ -1407,6 +1518,7 @@ pub fn format_and_highlight_json(
                             folds.push((
                                 node.start_byte() + prefix.len(),
                                 node.end_byte() + prefix.len(),
+                                json_container_depth(node),
                             ));
                         }
                     }
@@ -1455,6 +1567,18 @@ pub fn format_and_highlight_json(
     (final_string, spans, folds)
 }
 
+fn json_container_depth(node: tree_sitter::Node<'_>) -> usize {
+    let mut depth = 1;
+    let mut parent = node.parent();
+    while let Some(p) = parent {
+        if matches!(p.kind(), "object" | "array") {
+            depth += 1;
+        }
+        parent = p.parent();
+    }
+    depth
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,7 +1599,6 @@ mod tests {
             current_uri: None,
             def,
             open_file_data: None,
-            workspace_scanned: true,
         };
         (proc, cmd_rx, event_tx)
     }
@@ -1526,7 +1649,7 @@ mod tests {
         assert!(
             folds
                 .iter()
-                .all(|(start, end)| start < end && *end <= pretty.len())
+                .all(|(start, end, _)| start < end && *end <= pretty.len())
         );
     }
 
@@ -1649,6 +1772,20 @@ mod tests {
                 assert_eq!(only, Some(vec!["quickfix".to_string()]));
             }
             _ => panic!("expected code action command"),
+        }
+
+        let ws_diag_id = proc.request_workspace_diagnostics(
+            r#"[{"uri":"file:///tmp/app.py","value":"r1"}]"#.to_string(),
+        );
+        match rx.try_recv().unwrap() {
+            Cmd::WorkspaceDiagnostic {
+                id,
+                previous_result_ids_json,
+            } => {
+                assert_eq!(id, ws_diag_id);
+                assert!(previous_result_ids_json.contains("r1"));
+            }
+            _ => panic!("expected workspace diagnostic command"),
         }
 
         proc.notify_close(&path);
@@ -1774,13 +1911,22 @@ mod tests {
     }
 
     #[test]
-    fn lsp_manager_poll_merges_events_updates_status_and_keeps_bounded_logs() {
+    fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
         let path = PathBuf::from("/tmp/ws/app.py");
         let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
         let (ty, _ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
         let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
         manager.python = Some(ruff);
         manager.ty_process = Some(ty);
+        manager.server_logs.insert(
+            RUFF_SERVER.program,
+            vec![LogEntry {
+                text: "old log".to_string(),
+                spans: Vec::new(),
+                folds: Vec::new(),
+                created_at: Instant::now() - Duration::from_secs(301),
+            }],
+        );
 
         ruff_tx
             .send(LspEvent::StatusChanged {
@@ -1800,6 +1946,7 @@ mod tests {
                 path: path.clone(),
                 version: Some(2),
                 items: vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))],
+                result_id: None,
             })
             .unwrap();
         ty_tx
@@ -1808,17 +1955,20 @@ mod tests {
                 path: path.clone(),
                 version: Some(5),
                 items: vec![test_diag("ty", DiagSeverity::Warning, None)],
+                result_id: Some("ty-r1".to_string()),
             })
             .unwrap();
-        ruff_tx
-            .send(LspEvent::Log {
-                name: RUFF_SERVER.program,
-                message: format!("{{\"big\":\"{}\"}}", "я".repeat(3000)),
-            })
-            .unwrap();
+        for i in 0..32 {
+            ruff_tx
+                .send(LspEvent::Log {
+                    name: RUFF_SERVER.program,
+                    message: format!("{{\"idx\":{i}}}"),
+                })
+                .unwrap();
+        }
 
         let events = manager.poll();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 36);
         assert_eq!(manager.python_status, LspServerStatus::Running);
         assert_eq!(manager.ty_status, LspServerStatus::Crashed);
         assert!(!manager.dirty_diagnostics);
@@ -1830,20 +1980,26 @@ mod tests {
         let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
         assert_eq!(version, 5);
         assert_eq!(instant.len(), 2);
+        assert_eq!(
+            manager.ty_diag_result_ids.get(&path).map(String::as_str),
+            Some("ty-r1")
+        );
         assert!(manager.has_stale_instant_diagnostics(&path, 5));
         assert!(!manager.has_stale_instant_diagnostics(&path, 2));
         assert_eq!(manager.diagnostics_for_line(&path, 1).len(), 2);
         assert!(manager.diagnostics_for_line(&path, 99).is_empty());
 
         let logs = &manager.server_logs[RUFF_SERVER.program];
-        assert_eq!(logs.len(), 1);
-        assert!(logs[0].text.contains("TRUNCATED TO SAVE RAM"));
-        assert!(logs[0].text.is_char_boundary(logs[0].text.len()));
+        assert_eq!(logs.len(), 32);
+        assert!(!logs.iter().any(|log| log.text.contains("old log")));
+        assert!(logs[0].text.contains("\"idx\": 0"));
+        assert!(logs[31].text.contains("\"idx\": 31"));
+        assert!(logs[31].text.is_char_boundary(logs[31].text.len()));
 
         let info = manager.servers_info();
         assert_eq!(info[0].name, RUFF_SERVER.program);
         assert_eq!(info[0].status, LspServerStatus::Running);
-        assert_eq!(info[0].logs.len(), 1);
+        assert_eq!(info[0].logs.len(), 32);
         assert_eq!(info[1].status, LspServerStatus::Crashed);
     }
 
@@ -1880,7 +2036,7 @@ mod tests {
     }
 
     #[test]
-    fn send_and_log_truncates_text_document_payloads_but_sends_original_body() {
+    fn send_and_log_removes_text_document_payloads_but_sends_original_body() {
         let (out_tx, out_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
 
@@ -1897,7 +2053,7 @@ mod tests {
             LspEvent::Log { name, message } => {
                 assert_eq!(name, RUFF_SERVER.program);
                 assert!(message.contains("[LSP SEND]"));
-                assert!(message.contains("<TRUNCATED>"));
+                assert!(!message.contains("\"text\""));
                 assert!(!message.contains("secret payload"));
             }
             other => panic!("unexpected event: {other:?}"),
@@ -1912,6 +2068,37 @@ mod tests {
                 assert_eq!(name, TY_SERVER.program);
                 assert!(message.contains("textDocument/hover"));
                 assert!(!message.contains("<TRUNCATED>"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_and_log_removes_only_sent_text_fields_and_keeps_json_shape() {
+        let (out_tx, out_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let body = make_did_change_full(
+            "file:///tmp/main.py",
+            17,
+            "secret payload\nwith many lines\nthat must not be logged",
+        );
+        send_and_log(&out_tx, &event_tx, RUFF_SERVER.program, body.clone()).unwrap();
+
+        assert_eq!(out_rx.try_recv().unwrap(), body);
+        match event_rx.try_recv().unwrap() {
+            LspEvent::Log { name, message } => {
+                assert_eq!(name, RUFF_SERVER.program);
+                assert!(message.starts_with("[LSP SEND] "));
+                assert!(!message.contains("secret payload"));
+                assert!(!message.contains("\"text\""));
+
+                let json = message.trim_start_matches("[LSP SEND] ");
+                let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+                assert_eq!(parsed["method"], "textDocument/didChange");
+                assert_eq!(parsed["params"]["textDocument"]["uri"], "file:///tmp/main.py");
+                assert_eq!(parsed["params"]["textDocument"]["version"], 17);
+                assert!(parsed["params"]["contentChanges"][0].get("text").is_none());
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -1952,6 +2139,7 @@ mod tests {
                 path: path.clone(),
                 version: Some(1),
                 items: vec![test_diag("suppressed", DiagSeverity::Error, None)],
+                result_id: None,
             })
             .unwrap();
 
@@ -1974,6 +2162,7 @@ mod tests {
                 path: path.clone(),
                 version: Some(2),
                 items: vec![test_diag("flushed", DiagSeverity::Warning, Some("W1"))],
+                result_id: None,
             })
             .unwrap();
 
@@ -1984,6 +2173,66 @@ mod tests {
         assert_eq!(manager.get_instant_diagnostics_with_version(&path).0, 2);
         assert!(!manager.dirty_diagnostics);
         assert!(manager.last_change.is_none());
+    }
+
+    #[test]
+    fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids() {
+        let path = PathBuf::from("/tmp/ws/pkg/offscreen.py");
+        let (ty, ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
+        let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+        manager.ty_process = Some(ty);
+        manager.ty_status = LspServerStatus::Running;
+
+        ty_tx
+            .send(LspEvent::ConfigurationServed {
+                name: TY_SERVER.program,
+            })
+            .unwrap();
+
+        let events = manager.poll();
+        assert_eq!(events.len(), 1);
+        let request_id = match ty_rx.try_recv().unwrap() {
+            Cmd::WorkspaceDiagnostic {
+                id,
+                previous_result_ids_json,
+            } => {
+                assert_eq!(previous_result_ids_json, "[]");
+                id
+            }
+            _ => panic!("expected workspace diagnostic command"),
+        };
+
+        ty_tx
+            .send(LspEvent::Diagnostics {
+                server_name: TY_SERVER.program,
+                path: path.clone(),
+                version: None,
+                items: vec![test_diag("offscreen", DiagSeverity::Error, Some("T1"))],
+                result_id: Some("next-r1".to_string()),
+            })
+            .unwrap();
+        ty_tx
+            .send(LspEvent::WorkspaceDiagnosticsDone { request_id })
+            .unwrap();
+
+        let events = manager.poll();
+        assert_eq!(events.len(), 2);
+        assert_eq!(manager.get_diagnostics(&path)[0].message, "offscreen");
+        assert!(manager.ty_workspace_diag_pending.is_none());
+
+        manager.ty_workspace_diag_dirty = true;
+        let events = manager.poll();
+        assert!(events.is_empty());
+        match ty_rx.try_recv().unwrap() {
+            Cmd::WorkspaceDiagnostic {
+                previous_result_ids_json,
+                ..
+            } => {
+                assert!(previous_result_ids_json.contains("file:///tmp/ws/pkg/offscreen.py"));
+                assert!(previous_result_ids_json.contains("next-r1"));
+            }
+            _ => panic!("expected second workspace diagnostic command"),
+        }
     }
 
     #[test]
@@ -2044,6 +2293,7 @@ mod tests {
                 text: "log".to_string(),
                 spans: Vec::new(),
                 folds: Vec::new(),
+                created_at: Instant::now(),
             }],
         );
 
@@ -2131,6 +2381,8 @@ mod tests {
         assert!(spans.iter().any(|s| s.color == [0.945, 0.980, 0.549, 1.0]));
         assert!(spans.iter().any(|s| s.color == [0.741, 0.576, 0.976, 1.0]));
         assert!(spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]));
-        assert!(folds.iter().any(|(start, end)| *start < *end));
+        assert!(folds.iter().any(|(start, end, _)| *start < *end));
+        assert!(folds.iter().any(|(_, _, depth)| *depth == 1));
+        assert!(folds.iter().any(|(_, _, depth)| *depth == 2));
     }
 }

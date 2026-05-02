@@ -829,6 +829,7 @@ pub(crate) enum PendingRequestKind {
     CodeAction,
     Definition,
     Completion,
+    WorkspaceDiagnostic,
 }
 
 #[cfg(test)]

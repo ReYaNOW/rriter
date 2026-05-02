@@ -662,6 +662,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
             crate::lsp::LspEvent::ServerReady => {}
             crate::lsp::LspEvent::StatusChanged { .. } => {}
+            crate::lsp::LspEvent::ConfigurationServed { .. } => {}
+            crate::lsp::LspEvent::WorkspaceDiagnosticsDone { .. } => {}
             crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
             crate::lsp::LspEvent::HoverResponse { request_id, text } => {
                 if let Some(ref t) = text {
@@ -915,13 +917,38 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         if let Some(lsp) = &mut app.lsp {
             // Умная синхронизация без аллокаций каждый кадр.
             // Обновляем UI только если статус или логи реально изменились.
-            let lsp_logs_len = lsp.server_logs.get("ruff").map(|l| l.len()).unwrap_or(0);
-            let needs_update = app.ide_panel.lsp_servers.is_empty()
-                || app.ide_panel.lsp_servers[0].status != lsp.python_status
-                || app.ide_panel.lsp_servers[0].logs.len() != lsp_logs_len;
+            let raw_servers = lsp.servers_info();
+            let filter = app.ide_panel.current_lsp_log_filter();
+            let needs_update = app.ide_panel.lsp_log_filter_dirty
+                || app.ide_panel.lsp_log_filter_applied.as_ref() != Some(&filter)
+                || app.ide_panel.lsp_servers.len() != raw_servers.len()
+                || raw_servers.iter().any(|info| {
+                    app.ide_panel
+                        .lsp_servers
+                        .iter()
+                        .find(|ui| ui.name == info.name)
+                        .is_none_or(|ui| ui.status != info.status)
+                        || app
+                            .ide_panel
+                            .lsp_log_source_counts
+                            .get(info.name)
+                            .copied()
+                            .unwrap_or(0)
+                            != info.logs.len()
+                });
 
             if needs_update {
-                app.ide_panel.lsp_servers = lsp.servers_info();
+                app.ide_panel.lsp_log_source_counts.clear();
+                let mut ui_servers = raw_servers;
+                for info in &mut ui_servers {
+                    app.ide_panel
+                        .lsp_log_source_counts
+                        .insert(info.name.to_string(), info.logs.len());
+                    info.logs.retain(|log| filter.matches(log));
+                }
+                app.ide_panel.lsp_servers = ui_servers;
+                app.ide_panel.lsp_log_filter_applied = Some(filter);
+                app.ide_panel.lsp_log_filter_dirty = false;
                 // Синхронизируем Editor для логов (для выделения и копирования)
                 for info in &app.ide_panel.lsp_servers {
                     let new_text = info
@@ -948,14 +975,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         let _ = entry.insert_str(&new_text);
 
                         entry.foldable_ranges_bytes.clear();
+                        let mut autofold_starts = Vec::new();
                         let mut byte_offset = 0;
                         for log in &info.logs {
-                            for &(s, e) in &log.folds {
-                                entry.foldable_ranges_bytes.push((
-                                    byte_offset + s,
-                                    byte_offset + e,
-                                    false,
-                                ));
+                            for &(s, e, depth) in &log.folds {
+                                let start = byte_offset + s;
+                                entry
+                                    .foldable_ranges_bytes
+                                    .push((start, byte_offset + e, false));
+                                if depth == 2 {
+                                    autofold_starts.push(start);
+                                }
                             }
                             byte_offset += log.text.len() + 1;
                         }
@@ -971,8 +1001,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 .partition_point(|&x| x <= e)
                                 .saturating_sub(1);
                             if el > sl {
-                                entry.folded_lines.insert(sl);
-                                entry.folded_start_bytes.insert(entry.line_offsets[sl]);
+                                entry.foldable_lines.insert(sl, el);
+                                if autofold_starts.contains(&s) {
+                                    entry.folded_lines.insert(sl);
+                                    entry.folded_start_bytes.insert(entry.line_offsets[sl]);
+                                }
                             }
                         }
 
