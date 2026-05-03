@@ -207,11 +207,22 @@ pub struct FileTreeTrashEntry {
 
 #[derive(Clone, Debug)]
 pub enum FileTreeUndoAction {
-    Created { paths: Vec<PathBuf> },
-    Copied { paths: Vec<PathBuf> },
-    Moved { pairs: Vec<(PathBuf, PathBuf)> },
-    Renamed { old_path: PathBuf, new_path: PathBuf },
-    Trashed { entries: Vec<FileTreeTrashEntry> },
+    Created {
+        paths: Vec<PathBuf>,
+    },
+    Copied {
+        paths: Vec<PathBuf>,
+    },
+    Moved {
+        pairs: Vec<(PathBuf, PathBuf)>,
+    },
+    Renamed {
+        old_path: PathBuf,
+        new_path: PathBuf,
+    },
+    Trashed {
+        entries: Vec<FileTreeTrashEntry>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -975,7 +986,11 @@ fn trash_deletion_date() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}")
 }
 
-fn trash_single_path(path: &Path, files_dir: &Path, info_dir: &Path) -> Result<FileTreeTrashEntry, String> {
+fn trash_single_path(
+    path: &Path,
+    files_dir: &Path,
+    info_dir: &Path,
+) -> Result<FileTreeTrashEntry, String> {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return Err("Не удалось прочитать имя".to_string());
     };
@@ -1002,7 +1017,10 @@ fn trash_single_path(path: &Path, files_dir: &Path, info_dir: &Path) -> Result<F
     })
 }
 
-fn trash_paths(paths: &[PathBuf], workspaces: &[PathBuf]) -> Result<Vec<FileTreeTrashEntry>, String> {
+fn trash_paths(
+    paths: &[PathBuf],
+    workspaces: &[PathBuf],
+) -> Result<Vec<FileTreeTrashEntry>, String> {
     let paths = prune_nested_paths(paths);
     for path in &paths {
         if !can_modify_path(path, workspaces) {
@@ -1032,7 +1050,10 @@ fn restore_trash_entries(entries: &[FileTreeTrashEntry]) -> Result<Vec<PathBuf>,
     let mut restored = Vec::new();
     for entry in entries.iter().rev() {
         if !entry.trash_path.exists() {
-            return Err(format!("Не найдено в корзине: {}", entry.trash_path.display()));
+            return Err(format!(
+                "Не найдено в корзине: {}",
+                entry.trash_path.display()
+            ));
         }
         let Some(parent) = entry.original_path.parent() else {
             return Err("Не удалось найти исходную папку".to_string());
@@ -1971,13 +1992,9 @@ impl App {
         let w = (FILE_TREE_DIALOG_W * s).min(r.width - 32.0 * s);
         let x = ((r.width - w) / 2.0).round();
         let (input_x, input_w) = if let Some(parent_dir) = parent_dir.as_ref() {
-            let (_, input_x, input_w) = file_tree_path_input_layout(
-                x,
-                w,
-                s,
-                parent_dir,
-                |text| r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE),
-            );
+            let (_, input_x, input_w) = file_tree_path_input_layout(x, w, s, parent_dir, |text| {
+                r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE)
+            });
             (input_x, input_w)
         } else {
             (
@@ -2219,8 +2236,7 @@ impl App {
             return false;
         }
         if ctrl
-            && physical_key
-                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
+            && physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
         {
             let _ = self.undo_file_tree_operation();
             if let Some(window) = self.window.as_ref() {
@@ -2307,7 +2323,10 @@ mod tests {
         assert_eq!(editor.get_full_text(), "alphabeta");
 
         editor.select_all();
-        insert_file_tree_name_text(&mut editor, &"x".repeat(FILE_TREE_NAME_INPUT_MAX_BYTES + 20));
+        insert_file_tree_name_text(
+            &mut editor,
+            &"x".repeat(FILE_TREE_NAME_INPUT_MAX_BYTES + 20),
+        );
 
         assert_eq!(editor.get_full_text().len(), FILE_TREE_NAME_INPUT_MAX_BYTES);
     }
@@ -2416,7 +2435,10 @@ mod tests {
             file_tree_name_input_hit_index(text, 5.0 + scroll_x, |_| 10.0),
             3
         );
-        assert_eq!(file_tree_name_input_hit_index(text, 500.0, |_| 10.0), text.len());
+        assert_eq!(
+            file_tree_name_input_hit_index(text, 500.0, |_| 10.0),
+            text.len()
+        );
     }
 
     #[test]
@@ -2664,9 +2686,7 @@ mod tests {
     fn file_tree_path_input_layout_clips_parent_and_preserves_input_width() {
         let parent = PathBuf::from("/tmp/workspace/src/features/bookings");
         let (prefix, input_x, input_w) =
-            file_tree_path_input_layout(100.0, 460.0, 1.0, &parent, |text| {
-                text.len() as f32 * 8.0
-            });
+            file_tree_path_input_layout(100.0, 460.0, 1.0, &parent, |text| text.len() as f32 * 8.0);
 
         assert!(prefix.starts_with("..."));
         assert!(prefix.ends_with("bookings/"));
@@ -2674,9 +2694,8 @@ mod tests {
         assert!(input_w >= FILE_TREE_PATH_INPUT_MIN_W);
 
         let short = PathBuf::from("/tmp/ws");
-        let (prefix, _, _) = file_tree_path_input_layout(0.0, 460.0, 1.0, &short, |text| {
-            text.len() as f32 * 4.0
-        });
+        let (prefix, _, _) =
+            file_tree_path_input_layout(0.0, 460.0, 1.0, &short, |text| text.len() as f32 * 4.0);
         assert_eq!(prefix, file_tree_parent_path_prefix(&short));
     }
 
@@ -2717,10 +2736,7 @@ mod tests {
         let start = Instant::now();
         assert_eq!(file_tree_context_menu_anim_progress(start, start), 0.0);
         assert_eq!(
-            file_tree_context_menu_anim_progress(
-                start,
-                start + std::time::Duration::from_secs(1)
-            ),
+            file_tree_context_menu_anim_progress(start, start + std::time::Duration::from_secs(1)),
             1.0
         );
     }

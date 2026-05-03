@@ -309,8 +309,7 @@ impl Renderer {
                 let bw_stop = self.measure_ui_width(label_stop, 0.8) + btn_pad * 2.0;
                 let bw_logs = self.measure_ui_width(label_logs, 0.8) + btn_pad * 2.0;
                 let bw_fix_all = self.measure_ui_width(label_fix_all, 0.8) + btn_pad * 2.0;
-                let bw_clear_logs =
-                    self.measure_ui_width(label_clear_logs, 0.8) + btn_pad * 2.0;
+                let bw_clear_logs = self.measure_ui_width(label_clear_logs, 0.8) + btn_pad * 2.0;
 
                 let btn_x_restart = card_x + pad_x;
                 let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
@@ -560,8 +559,7 @@ impl Renderer {
                     let send_w = self.measure_ui_width(label_send, 0.72) + chip_pad * 2.0;
                     let recv_w = self.measure_ui_width(label_recv, 0.72) + chip_pad * 2.0;
                     let other_w = self.measure_ui_width(label_other, 0.72) + chip_pad * 2.0;
-                    let chips_w =
-                        clear_w + case_w + send_w + recv_w + other_w + 5.0 * 6.0 * s;
+                    let chips_w = clear_w + case_w + send_w + recv_w + other_w + 5.0 * 6.0 * s;
                     let input_w = (log_bg_w - chips_w).max(70.0 * s);
                     let input_hover = ui_registry.register_text_input(
                         crate::ui_system::UiId::LspLogsFilterInput,
@@ -600,8 +598,8 @@ impl Renderer {
                         let max_text_w = (input_w - 16.0 * s).max(0.0);
                         let mut used_w = 0.0;
                         for c in lsp_log_filter_text.chars() {
-                            let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0)
-                                * 0.78;
+                            let adv =
+                                self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.78;
                             if used_w + adv > max_text_w {
                                 clipped_filter.push('…');
                                 break;
@@ -628,10 +626,10 @@ impl Renderer {
                     let draw_chip = |renderer: &mut Self,
                                      ui_registry: &mut crate::ui_system::UiRegistry,
                                      id: crate::ui_system::UiId,
-                                         label: &str,
-                                         active: bool,
-                                         x: f32,
-                                         w: f32| {
+                                     label: &str,
+                                     active: bool,
+                                     x: f32,
+                                     w: f32| {
                         let hovered = ui_registry.register_rect(id, x, chip_y, w, chip_h, mx, my);
                         let bg = if active {
                             if hovered {

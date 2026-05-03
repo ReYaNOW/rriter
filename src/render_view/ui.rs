@@ -9,7 +9,7 @@ pub(crate) use hover_widget::diag_popup_byte_at;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AutocompleteBadgeStyle {
-    letter: char,
+    letter: Option<char>,
     bg: [f32; 4],
     fg: [f32; 4],
 }
@@ -17,47 +17,47 @@ struct AutocompleteBadgeStyle {
 fn autocomplete_badge_style(kind: crate::highlighter::SymbolKind) -> AutocompleteBadgeStyle {
     match kind {
         crate::highlighter::SymbolKind::Class => AutocompleteBadgeStyle {
-            letter: 'C',
+            letter: Some('C'),
             bg: [0.14, 0.33, 0.42, 1.0],
             fg: [0.58, 0.88, 1.0, 1.0],
         },
         crate::highlighter::SymbolKind::Function => AutocompleteBadgeStyle {
-            letter: 'F',
+            letter: Some('F'),
             bg: [0.19, 0.36, 0.22, 1.0],
             fg: [0.66, 0.94, 0.68, 1.0],
         },
         crate::highlighter::SymbolKind::Variable => AutocompleteBadgeStyle {
-            letter: 'V',
+            letter: Some('V'),
             bg: [0.32, 0.23, 0.42, 1.0],
             fg: [0.78, 0.64, 1.0, 1.0],
         },
         crate::highlighter::SymbolKind::Parameter => AutocompleteBadgeStyle {
-            letter: 'P',
+            letter: Some('P'),
             bg: [0.42, 0.31, 0.16, 1.0],
             fg: [1.0, 0.79, 0.42, 1.0],
         },
         crate::highlighter::SymbolKind::Property => AutocompleteBadgeStyle {
-            letter: 'P',
+            letter: Some('P'),
             bg: [0.35, 0.25, 0.14, 1.0],
             fg: [1.0, 0.72, 0.38, 1.0],
         },
         crate::highlighter::SymbolKind::Module => AutocompleteBadgeStyle {
-            letter: 'M',
+            letter: Some('M'),
             bg: [0.17, 0.28, 0.43, 1.0],
             fg: [0.62, 0.78, 1.0, 1.0],
         },
         crate::highlighter::SymbolKind::Builtin => AutocompleteBadgeStyle {
-            letter: 'B',
+            letter: None,
             bg: [0.29, 0.24, 0.48, 1.0],
             fg: [0.74, 0.66, 1.0, 1.0],
         },
         crate::highlighter::SymbolKind::Keyword => AutocompleteBadgeStyle {
-            letter: 'K',
+            letter: Some('K'),
             bg: [0.43, 0.20, 0.30, 1.0],
             fg: [1.0, 0.61, 0.80, 1.0],
         },
         crate::highlighter::SymbolKind::Unknown => AutocompleteBadgeStyle {
-            letter: 'U',
+            letter: Some('U'),
             bg: [0.25, 0.26, 0.29, 1.0],
             fg: [0.70, 0.72, 0.76, 1.0],
         },
@@ -93,7 +93,11 @@ fn autocomplete_popup_width(screen_w: f32, x: f32, min_width: f32, scale: f32) -
     let max_w = 760.0 * scale;
     let edge_margin = 8.0 * scale;
     let available_w = (screen_w - x - edge_margin).max(195.0 * scale);
-    target_w.max(min_width).max(min_w).min(max_w).min(available_w)
+    target_w
+        .max(min_width)
+        .max(min_w)
+        .min(max_w)
+        .min(available_w)
 }
 
 fn autocomplete_source_is_type_or_signature(source: &str, class_repr: bool) -> bool {
@@ -183,7 +187,11 @@ fn autocomplete_module_layout<'a>(
         }
         let next_w = width + char_width(c, scale);
         let next_idx = idx + c.len_utf8();
-        let suffix_w = if next_idx < label.len() { ellipsis_w } else { 0.0 };
+        let suffix_w = if next_idx < label.len() {
+            ellipsis_w
+        } else {
+            0.0
+        };
         if next_w + suffix_w > limit {
             end = idx;
             truncated = true;
@@ -214,15 +222,39 @@ mod tests {
 
     #[test]
     fn autocomplete_badges_match_lapce_style_letters() {
-        assert_eq!(autocomplete_badge_style(SymbolKind::Class).letter, 'C');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Function).letter, 'F');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Variable).letter, 'V');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Parameter).letter, 'P');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Property).letter, 'P');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Module).letter, 'M');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Builtin).letter, 'B');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Keyword).letter, 'K');
-        assert_eq!(autocomplete_badge_style(SymbolKind::Unknown).letter, 'U');
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Class).letter,
+            Some('C')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Function).letter,
+            Some('F')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Variable).letter,
+            Some('V')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Parameter).letter,
+            Some('P')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Property).letter,
+            Some('P')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Module).letter,
+            Some('M')
+        );
+        assert_eq!(autocomplete_badge_style(SymbolKind::Builtin).letter, None);
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Keyword).letter,
+            Some('K')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Unknown).letter,
+            Some('U')
+        );
     }
 
     #[test]
@@ -316,8 +348,7 @@ mod tests {
             Some("car_wash.core.db.repo_base")
         );
         assert_eq!(
-            autocomplete_source_label("def dir(o: object = ..., /) -> list[str]", "dir")
-                .as_deref(),
+            autocomplete_source_label("def dir(o: object = ..., /) -> list[str]", "dir").as_deref(),
             None
         );
         assert_eq!(
@@ -327,6 +358,10 @@ mod tests {
         );
         assert_eq!(
             autocomplete_source_label("builtins", "print").as_deref(),
+            Some("builtins")
+        );
+        assert_eq!(
+            autocomplete_source_label("builtins", "bool").as_deref(),
             Some("builtins")
         );
     }
@@ -543,7 +578,7 @@ impl Renderer {
         let icon_gap = 8.0 * scale;
         let right_pad = 18.0 * scale;
         let content_start_offset = icon_sz + icon_gap;
-        let module_scale = 0.92;
+        let module_scale = 1.0;
         let mut max_name_w: f32 = 0.0;
         for (item, _) in options {
             let name_w: f32 = item
@@ -664,25 +699,27 @@ impl Renderer {
 
             let badge = autocomplete_badge_style(item.kind);
             self.push_autocomplete_badge_bg(x, row_y, icon_sz, 4.0 * scale, badge.bg, row_edges);
-            if let Some(g) = self.get_ui_glyph(badge.letter) {
-                let char_scale = 0.82;
-                let actual_w = g.width * char_scale;
-                let actual_h = g.height * char_scale;
-                let char_x = x + (icon_sz - actual_w) / 2.0;
-                let char_y = row_y + (step - actual_h) / 2.0;
+            if let Some(letter) = badge.letter {
+                if let Some(g) = self.get_ui_glyph(letter) {
+                    let char_scale = 0.82;
+                    let actual_w = g.width * char_scale;
+                    let actual_h = g.height * char_scale;
+                    let char_x = x + (icon_sz - actual_w) / 2.0;
+                    let char_y = row_y + (step - actual_h) / 2.0;
 
-                self.push_quad(
-                    char_x.round(),
-                    char_y.round(),
-                    actual_w,
-                    actual_h,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    badge.fg,
-                    0.0,
-                );
+                    self.push_quad(
+                        char_x.round(),
+                        char_y.round(),
+                        actual_w,
+                        actual_h,
+                        g.u,
+                        g.v,
+                        g.uw,
+                        g.vh,
+                        badge.fg,
+                        0.0,
+                    );
+                }
             }
             let mut cx = x + icon_sz + icon_gap;
 
@@ -697,24 +734,21 @@ impl Renderer {
             let module_min_x = cx + name_w + module_gap;
             let right_limit = x + max_w - right_pad;
             let ellipsis_w = self.measure_ui_width("...", module_scale);
-            let module_metrics = item
-                .module
-                .as_ref()
-                .and_then(|module| {
-                    autocomplete_module_layout(
-                        module,
-                        &item.word,
-                        module_min_x,
-                        right_limit,
-                        scale,
-                        ellipsis_w,
-                        |c, _| {
-                            self.get_ui_glyph(c)
-                                .map(|glyph| glyph.advance * module_scale)
-                                .unwrap_or(0.0)
-                        },
-                    )
-                });
+            let module_metrics = item.module.as_ref().and_then(|module| {
+                autocomplete_module_layout(
+                    module,
+                    &item.word,
+                    module_min_x,
+                    right_limit,
+                    scale,
+                    ellipsis_w,
+                    |c, _| {
+                        self.get_ui_glyph(c)
+                            .map(|glyph| glyph.advance * module_scale)
+                            .unwrap_or(0.0)
+                    },
+                )
+            });
             let mut truncated = false;
             for (j, c) in item.word.chars().enumerate() {
                 if let Some(g) = self.get_glyph(c) {

@@ -468,10 +468,7 @@ pub(super) fn make_completion(
     .into_bytes()
 }
 
-pub(super) fn make_workspace_diagnostic(
-    id: i32,
-    previous_result_ids_json: &str,
-) -> Vec<u8> {
+pub(super) fn make_workspace_diagnostic(id: i32, previous_result_ids_json: &str) -> Vec<u8> {
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"method":"workspace/diagnostic","params":{{"identifier":"ty","previousResultIds":{}}}}}"#,
         id, previous_result_ids_json
@@ -1154,7 +1151,7 @@ pub(super) fn dispatch_frame(
         }
     };
 
-    let log_msg = format!("[LSP RECV] {}", String::from_utf8_lossy(body));
+    let log_msg = recv_log_message(body, &msg);
     let _ = event_tx.send(LspEvent::Log {
         name: server_name,
         message: log_msg,
@@ -1356,6 +1353,34 @@ pub(super) fn dispatch_frame(
             }
         }
     }
+}
+
+fn recv_log_message(body: &[u8], msg: &serde_json::Value) -> String {
+    const LARGE_ITEMS_LOG_LIMIT: usize = 80;
+    if let Some(items_len) = msg
+        .pointer("/result/items")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .filter(|len| *len > LARGE_ITEMS_LOG_LIMIT)
+    {
+        let mut compact = msg.clone();
+        if let Some(result) = compact
+            .get_mut("result")
+            .and_then(|value| value.as_object_mut())
+        {
+            result.insert(
+                "items".to_string(),
+                serde_json::json!({
+                    "omitted": items_len,
+                    "reason": "large LSP result"
+                }),
+            );
+        }
+        if let Ok(text) = serde_json::to_string(&compact) {
+            return format!("[LSP RECV] {text}");
+        }
+    }
+    format!("[LSP RECV] {}", String::from_utf8_lossy(body))
 }
 
 // ── Запуск процесса ───────────────────────────────────────────────────────────
@@ -1703,12 +1728,11 @@ mod tests {
         assert_eq!(completion["params"]["context"]["triggerKind"], 2);
         assert_eq!(completion["params"]["context"]["triggerCharacter"], ".");
 
-        let workspace_diag: serde_json::Value =
-            serde_json::from_slice(&make_workspace_diagnostic(
-                103,
-                r#"[{"uri":"file:///tmp/project/main.py","value":"r1"}]"#,
-            ))
-            .unwrap();
+        let workspace_diag: serde_json::Value = serde_json::from_slice(&make_workspace_diagnostic(
+            103,
+            r#"[{"uri":"file:///tmp/project/main.py","value":"r1"}]"#,
+        ))
+        .unwrap();
         assert_eq!(workspace_diag["method"], "workspace/diagnostic");
         assert_eq!(workspace_diag["params"]["identifier"], "ty");
         assert_eq!(

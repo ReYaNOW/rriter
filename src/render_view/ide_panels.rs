@@ -55,9 +55,7 @@ fn file_tree_menu_separator_before(
     idx > 0 && file_tree_menu_group(entries[idx - 1]) != file_tree_menu_group(entries[idx])
 }
 
-fn file_tree_menu_separator_count(
-    entries: &[crate::app::file_tree::FileTreeMenuAction],
-) -> usize {
+fn file_tree_menu_separator_count(entries: &[crate::app::file_tree::FileTreeMenuAction]) -> usize {
     (1..entries.len())
         .filter(|&idx| file_tree_menu_separator_before(entries, idx))
         .count()
@@ -1146,18 +1144,13 @@ impl Renderer {
             );
 
             let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
-            let (path_prefix, input_x, input_w) =
-                if let Some(parent_dir) = dialog.path.parent() {
-                    crate::app::file_tree::file_tree_path_input_layout(
-                        x,
-                        w,
-                        s,
-                        parent_dir,
-                        |text| self.measure_ui_width(text, path_scale),
-                    )
-                } else {
-                    (String::new(), x + side_pad, w - side_pad * 2.0)
-                };
+            let (path_prefix, input_x, input_w) = if let Some(parent_dir) = dialog.path.parent() {
+                crate::app::file_tree::file_tree_path_input_layout(x, w, s, parent_dir, |text| {
+                    self.measure_ui_width(text, path_scale)
+                })
+            } else {
+                (String::new(), x + side_pad, w - side_pad * 2.0)
+            };
             let input_y = y + 66.0 * s;
             let input_h = 34.0 * s;
             if !path_prefix.is_empty() {
@@ -1235,8 +1228,8 @@ impl Renderer {
 
         if let Some(dialog) = &ide_panel.file_tree_move_dialog {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
-            let w = ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s)
-                .min(self.width - 32.0 * s);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 154.0 * s;
             let x = ((self.width - w) / 2.0).round();
             let y = ((self.height - h) / 2.0).round();
@@ -1309,8 +1302,8 @@ impl Renderer {
 
         if let Some(dialog) = &ide_panel.file_tree_delete_dialog {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
-            let w = ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s)
-                .min(self.width - 32.0 * s);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 154.0 * s;
             let x = ((self.width - w) / 2.0).round();
             let y = ((self.height - h) / 2.0).round();

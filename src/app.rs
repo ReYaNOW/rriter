@@ -13,7 +13,7 @@ use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
 use glutin::display::GetGlDisplay;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use winit::event_loop::ActiveEventLoop;
 use winit::platform::wayland::WindowAttributesExtWayland;
@@ -342,6 +342,53 @@ fn is_plain_python_type_name(text: &str) -> bool {
     )
 }
 
+fn is_builtin_class_completion_detail(word: &str, detail: &str) -> bool {
+    let source = normalized_completion_source(detail);
+    source == word && is_plain_python_type_name(source)
+}
+
+fn completion_source_missing_or_plain_builtin_type(word: &str, source: Option<&str>) -> bool {
+    source.is_none_or(|source| {
+        let source = normalized_completion_source(source);
+        source.is_empty()
+            || completion_source_is_builtin(source)
+            || source == word && is_plain_python_type_name(source)
+    })
+}
+
+fn should_assign_builtin_completion_module(item: &AutocompleteItem) -> bool {
+    if matches!(
+        item.kind,
+        SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+    ) {
+        return false;
+    }
+    if !item.detail.as_deref().is_none_or(|detail| {
+        detail.starts_with("type[")
+            || is_builtin_class_completion_detail(&item.word, detail)
+            || normalized_completion_source(detail) == item.word
+                && is_plain_python_type_name(&item.word)
+    }) {
+        return false;
+    }
+    if item.module.is_none() && item.module_path.is_none() {
+        return true;
+    }
+    is_plain_python_type_name(&item.word)
+        && completion_source_missing_or_plain_builtin_type(&item.word, item.module.as_deref())
+        && completion_source_missing_or_plain_builtin_type(&item.word, item.module_path.as_deref())
+}
+
+fn assign_builtin_completion_module(item: &mut AutocompleteItem) {
+    if should_assign_builtin_completion_module(item)
+        && let Some(module) = python_builtin_completion_module(&item.word)
+    {
+        item.module = Some(module.to_string());
+        item.module_path = Some(format!("{module}.{}", item.word));
+        item.kind = SymbolKind::Builtin;
+    }
+}
+
 fn is_type_like_completion_source(text: &str) -> bool {
     let s = normalized_completion_source(text);
     if s.is_empty() {
@@ -381,7 +428,11 @@ fn completion_item_has_explicit_owner(item: &AutocompleteItem) -> bool {
         return false;
     };
     completion_owner_label_from_source(module).as_deref()
-        == Some(completion_owner_label_from_source(owner).as_deref().unwrap_or(owner))
+        == Some(
+            completion_owner_label_from_source(owner)
+                .as_deref()
+                .unwrap_or(owner),
+        )
 }
 
 fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
@@ -422,6 +473,34 @@ fn completion_item_is_argument_like(item: &AutocompleteItem) -> bool {
             .insert_text
             .as_deref()
             .is_some_and(|text| text.contains('='))
+}
+
+fn completion_detail_is_type_label(detail: &str) -> bool {
+    let detail = detail.trim();
+    !detail.is_empty()
+        && !detail.starts_with("(variable)")
+        && !detail.starts_with("(parameter)")
+        && !detail.starts_with("(property)")
+        && !detail.starts_with("(field)")
+        && !detail.starts_with("bound ")
+        && !detail.starts_with("def ")
+        && !detail.starts_with("async def ")
+        && !detail.contains('\n')
+}
+
+fn completion_needs_python_source_attr_owner(item: &AutocompleteItem) -> bool {
+    if !completion_word_starts_lower(&item.word)
+        || item.word.starts_with("__")
+        || completion_item_has_explicit_owner(item)
+    {
+        return false;
+    }
+    completion_item_is_field_like(item)
+        || item
+            .detail
+            .as_deref()
+            .is_some_and(completion_detail_is_type_label)
+        || item.detail.is_none() && item.module.is_some()
 }
 
 fn completion_owner_from_detail<'a>(word: &str, detail: &'a str) -> Option<&'a str> {
@@ -481,7 +560,12 @@ fn completion_source_is_module_path(source: &str) -> bool {
 }
 
 fn completion_item_source_is_field_type(item: &AutocompleteItem) -> bool {
-    let Some(source) = item.module.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+    let Some(source) = item
+        .module
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
         return false;
     };
     let Some(detail) = item.detail.as_deref() else {
@@ -603,7 +687,10 @@ fn common_completion_owner(items: &[AutocompleteItem]) -> Option<String> {
         let Some(owner) = completion_item_owner_label(item) else {
             continue;
         };
-        if completion_item_is_field_like(item) && !completion_item_has_explicit_owner(item) {
+        if !is_class_like_type_name(&owner) {
+            continue;
+        }
+        if completion_needs_python_source_attr_owner(item) {
             continue;
         }
         *counts.entry(owner).or_insert(0) += 1;
@@ -751,14 +838,31 @@ fn completion_is_lowercase_type_source(
 
 fn python_builtin_completion_module(word: &str) -> Option<&'static str> {
     match word {
-        "print" | "len" | "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool"
-        | "float" | "sum" | "min" | "max" | "abs" | "isinstance" | "issubclass" | "hasattr"
-        | "getattr" | "setattr" | "delattr" | "dir" | "type" | "enumerate" | "zip"
-        | "map" | "filter" | "range" | "reversed" | "open" | "super" | "Exception"
-        | "ValueError" | "TypeError" | "KeyError" | "IndexError" | "AttributeError"
-        | "RuntimeError" | "KeyboardInterrupt" => Some("builtins"),
+        "print" | "len" | "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool" | "float"
+        | "sum" | "min" | "max" | "abs" | "isinstance" | "issubclass" | "hasattr" | "getattr"
+        | "setattr" | "delattr" | "dir" | "type" | "enumerate" | "zip" | "map" | "filter"
+        | "range" | "reversed" | "open" | "super" | "Exception" | "ValueError" | "TypeError"
+        | "KeyError" | "IndexError" | "AttributeError" | "RuntimeError" | "KeyboardInterrupt" => {
+            Some("builtins")
+        }
         _ => None,
     }
+}
+
+fn ty_autocomplete_context_key(
+    text: &str,
+    line_offsets: &[usize],
+    cursor: usize,
+    prefix: &str,
+    mode: AutocompleteMode,
+) -> String {
+    let anchor = cursor.saturating_sub(prefix.len()).min(text.len());
+    let line = line_offsets
+        .partition_point(|&offset| offset <= anchor)
+        .saturating_sub(1);
+    let line_start = line_offsets.get(line).copied().unwrap_or(0).min(anchor);
+    let context = text.get(line_start..anchor).unwrap_or("").trim_end();
+    format!("{mode:?}|{context}")
 }
 
 fn apply_import_modules_to_autocomplete_items(
@@ -836,6 +940,82 @@ fn class_direct_attr(line: &str) -> Option<&str> {
     (rest.starts_with(':') || rest.starts_with('=')).then_some(&trimmed[..end])
 }
 
+#[cfg(test)]
+fn class_body_declares_attr(
+    lines: &[&str],
+    class_idx: usize,
+    class_indent: usize,
+    attr: &str,
+) -> bool {
+    let direct_indent = class_indent + 4;
+    let mut type_checking_attr_indent = None;
+    for body in lines.iter().skip(class_idx + 1) {
+        if body.trim().is_empty() {
+            continue;
+        }
+        let indent = body.len().saturating_sub(body.trim_start().len());
+        if indent <= class_indent {
+            break;
+        }
+        if indent == direct_indent {
+            type_checking_attr_indent = None;
+            if class_direct_attr(body) == Some(attr) {
+                return true;
+            }
+            let trimmed = body.trim();
+            if trimmed == "if TYPE_CHECKING:" {
+                type_checking_attr_indent = Some(indent + 4);
+            }
+            continue;
+        }
+        if type_checking_attr_indent == Some(indent) && class_direct_attr(body) == Some(attr) {
+            return true;
+        }
+    }
+    false
+}
+
+fn class_body_declared_attrs(
+    lines: &[&str],
+    class_idx: usize,
+    class_indent: usize,
+    attrs: &FxHashSet<String>,
+    owner: &str,
+    out: &mut FxHashMap<String, String>,
+) {
+    let direct_indent = class_indent + 4;
+    let mut type_checking_attr_indent = None;
+    for body in lines.iter().skip(class_idx + 1) {
+        if body.trim().is_empty() {
+            continue;
+        }
+        let indent = body.len().saturating_sub(body.trim_start().len());
+        if indent <= class_indent {
+            break;
+        }
+        if indent == direct_indent {
+            type_checking_attr_indent = None;
+            if let Some(attr) = class_direct_attr(body)
+                && attrs.contains(attr)
+            {
+                out.entry(attr.to_string()).or_insert_with(|| owner.to_string());
+            }
+            let trimmed = body.trim();
+            if trimmed == "if TYPE_CHECKING:" {
+                type_checking_attr_indent = Some(indent + 4);
+            }
+            continue;
+        }
+        if type_checking_attr_indent == Some(indent)
+            && let Some(attr) = class_direct_attr(body)
+            && attrs.contains(attr)
+        {
+            out.entry(attr.to_string()).or_insert_with(|| owner.to_string());
+        }
+    }
+}
+
+#[cfg(test)]
 fn python_class_attr_owner_in_source(source: &str, class_name: &str, attr: &str) -> Option<String> {
     fn find(source: &str, class_name: &str, attr: &str, depth: usize) -> Option<String> {
         if depth > 8 {
@@ -847,18 +1027,8 @@ fn python_class_attr_owner_in_source(source: &str, class_name: &str, attr: &str)
             let Some(bases) = class_header_bases(line, class_name) else {
                 continue;
             };
-            let direct_indent = class_indent + 4;
-            for body in lines.iter().skip(idx + 1) {
-                if body.trim().is_empty() {
-                    continue;
-                }
-                let indent = body.len().saturating_sub(body.trim_start().len());
-                if indent <= class_indent {
-                    break;
-                }
-                if indent == direct_indent && class_direct_attr(body) == Some(attr) {
-                    return Some(class_name.to_string());
-                }
+            if class_body_declares_attr(&lines, idx, class_indent, attr) {
+                return Some(class_name.to_string());
             }
             for base in bases {
                 if let Some(owner) = find(source, &base, attr, depth + 1) {
@@ -869,6 +1039,91 @@ fn python_class_attr_owner_in_source(source: &str, class_name: &str, attr: &str)
         None
     }
     find(source, class_name, attr, 0)
+}
+
+fn python_class_attr_owners_with_imports(
+    source: &str,
+    workspaces: &[PathBuf],
+    current_path: Option<&Path>,
+    class_name: &str,
+    attrs: &FxHashSet<String>,
+) -> FxHashMap<String, String> {
+    fn find(
+        source: &str,
+        workspaces: &[PathBuf],
+        current_path: Option<&Path>,
+        class_name: &str,
+        attrs: &FxHashSet<String>,
+        depth: usize,
+        seen: &mut FxHashSet<String>,
+        out: &mut FxHashMap<String, String>,
+    ) {
+        if depth > 8 || out.len() >= attrs.len() {
+            return;
+        }
+        let seen_key = format!("{:p}:{}:{class_name}", source.as_ptr(), source.len());
+        if !seen.insert(seen_key) {
+            return;
+        }
+        let lines: Vec<&str> = source.lines().collect();
+        for (idx, line) in lines.iter().enumerate() {
+            let class_indent = line.len().saturating_sub(line.trim_start().len());
+            let Some(bases) = class_header_bases(line, class_name) else {
+                continue;
+            };
+            class_body_declared_attrs(&lines, idx, class_indent, attrs, class_name, out);
+            if out.len() >= attrs.len() {
+                return;
+            }
+            for base in bases {
+                find(
+                    source,
+                    workspaces,
+                    current_path,
+                    &base,
+                    attrs,
+                    depth + 1,
+                    seen,
+                    out,
+                );
+                if out.len() >= attrs.len() {
+                    return;
+                }
+                if let Some(base_source) =
+                    imported_python_class_source(source, workspaces, current_path, &base)
+                {
+                    find(
+                        &base_source,
+                        workspaces,
+                        current_path,
+                        &base,
+                        attrs,
+                        depth + 1,
+                        seen,
+                        out,
+                    );
+                    if out.len() >= attrs.len() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = FxHashMap::default();
+    if !attrs.is_empty() {
+        find(
+            source,
+            workspaces,
+            current_path,
+            class_name,
+            attrs,
+            0,
+            &mut FxHashSet::default(),
+            &mut out,
+        );
+    }
+    out
 }
 
 fn imported_python_class_source(
@@ -1829,7 +2084,7 @@ impl App {
                 ) || completion_is_lowercase_type_source(
                     &item.word,
                     module.as_deref(),
-                    detail.as_deref()
+                    detail.as_deref(),
                 ))
             {
                 if completion_is_lowercase_type_source(
@@ -1855,6 +2110,7 @@ impl App {
             {
                 item.module = Some(module.to_string());
             }
+            assign_builtin_completion_module(item);
             if item.word == target {
                 target_changed = true;
             }
@@ -1910,10 +2166,28 @@ impl App {
             crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
         if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
         {
+            let prefix = self.get_current_word_prefix();
+            let context_key = ty_autocomplete_context_key(
+                &text,
+                &self.editor.line_offsets,
+                self.editor.cursor,
+                &prefix,
+                mode,
+            );
+            let cached_items = self
+                .autocomplete_cache
+                .as_ref()
+                .filter(|cache| {
+                    cache.mode == mode && cache.path == path && cache.context_key == context_key
+                })
+                .map(|cache| cache.items.clone());
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = Some(id);
             self.autocomplete_apply_pending_response = false;
-            if hide_exact_match {
+            if let Some(items) = cached_items {
+                self.update_ty_autocomplete(items);
+                self.autocomplete_pending_request_id = Some(id);
+            } else if hide_exact_match {
                 self.hide_autocomplete_popup_keep_request();
             } else if !self.autocomplete_active {
                 self.autocomplete_active = true;
@@ -1925,6 +2199,26 @@ impl App {
                 self.autocomplete_active = true;
             }
         }
+    }
+
+    pub fn remember_ty_autocomplete_cache(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        let Some(path) = self.file_path.clone() else {
+            return;
+        };
+        let text = self.editor.get_full_text();
+        let prefix = self.get_current_word_prefix();
+        self.autocomplete_cache = Some(AutocompleteCacheEntry {
+            mode: self.autocomplete_mode,
+            path,
+            context_key: ty_autocomplete_context_key(
+                &text,
+                &self.editor.line_offsets,
+                self.editor.cursor,
+                &prefix,
+                self.autocomplete_mode,
+            ),
+            items,
+        });
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
@@ -1958,14 +2252,40 @@ impl App {
                 .and_then(|imports| imports.get(owner))
                 .map(String::as_str)
         });
-        let inherited_owner_source = common_owner.as_ref().and_then(|owner| {
-            imported_python_class_source(
-                &current_text,
+        let source_attr_words: FxHashSet<String> = if common_owner.is_some() {
+            items
+                .iter()
+                .filter(|item| completion_needs_python_source_attr_owner(item))
+                .map(|item| item.word.clone())
+                .collect()
+        } else {
+            FxHashSet::default()
+        };
+        let inherited_owner_source = if !source_attr_words.is_empty() {
+            common_owner.as_ref().and_then(|owner| {
+                imported_python_class_source(
+                    &current_text,
+                    &self.ide_workspaces,
+                    self.file_path.as_deref(),
+                    owner,
+                )
+            })
+        } else {
+            None
+        };
+        let source_attr_owners = if let (Some(owner), Some(source)) =
+            (common_owner.as_deref(), inherited_owner_source.as_deref())
+        {
+            python_class_attr_owners_with_imports(
+                source,
                 &self.ide_workspaces,
                 self.file_path.as_deref(),
                 owner,
+                &source_attr_words,
             )
-        });
+        } else {
+            FxHashMap::default()
+        };
         for item in &mut items {
             item.kind = completion_detail_kind(item.kind, item.detail.as_deref());
             if self.autocomplete_mode == AutocompleteMode::TyImports {
@@ -1993,27 +2313,31 @@ impl App {
                     {
                         item.module = Some(module.clone());
                         item.module_path.get_or_insert_with(|| module.clone());
-                    } else if item.module.is_none()
-                        && item.module_path.is_none()
-                        && item
-                            .detail
-                            .as_deref()
-                            .is_none_or(|detail| detail.starts_with("type["))
-                        && let Some(module) = python_builtin_completion_module(&item.word)
-                    {
-                        item.module = Some(module.to_string());
-                        item.module_path = Some(format!("{module}.{}", item.word));
-                        item.kind = SymbolKind::Builtin;
+                    } else {
+                        assign_builtin_completion_module(item);
                     }
                 }
                 if completion_item_is_argument_like(item) {
                     item.kind = SymbolKind::Parameter;
                 }
-                if completion_item_is_field_like(item) {
+                let source_attr_owner = if member_dot_context {
+                    source_attr_owners.get(&item.word).cloned()
+                } else {
+                    None
+                };
+                if completion_item_is_field_like(item) || source_attr_owner.is_some() {
                     if !member_dot_context {
                         item.kind = SymbolKind::Variable;
                         item.module = None;
                         item.module_path = None;
+                    } else if let Some(owner) = source_attr_owner {
+                        item.kind = SymbolKind::Variable;
+                        set_completion_owner_source(
+                            item,
+                            owner,
+                            imported_modules.as_ref(),
+                            common_owner_module,
+                        );
                     } else if let Some(owner) = item
                         .detail
                         .as_deref()
@@ -2030,23 +2354,31 @@ impl App {
                             common_owner_module,
                         );
                     } else if !completion_item_has_explicit_owner(item) {
-                        if let Some(owner) = common_owner.as_ref().map(|owner| {
-                            inherited_owner_source
-                                .as_deref()
-                                .and_then(|source| {
-                                    python_class_attr_owner_in_source(source, owner, &item.word)
-                                })
-                                .unwrap_or_else(|| owner.clone())
-                        }) {
+                        if let Some(owner) = source_attr_owners.get(&item.word).cloned() {
                             set_completion_owner_source(
                                 item,
                                 owner,
                                 imported_modules.as_ref(),
                                 common_owner_module,
                             );
+                        } else if inherited_owner_source.is_none() {
+                            if let Some(owner) = common_owner.as_ref() {
+                                set_completion_owner_source(
+                                    item,
+                                    owner.clone(),
+                                    imported_modules.as_ref(),
+                                    common_owner_module,
+                                );
+                            }
+                        } else {
+                            item.module = None;
+                            item.module_path = None;
                         }
                     }
-                    if item.module.as_deref().is_some_and(is_type_like_completion_source)
+                    if item
+                        .module
+                        .as_deref()
+                        .is_some_and(is_type_like_completion_source)
                         || completion_item_source_is_field_type(item)
                     {
                         item.module = None;
@@ -2254,6 +2586,11 @@ impl App {
             .take(60)
             .map(|m| (m.2.into(), m.3))
             .collect();
+        if self.file_extension == "py" {
+            for (item, _) in &mut self.autocomplete_options {
+                assign_builtin_completion_module(item);
+            }
+        }
         if self.file_extension == "py" && !self.autocomplete_options.is_empty() {
             let imports = imported_python_symbols(&self.editor.get_full_text());
             apply_import_modules_to_autocomplete_items(&mut self.autocomplete_options, &imports);
@@ -3103,6 +3440,7 @@ mod app_behavior_tests {
             autocomplete_detail_selection_cursor: None,
             autocomplete_detail_selecting: false,
             autocomplete_apply_pending_response: false,
+            autocomplete_cache: None,
             current_sticky_lines: Vec::new(),
             target_sticky_lines: Vec::new(),
             sticky_anim_progress: 1.0,
@@ -3517,9 +3855,11 @@ mod app_behavior_tests {
 
         app.refresh_autocomplete_detail_popup();
         let popup = app.autocomplete_detail_popup.as_ref().unwrap();
-        assert!(popup
-            .text
-            .starts_with("[[MODULE]] car_wash.core.db.repo_base.RepoBase\n"));
+        assert!(
+            popup
+                .text
+                .starts_with("[[MODULE]] car_wash.core.db.repo_base.RepoBase\n")
+        );
         assert_eq!(
             popup.line_kinds.first().copied(),
             Some(crate::lsp::HoverLineKindPublic::Text)
@@ -3904,9 +4244,8 @@ mod app_behavior_tests {
             return;
         };
         app.file_extension = "py".to_string();
-        app.editor = editor_with(
-            "from car_wash.domains.washes.bookings.service import BookingService\nBo",
-        );
+        app.editor =
+            editor_with("from car_wash.domains.washes.bookings.service import BookingService\nBo");
         app.autocomplete_mode = AutocompleteMode::TyContext;
 
         app.update_ty_autocomplete(vec![
@@ -3923,7 +4262,7 @@ mod app_behavior_tests {
                 label: "bool".to_string(),
                 kind: SymbolKind::Class,
                 module: None,
-                detail: Some("type[bool]".to_string()),
+                detail: Some("<class 'bool'>".to_string()),
                 insert_text: None,
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -3970,6 +4309,16 @@ mod app_behavior_tests {
             python_class_attr_owner_in_source(source, "BoxRead", "user_id").as_deref(),
             Some("BoxRead")
         );
+        let type_checking_source = "class BasedStruct(msgspec.Struct):\n    if TYPE_CHECKING:\n        _registered_properties: ClassVar[list[str]]\n\nclass BoxRead(BasedStruct, kw_only=True):\n    id: int\n";
+        assert_eq!(
+            python_class_attr_owner_in_source(
+                type_checking_source,
+                "BoxRead",
+                "_registered_properties"
+            )
+            .as_deref(),
+            Some("BasedStruct")
+        );
 
         let imports = "from car_wash.domains.washes.boxes.output import BoxRead\n";
         assert_eq!(
@@ -4011,6 +4360,27 @@ mod app_behavior_tests {
     }
 
     #[test]
+    fn tree_sitter_autocomplete_shows_builtin_module_for_python_builtins() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("b");
+        app.highlighter.completions = vec![completion("bool", SymbolKind::Builtin, 0, 200)];
+
+        app.update_autocomplete();
+
+        let bool_item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "bool")
+            .unwrap();
+        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
+        assert_eq!(bool_item.0.module_path.as_deref(), Some("builtins.bool"));
+    }
+
+    #[test]
     fn ty_context_completion_uses_declaring_owner_not_field_type() {
         let Some(mut app) = test_app() else {
             return;
@@ -4024,7 +4394,14 @@ mod app_behavior_tests {
         std::fs::create_dir_all(&package_dir).unwrap();
         std::fs::write(
             package_dir.join("output.py"),
-            "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    name: str\n    car_wash_id: int\n    car_wash: CarWashRead\n    created_at: dt.datetime\n\nclass BoxRead(BoxReadPublic, kw_only=True):\n    percentage: int | None\n    user_id: int | None = None\n    employee: UserRead | None = None\n    car_wash: CarWashRead\n",
+            "from car_wash.utils.schemas.struct import BasedStruct\n\nclass BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    name: str\n    car_wash_id: int\n    car_wash: CarWashRead\n    created_at: dt.datetime\n\nclass BoxRead(BoxReadPublic, kw_only=True):\n    percentage: int | None\n    user_id: int | None = None\n    employee: UserRead | None = None\n    car_wash: CarWashRead\n",
+        )
+        .unwrap();
+        let struct_dir = root.join("car_wash/utils/schemas");
+        std::fs::create_dir_all(&struct_dir).unwrap();
+        std::fs::write(
+            struct_dir.join("struct.py"),
+            "from typing import TYPE_CHECKING, ClassVar\n\nclass BasedStruct(msgspec.Struct):\n    if TYPE_CHECKING:\n        _registered_field_validators: ClassVar[dict[str, list[Callable]]]\n        _registered_model_validators: ClassVar[list[Callable]]\n        _registered_properties: ClassVar[list[str]]\n",
         )
         .unwrap();
         let current = root.join("car_wash/domains/washes/bookings/service.py");
@@ -4037,6 +4414,15 @@ mod app_behavior_tests {
         app.editor = editor_with("from car_wash.domains.washes.boxes.output import BoxRead\nbox.");
         app.autocomplete_mode = AutocompleteMode::TyContext;
         app.update_ty_autocomplete(vec![
+            crate::lsp::LspCompletionItem {
+                label: "active".to_string(),
+                kind: SymbolKind::Class,
+                module: None,
+                detail: Some("bool".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
             crate::lsp::LspCompletionItem {
                 label: "model_dump".to_string(),
                 kind: SymbolKind::Function,
@@ -4057,9 +4443,18 @@ mod app_behavior_tests {
             },
             crate::lsp::LspCompletionItem {
                 label: "created_at".to_string(),
-                kind: SymbolKind::Variable,
+                kind: SymbolKind::Class,
                 module: Some("datetime".to_string()),
-                detail: Some("(variable) created_at: datetime".to_string()),
+                detail: Some("datetime".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "_registered_properties".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) _registered_properties: list[str]".to_string()),
                 insert_text: None,
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -4068,7 +4463,7 @@ mod app_behavior_tests {
                 label: "car_wash".to_string(),
                 kind: SymbolKind::Class,
                 module: Some("CarWashRead".to_string()),
-                detail: Some("(variable) car_wash: CarWashRead".to_string()),
+                detail: Some("CarWashRead".to_string()),
                 insert_text: None,
                 text_edit: None,
                 additional_text_edits: Vec::new(),
@@ -4090,6 +4485,11 @@ mod app_behavior_tests {
             .iter()
             .find(|(item, _)| item.word == "car_wash")
             .and_then(|(item, _)| item.module.as_deref());
+        let registered_owner = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "_registered_properties")
+            .and_then(|(item, _)| item.module.as_deref());
         let id_module_path = app
             .autocomplete_options
             .iter()
@@ -4098,6 +4498,7 @@ mod app_behavior_tests {
         assert_eq!(id_owner, Some("BoxReadPublic"));
         assert_eq!(created_at_owner, Some("BoxReadPublic"));
         assert_eq!(car_wash_owner, Some("BoxRead"));
+        assert_eq!(registered_owner, Some("BasedStruct"));
         assert_eq!(
             id_module_path,
             Some("car_wash.domains.washes.boxes.output.BoxReadPublic")

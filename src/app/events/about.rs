@@ -649,6 +649,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             crate::lsp::LspEvent::CompletionResponse { request_id, items } => {
                 if app.autocomplete_pending_request_id == Some(request_id) {
                     app.autocomplete_pending_request_id = None;
+                    app.remember_ty_autocomplete_cache(items.clone());
                     app.update_ty_autocomplete(items);
                     if let Some(w) = app.window.as_ref() {
                         w.request_redraw();

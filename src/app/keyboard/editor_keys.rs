@@ -1049,7 +1049,12 @@ mod tests {
             Some(".")
         );
         assert_eq!(
-            key_text_for_editor_insert(PhysicalKey::Code(KeyCode::NumpadDecimal), None, None, false),
+            key_text_for_editor_insert(
+                PhysicalKey::Code(KeyCode::NumpadDecimal),
+                None,
+                None,
+                false
+            ),
             Some(".")
         );
         assert_eq!(

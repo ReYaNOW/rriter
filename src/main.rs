@@ -866,6 +866,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_detail_selection_cursor: None,
         autocomplete_detail_selecting: false,
         autocomplete_apply_pending_response: false,
+        autocomplete_cache: None,
 
         current_sticky_lines: Vec::new(),
         target_sticky_lines: Vec::new(),

@@ -943,7 +943,11 @@ impl App {
                 let input_x = self
                     .lsp_panel_bounds()
                     .map(|(cx, _, _, _)| {
-                        let s = self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
+                        let s = self
+                            .renderer
+                            .as_ref()
+                            .map(|r| r.scale_factor)
+                            .unwrap_or(1.0);
                         cx + 24.0 * s
                     })
                     .unwrap_or(0.0);
@@ -989,16 +993,14 @@ impl App {
                 }
             }
             UiId::LspLogsFilterSend => {
-                self.ide_panel.lsp_log_filter_show_send =
-                    !self.ide_panel.lsp_log_filter_show_send;
+                self.ide_panel.lsp_log_filter_show_send = !self.ide_panel.lsp_log_filter_show_send;
                 self.ide_panel.lsp_log_filter_dirty = true;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::LspLogsFilterRecv => {
-                self.ide_panel.lsp_log_filter_show_recv =
-                    !self.ide_panel.lsp_log_filter_show_recv;
+                self.ide_panel.lsp_log_filter_show_recv = !self.ide_panel.lsp_log_filter_show_recv;
                 self.ide_panel.lsp_log_filter_dirty = true;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

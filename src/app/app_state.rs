@@ -147,9 +147,7 @@ impl LspLogFilter {
             return true;
         }
         if self.case_sensitive {
-            query
-                .split_whitespace()
-                .all(|part| log.text.contains(part))
+            query.split_whitespace().all(|part| log.text.contains(part))
         } else {
             let hay = log.text.to_lowercase();
             query
@@ -214,6 +212,14 @@ impl From<crate::lsp::LspCompletionItem> for AutocompleteItem {
             additional_text_edits: item.additional_text_edits,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct AutocompleteCacheEntry {
+    pub mode: AutocompleteMode,
+    pub path: PathBuf,
+    pub context_key: String,
+    pub items: Vec<crate::lsp::LspCompletionItem>,
 }
 
 pub struct IdePanelState {
@@ -597,6 +603,7 @@ pub struct App {
     pub autocomplete_detail_selection_cursor: Option<usize>,
     pub autocomplete_detail_selecting: bool,
     pub autocomplete_apply_pending_response: bool,
+    pub autocomplete_cache: Option<AutocompleteCacheEntry>,
 
     pub current_sticky_lines: Vec<(usize, usize)>,
     pub target_sticky_lines: Vec<(usize, usize)>,

@@ -149,7 +149,9 @@ impl App {
                         self.ide_panel.file_tree_context_menu = None;
                     }
                 }
-                winit::event::MouseButton::Right if self.ide_panel.file_tree_context_menu.is_some() => {
+                winit::event::MouseButton::Right
+                    if self.ide_panel.file_tree_context_menu.is_some() =>
+                {
                     self.ide_panel.file_tree_context_menu = None;
                 }
                 _ => {}

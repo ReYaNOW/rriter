@@ -2096,7 +2096,10 @@ mod tests {
                 let json = message.trim_start_matches("[LSP SEND] ");
                 let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
                 assert_eq!(parsed["method"], "textDocument/didChange");
-                assert_eq!(parsed["params"]["textDocument"]["uri"], "file:///tmp/main.py");
+                assert_eq!(
+                    parsed["params"]["textDocument"]["uri"],
+                    "file:///tmp/main.py"
+                );
                 assert_eq!(parsed["params"]["textDocument"]["version"], 17);
                 assert!(parsed["params"]["contentChanges"][0].get("text").is_none());
             }
