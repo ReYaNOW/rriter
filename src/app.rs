@@ -385,7 +385,6 @@ fn assign_builtin_completion_module(item: &mut AutocompleteItem) {
     {
         item.module = Some(module.to_string());
         item.module_path = Some(format!("{module}.{}", item.word));
-        item.kind = SymbolKind::Builtin;
     }
 }
 
@@ -806,13 +805,6 @@ fn completion_detail_kind(kind: SymbolKind, detail: Option<&str>) -> SymbolKind 
 fn completion_source_is_builtin(source: &str) -> bool {
     let source = normalized_completion_source(source);
     source == "builtins" || source.starts_with("builtins.")
-}
-
-fn completion_item_source_is_builtin(item: &AutocompleteItem) -> bool {
-    item.module_path
-        .as_deref()
-        .or(item.module.as_deref())
-        .is_some_and(completion_source_is_builtin)
 }
 
 fn completion_word_starts_lower(word: &str) -> bool {
@@ -2395,7 +2387,7 @@ impl App {
                             imported_modules.as_ref(),
                             common_owner_module,
                         );
-                    } else if item
+                                        } else if item
                         .module
                         .as_deref()
                         .is_some_and(is_type_like_completion_source)
@@ -2403,9 +2395,6 @@ impl App {
                     {
                         item.module = common_owner.clone();
                     }
-                }
-                if !member_dot_context && completion_item_source_is_builtin(item) {
-                    item.kind = SymbolKind::Builtin;
                 }
             }
         }
@@ -2451,32 +2440,38 @@ impl App {
                 SymbolKind::Builtin => 4,
                 SymbolKind::Keyword => 5,
                 SymbolKind::Unknown => 6,
-            };
-            (
-                !*is_prefix,
-                arg_priority,
-                is_magic_python_name(&item.word),
-                type_priority,
-                *len,
-            )
-        });
+            };                        (
+                            !*is_prefix,
+                            arg_priority,
+                            is_magic_python_name(&item.word),
+                            type_priority,
+                            *len,
+                        )
+                    });
 
-        self.autocomplete_options = matches
-            .into_iter()
-            .take(80)
-            .map(|(_, _, item, indices)| (item, indices))
-            .collect();
-        if self.autocomplete_options.len() == 1
-            && !prefix.is_empty()
-            && self.autocomplete_options[0].0.word == prefix
-        {
-            self.autocomplete_options.clear();
-            self.close_autocomplete();
-            return;
-        }
-        self.autocomplete_active = !self.autocomplete_options.is_empty()
-            || self.autocomplete_mode == AutocompleteMode::TyImports;
-        if !self.autocomplete_active {
+                    let was_empty_or_inactive = self.autocomplete_options.is_empty() || !self.autocomplete_active;
+
+                    self.autocomplete_options = matches
+                        .into_iter()
+                        .take(80)
+                        .map(|(_, _, item, indices)| (item, indices))
+                        .collect();
+                    if self.autocomplete_options.len() == 1
+                        && !prefix.is_empty()
+                        && self.autocomplete_options[0].0.word == prefix
+                    {
+                        self.autocomplete_options.clear();
+                        self.close_autocomplete();
+                        return;
+                    }
+
+                    if was_empty_or_inactive && !self.autocomplete_options.is_empty() {
+                        self.autocomplete_anim_progress = 0.0;
+                    }
+
+                    self.autocomplete_active = !self.autocomplete_options.is_empty()
+                        || self.autocomplete_mode == AutocompleteMode::TyImports;
+                    if !self.autocomplete_active {
             self.autocomplete_detail_popup = None;
             self.autocomplete_detail_rect = None;
             self.autocomplete_detail_placement = None;
@@ -2588,7 +2583,7 @@ impl App {
             )
         });
 
-        self.autocomplete_options = matches
+                self.autocomplete_options = matches
             .into_iter()
             .take(60)
             .map(|m| (m.2.into(), m.3))
@@ -2599,6 +2594,15 @@ impl App {
         if self.file_extension == "py" {
             for (item, _) in &mut self.autocomplete_options {
                 assign_builtin_completion_module(item);
+                if item.kind == SymbolKind::Builtin {
+                    if item.word.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                        item.kind = SymbolKind::Class;
+                    } else if matches!(item.word.as_str(), "bool" | "int" | "float" | "str" | "list" | "dict" | "set" | "tuple" | "bytes" | "type" | "object" | "complex") {
+                        item.kind = SymbolKind::Class;
+                    } else {
+                        item.kind = SymbolKind::Function;
+                    }
+                }
             }
         }
         if self.file_extension == "py" && !self.autocomplete_options.is_empty() {
@@ -4222,12 +4226,12 @@ mod app_behavior_tests {
             },
         ]);
 
-        let bool_item = app
+                let bool_item = app
             .autocomplete_options
             .iter()
             .find(|(item, _)| item.word == "bool")
             .unwrap();
-        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.kind, SymbolKind::Class);
         assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
 
         let booking = app
@@ -4293,12 +4297,12 @@ mod app_behavior_tests {
             Some("car_wash.domains.washes.bookings.service")
         );
 
-        let bool_item = app
+                let bool_item = app
             .autocomplete_options
             .iter()
             .find(|(item, _)| item.word == "bool")
             .unwrap();
-        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.kind, SymbolKind::Class);
         assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
         assert_eq!(bool_item.0.module_path.as_deref(), Some("builtins.bool"));
     }
@@ -4369,6 +4373,29 @@ mod app_behavior_tests {
         );
     }
 
+        #[test]
+    fn tree_sitter_autocomplete_remaps_builtins_to_class_or_function() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+
+        app.editor = editor_with("pr");
+        app.highlighter.completions = vec![completion("print", SymbolKind::Builtin, 0, 200)];
+        app.update_autocomplete();
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Function);
+
+        app.editor = editor_with("bo");
+        app.highlighter.completions = vec![completion("bool", SymbolKind::Builtin, 0, 200)];
+        app.update_autocomplete();
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Class);
+
+        app.editor = editor_with("Ex");
+        app.highlighter.completions = vec![completion("Exception", SymbolKind::Builtin, 0, 200)];
+        app.update_autocomplete();
+        assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Class);
+    }
+
     #[test]
     fn tree_sitter_autocomplete_shows_builtin_module_for_python_builtins() {
         let Some(mut app) = test_app() else {
@@ -4380,12 +4407,12 @@ mod app_behavior_tests {
 
         app.update_autocomplete();
 
-        let bool_item = app
+                let bool_item = app
             .autocomplete_options
             .iter()
             .find(|(item, _)| item.word == "bool")
             .unwrap();
-        assert_eq!(bool_item.0.kind, SymbolKind::Builtin);
+        assert_eq!(bool_item.0.kind, SymbolKind::Class);
         assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
         assert_eq!(bool_item.0.module_path.as_deref(), Some("builtins.bool"));
     }
