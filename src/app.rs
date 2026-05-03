@@ -2470,6 +2470,7 @@ impl App {
             && !prefix.is_empty()
             && self.autocomplete_options[0].0.word == prefix
         {
+            self.autocomplete_options.clear();
             self.close_autocomplete();
             return;
         }
@@ -2521,10 +2522,20 @@ impl App {
 
         let prefix_lower = prefix.to_lowercase();
         let cursor = self.editor.cursor;
+        let prefix_start = cursor.saturating_sub(prefix.len());
 
         let mut best_scopes: FxHashMap<String, CompletionItem> = FxHashMap::default();
 
         for comp in &self.highlighter.completions {
+            if comp.scope_start == prefix_start
+                && matches!(
+                    comp.kind,
+                    SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Unknown
+                )
+                && comp.word.to_lowercase().starts_with(&prefix_lower)
+            {
+                continue;
+            }
             if cursor >= comp.scope_start && cursor <= comp.scope_end {
                 let current_size = comp.scope_end.saturating_sub(comp.scope_start);
                 if let Some(existing) = best_scopes.get(&comp.word) {
@@ -2541,10 +2552,6 @@ impl App {
         let mut matches = Vec::with_capacity(best_scopes.len());
 
         for (_, comp) in best_scopes {
-            if comp.word == prefix {
-                continue;
-            }
-
             let comp_lower = comp.word.to_lowercase();
             if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
                 let is_prefix = comp_lower.starts_with(&prefix_lower);
@@ -2586,6 +2593,9 @@ impl App {
             .take(60)
             .map(|m| (m.2.into(), m.3))
             .collect();
+        if self.autocomplete_options.len() == 1 && self.autocomplete_options[0].0.word == prefix {
+            self.autocomplete_options.clear();
+        }
         if self.file_extension == "py" {
             for (item, _) in &mut self.autocomplete_options {
                 assign_builtin_completion_module(item);
@@ -3516,7 +3526,7 @@ mod app_behavior_tests {
         app.editor.cursor = 3;
         app.highlighter.completions = vec![
             completion("print", SymbolKind::Function, 0, 100),
-            completion("private_value", SymbolKind::Variable, 0, 100),
+            completion("private_value", SymbolKind::Variable, 1, 100),
             completion("printf", SymbolKind::Function, 10, 20),
             completion("pri", SymbolKind::Variable, 0, 100),
         ];
@@ -4381,6 +4391,74 @@ mod app_behavior_tests {
     }
 
     #[test]
+    fn tree_sitter_autocomplete_keeps_exact_word_when_other_matches_exist() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("box = 1\nbox");
+        app.highlighter.completions = vec![
+            completion("box", SymbolKind::Variable, 0, 200),
+            completion("BoxRead", SymbolKind::Class, 0, 200),
+        ];
+
+        app.update_autocomplete();
+
+        assert!(app.autocomplete_active);
+        assert!(app
+            .autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "box"));
+        assert!(app
+            .autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "BoxRead"));
+
+        app.highlighter.completions = vec![completion("box", SymbolKind::Variable, 0, 200)];
+        app.update_autocomplete();
+
+        assert!(!app.autocomplete_active);
+        assert!(app.autocomplete_options.is_empty());
+    }
+
+    #[test]
+    fn tree_sitter_autocomplete_ignores_current_token_matches() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.file_extension = "py".to_string();
+        app.editor = editor_with("BoxR");
+        app.highlighter.completions = vec![
+            completion("BoxR", SymbolKind::Variable, 0, 200),
+            completion("BoxRead", SymbolKind::Class, 0, 200),
+        ];
+
+        app.update_autocomplete();
+
+        assert!(app.autocomplete_active);
+        assert!(app
+            .autocomplete_options
+            .iter()
+            .all(|(item, _)| item.word != "BoxR"));
+        assert_eq!(app.autocomplete_options[0].0.word, "BoxRead");
+
+        app.editor = editor_with("Box");
+        app.highlighter.completions = vec![
+            completion("BoxR", SymbolKind::Variable, 0, 200),
+            completion("BoxRead", SymbolKind::Class, 0, 200),
+        ];
+
+        app.update_autocomplete();
+
+        assert!(app.autocomplete_active);
+        assert!(app
+            .autocomplete_options
+            .iter()
+            .all(|(item, _)| item.word != "BoxR"));
+        assert_eq!(app.autocomplete_options[0].0.word, "BoxRead");
+    }
+
+    #[test]
     fn ty_context_completion_uses_declaring_owner_not_field_type() {
         let Some(mut app) = test_app() else {
             return;
@@ -5023,9 +5101,9 @@ mod app_behavior_tests {
         app.editor = editor_with("pr");
         app.highlighter.completions = vec![
             completion("print", SymbolKind::Function, 0, 10),
-            completion("private", SymbolKind::Variable, 0, 100),
+            completion("private", SymbolKind::Variable, 1, 100),
             completion("property", SymbolKind::Class, 0, 100),
-            completion("pr", SymbolKind::Keyword, 0, 100),
+            completion("pr", SymbolKind::Variable, 0, 100),
         ];
         app.update_autocomplete();
         assert!(app.autocomplete_active);
