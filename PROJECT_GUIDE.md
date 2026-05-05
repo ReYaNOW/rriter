@@ -250,7 +250,11 @@ Use when task touches startup, window creation, GL context setup, or global app 
 
 Main `App` behavior impls and app-level editor/workspace operations.
 
-Use when changing tab/file/search/autocomplete behavior that crosses app state and subsystems.
+Use when changing tab/file/search behavior that crosses app state and subsystems.
+
+Autocomplete-specific `App` methods live in `src/app/autocomplete.rs`.
+Python completion/fold/source-owner helpers live in `src/app/python_completion.rs`.
+Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/app/app_file_behavior_tests.rs`.
 
 ### `src/app/app_state.rs`
 
@@ -407,6 +411,13 @@ File explorer/tree state and behavior.
 
 Use when task touches project tree, directory expansion, file opening from tree, file watching, or path display.
 
+Submodules:
+
+* `src/app/file_tree_scan.rs` -> background scan/watch and icon raster cache.
+* `src/app/file_tree_ops.rs` -> filesystem copy/move/delete/trash helpers.
+* `src/app/file_tree_dialog.rs` -> dialog hit-testing and keyboard routing.
+* `src/app/file_tree_tests.rs` -> file-tree tests.
+
 ### `src/app/file_icons.rs`
 
 File icon mapping.
@@ -477,6 +488,8 @@ Responsibilities:
 * Flush.
 
 Use when changing GPU primitives, shader modes, atlas behavior, or batching.
+
+Vertex layout and primitive geometry helpers live in `src/renderer/geometry.rs`.
 
 Hot path. Avoid allocations and I/O.
 
@@ -711,6 +724,8 @@ Responsibilities:
 
 Use when syntax parsing/highlighting logic changes.
 
+Highlighter unit tests live in `src/highlighter_tests.rs`.
+
 ### `src/highlighter_runtime.rs`
 
 Public highlighter runtime API.
@@ -754,6 +769,8 @@ Responsibilities:
 
 Use when Python LSP hover formatting changes.
 
+Python language helper tests live in `src/languages/python_tests.rs`.
+
 ### `src/languages/rust.rs`
 
 Rust-specific import-block helpers.
@@ -773,6 +790,8 @@ Responsibilities:
 
 Use when LSP process behavior, restart, request dispatch, or manager state changes.
 
+Tests live in `src/lsp/lsp_tests.rs`.
+
 ### `src/lsp/protocol.rs`
 
 JSON-RPC/LSP protocol layer.
@@ -787,6 +806,8 @@ Responsibilities:
 
 Use when protocol messages, capabilities, server commands, or wire format changes.
 
+Protocol tests live in `src/lsp/protocol_tests.rs`.
+
 ### `src/lsp/hover.rs`
 
 Hover text normalization/highlighting.
@@ -795,9 +816,11 @@ Responsibilities:
 
 * Markdown/plain hover normalization.
 * Hover formatting.
-* Hover tests.
+* Hover public line-kind bridge for LSP UI.
 
 Use when hover content is wrong after LSP response arrives.
+
+Python hover tests live in `src/lsp/python_hover_tests.rs`.
 
 ### `src/scroll.rs`
 

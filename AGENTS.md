@@ -407,10 +407,14 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
-* `src/app.rs` -> app-level behavior: tabs, files, search, autocomplete, title, dialogs.
+* `src/app.rs` -> app-level behavior: tabs, files, search, title, dialogs.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
+* `src/app/autocomplete.rs` -> `App` autocomplete detail/request/update/apply behavior.
+* `src/app/python_completion.rs` -> Python autocomplete/fold/source-owner helpers.
+* `src/app/app_behavior_tests.rs` -> app/autocomplete behavior tests.
+* `src/app/app_file_behavior_tests.rs` -> app file/tab/search/UI behavior tests.
 
 Input:
 
@@ -423,7 +427,11 @@ Input:
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
-* `src/app/mouse/hover_mouse_tests.rs` -> hover tests.
+* `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.
+* `src/app/mouse/hover_visibility_tests.rs` -> hover visibility/state tests.
+* `src/app/mouse/hover_transition_tests.rs` -> stale/in-flight hover transition tests.
+* `src/app/mouse/hover_diagnostic_range_tests.rs` -> diagnostic hover target/range tests.
+* `src/app/mouse/hover_bridge_tests.rs` -> hover popup bridge/hitbox tests.
 
 UI/actions:
 
@@ -440,6 +448,7 @@ Editor/text:
 Rendering:
 
 * `src/renderer.rs` -> OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
+* `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.
 * `src/render_view.rs` -> frame draw orchestration and layer order. Hot path.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
@@ -459,23 +468,32 @@ Rendering:
 Syntax/languages:
 
 * `src/highlighter.rs` -> Tree-sitter thread, parser/query setup, spans/completions/folds.
+* `src/highlighter_tests.rs` -> highlighter unit tests.
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
 * `src/languages/dart.rs` -> Dart import-block helpers.
-* `src/languages/python.rs` -> Python hover formatting/highlighting helpers.
+* `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
+* `src/languages/python_tests.rs` -> Python language helper tests.
 * `src/languages/rust.rs` -> Rust import-block helpers.
 
 LSP:
 
 * `src/lsp.rs` -> server lifecycle, requests, diagnostics, logs, manager state.
+* `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
 * `src/lsp/protocol.rs` -> JSON-RPC framing, LSP encode/decode, wire parsing.
+* `src/lsp/protocol_tests.rs` -> protocol parse/encode tests.
 * `src/lsp/hover.rs` -> hover text normalization/highlighting.
+* `src/lsp/python_hover_tests.rs` -> Python hover normalization/highlight tests.
 * `src/app/lsp_actions.rs` -> code actions, go-to-def, quick fixes, noqa/workspace edits.
 
 Project tree/files:
 
-* `src/app/file_tree.rs` -> explorer scan/watch/expand/open.
+* `src/app/file_tree.rs` -> explorer types and `App` tree/menu operations.
+* `src/app/file_tree_scan.rs` -> explorer scan/watch/icon raster cache.
+* `src/app/file_tree_ops.rs` -> file-tree filesystem copy/move/delete/trash helpers.
+* `src/app/file_tree_dialog.rs` -> file-tree dialog keyboard/input routing.
+* `src/app/file_tree_tests.rs` -> file-tree unit tests.
 * `src/app/file_icons.rs` -> file/folder icon keys + SVG lookup.
 
 Terminal:
