@@ -1,6 +1,108 @@
 use super::*;
 
+fn autocomplete_trace_enabled() -> bool {
+    false
+}
+
+const AUTOCOMPLETE_CACHE_MAX_ITEMS: usize = 256;
+
+fn autocomplete_detail_cache_item(
+    item: &crate::lsp::LspCompletionItem,
+) -> AutocompleteDetailCacheItem {
+    AutocompleteDetailCacheItem {
+        kind: item.kind,
+        detail: item.detail.clone(),
+        module: item.module.clone(),
+        module_path: item.module.clone(),
+    }
+}
+
+fn apply_autocomplete_detail_cache_item(
+    item: &mut AutocompleteItem,
+    cached: &AutocompleteDetailCacheItem,
+    member_dot_context: bool,
+) {
+    let incoming_kind = completion_detail_kind(cached.kind, cached.detail.as_deref());
+    item.kind = incoming_kind;
+    if item.detail.is_none() && cached.detail.is_some() {
+        item.detail = cached.detail.clone();
+    }
+    if !member_dot_context
+        && (matches!(
+            incoming_kind,
+            SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+        ) || completion_is_lowercase_type_source(
+            &item.word,
+            cached.module.as_deref(),
+            cached.detail.as_deref(),
+        ))
+    {
+        if completion_is_lowercase_type_source(
+            &item.word,
+            cached.module.as_deref(),
+            cached.detail.as_deref(),
+        ) {
+            item.kind = SymbolKind::Variable;
+        }
+        item.module = None;
+        item.module_path = None;
+        return;
+    }
+    if item.module_path.is_none() && cached.module_path.is_some() {
+        item.module_path = cached.module_path.clone();
+    }
+    if let Some(module) = cached
+        .module
+        .as_deref()
+        .filter(|module| should_replace_completion_module(item.module.as_deref(), module))
+    {
+        item.module = Some(module.to_string());
+    }
+    assign_builtin_completion_module(item);
+}
+
 impl App {
+    fn trace_autocomplete_state(&self, event: &str) {
+        if !autocomplete_trace_enabled() {
+            return;
+        }
+        let detail_len = self
+            .autocomplete_detail_popup
+            .as_ref()
+            .map(|popup| popup.text.len())
+            .unwrap_or(0);
+        let detail_lines = self
+            .autocomplete_detail_popup
+            .as_ref()
+            .map(|popup| popup.text.lines().count())
+            .unwrap_or(0);
+        let prefix = self.get_current_word_prefix();
+        println!(
+            "Autocomplete state: event={} active={} mode={:?} opts={} selected={} hovered={:?} anim={:.3} scroll={:.1}/{:.1} pending={:?} detail_req={:?} detail_word={:?} detail={}B/{}l rect={:?} detail_rect={:?} anchor={:?} min_w={:.1} prefix={:?} cursor={} version={}",
+            event,
+            self.autocomplete_active,
+            self.autocomplete_mode,
+            self.autocomplete_options.len(),
+            self.autocomplete_selected_idx,
+            self.autocomplete_hovered_idx,
+            self.autocomplete_anim_progress,
+            self.autocomplete_scroll.current,
+            self.autocomplete_scroll.target,
+            self.autocomplete_pending_request_id,
+            self.autocomplete_detail_request_id,
+            self.autocomplete_detail_word,
+            detail_len,
+            detail_lines,
+            self.autocomplete_rect,
+            self.autocomplete_detail_rect,
+            self.autocomplete_anchor,
+            self.autocomplete_min_width,
+            prefix,
+            self.editor.cursor,
+            self.editor.version
+        );
+    }
+
     pub(crate) fn nearest_assignment_usage_target(
         &self,
         source_range: (usize, usize),
@@ -39,6 +141,7 @@ impl App {
     }
 
     pub fn close_autocomplete(&mut self) {
+        self.trace_autocomplete_state("close:before");
         self.autocomplete_active = false;
         self.autocomplete_selected_idx = 0;
         self.autocomplete_hovered_idx = None;
@@ -49,6 +152,8 @@ impl App {
         self.autocomplete_pending_request_id = None;
         self.autocomplete_detail_request_id = None;
         self.autocomplete_detail_word = None;
+        self.autocomplete_detail_request_path = None;
+        self.autocomplete_detail_context_key = None;
         self.autocomplete_detail_popup = None;
         self.autocomplete_detail_rect = None;
         self.autocomplete_detail_placement = None;
@@ -58,6 +163,8 @@ impl App {
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
         self.autocomplete_apply_pending_response = false;
+        crate::app::events::reset_autocomplete_frame_stats();
+        self.trace_autocomplete_state("close:after");
     }
 
     pub fn autocomplete_detail_selection(&self) -> Option<(usize, usize)> {
@@ -112,6 +219,7 @@ impl App {
     }
 
     pub(crate) fn hide_autocomplete_popup_keep_request(&mut self) {
+        self.trace_autocomplete_state("hide_keep_request:before");
         self.autocomplete_active = false;
         self.autocomplete_options.clear();
         self.autocomplete_selected_idx = 0;
@@ -122,6 +230,8 @@ impl App {
         self.autocomplete_anchor = None;
         self.autocomplete_detail_request_id = None;
         self.autocomplete_detail_word = None;
+        self.autocomplete_detail_request_path = None;
+        self.autocomplete_detail_context_key = None;
         self.autocomplete_detail_popup = None;
         self.autocomplete_detail_rect = None;
         self.autocomplete_detail_placement = None;
@@ -131,6 +241,8 @@ impl App {
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
         self.autocomplete_apply_pending_response = false;
+        crate::app::events::reset_autocomplete_frame_stats();
+        self.trace_autocomplete_state("hide_keep_request:after");
     }
 
     pub fn autocomplete_window_contains(&self, x: f32, y: f32) -> bool {
@@ -151,15 +263,18 @@ impl App {
     }
 
     pub fn refresh_autocomplete_detail_popup(&mut self) {
+        self.trace_autocomplete_state("detail_refresh:begin");
         let idx = self.autocomplete_selected_idx;
         let Some((item, _)) = self.autocomplete_options.get(idx) else {
             self.autocomplete_detail_popup = None;
             self.autocomplete_detail_rect = None;
+            self.trace_autocomplete_state("detail_refresh:no_item");
             return;
         };
         let Some(detail) = item.detail.as_ref().filter(|s| !s.trim().is_empty()) else {
             self.autocomplete_detail_popup = None;
             self.autocomplete_detail_rect = None;
+            self.trace_autocomplete_state("detail_refresh:no_detail");
             return;
         };
         let module_path = autocomplete_detail_module_path(item).map(str::to_string);
@@ -174,6 +289,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|popup| popup.text == expected_text)
             {
+                self.trace_autocomplete_state("detail_refresh:unchanged");
                 return;
             }
             crate::lsp::highlight_hover_text(detail_text.as_ref())
@@ -202,99 +318,176 @@ impl App {
         self.autocomplete_detail_selection_anchor = None;
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
+        self.trace_autocomplete_state("detail_refresh:rebuilt");
+    }
+
+    fn current_autocomplete_detail_context_key(&self, text: &str, prefix: &str) -> String {
+        ty_autocomplete_context_key(
+            text,
+            &self.editor.line_offsets,
+            self.editor.cursor,
+            prefix,
+            AutocompleteMode::TreeSitter,
+        )
+    }
+
+    fn autocomplete_detail_wanted_words(&self) -> FxHashSet<String> {
+        let mut words = FxHashSet::default();
+        words.reserve(self.autocomplete_options.len() + 1);
+        for (item, _) in &self.autocomplete_options {
+            words.insert(item.word.clone());
+        }
+        if let Some(word) = &self.autocomplete_detail_word {
+            words.insert(word.clone());
+        }
+        words
+    }
+
+    fn apply_cached_autocomplete_detail_for_index(
+        &mut self,
+        idx: usize,
+        path: &PathBuf,
+        context_key: &str,
+    ) -> bool {
+        let Some((item, _)) = self.autocomplete_options.get(idx) else {
+            return false;
+        };
+        let target = item.word.clone();
+        let Some(cache) = self.autocomplete_detail_cache.as_ref().filter(|cache| {
+            cache.path.as_path() == path.as_path() && cache.context_key == context_key
+        }) else {
+            return false;
+        };
+        let Some(cached) = cache.items.get(&target).cloned() else {
+            return false;
+        };
+        let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        if let Some((item, _)) = self.autocomplete_options.get_mut(idx) {
+            apply_autocomplete_detail_cache_item(item, &cached, member_dot_context);
+        }
+        self.refresh_autocomplete_detail_popup();
+        true
+    }
+
+    pub fn remember_autocomplete_detail_cache(
+        &mut self,
+        items: &[crate::lsp::LspCompletionItem],
+    ) {
+        let (Some(path), Some(context_key)) = (
+            self.autocomplete_detail_request_path.clone(),
+            self.autocomplete_detail_context_key.clone(),
+        ) else {
+            return;
+        };
+        let wanted = self.autocomplete_detail_wanted_words();
+        let mut details = FxHashMap::default();
+        for item in items {
+            if !wanted.contains(item.label.as_str()) {
+                continue;
+            }
+            details
+                .entry(item.label.clone())
+                .or_insert_with(|| autocomplete_detail_cache_item(item));
+        }
+        if details.is_empty() {
+            self.autocomplete_detail_cache = None;
+            return;
+        }
+        self.autocomplete_detail_cache = Some(AutocompleteDetailCacheEntry {
+            path,
+            context_key,
+            items: details,
+        });
+    }
+
+    pub fn finish_autocomplete_detail_request(&mut self) {
+        self.autocomplete_detail_request_id = None;
+        self.autocomplete_detail_word = None;
+        self.autocomplete_detail_request_path = None;
+        self.autocomplete_detail_context_key = None;
     }
 
     pub fn request_autocomplete_detail_for_index(&mut self, idx: usize) {
+        self.trace_autocomplete_state("detail_request:begin");
         if self.autocomplete_mode != AutocompleteMode::TreeSitter {
             self.refresh_autocomplete_detail_popup();
+            self.trace_autocomplete_state("detail_request:non_treesitter_refresh");
             return;
         }
         let Some((item, _)) = self.autocomplete_options.get(idx) else {
+            self.trace_autocomplete_state("detail_request:no_item");
             return;
         };
+        let target_word = item.word.clone();
         if item.detail.is_some() {
             self.refresh_autocomplete_detail_popup();
-            return;
-        }
-        if self.autocomplete_detail_word.as_deref() == Some(item.word.as_str())
-            && self.autocomplete_detail_request_id.is_some()
-        {
+            self.trace_autocomplete_state("detail_request:local_detail");
             return;
         }
         let Some(path) = self.file_path.clone() else {
-            return;
-        };
-        let Some(lsp) = self.lsp.as_mut() else {
+            self.trace_autocomplete_state("detail_request:no_path");
             return;
         };
         let text = self.editor.get_full_text();
+        let prefix = self.get_current_word_prefix();
+        let context_key = self.current_autocomplete_detail_context_key(&text, &prefix);
+        if self.apply_cached_autocomplete_detail_for_index(idx, &path, &context_key) {
+            self.trace_autocomplete_state("detail_request:cache_hit");
+            return;
+        }
+        if self.autocomplete_detail_word.as_deref() == Some(target_word.as_str())
+            && self.autocomplete_detail_request_id.is_some()
+            && self.autocomplete_detail_request_path.as_ref() == Some(&path)
+            && self.autocomplete_detail_context_key.as_deref() == Some(context_key.as_str())
+        {
+            self.trace_autocomplete_state("detail_request:dedupe");
+            return;
+        }
+        let Some(lsp) = self.lsp.as_mut() else {
+            self.trace_autocomplete_state("detail_request:no_lsp");
+            return;
+        };
         let (line, col) =
             crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
         if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, None) {
             self.autocomplete_detail_request_id = Some(id);
-            self.autocomplete_detail_word = Some(item.word.clone());
+            self.autocomplete_detail_word = Some(target_word);
+            self.autocomplete_detail_request_path = Some(path);
+            self.autocomplete_detail_context_key = Some(context_key);
+            self.trace_autocomplete_state("detail_request:sent");
         }
     }
 
     pub fn merge_autocomplete_details(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        if autocomplete_trace_enabled() {
+            println!(
+                "Autocomplete merge: incoming={} target={:?}",
+                items.len(),
+                self.autocomplete_detail_word
+            );
+        }
+        self.trace_autocomplete_state("merge_detail:begin");
         let Some(target) = self.autocomplete_detail_word.clone() else {
+            self.trace_autocomplete_state("merge_detail:no_target");
             return;
         };
-        let mut details: FxHashMap<
-            String,
-            (SymbolKind, Option<String>, Option<String>, Option<String>),
-        > = FxHashMap::default();
-        for item in items {
-            let module_path = item.module.clone();
+        let wanted = self.autocomplete_detail_wanted_words();
+        let mut details = FxHashMap::default();
+        for item in &items {
+            if !wanted.contains(item.label.as_str()) {
+                continue;
+            }
             details
-                .entry(item.label)
-                .or_insert((item.kind, item.detail, item.module, module_path));
+                .entry(item.label.clone())
+                .or_insert_with(|| autocomplete_detail_cache_item(item));
         }
         let mut target_changed = false;
         let member_dot_context = cursor_after_python_member_dot(&self.editor);
         for (item, _) in &mut self.autocomplete_options {
-            let Some((kind, detail, module, module_path)) = details.get(&item.word) else {
+            let Some(cached) = details.get(&item.word) else {
                 continue;
             };
-            let incoming_kind = completion_detail_kind(*kind, detail.as_deref());
-            item.kind = incoming_kind;
-            if item.detail.is_none() && detail.is_some() {
-                item.detail = detail.clone();
-            }
-            if !member_dot_context
-                && (matches!(
-                    incoming_kind,
-                    SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
-                ) || completion_is_lowercase_type_source(
-                    &item.word,
-                    module.as_deref(),
-                    detail.as_deref(),
-                ))
-            {
-                if completion_is_lowercase_type_source(
-                    &item.word,
-                    module.as_deref(),
-                    detail.as_deref(),
-                ) {
-                    item.kind = SymbolKind::Variable;
-                }
-                item.module = None;
-                item.module_path = None;
-                if item.word == target {
-                    target_changed = true;
-                }
-                continue;
-            }
-            if item.module_path.is_none() && module_path.is_some() {
-                item.module_path = module_path.clone();
-            }
-            if let Some(module) = module
-                .as_deref()
-                .filter(|module| should_replace_completion_module(item.module.as_deref(), module))
-            {
-                item.module = Some(module.to_string());
-            }
-            assign_builtin_completion_module(item);
+            apply_autocomplete_detail_cache_item(item, cached, member_dot_context);
             if item.word == target {
                 target_changed = true;
             }
@@ -302,12 +495,24 @@ impl App {
         if target_changed {
             self.refresh_autocomplete_detail_popup();
         }
-        self.autocomplete_detail_request_id = None;
-        self.autocomplete_detail_word = None;
+        self.finish_autocomplete_detail_request();
+        self.trace_autocomplete_state("merge_detail:end");
     }
 
     pub fn request_ty_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
+        if autocomplete_trace_enabled() {
+            println!(
+                "Autocomplete request_ty: mode={:?} trigger={:?} active={} opts={} pending={:?}",
+                mode,
+                trigger,
+                self.autocomplete_active,
+                self.autocomplete_options.len(),
+                self.autocomplete_pending_request_id
+            );
+        }
+        self.trace_autocomplete_state("request_ty:begin");
         if !self.is_ide_mode || self.show_welcome {
+            self.trace_autocomplete_state("request_ty:not_ide");
             return;
         }
         if mode == AutocompleteMode::TyContext
@@ -317,6 +522,7 @@ impl App {
                     && !cursor_after_python_member_dot(&self.editor))
         {
             self.close_autocomplete();
+            self.trace_autocomplete_state("request_ty:blocked_context");
             return;
         }
         if mode == AutocompleteMode::TyImports && self.get_current_word_prefix().is_empty() {
@@ -329,17 +535,43 @@ impl App {
             self.autocomplete_scroll.current = 0.0;
             self.autocomplete_scroll.target = 0.0;
             self.autocomplete_anchor = None;
+            self.trace_autocomplete_state("request_ty:imports_empty_prefix");
             return;
         }
         let Some(path) = self.file_path.clone() else {
+            self.trace_autocomplete_state("request_ty:no_path");
             return;
         };
         let hide_exact_match =
             mode == AutocompleteMode::TyContext && self.autocomplete_has_only_current_text_match();
+        let text = self.editor.get_full_text();
+        let prefix = self.get_current_word_prefix();
+        let context_key = ty_autocomplete_context_key(
+            &text,
+            &self.editor.line_offsets,
+            self.editor.cursor,
+            &prefix,
+            mode,
+        );
+        if let Some(items) = self
+            .autocomplete_cache
+            .as_ref()
+            .filter(|cache| {
+                cache.mode == mode && cache.path == path && cache.context_key == context_key
+            })
+            .map(|cache| cache.items.clone())
+        {
+            self.autocomplete_mode = mode;
+            self.autocomplete_pending_request_id = None;
+            self.autocomplete_apply_pending_response = false;
+            self.update_ty_autocomplete(items);
+            self.trace_autocomplete_state("request_ty:cached_end");
+            return;
+        }
         let Some(lsp) = self.lsp.as_mut() else {
+            self.trace_autocomplete_state("request_ty:no_lsp");
             return;
         };
-        let text = self.editor.get_full_text();
         lsp.notify_change(
             &path,
             &self.file_extension,
@@ -350,45 +582,37 @@ impl App {
             crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
         if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
         {
-            let prefix = self.get_current_word_prefix();
-            let context_key = ty_autocomplete_context_key(
-                &text,
-                &self.editor.line_offsets,
-                self.editor.cursor,
-                &prefix,
-                mode,
-            );
-            let cached_items = self
-                .autocomplete_cache
-                .as_ref()
-                .filter(|cache| {
-                    cache.mode == mode && cache.path == path && cache.context_key == context_key
-                })
-                .map(|cache| cache.items.clone());
+            if autocomplete_trace_enabled() {
+                println!(
+                    "Autocomplete request_ty_sent: id={} cached={} hide_exact={} context_key_len={} line={} col={}",
+                    id,
+                    0,
+                    hide_exact_match,
+                    context_key.len(),
+                    line,
+                    col
+                );
+            }
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = Some(id);
             self.autocomplete_apply_pending_response = false;
-            if let Some(items) = cached_items {
-                self.update_ty_autocomplete(items);
-                self.autocomplete_pending_request_id = Some(id);
-            } else if hide_exact_match {
+            if hide_exact_match {
                 self.hide_autocomplete_popup_keep_request();
-            } else if !self.autocomplete_active {
-                self.autocomplete_active = true;
-                self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_scroll.current = 0.0;
-                self.autocomplete_scroll.target = 0.0;
-                self.autocomplete_anchor = None;
             } else {
-                self.autocomplete_active = true;
+                self.autocomplete_detail_popup = None;
+                self.autocomplete_detail_rect = None;
             }
+            self.trace_autocomplete_state("request_ty:end");
         }
     }
 
-    pub fn remember_ty_autocomplete_cache(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+    pub fn remember_ty_autocomplete_cache(&mut self, mut items: Vec<crate::lsp::LspCompletionItem>) {
         let Some(path) = self.file_path.clone() else {
             return;
         };
+        if items.len() > AUTOCOMPLETE_CACHE_MAX_ITEMS {
+            items.truncate(AUTOCOMPLETE_CACHE_MAX_ITEMS);
+        }
         let text = self.editor.get_full_text();
         let prefix = self.get_current_word_prefix();
         self.autocomplete_cache = Some(AutocompleteCacheEntry {
@@ -406,17 +630,30 @@ impl App {
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        if autocomplete_trace_enabled() {
+            println!(
+                "Autocomplete update_ty: incoming={} mode={:?} active={} opts_before={} pending={:?}",
+                items.len(),
+                self.autocomplete_mode,
+                self.autocomplete_active,
+                self.autocomplete_options.len(),
+                self.autocomplete_pending_request_id
+            );
+        }
+        self.trace_autocomplete_state("update_ty:begin");
         let prefix = self.get_current_word_prefix();
         if self.autocomplete_mode == AutocompleteMode::TyContext
             && (python_member_chain_too_deep(&self.editor)
                 || prefix.is_empty() && !cursor_after_python_member_dot(&self.editor))
         {
             self.close_autocomplete();
+            self.trace_autocomplete_state("update_ty:blocked_context");
             return;
         }
         if self.autocomplete_mode == AutocompleteMode::TyImports && prefix.is_empty() {
             self.autocomplete_options.clear();
             self.autocomplete_active = true;
+            self.trace_autocomplete_state("update_ty:imports_empty_prefix");
             return;
         }
 
@@ -430,6 +667,15 @@ impl App {
             && member_dot_context)
             .then(|| common_completion_owner(&items))
             .flatten();
+        if autocomplete_trace_enabled() {
+            println!(
+                "Autocomplete update_ty_context: prefix={:?} member_dot={} common_owner={:?} current_text_len={}",
+                prefix,
+                member_dot_context,
+                common_owner,
+                current_text.len()
+            );
+        }
         let common_owner_module = common_owner.as_ref().and_then(|owner| {
             imported_modules
                 .as_ref()
@@ -642,25 +888,41 @@ impl App {
             )
         });
 
-        let was_empty_or_inactive =
-            self.autocomplete_options.is_empty() || !self.autocomplete_active;
+        let was_inactive = !self.autocomplete_active;
 
         self.autocomplete_options = matches
             .into_iter()
             .take(80)
             .map(|(_, _, item, indices)| (item, indices))
             .collect();
+        if autocomplete_trace_enabled() {
+            let first = self
+                .autocomplete_options
+                .iter()
+                .take(5)
+                .map(|(item, _)| item.word.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            println!(
+                "Autocomplete update_ty_matches: opts={} first=[{}] was_inactive={}",
+                self.autocomplete_options.len(),
+                first,
+                was_inactive
+            );
+        }
         if self.autocomplete_options.len() == 1
             && !prefix.is_empty()
             && self.autocomplete_options[0].0.word == prefix
         {
             self.autocomplete_options.clear();
             self.close_autocomplete();
+            self.trace_autocomplete_state("update_ty:single_exact_close");
             return;
         }
 
-        if was_empty_or_inactive && !self.autocomplete_options.is_empty() {
+        if was_inactive && !self.autocomplete_options.is_empty() {
             self.autocomplete_anim_progress = 0.0;
+            self.autocomplete_anchor = None;
         }
 
         self.autocomplete_active = !self.autocomplete_options.is_empty()
@@ -670,6 +932,8 @@ impl App {
             self.autocomplete_detail_rect = None;
             self.autocomplete_detail_placement = None;
             self.autocomplete_detail_max_scroll = 0.0;
+            crate::app::events::reset_autocomplete_frame_stats();
+            self.trace_autocomplete_state("update_ty:inactive_end");
             return;
         }
         self.autocomplete_selected_idx = 0;
@@ -680,14 +944,17 @@ impl App {
         if self.autocomplete_apply_pending_response {
             self.autocomplete_apply_pending_response = false;
             self.apply_autocomplete();
+            self.trace_autocomplete_state("update_ty:applied_pending");
             return;
         }
         if self.autocomplete_mode == AutocompleteMode::TreeSitter {
             self.request_autocomplete_detail_for_index(0);
         }
+        self.trace_autocomplete_state("update_ty:end");
     }
 
     pub fn update_autocomplete(&mut self) {
+        self.trace_autocomplete_state("update_ts:begin");
         if self.autocomplete_active && self.autocomplete_mode != AutocompleteMode::TreeSitter {
             let after_member_dot = cursor_after_python_member_dot(&self.editor);
             let inside_call = cursor_inside_python_call_parens(&self.editor);
@@ -698,7 +965,9 @@ impl App {
                     || (empty_prefix && !after_member_dot))
             {
                 self.close_autocomplete();
+                self.trace_autocomplete_state("update_ts:closed_non_ts_context");
             }
+            self.trace_autocomplete_state("update_ts:skip_non_ts_active");
             return;
         }
         let prefix = self.get_current_word_prefix();
@@ -706,6 +975,14 @@ impl App {
             self.autocomplete_active = false;
             self.autocomplete_options.clear();
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
+            self.autocomplete_rect = None;
+            self.autocomplete_anchor = None;
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+            self.autocomplete_detail_placement = None;
+            self.autocomplete_detail_max_scroll = 0.0;
+            crate::app::events::reset_autocomplete_frame_stats();
+            self.trace_autocomplete_state("update_ts:empty_prefix");
             return;
         }
 
@@ -739,6 +1016,14 @@ impl App {
         }
 
         let mut matches = Vec::with_capacity(best_scopes.len());
+        if autocomplete_trace_enabled() {
+            println!(
+                "Autocomplete update_ts_scope: prefix={:?} completions={} best_scopes={}",
+                prefix,
+                self.highlighter.completions.len(),
+                best_scopes.len()
+            );
+        }
 
         for (_, comp) in best_scopes {
             let comp_lower = comp.word.to_lowercase();
@@ -782,8 +1067,23 @@ impl App {
             .take(60)
             .map(|m| (m.2.into(), m.3))
             .collect();
+        if autocomplete_trace_enabled() {
+            let first = self
+                .autocomplete_options
+                .iter()
+                .take(5)
+                .map(|(item, _)| item.word.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            println!(
+                "Autocomplete update_ts_matches: opts={} first=[{}]",
+                self.autocomplete_options.len(),
+                first
+            );
+        }
         if self.autocomplete_options.len() == 1 && self.autocomplete_options[0].0.word == prefix {
             self.autocomplete_options.clear();
+            self.trace_autocomplete_state("update_ts:single_exact_clear");
         }
         if self.file_extension == "py" {
             for (item, _) in &mut self.autocomplete_options {
@@ -833,10 +1133,11 @@ impl App {
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
-            self.refresh_autocomplete_detail_popup();
             self.request_autocomplete_detail_for_index(0);
+            self.trace_autocomplete_state("update_ts:active_end");
         } else {
             self.autocomplete_active = false;
+            self.trace_autocomplete_state("update_ts:no_options");
         }
     }
 

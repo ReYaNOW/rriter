@@ -655,7 +655,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         w.request_redraw();
                     }
                 } else if app.autocomplete_detail_request_id == Some(request_id) {
-                    app.merge_autocomplete_details(items);
+                    app.remember_autocomplete_detail_cache(&items);
+                    if app.autocomplete_active {
+                        app.merge_autocomplete_details(items);
+                    } else {
+                        app.finish_autocomplete_detail_request();
+                    }
                     if let Some(w) = app.window.as_ref() {
                         w.request_redraw();
                     }
@@ -1045,6 +1050,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
 
     let is_highlighting = !app.is_highlighted_once;
     let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
+    let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
     match compute_about_wait_plan(
         now,
         app.last_action,
@@ -1060,7 +1066,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if let Some(w) = app.window.as_ref() {
                 w.request_redraw();
             }
-            event_loop.set_control_flow(ControlFlow::Wait);
+            if autocomplete_animating {
+                event_loop.set_control_flow(ControlFlow::Poll);
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
         }
         AboutWaitPlan::WaitUntil(wake_at) => {
             event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));

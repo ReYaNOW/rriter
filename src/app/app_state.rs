@@ -222,6 +222,21 @@ pub struct AutocompleteCacheEntry {
     pub items: Vec<crate::lsp::LspCompletionItem>,
 }
 
+#[derive(Clone, Debug)]
+pub struct AutocompleteDetailCacheItem {
+    pub kind: SymbolKind,
+    pub detail: Option<String>,
+    pub module: Option<String>,
+    pub module_path: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AutocompleteDetailCacheEntry {
+    pub path: PathBuf,
+    pub context_key: String,
+    pub items: FxHashMap<String, AutocompleteDetailCacheItem>,
+}
+
 pub struct IdePanelState {
     pub slots: Vec<PanelSlot>,
     pub left_width: f32,
@@ -594,6 +609,8 @@ pub struct App {
     pub autocomplete_pending_request_id: Option<i32>,
     pub autocomplete_detail_request_id: Option<i32>,
     pub autocomplete_detail_word: Option<String>,
+    pub autocomplete_detail_request_path: Option<PathBuf>,
+    pub autocomplete_detail_context_key: Option<String>,
     pub autocomplete_detail_popup: Option<crate::app::mouse::HoverPopup>,
     pub autocomplete_detail_rect: Option<(f32, f32, f32, f32)>,
     pub autocomplete_detail_placement: Option<i8>,
@@ -604,6 +621,7 @@ pub struct App {
     pub autocomplete_detail_selecting: bool,
     pub autocomplete_apply_pending_response: bool,
     pub autocomplete_cache: Option<AutocompleteCacheEntry>,
+    pub autocomplete_detail_cache: Option<AutocompleteDetailCacheEntry>,
 
     pub current_sticky_lines: Vec<(usize, usize)>,
     pub target_sticky_lines: Vec<(usize, usize)>,

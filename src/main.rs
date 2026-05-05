@@ -857,6 +857,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_pending_request_id: None,
         autocomplete_detail_request_id: None,
         autocomplete_detail_word: None,
+        autocomplete_detail_request_path: None,
+        autocomplete_detail_context_key: None,
         autocomplete_detail_popup: None,
         autocomplete_detail_rect: None,
         autocomplete_detail_placement: None,
@@ -867,6 +869,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_detail_selecting: false,
         autocomplete_apply_pending_response: false,
         autocomplete_cache: None,
+        autocomplete_detail_cache: None,
 
         current_sticky_lines: Vec::new(),
         target_sticky_lines: Vec::new(),

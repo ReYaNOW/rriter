@@ -36,10 +36,41 @@ use std::time::{Duration, Instant};
 // ── Atomic request ID ─────────────────────────────────────────────────────────
 
 static NEXT_ID: AtomicI32 = AtomicI32::new(1);
+const LSP_LOG_RETENTION: Duration = Duration::from_secs(120);
+const LSP_LOG_MAX_ENTRIES: usize = 64;
+const LSP_LOG_MAX_BYTES: usize = 512 * 1024;
+const LSP_LOG_ENTRY_MAX_BYTES: usize = 64 * 1024;
 
 #[inline(always)]
 fn next_id() -> i32 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn compact_lsp_log_message(message: &str) -> String {
+    if message.len() <= LSP_LOG_ENTRY_MAX_BYTES {
+        return message.to_string();
+    }
+    let mut end = LSP_LOG_ENTRY_MAX_BYTES;
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n... truncated {} bytes ...",
+        &message[..end],
+        message.len().saturating_sub(end)
+    )
+}
+
+fn trim_lsp_logs(logs: &mut Vec<LogEntry>, now: Instant) {
+    logs.retain(|log| now.duration_since(log.created_at) <= LSP_LOG_RETENTION);
+    while logs.len() > LSP_LOG_MAX_ENTRIES {
+        logs.remove(0);
+    }
+    let mut total_bytes: usize = logs.iter().map(|log| log.text.len()).sum();
+    while total_bytes > LSP_LOG_MAX_BYTES && logs.len() > 1 {
+        let removed = logs.remove(0);
+        total_bytes = total_bytes.saturating_sub(removed.text.len());
+    }
 }
 
 // ── Публичные типы ────────────────────────────────────────────────────────────
@@ -1252,19 +1283,18 @@ impl LspManager {
                     }
                 }
                 LspEvent::Log { name, message } => {
-                    let (final_text, spans, folds) = format_and_highlight_json(message);
+                    let compact_message = compact_lsp_log_message(message);
+                    let (final_text, spans, folds) = format_and_highlight_json(&compact_message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
                     let now = Instant::now();
-                    logs.retain(|log| {
-                        now.duration_since(log.created_at) <= Duration::from_secs(300)
-                    });
                     logs.push(LogEntry {
                         text: final_text,
                         spans,
                         folds,
                         created_at: now,
                     });
+                    trim_lsp_logs(logs, now);
                 }
                 _ => {}
             }

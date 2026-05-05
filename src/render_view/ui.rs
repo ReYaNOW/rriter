@@ -612,7 +612,10 @@ impl Renderer {
             y += 10.0 * scale;
         }
 
-        // --- 1. Отрисовка Тени ---
+        if current_h < 1.0 {
+            return (x, y, max_w, current_h);
+        }
+
         for i in 1..=5 {
             let offset = i as f32 * scale;
             let alpha = (0.15 - (i as f32 * 0.03)) * smooth_progress;
@@ -626,44 +629,33 @@ impl Renderer {
             );
         }
 
-        // --- 2. Рамка и Фон ---
         let bg_color = [0.15, 0.16, 0.20, 1.0];
         let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.8];
-
-        // ИСПРАВЛЕНИЕ: Делаем рамку толще и математически синхронизируем внутренний радиус
-        let border_width = 1.5 * scale;
+        let border_width = (2.0 * scale).max(2.0);
         self.push_rounded_rect(
             x - border_width,
             y - border_width,
             max_w + border_width * 2.0,
             current_h + border_width * 2.0,
-            5.5 * scale, // Внешний радиус
+            6.0 * scale,
             border_color,
         );
-        self.push_rounded_rect(
-            x,
-            y,
-            max_w,
-            current_h,
-            4.0 * scale, // Внутренний радиус (ровно 5.5 - 1.5), чтобы не было "точек" на углах
-            bg_color,
-        );
+        self.push_rounded_rect(x, y, max_w, current_h, 4.0 * scale, bg_color);
 
         self.flush();
 
-        // --- 3. Scissor Test ---
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (y + current_h)).round() as i32;
+            let sx = x.floor().max(0.0) as i32;
+            let sy = (self.height - (y + current_h)).max(0.0).floor() as i32;
             self.gl.scissor(
-                x.round() as i32,
+                sx,
                 sy,
-                max_w.round() as i32,
-                current_h.round() as i32,
+                max_w.ceil().max(1.0) as i32,
+                current_h.ceil().max(1.0) as i32,
             );
         }
 
-        // --- 4. Отрисовка элементов ---
         let mut current_y = y + padding_top - scroll_y;
 
         for (i, (item, matches)) in options.iter().enumerate() {
@@ -796,18 +788,12 @@ impl Renderer {
             current_y += step;
         }
 
-        self.flush();
-        unsafe {
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
-
-        // --- 5. Отрисовка Скроллбара (стиль как в главном окне) ---
         if total_h > target_h {
             let max_scroll = (total_h - target_h).max(0.0);
             let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
 
             let track_margin = autocomplete_scrollbar_track_margin(scale);
-            let track_h = current_h - track_margin * 2.0;
+            let track_h = (current_h - track_margin * 2.0).max(1.0);
             let thumb_h = (current_h / total_h * track_h).max(20.0 * scale);
             let thumb_y = y + track_margin + scroll_ratio * (track_h - thumb_h);
 
@@ -824,6 +810,9 @@ impl Renderer {
         }
 
         self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
 
         (x, y, max_w, current_h)
     }
