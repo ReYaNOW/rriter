@@ -324,6 +324,19 @@ pub(crate) fn assign_builtin_completion_module(item: &mut AutocompleteItem) {
     }
 }
 
+pub(crate) fn python_builtin_completion_kind(word: &str) -> Option<SymbolKind> {
+    match word {
+        "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool" | "float" | "type"
+        | "map" | "filter" | "range" | "reversed" | "super" | "Exception" | "ValueError"
+        | "TypeError" | "KeyError" | "IndexError" | "AttributeError" | "RuntimeError"
+        | "KeyboardInterrupt" => Some(SymbolKind::Class),
+        "print" | "len" | "sum" | "min" | "max" | "abs" | "isinstance" | "issubclass"
+        | "hasattr" | "getattr" | "setattr" | "delattr" | "dir" | "enumerate" | "zip"
+        | "open" => Some(SymbolKind::Function),
+        _ => None,
+    }
+}
+
 pub(crate) fn is_type_like_completion_source(text: &str) -> bool {
     let s = normalized_completion_source(text);
     if s.is_empty() {
@@ -828,6 +841,9 @@ pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<Str
     {
         return None;
     }
+    if rest.trim_start().starts_with(':') {
+        return Some(Vec::new());
+    }
     let open = rest.find('(')?;
     let close = rest.rfind(')')?;
     if close <= open {
@@ -1060,6 +1076,77 @@ pub(crate) fn python_class_attr_owners_with_imports(
     out
 }
 
+pub(crate) fn python_class_owner_depths_with_imports(
+    source: &str,
+    workspaces: &[PathBuf],
+    current_path: Option<&Path>,
+    class_name: &str,
+) -> FxHashMap<String, u8> {
+    fn find(
+        source: &str,
+        workspaces: &[PathBuf],
+        current_path: Option<&Path>,
+        class_name: &str,
+        depth: usize,
+        seen: &mut FxHashSet<String>,
+        out: &mut FxHashMap<String, u8>,
+    ) {
+        if depth > 8 {
+            return;
+        }
+        let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+        out.entry(class_label.to_string())
+            .or_insert(depth.min(u8::MAX as usize) as u8);
+        let seen_key = format!("{:p}:{}:{class_label}", source.as_ptr(), source.len());
+        if !seen.insert(seen_key) {
+            return;
+        }
+        let lines: Vec<&str> = source.lines().collect();
+        for line in &lines {
+            let Some(bases) = class_header_bases(line, class_label) else {
+                continue;
+            };
+            for base in bases {
+                let base_label = base.rsplit('.').next().unwrap_or(&base);
+                find(
+                    source,
+                    workspaces,
+                    current_path,
+                    base_label,
+                    depth + 1,
+                    seen,
+                    out,
+                );
+                if let Some(base_source) =
+                    imported_python_class_source(source, workspaces, current_path, base_label)
+                {
+                    find(
+                        &base_source,
+                        workspaces,
+                        current_path,
+                        base_label,
+                        depth + 1,
+                        seen,
+                        out,
+                    );
+                }
+            }
+        }
+    }
+
+    let mut out = FxHashMap::default();
+    find(
+        source,
+        workspaces,
+        current_path,
+        class_name,
+        0,
+        &mut FxHashSet::default(),
+        &mut out,
+    );
+    out
+}
+
 pub(crate) fn imported_python_class_source(
     current_text: &str,
     workspaces: &[PathBuf],
@@ -1135,6 +1222,30 @@ pub(crate) fn cursor_after_python_member_dot(editor: &Editor) -> bool {
         return false;
     }
     idx >= 2 && is_python_ident_byte(bytes[idx - 2])
+}
+
+pub(crate) fn python_member_receiver_before_cursor(editor: &Editor) -> Option<String> {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let (line_start, _) = cursor_line_bounds(&text, cursor);
+    let prefix = text.get(line_start..cursor)?;
+    if cursor_in_python_string_or_comment(prefix) {
+        return None;
+    }
+    let bytes = prefix.as_bytes();
+    let mut idx = bytes.len();
+    while idx > 0 && is_python_ident_byte(bytes[idx - 1]) {
+        idx -= 1;
+    }
+    if idx == 0 || bytes[idx - 1] != b'.' {
+        return None;
+    }
+    let end = idx - 1;
+    let mut start = end;
+    while start > 0 && is_python_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    (start < end).then(|| prefix[start..end].to_string())
 }
 
 pub(crate) fn cursor_inside_python_call_parens(editor: &Editor) -> bool {

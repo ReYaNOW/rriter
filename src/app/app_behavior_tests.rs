@@ -1081,6 +1081,11 @@ fn tree_sitter_autocomplete_remaps_builtins_to_class_or_function() {
     app.highlighter.completions = vec![completion("Exception", SymbolKind::Builtin, 0, 200)];
     app.update_autocomplete();
     assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Class);
+
+    app.editor = editor_with("ra");
+    app.highlighter.completions = vec![completion("range", SymbolKind::Builtin, 0, 200)];
+    app.update_autocomplete();
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Class);
 }
 
 #[test]
@@ -1102,6 +1107,63 @@ fn tree_sitter_autocomplete_shows_builtin_module_for_python_builtins() {
     assert_eq!(bool_item.0.kind, SymbolKind::Class);
     assert_eq!(bool_item.0.module.as_deref(), Some("builtins"));
     assert_eq!(bool_item.0.module_path.as_deref(), Some("builtins.bool"));
+}
+
+#[test]
+fn tree_sitter_autocomplete_prioritizes_scoped_self() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    let text = "class Box:\n    def method(self):\n        s";
+    app.editor = editor_with(text);
+    app.highlighter.completions = vec![
+        completion("set", SymbolKind::Builtin, 0, usize::MAX),
+        completion("str", SymbolKind::Builtin, 0, usize::MAX),
+        completion("self", SymbolKind::Parameter, text.find("self").unwrap(), text.len()),
+    ];
+
+    app.update_autocomplete();
+
+    assert_eq!(app.autocomplete_options[0].0.word, "self");
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Parameter);
+}
+
+#[test]
+fn ty_context_suppresses_unscoped_self_member_completion() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.file_path = Some(PathBuf::from("/tmp/example.py"));
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.editor = editor_with("async def lifespan(_: Litestar):\n    self.");
+
+    app.request_ty_autocomplete(AutocompleteMode::TyContext, Some("."));
+
+    assert!(!app.autocomplete_active);
+    assert!(app.autocomplete_options.is_empty());
+}
+
+#[test]
+fn scoped_self_member_completion_is_allowed() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    let text = "class Box:\n    def method(self):\n        self.";
+    app.editor = editor_with(text);
+    app.highlighter.completions = vec![completion(
+        "self",
+        SymbolKind::Parameter,
+        text.find("self").unwrap(),
+        text.len(),
+    )];
+
+    assert!(!app.python_member_dot_receiver_is_unavailable_self());
 }
 
 #[test]
@@ -1298,6 +1360,129 @@ fn ty_context_completion_uses_declaring_owner_not_field_type() {
     assert_eq!(
         id_module_path,
         Some("car_wash.domains.washes.boxes.output.BoxReadPublic")
+    );
+}
+
+#[test]
+fn ty_context_member_completion_orders_owner_depth_and_private_names() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_owner_rank_test_{stamp}"));
+    let package_dir = root.join("car_wash/domains/washes/boxes");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("output.py"),
+        "class GrandBase:\n    grand_public: int\n\nclass BoxReadPublic(GrandBase):\n    base_public: int\n    _base_hidden: int\n\nclass BoxRead(BoxReadPublic):\n    current_public: int\n    _current_hidden: int\n",
+    )
+    .unwrap();
+    let current = root.join("car_wash/domains/washes/bookings/service.py");
+    std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(current);
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with("from car_wash.domains.washes.boxes.output import BoxRead\nbox.");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "base_public".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("int".to_string()),
+            detail: Some("int".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "_base_hidden".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("int".to_string()),
+            detail: Some("int".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "grand_public".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("int".to_string()),
+            detail: Some("int".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "current_public".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("int".to_string()),
+            detail: Some("int".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "_current_hidden".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("int".to_string()),
+            detail: Some("int".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "model_dump".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("BoxRead".to_string()),
+            detail: Some("def BoxRead.model_dump(self) -> dict".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "base_method".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("BoxReadPublic".to_string()),
+            detail: Some("def BoxReadPublic.base_method(self) -> dict".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "mro".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("BoxRead".to_string()),
+            detail: Some("def BoxRead.mro(self) -> list[type]".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    let words = app
+        .autocomplete_options
+        .iter()
+        .map(|(item, _)| item.word.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        words,
+        vec![
+            "current_public",
+            "model_dump",
+            "_current_hidden",
+            "base_public",
+            "base_method",
+            "_base_hidden",
+            "grand_public",
+            "mro",
+        ]
     );
 }
 

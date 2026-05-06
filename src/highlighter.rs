@@ -1305,8 +1305,6 @@ impl Highlighter {
                             ("__dict__", SymbolKind::Variable),
                             ("__init__", SymbolKind::Function),
                             ("__call__", SymbolKind::Function),
-                            ("self", SymbolKind::Variable),
-                            ("cls", SymbolKind::Variable),
                         ]);
                     }
                     "rs" => {

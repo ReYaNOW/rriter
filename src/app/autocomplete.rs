@@ -61,6 +61,65 @@ fn apply_autocomplete_detail_cache_item(
     assign_builtin_completion_module(item);
 }
 
+fn python_scoped_self_priority(word: &str) -> u8 {
+    match word {
+        "self" => 0,
+        "cls" => 1,
+        _ => 2,
+    }
+}
+
+fn python_low_priority_member_name(word: &str) -> bool {
+    matches!(word, "mro")
+}
+
+fn infer_python_member_owner(
+    current_text: &str,
+    imported_modules: Option<&FxHashMap<String, String>>,
+    workspaces: &[PathBuf],
+    current_path: Option<&Path>,
+    items: &[AutocompleteItem],
+    fallback: Option<&str>,
+) -> Option<String> {
+    let mut owner_candidates = FxHashSet::default();
+    if let Some(owner) = fallback {
+        owner_candidates.insert(owner.to_string());
+    }
+    let mut item_owners = Vec::new();
+    for item in items {
+        let Some(owner) = completion_item_owner_label(item) else {
+            continue;
+        };
+        if imported_modules.is_some_and(|imports| imports.contains_key(&owner))
+            || fallback == Some(owner.as_str())
+        {
+            owner_candidates.insert(owner.clone());
+        }
+        item_owners.push(owner);
+    }
+
+    let mut best = fallback.map(str::to_string);
+    let mut best_score = 0usize;
+    for owner in owner_candidates {
+        let Some(source) =
+            imported_python_class_source(current_text, workspaces, current_path, &owner)
+        else {
+            continue;
+        };
+        let depths =
+            python_class_owner_depths_with_imports(&source, workspaces, current_path, &owner);
+        let score = item_owners
+            .iter()
+            .filter(|item_owner| depths.contains_key(item_owner.as_str()))
+            .count();
+        if score > best_score {
+            best_score = score;
+            best = Some(owner);
+        }
+    }
+    best
+}
+
 impl App {
     fn trace_autocomplete_state(&self, event: &str) {
         if !autocomplete_trace_enabled() {
@@ -516,6 +575,13 @@ impl App {
             return;
         }
         if mode == AutocompleteMode::TyContext
+            && self.python_member_dot_receiver_is_unavailable_self()
+        {
+            self.close_autocomplete();
+            self.trace_autocomplete_state("request_ty:unscoped_self_member");
+            return;
+        }
+        if mode == AutocompleteMode::TyContext
             && (python_member_chain_too_deep(&self.editor)
                 || trigger.is_none()
                     && self.get_current_word_prefix().is_empty()
@@ -667,22 +733,37 @@ impl App {
             && member_dot_context)
             .then(|| common_completion_owner(&items))
             .flatten();
+        let member_owner = if self.autocomplete_mode == AutocompleteMode::TyContext
+            && member_dot_context
+        {
+            infer_python_member_owner(
+                &current_text,
+                imported_modules.as_ref(),
+                &self.ide_workspaces,
+                self.file_path.as_deref(),
+                &items,
+                common_owner.as_deref(),
+            )
+        } else {
+            common_owner.clone()
+        };
         if autocomplete_trace_enabled() {
             println!(
-                "Autocomplete update_ty_context: prefix={:?} member_dot={} common_owner={:?} current_text_len={}",
+                "Autocomplete update_ty_context: prefix={:?} member_dot={} common_owner={:?} member_owner={:?} current_text_len={}",
                 prefix,
                 member_dot_context,
                 common_owner,
+                member_owner,
                 current_text.len()
             );
         }
-        let common_owner_module = common_owner.as_ref().and_then(|owner| {
+        let common_owner_module = member_owner.as_ref().and_then(|owner| {
             imported_modules
                 .as_ref()
                 .and_then(|imports| imports.get(owner))
                 .map(String::as_str)
         });
-        let source_attr_words: FxHashSet<String> = if common_owner.is_some() {
+        let source_attr_words: FxHashSet<String> = if member_owner.is_some() {
             items
                 .iter()
                 .filter(|item| completion_needs_python_source_attr_owner(item))
@@ -692,7 +773,7 @@ impl App {
             FxHashSet::default()
         };
         let inherited_owner_source = if !source_attr_words.is_empty() {
-            common_owner.as_ref().and_then(|owner| {
+            member_owner.as_ref().and_then(|owner| {
                 imported_python_class_source(
                     &current_text,
                     &self.ide_workspaces,
@@ -704,7 +785,7 @@ impl App {
             None
         };
         let source_attr_owners = if let (Some(owner), Some(source)) =
-            (common_owner.as_deref(), inherited_owner_source.as_deref())
+            (member_owner.as_deref(), inherited_owner_source.as_deref())
         {
             python_class_attr_owners_with_imports(
                 source,
@@ -715,6 +796,24 @@ impl App {
             )
         } else {
             FxHashMap::default()
+        };
+        let member_owner_depths = if let (Some(owner), Some(source)) =
+            (member_owner.as_deref(), inherited_owner_source.as_deref())
+        {
+            python_class_owner_depths_with_imports(
+                source,
+                &self.ide_workspaces,
+                self.file_path.as_deref(),
+                owner,
+            )
+        } else {
+            let mut depths = FxHashMap::default();
+            if member_dot_context
+                && let Some(owner) = member_owner.as_ref()
+            {
+                depths.insert(owner.clone(), 0);
+            }
+            depths
         };
         for item in &mut items {
             item.kind = completion_detail_kind(item.kind, item.detail.as_deref());
@@ -792,7 +891,7 @@ impl App {
                                 common_owner_module,
                             );
                         } else if inherited_owner_source.is_none() {
-                            if let Some(owner) = common_owner.as_ref() {
+                            if let Some(owner) = member_owner.as_ref() {
                                 set_completion_owner_source(
                                     item,
                                     owner.clone(),
@@ -831,7 +930,7 @@ impl App {
                         .is_some_and(is_type_like_completion_source)
                         || item.module.is_none()
                     {
-                        item.module = common_owner.clone();
+                        item.module = member_owner.clone();
                     }
                 }
             }
@@ -870,6 +969,18 @@ impl App {
             } else {
                 1
             };
+            let owner_depth = if member_dot_context {
+                completion_item_owner_label(item)
+                    .as_deref()
+                    .and_then(|owner| member_owner_depths.get(owner))
+                    .copied()
+                    .unwrap_or(u8::MAX)
+            } else {
+                u8::MAX
+            };
+            let private_priority = member_dot_context && item.word.starts_with('_');
+            let low_priority_member =
+                member_dot_context && python_low_priority_member_name(&item.word);
             let type_priority = match item.kind {
                 SymbolKind::Parameter => 0,
                 SymbolKind::Property | SymbolKind::Variable => 1,
@@ -882,6 +993,9 @@ impl App {
             (
                 !*is_prefix,
                 arg_priority,
+                low_priority_member,
+                owner_depth,
+                private_priority,
                 is_magic_python_name(&item.word),
                 type_priority,
                 *len,
@@ -1044,6 +1158,13 @@ impl App {
         }
 
         matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
+            let scoped_self_priority = if self.file_extension == "py"
+                && comp.kind == SymbolKind::Parameter
+            {
+                python_scoped_self_priority(&comp.word)
+            } else {
+                2
+            };
             let type_priority = match comp.kind {
                 SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property => 0,
                 SymbolKind::Function => 1,
@@ -1056,6 +1177,7 @@ impl App {
             let match_priority = if *is_prefix { 0 } else { 1 };
             (
                 match_priority,
+                scoped_self_priority,
                 is_magic_python_name(&comp.word),
                 type_priority,
                 std::cmp::Reverse(*score),
@@ -1089,32 +1211,8 @@ impl App {
             for (item, _) in &mut self.autocomplete_options {
                 assign_builtin_completion_module(item);
                 if item.kind == SymbolKind::Builtin {
-                    if item
-                        .word
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_uppercase())
-                    {
-                        item.kind = SymbolKind::Class;
-                    } else if matches!(
-                        item.word.as_str(),
-                        "bool"
-                            | "int"
-                            | "float"
-                            | "str"
-                            | "list"
-                            | "dict"
-                            | "set"
-                            | "tuple"
-                            | "bytes"
-                            | "type"
-                            | "object"
-                            | "complex"
-                    ) {
-                        item.kind = SymbolKind::Class;
-                    } else {
-                        item.kind = SymbolKind::Function;
-                    }
+                    item.kind =
+                        python_builtin_completion_kind(&item.word).unwrap_or(SymbolKind::Function);
                 }
             }
         }
@@ -1279,5 +1377,29 @@ impl App {
         self.highlighter
             .apply_edits(self.editor.version, edits, None, None);
         self.last_sent_version = self.editor.version;
+    }
+
+    pub(crate) fn python_member_dot_receiver_is_unavailable_self(&self) -> bool {
+        if self.file_extension != "py" {
+            return false;
+        }
+        let Some(receiver) = python_member_receiver_before_cursor(&self.editor) else {
+            return false;
+        };
+        if !matches!(receiver.as_str(), "self" | "cls") {
+            return false;
+        }
+        let cursor = self.editor.cursor.min(self.editor.len());
+        let lookup_cursor = if cursor > 0 && self.editor.byte_at(cursor - 1) == b'.' {
+            cursor - 1
+        } else {
+            cursor
+        };
+        !self.highlighter.completions.iter().any(|item| {
+            item.word == receiver
+                && item.kind == SymbolKind::Parameter
+                && lookup_cursor >= item.scope_start
+                && lookup_cursor <= item.scope_end
+        })
     }
 }
