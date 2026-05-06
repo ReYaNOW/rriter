@@ -549,6 +549,7 @@ impl Renderer {
                     my,
                     render_scroll_y,
                     wants_pointer,
+                    1.0,
                 );
                 crate::app::mouse::HOVER_STATE.with(|s| {
                     let mut state = s.borrow_mut();

@@ -104,6 +104,11 @@ fn smooth_hover_anim_progress(anim_progress: f32) -> f32 {
     p * p * (3.0 - 2.0 * p)
 }
 
+fn fade_hover_color(mut color: [f32; 4], alpha: f32) -> [f32; 4] {
+    color[3] *= alpha;
+    color
+}
+
 fn compute_hover_scrollbar_alpha(anim_progress: f32) -> f32 {
     let p = ((anim_progress.clamp(0.0, 1.0) - 0.88) / 0.12).clamp(0.0, 1.0);
     p * p * (3.0 - 2.0 * p)
@@ -364,10 +369,12 @@ impl Renderer {
         frame_w: f32,
         frame_h: f32,
         radius: f32,
+        alpha: f32,
     ) {
         if frame_w <= 0.0 || frame_h <= 0.0 {
             return;
         }
+        let alpha = alpha.clamp(0.0, 1.0);
 
         self.push_rounded_rect(
             frame_x.round() - 1.0,
@@ -375,7 +382,7 @@ impl Renderer {
             frame_w.round() + 2.0,
             frame_h.round() + 2.0,
             radius,
-            [0.4, 0.4, 0.45, 0.6],
+            [0.4, 0.4, 0.45, 0.6 * alpha],
         );
         self.push_rounded_rect(
             frame_x.round(),
@@ -387,7 +394,7 @@ impl Renderer {
                 self.theme.minimap_bg[0],
                 self.theme.minimap_bg[1],
                 self.theme.minimap_bg[2],
-                1.0,
+                alpha,
             ],
         );
     }
@@ -678,7 +685,7 @@ impl Renderer {
             anim_progress,
             combined_hover_h > 0.0,
         );
-        self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s);
+        self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, 1.0);
 
         self.flush();
         let bg_min_y = if combined_hover_h > 0.0 {
@@ -1081,8 +1088,10 @@ impl Renderer {
         my: f32,
         render_scroll_y: f32,
         wants_pointer: &mut bool,
+        opacity: f32,
     ) -> (f32, f32, f32, f32, f32) {
         let s = self.scale_factor;
+        let opacity = opacity.clamp(0.0, 1.0);
         let pad = 12.0 * s;
         let line_h = 22.0 * s;
         let max_text_w = (self.width - 80.0 * s).min(820.0 * s).max(320.0 * s);
@@ -1211,7 +1220,7 @@ impl Renderer {
             self.flush();
             let (frame_x, frame_y, frame_w, frame_h) =
                 compute_animated_popup_frame(anim_mx, anim_my, bx, by, box_w, box_h, anim_progress);
-            self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s);
+            self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, opacity);
         }
 
         self.flush();
@@ -1254,7 +1263,7 @@ impl Renderer {
                         rounded_top + (cur_line_h * 0.5).round(),
                         (box_w - pad * 2.0).round(),
                         1.0_f32.max(s.round()),
-                        [1.0, 1.0, 1.0, 0.10],
+                        [1.0, 1.0, 1.0, 0.10 * opacity],
                     );
                     current_top += cur_line_h;
                     idx += 1;
@@ -1274,7 +1283,7 @@ impl Renderer {
                         (box_w - pad * 2.0 + 8.0 * s).round(),
                         (line_h * run_len as f32).round(),
                         4.0 * s,
-                        [0.15, 0.16, 0.20, 0.96],
+                        [0.15, 0.16, 0.20, 0.96 * opacity],
                     );
                 }
 
@@ -1316,7 +1325,7 @@ impl Renderer {
                                         rounded_top,
                                         adv.ceil() + 1.0,
                                         cur_line_h.ceil() + 1.0,
-                                        self.theme.sel,
+                                        fade_hover_color(self.theme.sel, opacity),
                                     );
                                 }
                             }
@@ -1329,7 +1338,7 @@ impl Renderer {
                                 g.v,
                                 g.uw,
                                 g.vh,
-                                color,
+                                fade_hover_color(color, opacity),
                                 g.is_emoji,
                             );
                         }
@@ -1353,7 +1362,7 @@ impl Renderer {
                                     (draw_x - run_x + 1.0 * s).max(2.0 * s),
                                     (cur_line_h - 2.0 * s).round(),
                                     3.0 * s,
-                                    [0.22, 0.23, 0.28, 0.98],
+                                    [0.22, 0.23, 0.28, 0.98 * opacity],
                                 );
                             }
                         }
@@ -1366,7 +1375,7 @@ impl Renderer {
                             (draw_x - run_x + 1.0 * s).max(2.0 * s),
                             (cur_line_h - 2.0 * s).round(),
                             3.0 * s,
-                            [0.22, 0.23, 0.28, 0.98],
+                            [0.22, 0.23, 0.28, 0.98 * opacity],
                         );
                     }
 
@@ -1380,13 +1389,19 @@ impl Renderer {
                                     rounded_top,
                                     adv.ceil() + 1.0,
                                     cur_line_h.ceil() + 1.0,
-                                    self.theme.sel,
+                                    fade_hover_color(self.theme.sel, opacity),
                                 );
                             }
                         }
                         let mut b = [0; 4];
                         let s_str = c.encode_utf8(&mut b);
-                        self.draw_string_mono_scaled(s_str, draw_x, text_y, color, 1.0);
+                        self.draw_string_mono_scaled(
+                            s_str,
+                            draw_x,
+                            text_y,
+                            fade_hover_color(color, opacity),
+                            1.0,
+                        );
                         draw_x += adv;
                     }
                 }
@@ -1412,7 +1427,7 @@ impl Renderer {
                 4.0 * s,
                 thumb_h,
                 2.0 * s,
-                [1.0, 1.0, 1.0, 0.2 * scrollbar_alpha],
+                [1.0, 1.0, 1.0, 0.2 * scrollbar_alpha * opacity],
             );
 
             ui_registry.register_rect(

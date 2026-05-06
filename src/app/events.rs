@@ -861,6 +861,9 @@ impl ApplicationHandler for App {
                         perf_refresh_ms = start.elapsed().as_secs_f64() * 1000.0;
                     }
                     let detail_anim_progress = self.autocomplete_anim_progress.clamp(0.0, 1.0);
+                    let detail_opacity_p = ((detail_anim_progress - 0.55) / 0.30).clamp(0.0, 1.0);
+                    let detail_opacity =
+                        detail_opacity_p * detail_opacity_p * (3.0 - 2.0 * detail_opacity_p);
                     if detail_anim_progress > 0.0 && rect.3 > 0.0 {
                         if let Some(mut popup) = self.autocomplete_detail_popup.take() {
                             if perf_enabled {
@@ -959,6 +962,7 @@ impl ApplicationHandler for App {
                                     my,
                                     render_scroll_y,
                                     &mut wants_pointer,
+                                    detail_opacity,
                                 );
                             if let Some(start) = perf_detail_draw_start {
                                 perf_detail_draw_ms = start.elapsed().as_secs_f64() * 1000.0;
