@@ -1,4 +1,8 @@
 use crate::renderer::Renderer;
+use crate::render_view::{
+    cursor_line_and_character, diagnostic_error_warning_counts, ide_status_bar_height,
+    ide_status_bar_y,
+};
 use crate::widgets::IconButton;
 use glow::HasContext;
 
@@ -783,6 +787,185 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    pub(crate) fn draw_status_bar(
+        &mut self,
+        editor: &crate::editor::Editor,
+        editor_path: Option<&std::path::PathBuf>,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        s: f32,
+        mx: f32,
+        my: f32,
+        panel_bottom_h: f32,
+    ) {
+        let bar_h = ide_status_bar_height(s).round();
+        let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
+        let bar_x = (48.0 * s).round();
+        let bar_w = (self.width - bar_x).max(0.0);
+        if bar_w <= 1.0 || bar_h <= 1.0 {
+            return;
+        }
+
+        self.push_rect(bar_x, bar_y, bar_w, bar_h, [0.118, 0.125, 0.165, 1.0]);
+        self.push_rect(
+            bar_x,
+            bar_y,
+            bar_w,
+            1.0,
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.12],
+        );
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::StatusBar,
+            bar_x,
+            bar_y,
+            bar_w,
+            bar_h,
+            mx,
+            my,
+        );
+
+        let (error_count, warning_count) = lsp
+            .map(|l| diagnostic_error_warning_counts(l.diagnostics.values().map(|v| v.as_slice())))
+            .unwrap_or((0, 0));
+
+        let icon_sz = 15.0 * s;
+        let text_scale = 0.84;
+        let pad_x = 10.0 * s;
+        let icon_gap = 4.0 * s;
+        let item_gap = 12.0 * s;
+        let diag_x = bar_x + pad_x;
+        let icon_y = bar_y + (bar_h - icon_sz) / 2.0;
+        let text_y = bar_y + bar_h / 2.0 + 5.0 * s;
+
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
+        let error_w = self.measure_ui_width(&scratch, text_scale).round();
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
+        let warning_w = self.measure_ui_width(&scratch, text_scale).round();
+
+        let diagnostics_w =
+            icon_sz + icon_gap + error_w + item_gap + icon_sz + icon_gap + warning_w + pad_x;
+        let diagnostics_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::StatusDiagnostics,
+            diag_x - 4.0 * s,
+            bar_y,
+            diagnostics_w,
+            bar_h,
+            mx,
+            my,
+        );
+        if diagnostics_hovered {
+            self.push_rect(
+                diag_x - 4.0 * s,
+                bar_y,
+                diagnostics_w,
+                bar_h,
+                [1.0, 1.0, 1.0, 0.07],
+            );
+        }
+
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Error,
+            diag_x,
+            icon_y,
+            icon_sz,
+            self.theme.diag_error,
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
+        let error_text_x = diag_x + icon_sz + icon_gap;
+        self.draw_string_scaled(
+            &scratch,
+            error_text_x,
+            text_y,
+            self.theme.diag_error,
+            text_scale,
+        );
+
+        let warn_icon_x = error_text_x + error_w + item_gap;
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Warning,
+            warn_icon_x,
+            icon_y,
+            icon_sz,
+            self.theme.diag_warn,
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
+        self.draw_string_scaled(
+            &scratch,
+            warn_icon_x + icon_sz + icon_gap,
+            text_y,
+            self.theme.diag_warn,
+            text_scale,
+        );
+
+        let ext = editor_path
+            .and_then(|path| path.extension())
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        let lang = crate::highlighter::tree_sitter_lang_name_for_ext(ext);
+        let lang = if lang.is_empty() { "-" } else { lang };
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("TS: {}", lang));
+        let lang_w = self.measure_ui_width(&scratch, text_scale).round();
+        let lang_x = (bar_x + bar_w - pad_x - lang_w).max(diag_x);
+        self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
+
+        let (line, character) = cursor_line_and_character(editor);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(
+            &mut scratch,
+            format_args!("Стр {}, Сим {}", line, character),
+        );
+        let pos_w = self.measure_ui_width(&scratch, text_scale).round();
+        let pos_x = lang_x - 22.0 * s - pos_w;
+        if pos_x > diag_x + diagnostics_w + 8.0 * s {
+            self.draw_string_scaled(
+                &scratch,
+                pos_x,
+                text_y,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82],
+                text_scale,
+            );
+        }
+
+        if diagnostics_hovered {
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(
+                &mut scratch,
+                format_args!("Ляпы: {} error, {} warning", error_count, warning_count),
+            );
+            let tip_w = self.measure_ui_width(&scratch, text_scale).round() + 16.0 * s;
+            let tip_h = 26.0 * s;
+            let tip_x = (diag_x - 4.0 * s)
+                .min(self.width - tip_w - 6.0 * s)
+                .max(6.0 * s);
+            let tip_y = (bar_y - tip_h - 6.0 * s).max(6.0 * s);
+            self.push_rounded_rect_border(
+                tip_x,
+                tip_y,
+                tip_w,
+                tip_h,
+                5.0 * s,
+                1.0,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18],
+                [0.08, 0.085, 0.115, 0.96],
+            );
+            self.draw_string_scaled(
+                &scratch,
+                tip_x + 8.0 * s,
+                tip_y + 18.0 * s,
+                self.theme.fg,
+                text_scale,
+            );
+        }
+
+        self.scratch_buffer = scratch;
     }
 
     fn draw_file_tree_dialog_shell(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {

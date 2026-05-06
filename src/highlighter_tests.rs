@@ -11,6 +11,17 @@ fn wait(highlighter: &mut Highlighter, version: u64) {
 }
 
 #[test]
+fn tree_sitter_language_labels_follow_highlighter_extensions() {
+    assert_eq!(tree_sitter_lang_name_for_ext("py"), "py");
+    assert_eq!(tree_sitter_lang_name_for_ext("pyi"), "py");
+    assert_eq!(tree_sitter_lang_name_for_ext("rs"), "rs");
+    assert_eq!(tree_sitter_lang_name_for_ext("jsx"), "js");
+    assert_eq!(tree_sitter_lang_name_for_ext("hpp"), "cpp");
+    assert_eq!(tree_sitter_lang_name_for_ext("makefile"), "make");
+    assert_eq!(tree_sitter_lang_name_for_ext("txt"), "");
+}
+
+#[test]
 fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
     let mut highlighter = Highlighter::new();
 

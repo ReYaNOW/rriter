@@ -290,7 +290,7 @@ impl Renderer {
 
                     let (icon, color) = match diag.severity {
                         crate::lsp::DiagSeverity::Error => {
-                            (crate::widgets::IconType::Close, self.theme.diag_error)
+                            (crate::widgets::IconType::Error, self.theme.diag_error)
                         }
                         crate::lsp::DiagSeverity::Warning => {
                             (crate::widgets::IconType::Warning, self.theme.diag_warn)

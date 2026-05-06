@@ -20,6 +20,7 @@ use std::time::Instant;
 
 pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
+pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 24.0;
 
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
@@ -60,6 +61,68 @@ pub(crate) fn editor_max_scroll_for_lines(
         - viewport_height.max(0.0))
     .max(0.0);
     (raw_max / line_height).ceil() * line_height
+}
+
+#[inline(always)]
+pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
+    IDE_STATUS_BAR_HEIGHT * scale
+}
+
+#[inline(always)]
+pub(crate) fn ide_status_bar_y(window_height: f32, panel_bottom_h: f32, scale: f32) -> f32 {
+    (window_height - panel_bottom_h - ide_status_bar_height(scale)).max(0.0)
+}
+
+#[inline(always)]
+fn utf8_char_width(first_byte: u8) -> usize {
+    if first_byte < 0x80 {
+        1
+    } else if first_byte < 0xE0 {
+        2
+    } else if first_byte < 0xF0 {
+        3
+    } else {
+        4
+    }
+}
+
+pub(crate) fn cursor_line_and_character(editor: &Editor) -> (usize, usize) {
+    let cursor = editor.cursor.min(editor.len());
+    let line_idx = editor
+        .line_offsets
+        .partition_point(|&offset| offset <= cursor)
+        .saturating_sub(1);
+    let line_start = editor.line_offsets.get(line_idx).copied().unwrap_or(0);
+
+    let mut byte_idx = line_start.min(cursor);
+    let mut character = 1usize;
+    while byte_idx < cursor {
+        let step = utf8_char_width(editor.byte_at(byte_idx));
+        if byte_idx.saturating_add(step) > cursor {
+            break;
+        }
+        byte_idx += step;
+        character += 1;
+    }
+
+    (line_idx + 1, character)
+}
+
+pub(crate) fn diagnostic_error_warning_counts<'a>(
+    diagnostic_sets: impl IntoIterator<Item = &'a [crate::lsp::Diagnostic]>,
+) -> (usize, usize) {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    for diagnostics in diagnostic_sets {
+        for diagnostic in diagnostics {
+            match diagnostic.severity {
+                crate::lsp::DiagSeverity::Error => errors += 1,
+                crate::lsp::DiagSeverity::Warning => warnings += 1,
+                _ => {}
+            }
+        }
+    }
+    (errors, warnings)
 }
 
 thread_local! {
@@ -152,6 +215,63 @@ mod tests {
         assert_eq!(editor_bottom_blank_lines(30.0, 10.0), 0.0);
         assert_eq!(editor_max_scroll_for_lines(100, 10.0, 30.0), 970.0);
         assert_eq!(editor_max_scroll_for_lines(100, 0.0, 400.0), 0.0);
+    }
+
+    #[test]
+    fn status_bar_y_sits_above_bottom_panel() {
+        assert_eq!(ide_status_bar_height(1.0), 24.0);
+        assert_eq!(ide_status_bar_y(900.0, 0.0, 1.0), 876.0);
+        assert_eq!(ide_status_bar_y(900.0, 180.0, 1.0), 696.0);
+        assert_eq!(ide_status_bar_y(10.0, 20.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn cursor_line_and_character_counts_unicode_scalars() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("ab\nжz\n");
+        editor.cursor = 0;
+        assert_eq!(cursor_line_and_character(&editor), (1, 1));
+        editor.cursor = 2;
+        assert_eq!(cursor_line_and_character(&editor), (1, 3));
+        editor.cursor = 5;
+        assert_eq!(cursor_line_and_character(&editor), (2, 2));
+        editor.cursor = editor.len();
+        assert_eq!(cursor_line_and_character(&editor), (3, 1));
+    }
+
+    fn test_diagnostic(severity: crate::lsp::DiagSeverity) -> crate::lsp::Diagnostic {
+        crate::lsp::Diagnostic {
+            start_line: 0,
+            start_col: 0,
+            end_line: 0,
+            end_col: 1,
+            severity,
+            code: None,
+            code_href: None,
+            message: String::new(),
+            source: None,
+            quickfixes: Vec::new(),
+            tags: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn diagnostic_status_counts_errors_and_warnings_only() {
+        let first = vec![
+            test_diagnostic(crate::lsp::DiagSeverity::Error),
+            test_diagnostic(crate::lsp::DiagSeverity::Warning),
+            test_diagnostic(crate::lsp::DiagSeverity::Hint),
+        ];
+        let second = vec![
+            test_diagnostic(crate::lsp::DiagSeverity::Warning),
+            test_diagnostic(crate::lsp::DiagSeverity::Info),
+        ];
+
+        assert_eq!(
+            diagnostic_error_warning_counts([first.as_slice(), second.as_slice()]),
+            (1, 2)
+        );
     }
 
     #[test]
@@ -1044,7 +1164,12 @@ impl Renderer {
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
             let track_h_bg = 14.0 * s;
-            let track_y_bg = real_height - panel_bottom_h - track_h_bg;
+            let status_bar_h = if is_ide_mode {
+                ide_status_bar_height(s)
+            } else {
+                0.0
+            };
+            let track_y_bg = real_height - panel_bottom_h - status_bar_h - track_h_bg;
 
             self.push_rect(
                 self.left_padding,
@@ -1059,8 +1184,8 @@ impl Renderer {
             let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
             let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 
-            let thumb_y = real_height - 10.0 * s;
             let thumb_h = 6.0 * s;
+            let thumb_y = track_y_bg + (track_h_bg - thumb_h) / 2.0;
 
             self.push_rounded_rect(
                 thumb_x,
@@ -1198,10 +1323,15 @@ impl Renderer {
 
         if self.max_scroll_x > 0.0 {
             let track_w = scrollbar_x - self.left_padding;
+            let status_bar_h = if is_ide_mode {
+                ide_status_bar_height(s)
+            } else {
+                0.0
+            };
             ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarX,
                 self.left_padding,
-                real_height - panel_bottom_h - 14.0 * s,
+                real_height - panel_bottom_h - status_bar_h - 14.0 * s,
                 track_w,
                 14.0 * s,
                 self.last_mouse_x,
@@ -1249,17 +1379,39 @@ impl Renderer {
             );
         }
 
+        if is_ide_mode {
+            self.draw_status_bar(
+                editor,
+                editor_path,
+                lsp,
+                ui_registry,
+                s,
+                mx,
+                my,
+                panel_bottom_h,
+            );
+        }
+
         if dialog_window_open {
             self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
         }
 
+        let status_bar_y = if is_ide_mode {
+            ide_status_bar_y(self.height, panel_bottom_h, s)
+        } else {
+            self.height
+        };
+        let hover_blocked_by_status_bar =
+            is_ide_mode && my >= status_bar_y && my <= status_bar_y + ide_status_bar_height(s);
         let hover_blocked_by_bottom_panel = is_ide_mode
             && panel_bottom_h > 0.0
             && ide_panel.bottom_panel_blocks_editor_hover()
             && my >= self.height - panel_bottom_h;
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
-        if hover_blocked_by_bottom_panel {
+        if hover_blocked_by_status_bar {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if hover_blocked_by_bottom_panel {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));

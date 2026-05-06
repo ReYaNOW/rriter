@@ -426,6 +426,32 @@ impl IdePanelState {
             self.term_search_focused = false;
         }
     }
+    pub fn open(&mut self, id: PanelId) {
+        let mut group = None;
+        let mut found = false;
+        if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
+            slot.open = true;
+            group = Some(slot.group);
+            found = true;
+        }
+        if !found {
+            return;
+        }
+        if let Some(group) = group {
+            for slot in &mut self.slots {
+                if slot.id != id && slot.group == group {
+                    slot.open = false;
+                }
+            }
+        }
+        if id == PanelId::Terminal {
+            self.terminal_focused = true;
+            self.term_search_focused = false;
+        } else if group == Some(PanelGroup::Bottom) {
+            self.terminal_focused = false;
+            self.term_search_focused = false;
+        }
+    }
     pub fn open_terminal_exclusive(&mut self) {
         for slot in &mut self.slots {
             if slot.group == PanelGroup::Bottom {
@@ -726,6 +752,26 @@ mod tests {
         assert!(!panels.is_open(PanelId::Problems));
         assert!(panels.terminal_focused);
         assert!(!panels.term_search_focused);
+    }
+
+    #[test]
+    fn open_panel_opens_without_toggling_closed_and_keeps_group_exclusive() {
+        let mut panels = IdePanelState::default();
+        panels.open(PanelId::Problems);
+        panels.open(PanelId::Problems);
+
+        assert!(panels.is_open(PanelId::Problems));
+        assert!(!panels.terminal_focused);
+
+        panels.open(PanelId::Terminal);
+        assert!(panels.is_open(PanelId::Terminal));
+        assert!(!panels.is_open(PanelId::Problems));
+        assert!(panels.terminal_focused);
+
+        panels.open(PanelId::Problems);
+        assert!(panels.is_open(PanelId::Problems));
+        assert!(!panels.is_open(PanelId::Terminal));
+        assert!(!panels.terminal_focused);
     }
 
     #[test]

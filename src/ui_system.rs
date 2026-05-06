@@ -97,6 +97,8 @@ pub enum UiId {
     ProblemUrl(usize),
     ProblemsTab(usize),
     ProblemFileToggle(usize),
+    StatusBar,
+    StatusDiagnostics,
     TerminalBody,
     TerminalScrollY,
     TerminalTab(usize),

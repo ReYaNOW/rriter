@@ -1072,6 +1072,10 @@ impl Renderer {
                 include_bytes!("icons/dialog-warning.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Error,
+                include_bytes!("icons/circle-x.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::CaseMatch,
                 include_bytes!("icons/format-text-uppercase.svg").as_slice(),
             ),

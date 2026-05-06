@@ -53,7 +53,14 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
-            UiId::HoverPopupScroll => {}
+            UiId::HoverPopupScroll | UiId::StatusBar => {}
+            UiId::StatusDiagnostics => {
+                self.ide_panel.open(crate::app::PanelId::Problems);
+                crate::save_panel_state(&self.ide_panel);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::TerminalBody => {
                 self.is_dragging = true;
                 self.search_focused = false;

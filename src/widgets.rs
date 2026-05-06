@@ -6,6 +6,7 @@ pub enum IconType {
     Discard,
     Cancel,
     Warning,
+    Error,
     CaseMatch,
     Up,
     Down,

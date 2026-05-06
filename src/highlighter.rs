@@ -246,22 +246,8 @@ fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
     })
 }
 
-fn lang_name_for_ext_and_text(ext: &str, text: &str) -> &'static str {
-    let actual_ext = if ext.is_empty() && text.starts_with("#!") {
-        if text.contains("bash") {
-            "bash"
-        } else if text.contains("sh") {
-            "sh"
-        } else if text.contains("python") {
-            "py"
-        } else {
-            ""
-        }
-    } else {
-        ext
-    };
-
-    match actual_ext {
+pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
+    match ext {
         "sh" | "bash" => "bash",
         "rs" => "rs",
         "py" | "pyi" => "py",
@@ -282,6 +268,24 @@ fn lang_name_for_ext_and_text(ext: &str, text: &str) -> &'static str {
         "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
         _ => "",
     }
+}
+
+fn lang_name_for_ext_and_text(ext: &str, text: &str) -> &'static str {
+    let actual_ext = if ext.is_empty() && text.starts_with("#!") {
+        if text.contains("bash") {
+            "bash"
+        } else if text.contains("sh") {
+            "sh"
+        } else if text.contains("python") {
+            "py"
+        } else {
+            ""
+        }
+    } else {
+        ext
+    };
+
+    tree_sitter_lang_name_for_ext(actual_ext)
 }
 
 fn prev_char_start(text: &str, mut offset: usize) -> usize {
