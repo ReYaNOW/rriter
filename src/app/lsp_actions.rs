@@ -96,9 +96,10 @@ impl App {
             let panel_bottom_h = self.ide_panel.bottom_height * s;
             let wh = self.window.as_ref()?.inner_size().height as f32;
             let ww = self.window.as_ref()?.inner_size().width as f32;
+            let panel_y = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
             Some((
                 48.0 * s,
-                wh - panel_bottom_h + 1.0 + tab_h,
+                panel_y + 1.0 + tab_h,
                 ww - 48.0 * s,
                 panel_bottom_h - 1.0 - tab_h,
             ))

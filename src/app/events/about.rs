@@ -488,7 +488,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else {
             38.0 * s
         };
-        let visible_h = (w.inner_size().height as f32 - tab_bar_h).max(0.0);
+        let panel_bottom_h = if app.is_ide_mode && app.ide_panel.any_bottom_open() {
+            app.ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
+        let visible_h = crate::render_view::editor_view_height(
+            w.inner_size().height as f32,
+            tab_bar_h,
+            panel_bottom_h,
+            app.is_ide_mode,
+            s,
+        );
         let max_scroll_y = app
             .renderer
             .as_mut()

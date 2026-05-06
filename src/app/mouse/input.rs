@@ -274,10 +274,9 @@ impl App {
                     let char_h = self.renderer.as_ref().unwrap().line_height * 1.05;
                     let bottom_h = self.ide_panel.bottom_height * s;
                     let tab_h = 32.0 * s;
-                    let content_y = self.window.as_ref().unwrap().inner_size().height as f32
-                        - bottom_h
-                        + 1.0
-                        + tab_h;
+                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let content_y =
+                        crate::render_view::ide_bottom_panel_y(wh, bottom_h, s) + 1.0 + tab_h;
                     let content_h = bottom_h - 1.0 - tab_h;
                     let term_content_y = content_y + 32.0 * s;
                     let term_content_h = content_h - 32.0 * s;
@@ -452,9 +451,11 @@ impl App {
                     } else {
                         let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                         let tab_h = 32.0 * s;
+                        let panel_y =
+                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
                         (
                             sb_w,
-                            wh - panel_bottom_h + 1.0 + tab_h,
+                            panel_y + 1.0 + tab_h,
                             ww - sb_w,
                             panel_bottom_h - 1.0 - tab_h,
                         )
@@ -525,7 +526,8 @@ impl App {
                         }
                     }
                     if panel_bottom_h > 0.0 && !manual_resize {
-                        let resize_y = wh - panel_bottom_h;
+                        let resize_y =
+                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
                         if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
                             self.ide_panel.is_resizing_bottom = true;
                             manual_resize = true;
@@ -974,7 +976,19 @@ impl App {
                         } else {
                             38.0 * s
                         };
-                        let visible_h = (wh - tab_bar_h).max(0.0);
+                        let panel_bottom_h =
+                            if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                                self.ide_panel.bottom_height * s
+                            } else {
+                                0.0
+                            };
+                        let visible_h = crate::render_view::editor_view_height(
+                            wh,
+                            tab_bar_h,
+                            panel_bottom_h,
+                            self.is_ide_mode,
+                            s,
+                        );
                         let max_scroll = self
                             .renderer
                             .as_mut()

@@ -143,10 +143,10 @@ F|79|2|91||earliest_wake|Instant|||
 F|80|2|106||compute_about_wait_plan|AboutWaitPlan|||
 F|81|2|148||earliest_optional_wake|Option<Instant>|||
 F|82|2|158|pe|about_to_wait||||
-F|83|2|1086||sticky_animation_add_remove_and_equal_length_are_pure_state_transitions||||
-F|84|2|1129||drag_autoscroll_uses_inside_edge_band_and_outside_window_distance||||
-F|85|2|1140||drag_autoscroll_bottom_edge_ignores_open_bottom_panel||||
-F|86|2|1163||about_wait_plan_prioritizes_redraw_highlight_hover_and_blink||||
+F|83|2|1097||sticky_animation_add_remove_and_equal_length_are_pure_state_transitions||||
+F|84|2|1140||drag_autoscroll_uses_inside_edge_band_and_outside_window_distance||||
+F|85|2|1151||drag_autoscroll_bottom_edge_ignores_open_bottom_panel||||
+F|86|2|1174||about_wait_plan_prioritizes_redraw_highlight_hover_and_blink||||
 F|87|3|1|p|module_path_from_definition_path|Option<String>|||
 F|88|3|5||sanitize_module_path_parts|Option<String>|||
 F|89|3|63|p|prepend_hover_module_path||||
@@ -197,8 +197,8 @@ F|133|4|271||autocomplete_detail_placement|i8|||
 F|134|4|284||save_state_and_exit||||
 F|135|4|316|e|App.resumed||&mut self|base_title,editor,theme,window_height,window_width|gl_config=,gl_context=,gl_surface=,renderer=,window=
 F|136|4|400|e|App.window_event||&mut self|active_tab,autocomplete_active,autocomplete_anim_progress,autocomplete_detail_placement,autocomplete_hovered_idx,autocomplete_mode,autocomplete_options,autocomplete_scroll,autocomplete_selected_idx,base_title,ctrl_definition,current_sticky_lines,+45|autocomplete_detail_max_scroll=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_min_width=,autocomplete_rect=,current_cursor=,is_dragging=,is_focused=,is_ready=,last_frame=,last_resize_time=,modifiers=,+4
-F|137|4|1315|e|App.about_to_wait||&mut self||
-F|138|4|1325||autocomplete_detail_placement_stays_below_completion_window||||
+F|137|4|1319|e|App.about_to_wait||&mut self||
+F|138|4|1329||autocomplete_detail_placement_stays_below_completion_window||||
 T|139|5|21|struct|FallbackMatcher|set: RegexSet,keys: Vec<&'static str>
 F|140|5|41|p|file_icon_key|&'static str|||
 F|141|5|82|p|folder_icon_key|&'static str|||
@@ -333,16 +333,16 @@ F|269|13|3|p|lsp_server_logs_h_for_content|f32|||
 F|270|13|13|p|lsp_server_logs_h_for_row|f32|||
 F|271|13|31||build_noqa_comment|String|||
 F|272|13|68|p|App.lsp_panel_bounds|Option<(f32, f32, f32, f32)>||ide_panel,renderer,window|
-F|273|13|109|p|App.lsp_panel_total_h|f32||ide_panel|
-F|274|13|118|p|App.lsp_server_logs_h|f32||ide_panel|
-F|275|13|130|p|App.lsp_server_inner_size|(f32, f32)||ide_panel|
-F|276|13|166|p|App.open_lsp_actions_menu|||editor,file_extension,file_path,is_ide_mode,lsp,renderer,scroll_y,show_welcome,window|lsp_actions_menu=
-F|277|13|262|p|App.apply_selected_lsp_action||&mut self|file_extension,file_path,lsp,lsp_actions_menu,window|pending_fix_all_id=
-F|278|13|309|p|App.insert_noqa_comment|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
-F|279|13|375|p|App.apply_workspace_edit|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
-F|280|13|470||codes|Vec<String>|||
-F|281|13|475||build_noqa_comment_creates_plain_and_code_comments||||
-F|282|13|488||build_noqa_comment_merges_existing_codes_without_duplicates||||
+F|273|13|110|p|App.lsp_panel_total_h|f32||ide_panel|
+F|274|13|119|p|App.lsp_server_logs_h|f32||ide_panel|
+F|275|13|131|p|App.lsp_server_inner_size|(f32, f32)||ide_panel|
+F|276|13|167|p|App.open_lsp_actions_menu|||editor,file_extension,file_path,is_ide_mode,lsp,renderer,scroll_y,show_welcome,window|lsp_actions_menu=
+F|277|13|263|p|App.apply_selected_lsp_action||&mut self|file_extension,file_path,lsp,lsp_actions_menu,window|pending_fix_all_id=
+F|278|13|310|p|App.insert_noqa_comment|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
+F|279|13|376|p|App.apply_workspace_edit|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
+F|280|13|471||codes|Vec<String>|||
+F|281|13|476||build_noqa_comment_creates_plain_and_code_comments||||
+F|282|13|489||build_noqa_comment_merges_existing_codes_without_duplicates||||
 F|283|14|4||autocomplete_drag_target|f32|||
 F|284|14|26||autocomplete_scrollbar_track_margin|f32|||
 F|285|14|30||autocomplete_hovered_index|Option<usize>|||
@@ -351,11 +351,11 @@ F|287|14|63||resized_bottom_height|f32|||
 F|288|14|70||cursor_position_allows_editor_hover|bool|||
 F|289|14|79||should_suppress_editor_hover_for_scroll_drag|bool|||
 F|290|14|88|pe|App.handle_main_cursor_moved||&mut self|autocomplete_active,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_detail_selecting,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,file_path,ide_panel,is_dragging,+16|autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=
-F|291|14|1271||autocomplete_drag_target_clamps_to_available_scroll||||
-F|292|14|1283||autocomplete_hovered_index_ignores_scrollbar_and_outside_rect||||
-F|293|14|1318||resize_helpers_clamp_left_width_and_bottom_height||||
-F|294|14|1329||cursor_hover_requires_pointer_inside_window||||
-F|295|14|1349||editor_scrollbar_drag_suppresses_hover_only_while_dragging||||
+F|291|14|1294||autocomplete_drag_target_clamps_to_available_scroll||||
+F|292|14|1306||autocomplete_hovered_index_ignores_scrollbar_and_outside_rect||||
+F|293|14|1341||resize_helpers_clamp_left_width_and_bottom_height||||
+F|294|14|1352||cursor_hover_requires_pointer_inside_window||||
+F|295|14|1372||editor_scrollbar_drag_suppresses_hover_only_while_dragging||||
 F|296|15|11|p|advance_hover_anim_progress|f32|||
 F|297|15|24|p|compute_hover_visibility|(bool, bool, bool)|||
 F|298|15|51|p|compute_hover_visibility_from_matches|(bool, bool, bool)|||
@@ -418,23 +418,23 @@ F|354|17|56||terminal_mouse_sgr_sequence|String|||
 F|355|17|66||autocomplete_item_index_at|Option<usize>|||
 F|356|17|90||autocomplete_scroll_click_target|Option<(f32, f32)>|||
 F|357|17|125|pe|App.handle_main_mouse_input||&mut self|autocomplete_active,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,base_title,dialog_window,editor,file_extension,file_path,ide_panel,+12|active_tab=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=,autocomplete_selected_idx=,is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_dragging_settings_ignore=,last_action=,lsp_actions_menu=,+5
-F|358|17|1123||hover_rect_helpers_union_and_padding_are_inclusive||||
-F|359|17|1151||terminal_mouse_helpers_match_sgr_protocol_edges||||
-F|360|17|1175||autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer||||
-F|361|17|1192||autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll||||
+F|358|17|1137||hover_rect_helpers_union_and_padding_are_inclusive||||
+F|359|17|1165||terminal_mouse_helpers_match_sgr_protocol_edges||||
+F|360|17|1189||autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer||||
+F|361|17|1206||autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll||||
 F|362|18|3||wheel_delta|(f32, f32)|||
 F|363|18|10||point_in_rect|bool|||
 F|364|18|14||panel_scroll_rect|(f32, f32, f32, f32)|||
-F|365|18|43||autocomplete_max_scroll|f32|||
-F|366|18|50||scroll_autocomplete_list||||
-F|367|18|61||settings_ide_max_scroll|f32|||
-F|368|18|94|pe|App.handle_main_mouse_wheel||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,+14|lsp_actions_menu=
-F|369|18|554||wheel_delta_handles_line_and_pixel_units||||
-F|370|18|569||point_in_rect_uses_inclusive_edges||||
-F|371|18|579||panel_scroll_rect_covers_top_and_bottom_layouts||||
-F|372|18|591||autocomplete_max_scroll_matches_visible_limit||||
-F|373|18|599||scroll_autocomplete_list_clamps_without_closing_state||||
-F|374|18|609||settings_ide_max_scroll_counts_chip_wrapping||||
+F|365|18|48||autocomplete_max_scroll|f32|||
+F|366|18|55||scroll_autocomplete_list||||
+F|367|18|66||settings_ide_max_scroll|f32|||
+F|368|18|99|pe|App.handle_main_mouse_wheel||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,+14|lsp_actions_menu=
+F|369|18|570||wheel_delta_handles_line_and_pixel_units||||
+F|370|18|585||point_in_rect_uses_inclusive_edges||||
+F|371|18|595||panel_scroll_rect_covers_top_and_bottom_layouts||||
+F|372|18|607||autocomplete_max_scroll_matches_visible_limit||||
+F|373|18|615||scroll_autocomplete_list_clamps_without_closing_state||||
+F|374|18|625||settings_ide_max_scroll_counts_chip_wrapping||||
 F|375|20|2|p|initial_python_bracket_folds|Vec<(usize, usize)>|||
 F|376|20|53|p|is_python_ident_byte|bool|||
 F|377|20|57|p|is_plain_assignment_after_token|bool|||
@@ -548,24 +548,24 @@ F|484|23|547|p|App.clear_ctrl_definition||||ctrl_definition=
 F|485|23|551|p|App.update_ctrl_definition_hover|||editor,file_extension,file_path,is_ide_mode,modifiers|ctrl_definition=
 F|486|23|600|p|App.ctrl_definition_target_from_lsp|Option<DefinitionJumpTarget>||ctrl_definition,editor|
 F|487|23|617|p|App.ctrl_definition_target_under_mouse|Option<DefinitionJumpTarget>||ctrl_definition,editor,is_ide_mode,renderer,scroll_y,show_welcome|
-F|488|23|634|p|App.jump_to_definition_target|||editor,is_ide_mode,renderer,scroll_x,scroll_y,show_welcome,window|
-F|489|23|670|p|App.update_terminal_search||&mut self|ide_panel|
-F|490|23|716|p|App.jump_to_terminal_search_result||&mut self|ide_panel,renderer|
-F|491|23|752|p|App.update_search||&mut self|editor,search_case_sensitive,search_editor|search_current_idx=,search_results.clear(),search_results.push()
-F|492|23|809|p|App.jump_to_search_result||&mut self|editor,renderer,scroll_y,search_current_idx,search_results,window|
-F|493|23|836|p|App.update_window_title||||
-F|494|23|846|p|App.show_action_dialog||&mut self|gl_config,scroll_x,scroll_y|dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=
-F|495|23|889|p|App.close_dialog||&mut self|window|dialog_gl_surface=,dialog_window=
-F|496|23|897|p|App.close_current_file||&mut self|active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()
-F|497|23|944|p|App.trigger_file_picker||&mut self||open_file_rx=
-F|498|23|954|p|App.trigger_folder_picker||&mut self||open_folder_rx=
-F|499|23|966|p|App.trigger_save_as_picker||&mut self||save_file_rx=
-F|500|23|978|p|App.save_current_file|bool|&mut self|editor,file_path|
-F|501|23|1017|p|App.add_recent_file||&mut self||recent_files.insert(),recent_files.retain(),recent_files.truncate()
-F|502|23|1026|p|App.apply_highlight_results||&mut self|editor,file_extension,highlighter|is_highlighted_once=
-F|503|23|1064||App.wait_for_current_highlight||&mut self|editor|
-F|504|23|1073|p|App.load_file_internal||&mut self|highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=
-F|505|23|1154|p|App.check_external_changes||&mut self|active_tab,editor,file_extension,highlighter,is_ide_mode,lsp,renderer,tabs,window|last_sent_version=,lsp_actions_menu=
+F|488|23|634|p|App.jump_to_definition_target|||editor,ide_panel,is_ide_mode,renderer,scroll_x,scroll_y,show_welcome,window|
+F|489|23|682|p|App.update_terminal_search||&mut self|ide_panel|
+F|490|23|728|p|App.jump_to_terminal_search_result||&mut self|ide_panel,renderer|
+F|491|23|764|p|App.update_search||&mut self|editor,search_case_sensitive,search_editor|search_current_idx=,search_results.clear(),search_results.push()
+F|492|23|821|p|App.jump_to_search_result||&mut self|editor,ide_panel,is_ide_mode,renderer,scroll_y,search_current_idx,search_results,show_welcome,window|
+F|493|23|866|p|App.update_window_title||||
+F|494|23|876|p|App.show_action_dialog||&mut self|gl_config,scroll_x,scroll_y|dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=
+F|495|23|919|p|App.close_dialog||&mut self|window|dialog_gl_surface=,dialog_window=
+F|496|23|927|p|App.close_current_file||&mut self|active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()
+F|497|23|974|p|App.trigger_file_picker||&mut self||open_file_rx=
+F|498|23|984|p|App.trigger_folder_picker||&mut self||open_folder_rx=
+F|499|23|996|p|App.trigger_save_as_picker||&mut self||save_file_rx=
+F|500|23|1008|p|App.save_current_file|bool|&mut self|editor,file_path|
+F|501|23|1047|p|App.add_recent_file||&mut self||recent_files.insert(),recent_files.retain(),recent_files.truncate()
+F|502|23|1056|p|App.apply_highlight_results||&mut self|editor,file_extension,highlighter|is_highlighted_once=
+F|503|23|1094||App.wait_for_current_highlight||&mut self|editor|
+F|504|23|1103|p|App.load_file_internal||&mut self|highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=
+F|505|23|1184|p|App.check_external_changes||&mut self|active_tab,editor,file_extension,highlighter,is_ide_mode,lsp,renderer,tabs,window|last_sent_version=,lsp_actions_menu=
 T|506|24|69|enum|EditOp|Insert { offset: usize,text: String
 T|507|24|98|struct|Editor|data: Vec<u8>,gap_start: usize,gap_end: usize,cursor: usize,selection_anchor: Option<usize>,version: u64,line_offsets: Vec<usize>,longest_line_idx: usize,history: VecDeque<HistoryStep>,redo_stack: VecDeque<HistoryStep>,+17
 T|508|24|10|struct|HashSource|(&'a [u64])
@@ -936,12 +936,12 @@ F|872|40|70||Renderer.draw_tree_label_clipped|f32|&mut self||
 F|873|40|107|p|Renderer.draw_ide_side_panels|||gl,theme|
 F|874|40|637|p|Renderer.draw_ide_bottom_panel|||height,theme,width|
 F|875|40|792|p|Renderer.draw_status_bar|||height,theme,width|scratch_buffer=
-F|876|40|971||Renderer.draw_file_tree_dialog_shell||&mut self|theme|
-F|877|40|985||Renderer.draw_file_tree_dialog_input||&mut self|gl,height,scale_factor,theme|
-F|878|40|1106|p|Renderer.draw_file_tree_overlays|bool||gl,height,scale_factor,theme,width|
-F|879|40|1566||clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary||||
-F|880|40|1576||centered_dialog_button_positions_keep_pair_centered||||
-F|881|40|1585||file_tree_context_menu_groups_insert_logical_separators||||
+F|876|40|977||Renderer.draw_file_tree_dialog_shell||&mut self|theme|
+F|877|40|991||Renderer.draw_file_tree_dialog_input||&mut self|gl,height,scale_factor,theme|
+F|878|40|1112|p|Renderer.draw_file_tree_overlays|bool||gl,height,scale_factor,theme,width|
+F|879|40|1572||clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary||||
+F|880|40|1582||centered_dialog_button_positions_keep_pair_centered||||
+F|881|40|1591||file_tree_context_menu_groups_insert_logical_separators||||
 F|882|41|4||lsp_action_label|std::borrow::Cow<'a, str>|||
 F|883|41|59||lsp_action_label_formats_code_actions_and_noqa_codes||||
 F|884|41|83||lsp_action_label_formats_static_actions||||
@@ -1009,120 +1009,127 @@ F|945|50|820|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mous
 F|946|50|932|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
 F|947|50|1176|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
 F|948|50|1241|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
-T|949|51|331|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
-T|950|51|132|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
+T|949|51|431|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
+T|950|51|196|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
 F|951|51|26|p|hover_trace_enabled|bool|||
 F|952|51|31|p|editor_bottom_blank_lines|f32|||
 F|953|51|39|p|editor_scroll_content_height|f32|||
 F|954|51|52|p|editor_max_scroll_for_lines|f32|||
 F|955|51|67|p|ide_status_bar_height|f32|||
 F|956|51|72|p|ide_status_bar_y|f32|||
-F|957|51|77||utf8_char_width|usize|||
-F|958|51|89|p|cursor_line_and_character|(usize, usize)|||
-F|959|51|111|p|diagnostic_error_warning_counts|(usize, usize)|||
-F|960|51|143||Telemetry.default|Self|||
-F|961|51|156||transient_python_member_dot_byte|Option<usize>|||
-F|962|51|165||diagnostic_overlaps_transient_member_dot|bool|||
-F|963|51|175||should_draw_empty_ide_file_tree_overlay|bool|||
-F|964|51|188||telemetry_default_starts_with_empty_counters_and_fresh_print_time||||
-F|965|51|205||editor_max_scroll_keeps_five_text_lines_at_bottom||||
-F|966|51|212||editor_max_scroll_handles_short_files_and_tiny_viewports||||
-F|967|51|221||status_bar_y_sits_above_bottom_panel||||
-F|968|51|229||cursor_line_and_character_counts_unicode_scalars||||
-F|969|51|242||test_diagnostic|crate::lsp::Diagnostic|||
-F|970|51|260||diagnostic_status_counts_errors_and_warnings_only||||
-F|971|51|278||empty_ide_still_draws_file_tree_overlay||||
-F|972|51|286||transient_python_member_dot_byte_accepts_single_dot_only||||
-F|973|51|301||diagnostic_overlap_suppresses_single_dot_not_double_dot||||
-F|974|51|339|p|Renderer.draw|(bool, Vec<(usize, usize)>)||baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,merged_intervals_cache,program,scale_factor,texture,+3|bracket_pair_cache=,bracket_pair_cache_cursor=,bracket_pair_cache_version=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),identical_words_cache.clear(),identical_words_cache.push(),identical_words_cache_cursor=,identical_words_cache_selection_anchor=,+16
-T|975|52|5|struct|Vertex|pos: [f32; 2],uv: [f32; 2],color: [f32; 4],mode: f32,sdf_params: [f32; 3]
-F|976|52|16|p|quad_vertices|[Vertex; 6]|||
-F|977|52|67|p|glyph_quad_rect|(f32, f32, f32, f32)|||
-F|978|52|81|p|squiggle_vertices|[Vertex; 6]|||
-F|979|52|139|p|rounded_rect_gradient_vertices|[Vertex; 6]|||
-F|980|52|196||quad_vertices_round_positions_and_build_two_triangles||||
-F|981|52|215||glyph_quad_rect_keeps_scaled_edges_for_consistent_baseline_rounding||||
-F|982|52|239||squiggle_vertices_encode_wave_params_and_extent||||
-F|983|52|254||rounded_rect_gradient_vertices_keep_top_and_bottom_colors||||
-T|984|53|78|struct|FontData|source: FontSource,index: u32
-T|985|53|67|enum|FontSource|Static(&'static [u8]),LoadedMmap(std::sync::Arc<memmap2::Mmap>),LoadedVec(std::sync::Arc<Vec<u8>>),Lazy( std::path::PathBuf,std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>,()>>>>,)
-T|986|53|39|struct|GlyphInfo|u: f32,v: f32,uw: f32,vh: f32,width: f32,height: f32,offset_x: f32,offset_y: f32,advance: f32,is_emoji: f32
-T|987|53|138|struct|Renderer|gl: glow::Context,program: glow::Program,proj_loc: Option<glow::UniformLocation>,vao: glow::VertexArray,vbo: glow::Buffer,texture: glow::Texture,vertices: Vec<Vertex>,fonts: Vec<FontData>,ui_fonts: Vec<FontData>,scale_context: ScaleContext,+79
-T|988|53|24|struct|Theme|bg: [f32; 4],fg: [f32; 4],sel: [f32; 4],minimap_bg: [f32; 4],line_num: [f32; 4],minimap_cursor: [f32; 4],modified_unsaved: [f32; 4],modified_saved: [f32; 4],diag_warn: [f32; 4],diag_error: [f32; 4],+1
-T|989|53|55|struct|VisualLine|byte_idx: usize,physical_line: usize,is_soft_wrap: bool,whitespace_px_width: f32,text_px_width: f32,y_offset: f32,is_folded: bool,fold_suffix: [char; 4],fold_suffix_len: u8
-F|990|53|18||popup_waiting_for_mouse_move|bool|||
-F|991|53|84|p|FontData.new_lazy|Self|||
-F|992|53|94|p|FontData.new_static|Self|||
-F|993|53|101|p|FontData.ensure_loaded||&mut self||source=
-F|994|53|128|p|FontData.data_slice|&[u8]|&self|source|
-F|995|53|227|p|Renderer.suppress_popups_until_next_mouse_move||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
-F|996|53|233|p|Renderer.popups_waiting_for_mouse_move_at|bool|&self|hide_popups_until_mouse_move,last_known_mouse|
-F|997|53|243|p|Renderer.update_popup_mouse_move_gate||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
-F|998|53|251|p|Renderer.new|Self|||
-F|999|53|576|p|Renderer.get_custom_svg_glyph|Option<GlyphInfo>|&mut self|atlas_y,font_size,gl,texture|atlas_x=,max_row_h=
-F|1000|53|648|p|Renderer.get_glyph|Option<GlyphInfo>|&mut self|font_size,fonts,gl,texture|atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()
-F|1001|53|822|p|Renderer.get_ui_glyph|Option<GlyphInfo>|&mut self|font_size,gl,scale_factor,texture,ui_fonts|atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()
-F|1002|53|995|p|Renderer.resize||&mut self|gl|height=,width=
-F|1003|53|1006|p|Renderer.measure_ui_width|f32|&mut self||
-F|1004|53|1020|p|Renderer.char_advance|f32|&mut self|ascii_advances|
-F|1005|53|1038|p|Renderer.push_quad||&mut self|vertices|
-F|1006|53|1056|p|Renderer.load_builtin_icons||&mut self|gl,texture|icons.insert()
-F|1007|53|1244|p|Renderer.push_squiggle||&mut self|scale_factor,vertices|
-F|1008|53|1255|p|Renderer.push_rect||&mut self||
-F|1009|53|1260|p|Renderer.push_rounded_rect_gradient||&mut self|vertices|
-F|1010|53|1288||font_data_sources_return_expected_slices||||
-F|1011|53|1305||font_data_ensure_loaded_keeps_missing_lazy_source_empty||||
-F|1012|53|1314||font_data_ensure_loaded_maps_existing_lazy_source_once||||
-F|1013|53|1331||popup_mouse_move_gate_waits_for_real_motion_after_focus_restore||||
-F|1014|53|1345||vertex_layout_is_plain_data_and_visual_line_fields_are_stable||||
-F|1015|53|1376||renderer_constants_keep_expected_atlas_and_batch_sizes||||
-T|1016|54|2|struct|ScrollState|current: f32,target: f32,velocity: f32,anim_speed: f32,is_dragging: bool,drag_offset: f32
-F|1017|54|12|p|ScrollState.new|Self|||
-F|1018|54|23|p|ScrollState.update|bool|&mut self|anim_speed,target|current=,velocity=
-F|1019|54|48|p|ScrollState.clamp_target||&mut self||target=
-F|1020|54|52|p|ScrollState.clamp_current||&mut self||current=
-F|1021|54|56|p|ScrollState.scroll_by||&mut self|target|
-F|1022|54|60|p|ScrollState.set_target||&mut self||target=
-F|1023|54|64|p|ScrollState.stop_anim||&mut self||current=,target=,velocity=
-F|1024|54|76||scroll_state_clamps_animates_and_stops_end_to_end||||
-T|1025|55|117|enum|UiElement|Button { id: UiId,x: f32,y: f32,w: f32,h: f32
-T|1026|55|8|enum|UiId|WelcomeNewFile,WelcomeOpenFile,WelcomeIdeMode,WelcomeRecentFile(usize),DialogSave,DialogDiscard,DialogCancel,SettingsTab(usize),SettingsIdeAddWorkspace,SettingsIdeRemoveWorkspace(usize),+75
-T|1027|55|190|struct|UiRegistry|elements: Vec<UiElement>,hovered: Option<UiId>,wants_pointer: bool,wants_text: bool,overlay_mark: usize
-F|1028|55|152|p|UiElement.contains|bool|&self||
-F|1029|55|179|p|UiElement.id|UiId|&self||
-F|1030|55|203|p|UiRegistry.new|Self|||
-F|1031|55|214|p|UiRegistry.clear||&mut self||elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text=
-F|1032|55|224|p|UiRegistry.mark_overlay_start||&mut self|elements|overlay_mark=
-F|1033|55|230|p|UiRegistry.find_overlay_at|Option<UiId>|&self|elements,overlay_mark|
-F|1034|55|240|p|UiRegistry.register_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1035|55|269|p|UiRegistry.register_icon_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1036|55|298|p|UiRegistry.register_text_input|bool|&mut self||elements.push(),hovered=,wants_text=
-F|1037|55|321|p|UiRegistry.register_blocker|bool|&mut self||elements.push()
-F|1038|55|338|p|UiRegistry.register_rect|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1039|55|360|p|UiRegistry.find_at|Option<UiId>|&self|elements|
-F|1040|55|370|p|UiRegistry.hovered|Option<UiId>|&self|hovered|
-F|1041|55|377|p|UiRegistry.reset_cursor_state||&mut self||wants_pointer=,wants_text=
-F|1042|55|383|p|UiRegistry.wants_pointer|bool|&self|wants_pointer|
-F|1043|55|388|p|UiRegistry.wants_text|bool|&self|wants_text|
-F|1044|55|393|p|UiRegistry.cursor_code|u8|&self|wants_pointer,wants_text|
-F|1045|55|409||ui_registry_hit_testing_overlay_and_cursor_state_end_to_end||||
-F|1046|55|438||ui_element_icon_active_square_uses_fitts_law_hitbox||||
-F|1047|55|454||ui_element_ids_and_regular_icon_hitboxes_are_stable||||
-T|1048|56|23|struct|Button|x: f32,y: f32,w: f32,h: f32,text: String,icon: Option<IconType>,text_scale: f32,icon_size: f32
-T|1049|56|101|struct|IconButton|x: f32,y: f32,size: f32,icon: Option<IconType>,is_active: bool,icon_size: Option<f32>,active_square_width: Option<f32>,custom_color: Option<[f32; 4]>
-T|1050|56|4|enum|IconType|Save,Discard,Cancel,Warning,Error,CaseMatch,Up,Down,Close,Plus,+6
-F|1051|56|35|p|Button.is_hovered|bool|&self|h,w,x,y|
-F|1052|56|40|p|Button.render|bool|&self|h,icon,icon_size,text,text_scale,w,x,y|
-F|1053|56|113|p|IconButton.is_hovered|bool|&self|active_square_width,size,x,y|
-F|1054|56|124|p|IconButton.render|bool|&self|active_square_width,custom_color,icon,icon_size,is_active,size,x,y|
-F|1055|56|217|p|get_welcome_buttons|(Button, Button, Button)|||
-F|1056|56|230||welcome_buttons_from_widths|(Button, Button, Button)|||
-F|1057|56|285|p|get_dialog_buttons|(Button, Button, Button)|||
-F|1058|56|308||dialog_buttons_from_widths|(Button, Button, Button)|||
-F|1059|56|381||widget_hitboxes_cover_regular_and_sidebar_buttons||||
-F|1060|56|420||button_layout_helpers_scale_text_and_icons_consistently||||
-F|1061|56|449||layout_helpers_do_not_overlap_at_small_widths||||
-F|1062|56|468||welcome_and_dialog_button_layouts_are_stable||||
+F|957|51|77|p|ide_bottom_panel_y|f32|||
+F|958|51|82|p|editor_view_height|f32|||
+F|959|51|98||utf8_char_width|usize|||
+F|960|51|110|p|cursor_line_and_character|(usize, usize)|||
+F|961|51|132|p|selected_char_count|Option<usize>|||
+F|962|51|151|p|language_display_name_for_ext|&'static str|||
+F|963|51|175|p|diagnostic_error_warning_counts|(usize, usize)|||
+F|964|51|207||Telemetry.default|Self|||
+F|965|51|220||transient_python_member_dot_byte|Option<usize>|||
+F|966|51|229||diagnostic_overlaps_transient_member_dot|bool|||
+F|967|51|239||should_draw_empty_ide_file_tree_overlay|bool|||
+F|968|51|252||telemetry_default_starts_with_empty_counters_and_fresh_print_time||||
+F|969|51|269||editor_max_scroll_keeps_five_text_lines_at_bottom||||
+F|970|51|276||editor_max_scroll_handles_short_files_and_tiny_viewports||||
+F|971|51|285||status_bar_y_sits_above_bottom_panel||||
+F|972|51|295||editor_view_height_excludes_status_and_bottom_panel||||
+F|973|51|309||cursor_line_and_character_counts_unicode_scalars||||
+F|974|51|323||selected_char_count_counts_unicode_scalars||||
+F|975|51|334||language_display_names_are_user_facing_not_short_codes||||
+F|976|51|342||test_diagnostic|crate::lsp::Diagnostic|||
+F|977|51|360||diagnostic_status_counts_errors_and_warnings_only||||
+F|978|51|378||empty_ide_still_draws_file_tree_overlay||||
+F|979|51|386||transient_python_member_dot_byte_accepts_single_dot_only||||
+F|980|51|401||diagnostic_overlap_suppresses_single_dot_not_double_dot||||
+F|981|51|439|p|Renderer.draw|(bool, Vec<(usize, usize)>)||baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,merged_intervals_cache,program,scale_factor,texture,+3|bracket_pair_cache=,bracket_pair_cache_cursor=,bracket_pair_cache_version=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),identical_words_cache.clear(),identical_words_cache.push(),identical_words_cache_cursor=,identical_words_cache_selection_anchor=,+16
+T|982|52|5|struct|Vertex|pos: [f32; 2],uv: [f32; 2],color: [f32; 4],mode: f32,sdf_params: [f32; 3]
+F|983|52|16|p|quad_vertices|[Vertex; 6]|||
+F|984|52|67|p|glyph_quad_rect|(f32, f32, f32, f32)|||
+F|985|52|81|p|squiggle_vertices|[Vertex; 6]|||
+F|986|52|139|p|rounded_rect_gradient_vertices|[Vertex; 6]|||
+F|987|52|196||quad_vertices_round_positions_and_build_two_triangles||||
+F|988|52|215||glyph_quad_rect_keeps_scaled_edges_for_consistent_baseline_rounding||||
+F|989|52|239||squiggle_vertices_encode_wave_params_and_extent||||
+F|990|52|254||rounded_rect_gradient_vertices_keep_top_and_bottom_colors||||
+T|991|53|78|struct|FontData|source: FontSource,index: u32
+T|992|53|67|enum|FontSource|Static(&'static [u8]),LoadedMmap(std::sync::Arc<memmap2::Mmap>),LoadedVec(std::sync::Arc<Vec<u8>>),Lazy( std::path::PathBuf,std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>,()>>>>,)
+T|993|53|39|struct|GlyphInfo|u: f32,v: f32,uw: f32,vh: f32,width: f32,height: f32,offset_x: f32,offset_y: f32,advance: f32,is_emoji: f32
+T|994|53|138|struct|Renderer|gl: glow::Context,program: glow::Program,proj_loc: Option<glow::UniformLocation>,vao: glow::VertexArray,vbo: glow::Buffer,texture: glow::Texture,vertices: Vec<Vertex>,fonts: Vec<FontData>,ui_fonts: Vec<FontData>,scale_context: ScaleContext,+79
+T|995|53|24|struct|Theme|bg: [f32; 4],fg: [f32; 4],sel: [f32; 4],minimap_bg: [f32; 4],line_num: [f32; 4],minimap_cursor: [f32; 4],modified_unsaved: [f32; 4],modified_saved: [f32; 4],diag_warn: [f32; 4],diag_error: [f32; 4],+1
+T|996|53|55|struct|VisualLine|byte_idx: usize,physical_line: usize,is_soft_wrap: bool,whitespace_px_width: f32,text_px_width: f32,y_offset: f32,is_folded: bool,fold_suffix: [char; 4],fold_suffix_len: u8
+F|997|53|18||popup_waiting_for_mouse_move|bool|||
+F|998|53|84|p|FontData.new_lazy|Self|||
+F|999|53|94|p|FontData.new_static|Self|||
+F|1000|53|101|p|FontData.ensure_loaded||&mut self||source=
+F|1001|53|128|p|FontData.data_slice|&[u8]|&self|source|
+F|1002|53|227|p|Renderer.suppress_popups_until_next_mouse_move||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
+F|1003|53|233|p|Renderer.popups_waiting_for_mouse_move_at|bool|&self|hide_popups_until_mouse_move,last_known_mouse|
+F|1004|53|243|p|Renderer.update_popup_mouse_move_gate||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
+F|1005|53|251|p|Renderer.new|Self|||
+F|1006|53|576|p|Renderer.get_custom_svg_glyph|Option<GlyphInfo>|&mut self|atlas_y,font_size,gl,texture|atlas_x=,max_row_h=
+F|1007|53|648|p|Renderer.get_glyph|Option<GlyphInfo>|&mut self|font_size,fonts,gl,texture|atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()
+F|1008|53|822|p|Renderer.get_ui_glyph|Option<GlyphInfo>|&mut self|font_size,gl,scale_factor,texture,ui_fonts|atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()
+F|1009|53|995|p|Renderer.resize||&mut self|gl|height=,width=
+F|1010|53|1006|p|Renderer.measure_ui_width|f32|&mut self||
+F|1011|53|1020|p|Renderer.char_advance|f32|&mut self|ascii_advances|
+F|1012|53|1038|p|Renderer.push_quad||&mut self|vertices|
+F|1013|53|1056|p|Renderer.load_builtin_icons||&mut self|gl,texture|icons.insert()
+F|1014|53|1247|p|Renderer.push_squiggle||&mut self|scale_factor,vertices|
+F|1015|53|1258|p|Renderer.push_rect||&mut self||
+F|1016|53|1263|p|Renderer.push_rounded_rect_gradient||&mut self|vertices|
+F|1017|53|1291||font_data_sources_return_expected_slices||||
+F|1018|53|1308||font_data_ensure_loaded_keeps_missing_lazy_source_empty||||
+F|1019|53|1317||font_data_ensure_loaded_maps_existing_lazy_source_once||||
+F|1020|53|1334||popup_mouse_move_gate_waits_for_real_motion_after_focus_restore||||
+F|1021|53|1348||vertex_layout_is_plain_data_and_visual_line_fields_are_stable||||
+F|1022|53|1379||renderer_constants_keep_expected_atlas_and_batch_sizes||||
+T|1023|54|2|struct|ScrollState|current: f32,target: f32,velocity: f32,anim_speed: f32,is_dragging: bool,drag_offset: f32
+F|1024|54|12|p|ScrollState.new|Self|||
+F|1025|54|23|p|ScrollState.update|bool|&mut self|anim_speed,target|current=,velocity=
+F|1026|54|48|p|ScrollState.clamp_target||&mut self||target=
+F|1027|54|52|p|ScrollState.clamp_current||&mut self||current=
+F|1028|54|56|p|ScrollState.scroll_by||&mut self|target|
+F|1029|54|60|p|ScrollState.set_target||&mut self||target=
+F|1030|54|64|p|ScrollState.stop_anim||&mut self||current=,target=,velocity=
+F|1031|54|76||scroll_state_clamps_animates_and_stops_end_to_end||||
+T|1032|55|117|enum|UiElement|Button { id: UiId,x: f32,y: f32,w: f32,h: f32
+T|1033|55|8|enum|UiId|WelcomeNewFile,WelcomeOpenFile,WelcomeIdeMode,WelcomeRecentFile(usize),DialogSave,DialogDiscard,DialogCancel,SettingsTab(usize),SettingsIdeAddWorkspace,SettingsIdeRemoveWorkspace(usize),+75
+T|1034|55|190|struct|UiRegistry|elements: Vec<UiElement>,hovered: Option<UiId>,wants_pointer: bool,wants_text: bool,overlay_mark: usize
+F|1035|55|152|p|UiElement.contains|bool|&self||
+F|1036|55|179|p|UiElement.id|UiId|&self||
+F|1037|55|203|p|UiRegistry.new|Self|||
+F|1038|55|214|p|UiRegistry.clear||&mut self||elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text=
+F|1039|55|224|p|UiRegistry.mark_overlay_start||&mut self|elements|overlay_mark=
+F|1040|55|230|p|UiRegistry.find_overlay_at|Option<UiId>|&self|elements,overlay_mark|
+F|1041|55|240|p|UiRegistry.register_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|1042|55|269|p|UiRegistry.register_icon_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|1043|55|298|p|UiRegistry.register_text_input|bool|&mut self||elements.push(),hovered=,wants_text=
+F|1044|55|321|p|UiRegistry.register_blocker|bool|&mut self||elements.push()
+F|1045|55|338|p|UiRegistry.register_rect|bool|&mut self||elements.push(),hovered=,wants_pointer=
+F|1046|55|360|p|UiRegistry.find_at|Option<UiId>|&self|elements|
+F|1047|55|370|p|UiRegistry.hovered|Option<UiId>|&self|hovered|
+F|1048|55|377|p|UiRegistry.reset_cursor_state||&mut self||wants_pointer=,wants_text=
+F|1049|55|383|p|UiRegistry.wants_pointer|bool|&self|wants_pointer|
+F|1050|55|388|p|UiRegistry.wants_text|bool|&self|wants_text|
+F|1051|55|393|p|UiRegistry.cursor_code|u8|&self|wants_pointer,wants_text|
+F|1052|55|409||ui_registry_hit_testing_overlay_and_cursor_state_end_to_end||||
+F|1053|55|438||ui_element_icon_active_square_uses_fitts_law_hitbox||||
+F|1054|55|454||ui_element_ids_and_regular_icon_hitboxes_are_stable||||
+T|1055|56|23|struct|Button|x: f32,y: f32,w: f32,h: f32,text: String,icon: Option<IconType>,text_scale: f32,icon_size: f32
+T|1056|56|101|struct|IconButton|x: f32,y: f32,size: f32,icon: Option<IconType>,is_active: bool,icon_size: Option<f32>,active_square_width: Option<f32>,custom_color: Option<[f32; 4]>
+T|1057|56|4|enum|IconType|Save,Discard,Cancel,Warning,Error,CaseMatch,Up,Down,Close,Plus,+6
+F|1058|56|35|p|Button.is_hovered|bool|&self|h,w,x,y|
+F|1059|56|40|p|Button.render|bool|&self|h,icon,icon_size,text,text_scale,w,x,y|
+F|1060|56|113|p|IconButton.is_hovered|bool|&self|active_square_width,size,x,y|
+F|1061|56|124|p|IconButton.render|bool|&self|active_square_width,custom_color,icon,icon_size,is_active,size,x,y|
+F|1062|56|217|p|get_welcome_buttons|(Button, Button, Button)|||
+F|1063|56|230||welcome_buttons_from_widths|(Button, Button, Button)|||
+F|1064|56|285|p|get_dialog_buttons|(Button, Button, Button)|||
+F|1065|56|308||dialog_buttons_from_widths|(Button, Button, Button)|||
+F|1066|56|381||widget_hitboxes_cover_regular_and_sidebar_buttons||||
+F|1067|56|420||button_layout_helpers_scale_text_and_icons_consistently||||
+F|1068|56|449||layout_helpers_do_not_overlap_at_small_widths||||
+F|1069|56|468||welcome_and_dialog_button_layouts_are_stable||||
 E|32|33
 E|41|35
 E|46|391 413 414 417
@@ -1147,7 +1154,7 @@ E|69|35 44 47 49 50 64 130 385 391 412 420 430 431 432
 E|71|49 50 72 73 493
 E|72|73 279 493 786
 E|80|79 81
-E|82|75 76 77 78 80 87 89 91 97 99 101 123 124 163 462 493 951
+E|82|75 76 77 78 80 87 89 91 97 99 101 123 124 163 462 493 951 958
 E|83|75
 E|84|76 77
 E|85|76 78
@@ -1185,14 +1192,14 @@ E|130|128
 E|131|128
 E|132|128
 E|135|493
-E|136|50 51 56 57 58 128 129 131 132 133 134 202 203 251 290 357 368 483 484 493 494 495 496 497 500 1057
+E|136|50 51 56 57 58 128 129 131 132 133 134 202 203 251 290 357 368 483 484 493 494 495 496 497 500 957 1064
 E|137|82
 E|138|133
 E|143|140 142
 E|144|141 142
 E|169|167 168
-E|170|1004
-E|171|1004
+E|170|1011
+E|171|1011
 E|173|172
 E|175|176 190 216 223 224
 E|176|234
@@ -1253,6 +1260,7 @@ E|266|264
 E|267|264
 E|268|264
 E|270|269
+E|272|957
 E|273|274
 E|274|269 275
 E|277|66 278 279
@@ -1261,7 +1269,7 @@ E|279|493 786
 E|281|271 280
 E|282|271 280
 E|283|284
-E|290|56 199 202 204 205 270 272 273 274 275 283 285 286 287 288 289 300 306 308 310 311 313 314 319 347 348 485 951 952 953
+E|290|56 199 202 204 205 270 272 273 274 275 283 285 286 287 288 289 300 306 308 310 311 313 314 319 347 348 485 951 952 953 957 958
 E|291|283 284
 E|292|285
 E|293|286 287
@@ -1272,7 +1280,7 @@ E|299|306
 E|301|300
 E|304|311
 E|306|302 310 311
-E|307|1004
+E|307|1011
 E|308|307 310
 E|309|306
 E|310|302 304
@@ -1280,7 +1288,7 @@ E|311|302 305
 E|312|311
 E|315|313 314
 E|316|311 317
-E|317|1004
+E|317|1011
 E|318|317
 E|331|337
 E|333|337 339
@@ -1291,13 +1299,14 @@ E|339|336 337
 E|340|336
 E|344|337
 E|346|347 348
-E|357|50 56 64 66 71 176 183 200 201 202 203 278 279 300 319 349 350 351 352 353 354 355 466 471 472 487 488
+E|357|50 56 64 66 71 176 183 200 201 202 203 278 279 300 319 349 350 351 352 353 354 355 466 471 472 487 488 957 958
 E|358|349 350
 E|359|351 352 353 354
 E|360|356
 E|361|355
+E|364|957
 E|366|365
-E|368|50 270 272 273 274 275 300 362 363 364 366 367
+E|368|50 270 272 273 274 275 300 362 363 364 366 367 958
 E|369|362
 E|370|363
 E|371|364
@@ -1364,7 +1373,8 @@ E|479|474 475 504
 E|482|481
 E|485|48 482 484
 E|486|48 481 786
-E|488|477 484 786
+E|488|477 484 786 958
+E|492|958
 E|496|471 476 493
 E|500|471 499
 E|503|502
@@ -1518,48 +1528,48 @@ E|837|833 834 835 836
 E|839|838
 E|841|839 840
 E|842|839 840
-E|843|839 858 1003 1004
-E|844|839 846 858 1003 1004
-E|845|858 1004
-E|846|1004
-E|851|977 1000 1005
-E|852|977 1001 1005
-E|853|977 1000 1005
-E|854|1004
+E|843|839 858 1010 1011
+E|844|839 846 858 1010 1011
+E|845|858 1011
+E|846|1011
+E|851|984 1007 1012
+E|852|984 1008 1012
+E|853|984 1007 1012
+E|854|1011
 E|856|855
 E|857|859 860
 E|858|857
 E|859|861
 E|860|861
 E|863|857 858 862
-E|864|846 848 852 855 857 858 1000 1003 1004 1005 1008
-E|865|848 1004 1007
-E|866|919 920 921 951 1004
-E|867|1004
+E|864|846 848 852 855 857 858 1007 1010 1011 1012 1015
+E|865|848 1011 1014
+E|866|919 920 921 951 1011
+E|867|1011
 E|870|869
 E|871|870
-E|872|852 867 1001 1003
-E|873|166 848 852 855 872 885 941 1003 1007 1008
-E|874|852 885 897 922 1003 1008
-E|875|596 852 856 940 955 956 958 959 1003 1008
+E|872|852 867 1008 1010
+E|873|166 848 852 855 872 885 941 1010 1014 1015
+E|874|852 885 897 922 957 1010 1015
+E|875|852 856 940 955 956 960 961 962 963 1010 1015
 E|876|856
-E|877|170 848 855 1001 1005 1008
-E|878|163 164 165 166 169 848 852 855 856 868 870 871 876 877 1003 1008
+E|877|170 848 855 1008 1012 1015
+E|878|163 164 165 166 169 848 852 855 856 868 870 871 876 877 1010 1015
 E|879|867
 E|880|868
 E|881|870 871
 E|883|882
 E|884|882
-E|885|269 270 846 848 852 855 1000 1001 1003 1004 1005
-E|886|848 852 855 882 1003 1008
-E|887|848 952 1008
-E|888|848 853 855 1001 1005 1008
-E|890|848 852 855 856 889 940 977 1001 1003 1005 1008 1009
-E|891|848 849 852 1000 1003 1004 1005 1008
-E|893|140 848 850 852 855 892 940 941 1003 1008
-E|894|852 855 1003
+E|885|269 270 846 848 852 855 1007 1008 1010 1011 1012
+E|886|848 852 855 882 1010 1015
+E|887|848 952 1015
+E|888|848 853 855 1008 1012 1015
+E|890|848 852 855 856 889 940 984 1008 1010 1012 1015 1016
+E|891|848 849 852 1007 1010 1011 1012 1015
+E|893|140 848 850 852 855 892 940 941 1010 1015
+E|894|852 855 1010
 E|895|892
-E|897|848 852 853 855 940 1001 1003 1004 1005 1008
+E|897|848 852 853 855 940 1008 1010 1011 1012 1015
 E|901|907
 E|905|902
 E|906|902
@@ -1569,10 +1579,10 @@ E|910|909
 E|914|901
 E|915|900
 E|918|855
-E|919|848 853 854 855 899 901 908 910 911 912 915 917 918 940 1004 1008
-E|920|1003 1004
-E|921|848 853 855 900 903 904 908 909 912 913 914 918 920 941 1001 1004 1005 1008
-E|922|848 852 855 940 1003 1008
+E|919|848 853 854 855 899 901 908 910 911 912 915 917 918 940 1011 1015
+E|920|1010 1011
+E|921|848 853 855 900 903 904 908 909 912 913 914 918 920 941 1008 1011 1012 1015
+E|922|848 852 855 940 1010 1015
 E|931|930
 E|932|931
 E|933|926
@@ -1581,51 +1591,58 @@ E|935|927
 E|936|928
 E|937|929
 E|938|931
-E|939|848 1005
-E|940|848 1005
-E|941|848 1005
-E|942|855 1008
-E|943|855 1008
-E|944|848 852 855 926 927 928 929 932 942 943 1000 1001 1003 1005
-E|945|848 849 852 855 940 1057
-E|946|848 849 852 855 939 1003 1008 1055
-E|947|847 1008
-E|948|848 852 1003 1008
+E|939|848 1012
+E|940|848 1012
+E|941|848 1012
+E|942|855 1015
+E|943|855 1015
+E|944|848 852 855 926 927 928 929 932 942 943 1007 1008 1010 1012
+E|945|848 849 852 855 940 1064
+E|946|848 849 852 855 939 1010 1015 1062
+E|947|847 1015
+E|948|848 852 1010 1015
 E|953|952
 E|954|953
 E|956|955
-E|958|957
-E|965|952 953 954
-E|966|952 954
-E|967|955 956
-E|968|958
-E|970|959 969
-E|971|963
-E|972|961
-E|973|961 962
-E|974|166 843 846 848 851 852 853 854 855 864 865 866 873 874 875 878 887 888 891 893 894 946 947 948 953 954 955 956 961 962 963 995 997 1003 1008
-E|980|976
-E|981|976 977
-E|982|978
-E|983|979
-E|996|990
-E|997|996
-E|998|991 992
-E|1000|999
-E|1001|999
-E|1003|1001
-E|1004|1000
-E|1005|976
-E|1007|978
-E|1008|1005
-E|1009|979
-E|1010|991 992
-E|1011|991
-E|1012|991
-E|1013|990
-E|1054|1051 1053
-E|1055|1056
-E|1057|1058
-E|1060|1056 1058
-E|1061|1056 1058
-E|1062|1056 1058
+E|957|955
+E|958|955
+E|960|959
+E|961|959
+E|962|596
+E|969|952 953 954
+E|970|952 954
+E|971|955 956 957
+E|972|958
+E|973|960
+E|974|961
+E|975|962
+E|977|963 976
+E|978|967
+E|979|965
+E|980|965 966
+E|981|166 843 846 848 851 852 853 854 855 864 865 866 873 874 875 878 887 888 891 893 894 946 947 948 953 954 955 956 957 958 965 966 967 1002 1004 1010 1015
+E|987|983
+E|988|983 984
+E|989|985
+E|990|986
+E|1003|997
+E|1004|1003
+E|1005|998 999
+E|1007|1006
+E|1008|1006
+E|1010|1008
+E|1011|1007
+E|1012|983
+E|1014|985
+E|1015|1012
+E|1016|986
+E|1017|998 999
+E|1018|998
+E|1019|998
+E|1020|997
+E|1061|1058 1060
+E|1062|1063
+E|1064|1065
+E|1067|1063 1065
+E|1068|1063 1065
+E|1069|1063 1065

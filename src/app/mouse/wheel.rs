@@ -31,9 +31,14 @@ fn panel_scroll_rect(
         )
     } else {
         let tab_h = 32.0 * scale;
+        let panel_y = crate::render_view::ide_bottom_panel_y(
+            window_height,
+            bottom_height,
+            scale,
+        );
         (
             sidebar_w,
-            window_height - bottom_height + 1.0 + tab_h,
+            panel_y + 1.0 + tab_h,
             window_width - sidebar_w,
             bottom_height - 1.0 - tab_h,
         )
@@ -530,7 +535,18 @@ impl App {
         } else {
             38.0 * s
         };
-        let visible_h = (wh - tab_bar_h).max(0.0);
+        let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
+        let visible_h = crate::render_view::editor_view_height(
+            wh,
+            tab_bar_h,
+            panel_bottom_h,
+            self.is_ide_mode,
+            s,
+        );
         let max_scroll_y = self
             .renderer
             .as_mut()
@@ -583,7 +599,7 @@ mod tests {
         );
         assert_eq!(
             panel_scroll_rect(false, 2.0, 96.0, 240.0, 360.0, 360.0, 1600.0, 1000.0),
-            (96.0, 705.0, 1504.0, 295.0)
+            (96.0, 645.0, 1504.0, 295.0)
         );
     }
 

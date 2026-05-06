@@ -1075,7 +1075,11 @@ impl ApplicationHandler for App {
                         }
                     }
                     if panel_bottom_h > 0.0 && ide_resize_cursor.is_none() {
-                        let resize_y = wh - panel_bottom_h;
+                        let resize_y = crate::render_view::ide_bottom_panel_y(
+                            wh,
+                            panel_bottom_h,
+                            s,
+                        );
                         if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
                             ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                         }

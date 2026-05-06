@@ -289,12 +289,14 @@ impl Renderer {
                     }
 
                     let (icon, color) = match diag.severity {
-                        crate::lsp::DiagSeverity::Error => {
-                            (crate::widgets::IconType::Error, self.theme.diag_error)
-                        }
-                        crate::lsp::DiagSeverity::Warning => {
-                            (crate::widgets::IconType::Warning, self.theme.diag_warn)
-                        }
+                        crate::lsp::DiagSeverity::Error => (
+                            crate::widgets::IconType::Error,
+                            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+                        ),
+                        crate::lsp::DiagSeverity::Warning => (
+                            crate::widgets::IconType::Warning,
+                            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+                        ),
                         _ => (crate::widgets::IconType::Problems, [0.5, 0.5, 0.5, 1.0]),
                     };
 

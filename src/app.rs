@@ -652,7 +652,19 @@ impl App {
             };
             let line = (target.line as usize).min(self.editor.line_offsets.len().saturating_sub(1));
             let line_top_y = line as f32 * r.line_height;
-            let visible_h = (wh - tab_bar_h).max(r.line_height);
+            let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                self.ide_panel.bottom_height * r.scale_factor
+            } else {
+                0.0
+            };
+            let visible_h = crate::render_view::editor_view_height(
+                wh,
+                tab_bar_h,
+                panel_bottom_h,
+                self.is_ide_mode,
+                r.scale_factor,
+            )
+            .max(r.line_height);
             let max_scroll = r.get_max_scroll(&self.editor, visible_h);
             self.scroll_y.target = (line_top_y - visible_h * 0.45)
                 .max(0.0)
@@ -821,9 +833,27 @@ impl App {
                     let line_top_y = phys_line as f32 * r.line_height;
 
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    self.scroll_y.target = (line_top_y - wh / 2.0).max(0.0);
+                    let s = r.scale_factor;
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * s
+                    };
+                    let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                        self.ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let visible_h = crate::render_view::editor_view_height(
+                        wh,
+                        tab_bar_h,
+                        panel_bottom_h,
+                        self.is_ide_mode,
+                        s,
+                    );
+                    self.scroll_y.target = (line_top_y - visible_h / 2.0).max(0.0);
 
-                    let max_s = r.get_max_scroll(&self.editor, wh);
+                    let max_s = r.get_max_scroll(&self.editor, visible_h);
                     self.scroll_y.clamp_target(0.0, max_s);
                     self.scroll_y.target = self.scroll_y.target.round();
                     self.scroll_y.anim_speed = 10.0;

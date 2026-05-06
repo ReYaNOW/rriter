@@ -151,8 +151,8 @@ impl IconButton {
                     let icon_col = self.custom_color.unwrap_or([1.0, 1.0, 1.0, 1.0]);
                     renderer.draw_atlas_icon(
                         icon_type,
-                        self.x + offset,
-                        self.y + offset,
+                        (self.x + offset).round(),
+                        (self.y + offset).round(),
                         icon_render_size,
                         icon_col,
                     );
@@ -202,8 +202,8 @@ impl IconButton {
             };
             renderer.draw_atlas_icon(
                 icon_type,
-                self.x + offset,
-                self.y + offset,
+                (self.x + offset).round(),
+                (self.y + offset).round(),
                 icon_render_size,
                 icon_color,
             );

@@ -1155,9 +1155,12 @@ impl Renderer {
 
             if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
                 let size = tree.size();
-                // Оптимизация: 64.0 вместо 128.0 ускоряет старт приложения (парсинг SVG) в 2-4 раза.
-                // Для UI иконок (20-36px) этого разрешения с Mipmap более чем достаточно.
-                let target_size = 64.0;
+                // Error/warning icons are visible at larger status-bar size.
+                // Keep other UI icons at 64px to avoid extra texture work.
+                let target_size = match icon_type {
+                    crate::widgets::IconType::Error | crate::widgets::IconType::Warning => 128.0,
+                    _ => 64.0,
+                };
 
                 let scale = if size.width() > size.height() {
                     target_size / size.width()

@@ -844,5 +844,6 @@ mod tests {
         assert_eq!(PanelId::Terminal.label(), "Терминал");
         assert!(PanelId::Problems.icon() == crate::widgets::IconType::Problems);
         assert!(PanelId::LspServers.icon() == crate::widgets::IconType::LspServers);
+        assert_eq!(IdePanelState::default().bottom_height, 180.0);
     }
 }

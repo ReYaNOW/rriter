@@ -339,9 +339,10 @@ impl App {
             } else {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 let tab_h = 32.0 * s;
+                let panel_y = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
                 (
                     48.0 * s,
-                    wh - panel_bottom_h + 1.0 + tab_h,
+                    panel_y + 1.0 + tab_h,
                     ww - 48.0 * s,
                     panel_bottom_h - 1.0 - tab_h,
                 )
@@ -716,7 +717,18 @@ impl App {
         } else {
             38.0 * s
         };
-        let editor_visible_h = (wh - tab_bar_h).max(0.0);
+        let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
+        let editor_visible_h = crate::render_view::editor_view_height(
+            wh,
+            tab_bar_h,
+            panel_bottom_h,
+            self.is_ide_mode,
+            s,
+        );
         let max_scroll = self
             .renderer
             .as_mut()
@@ -918,9 +930,9 @@ impl App {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;
-                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h
-                    + 1.0
-                    + tab_h;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let content_y =
+                    crate::render_view::ide_bottom_panel_y(wh, bottom_h, s) + 1.0 + tab_h;
                 let content_h = bottom_h - 1.0 - tab_h;
                 let term_content_y = content_y + 32.0 * s;
                 let term_content_h = content_h - 32.0 * s;
@@ -952,7 +964,7 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let bottom_h = self.ide_panel.bottom_height * s;
-            let cy = wh - bottom_h;
+            let cy = crate::render_view::ide_bottom_panel_y(wh, bottom_h, s);
 
             let item_h = 24.0 * s;
             let total_h = self.ide_panel.flat_diags.len() as f32 * item_h;
@@ -1150,7 +1162,18 @@ impl App {
                 } else {
                     38.0 * s
                 };
-                let editor_height = wh - tab_bar_h;
+                let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                    self.ide_panel.bottom_height * s
+                } else {
+                    0.0
+                };
+                let editor_height = crate::render_view::editor_view_height(
+                    wh,
+                    tab_bar_h,
+                    panel_bottom_h,
+                    self.is_ide_mode,
+                    s,
+                );
                 let minimap_w = r.minimap_width;
 
                 let is_minimap_drag = self.last_click_pos.0
@@ -1192,9 +1215,9 @@ impl App {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let bottom_h = self.ide_panel.bottom_height * s;
                 let tab_h = 32.0 * s;
-                let content_y = self.window.as_ref().unwrap().inner_size().height as f32 - bottom_h
-                    + 1.0
-                    + tab_h;
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let content_y =
+                    crate::render_view::ide_bottom_panel_y(wh, bottom_h, s) + 1.0 + tab_h;
                 let content_h = bottom_h - 1.0 - tab_h;
                 let term_content_y = content_y + 32.0 * s;
                 let term_content_h = content_h - 32.0 * s;

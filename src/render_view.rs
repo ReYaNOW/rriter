@@ -20,7 +20,7 @@ use std::time::Instant;
 
 pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
-pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 24.0;
+pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 30.0;
 
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
@@ -69,8 +69,29 @@ pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
 }
 
 #[inline(always)]
-pub(crate) fn ide_status_bar_y(window_height: f32, panel_bottom_h: f32, scale: f32) -> f32 {
-    (window_height - panel_bottom_h - ide_status_bar_height(scale)).max(0.0)
+pub(crate) fn ide_status_bar_y(window_height: f32, _panel_bottom_h: f32, scale: f32) -> f32 {
+    (window_height - ide_status_bar_height(scale)).max(0.0)
+}
+
+#[inline(always)]
+pub(crate) fn ide_bottom_panel_y(window_height: f32, panel_bottom_h: f32, scale: f32) -> f32 {
+    (window_height - ide_status_bar_height(scale) - panel_bottom_h).max(0.0)
+}
+
+#[inline(always)]
+pub(crate) fn editor_view_height(
+    window_height: f32,
+    tab_bar_h: f32,
+    panel_bottom_h: f32,
+    is_ide_mode: bool,
+    scale: f32,
+) -> f32 {
+    let status_bar_h = if is_ide_mode {
+        ide_status_bar_height(scale)
+    } else {
+        0.0
+    };
+    (window_height - tab_bar_h - panel_bottom_h - status_bar_h).max(0.0)
 }
 
 #[inline(always)]
@@ -106,6 +127,49 @@ pub(crate) fn cursor_line_and_character(editor: &Editor) -> (usize, usize) {
     }
 
     (line_idx + 1, character)
+}
+
+pub(crate) fn selected_char_count(editor: &Editor) -> Option<usize> {
+    let anchor = editor.selection_anchor?;
+    let cursor = editor.cursor.min(editor.len());
+    let start = anchor.min(cursor).min(editor.len());
+    let end = anchor.max(cursor).min(editor.len());
+    if start == end {
+        return None;
+    }
+
+    let mut byte_idx = start;
+    let mut count = 0usize;
+    while byte_idx < end {
+        let step = utf8_char_width(editor.byte_at(byte_idx)).max(1);
+        byte_idx = byte_idx.saturating_add(step).min(end);
+        count += 1;
+    }
+    Some(count)
+}
+
+pub(crate) fn language_display_name_for_ext(ext: &str) -> &'static str {
+    match crate::highlighter::tree_sitter_lang_name_for_ext(ext) {
+        "bash" => "Shell",
+        "rs" => "Rust",
+        "py" => "Python",
+        "toml" => "TOML",
+        "go" => "Go",
+        "js" => "JavaScript",
+        "ts" => "TypeScript",
+        "tsx" => "TypeScript JSX",
+        "regex" => "Regex",
+        "java" => "Java",
+        "cs" => "C#",
+        "dart" => "Dart",
+        "html" => "HTML",
+        "css" => "CSS",
+        "json" => "JSON",
+        "c" => "C",
+        "cpp" => "C++",
+        "make" => "Makefile",
+        _ => "Text",
+    }
 }
 
 pub(crate) fn diagnostic_error_warning_counts<'a>(
@@ -219,10 +283,26 @@ mod tests {
 
     #[test]
     fn status_bar_y_sits_above_bottom_panel() {
-        assert_eq!(ide_status_bar_height(1.0), 24.0);
-        assert_eq!(ide_status_bar_y(900.0, 0.0, 1.0), 876.0);
-        assert_eq!(ide_status_bar_y(900.0, 180.0, 1.0), 696.0);
+        assert_eq!(ide_status_bar_height(1.0), 30.0);
+        assert_eq!(ide_status_bar_y(900.0, 0.0, 1.0), 870.0);
+        assert_eq!(ide_status_bar_y(900.0, 180.0, 1.0), 870.0);
         assert_eq!(ide_status_bar_y(10.0, 20.0, 1.0), 0.0);
+        assert_eq!(ide_bottom_panel_y(900.0, 180.0, 1.0), 690.0);
+        assert_eq!(ide_bottom_panel_y(100.0, 180.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn editor_view_height_excludes_status_and_bottom_panel() {
+        assert_eq!(editor_view_height(900.0, 44.0, 0.0, true, 1.0), 826.0);
+        assert_eq!(
+            editor_view_height(900.0, 44.0, 240.0, true, 1.0),
+            586.0
+        );
+        assert_eq!(
+            editor_view_height(900.0, 0.0, 240.0, false, 1.0),
+            660.0
+        );
+        assert_eq!(editor_view_height(20.0, 44.0, 240.0, true, 1.0), 0.0);
     }
 
     #[test]
@@ -237,6 +317,26 @@ mod tests {
         assert_eq!(cursor_line_and_character(&editor), (2, 2));
         editor.cursor = editor.len();
         assert_eq!(cursor_line_and_character(&editor), (3, 1));
+    }
+
+    #[test]
+    fn selected_char_count_counts_unicode_scalars() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("aж😊z");
+        editor.selection_anchor = Some(1);
+        editor.cursor = editor.len() - 1;
+        assert_eq!(selected_char_count(&editor), Some(2));
+        editor.cursor = 1;
+        assert_eq!(selected_char_count(&editor), None);
+    }
+
+    #[test]
+    fn language_display_names_are_user_facing_not_short_codes() {
+        assert_eq!(language_display_name_for_ext("py"), "Python");
+        assert_eq!(language_display_name_for_ext("pyi"), "Python");
+        assert_eq!(language_display_name_for_ext("rs"), "Rust");
+        assert_eq!(language_display_name_for_ext("ts"), "TypeScript");
+        assert_eq!(language_display_name_for_ext("txt"), "Text");
     }
 
     fn test_diagnostic(severity: crate::lsp::DiagSeverity) -> crate::lsp::Diagnostic {
@@ -598,7 +698,8 @@ impl Renderer {
         } else {
             44.0 * s
         };
-        let editor_height = real_height - tab_bar_h;
+        let editor_height =
+            editor_view_height(real_height, tab_bar_h, panel_bottom_h, is_ide_mode, s);
         let editor_scroll_height = editor_height;
 
         let target_minimap_w = 119.0 * s;
@@ -1365,6 +1466,19 @@ impl Renderer {
 
         // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
+        if is_ide_mode {
+            self.draw_status_bar(
+                editor,
+                editor_path,
+                lsp,
+                ui_registry,
+                s,
+                mx,
+                my,
+                panel_bottom_h,
+            );
+        }
+
         if is_ide_mode && panel_bottom_h > 0.0 {
             self.draw_ide_bottom_panel(
                 ide_panel,
@@ -1376,19 +1490,6 @@ impl Renderer {
                 my,
                 panel_bottom_h,
                 is_ui_disabled,
-            );
-        }
-
-        if is_ide_mode {
-            self.draw_status_bar(
-                editor,
-                editor_path,
-                lsp,
-                ui_registry,
-                s,
-                mx,
-                my,
-                panel_bottom_h,
             );
         }
 
@@ -1406,7 +1507,8 @@ impl Renderer {
         let hover_blocked_by_bottom_panel = is_ide_mode
             && panel_bottom_h > 0.0
             && ide_panel.bottom_panel_blocks_editor_hover()
-            && my >= self.height - panel_bottom_h;
+            && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
+            && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         if hover_blocked_by_status_bar {
@@ -1456,7 +1558,7 @@ impl Renderer {
             );
         }
         if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
-            let panel_y = self.height - panel_bottom_h;
+            let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,
                 48.0 * s,

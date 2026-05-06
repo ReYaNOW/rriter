@@ -1,7 +1,7 @@
 use crate::renderer::Renderer;
 use crate::render_view::{
-    cursor_line_and_character, diagnostic_error_warning_counts, ide_status_bar_height,
-    ide_status_bar_y,
+    cursor_line_and_character, diagnostic_error_warning_counts, ide_bottom_panel_y,
+    ide_status_bar_height, ide_status_bar_y, language_display_name_for_ext, selected_char_count,
 };
 use crate::widgets::IconButton;
 use glow::HasContext;
@@ -648,7 +648,7 @@ impl Renderer {
     ) {
         let sb_w = 48.0 * s;
         let panel_x = sb_w;
-        let panel_y = self.height - panel_bottom_h;
+        let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
         let panel_w = self.width - panel_x;
 
         let is_terminal = ide_panel.slots.iter().any(|sl| {
@@ -830,11 +830,11 @@ impl Renderer {
             .map(|l| diagnostic_error_warning_counts(l.diagnostics.values().map(|v| v.as_slice())))
             .unwrap_or((0, 0));
 
-        let icon_sz = 15.0 * s;
-        let text_scale = 0.84;
+        let icon_sz = 20.0 * s;
+        let text_scale = 0.95;
         let pad_x = 10.0 * s;
-        let icon_gap = 4.0 * s;
-        let item_gap = 12.0 * s;
+        let icon_gap = 5.0 * s;
+        let item_gap = 16.0 * s;
         let diag_x = bar_x + pad_x;
         let icon_y = bar_y + (bar_h - icon_sz) / 2.0;
         let text_y = bar_y + bar_h / 2.0 + 5.0 * s;
@@ -873,7 +873,7 @@ impl Renderer {
             diag_x,
             icon_y,
             icon_sz,
-            self.theme.diag_error,
+            [1.0, 1.0, 1.0, 1.0],
         );
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
@@ -882,7 +882,7 @@ impl Renderer {
             &scratch,
             error_text_x,
             text_y,
-            self.theme.diag_error,
+            self.theme.fg,
             text_scale,
         );
 
@@ -892,7 +892,7 @@ impl Renderer {
             warn_icon_x,
             icon_y,
             icon_sz,
-            self.theme.diag_warn,
+            [1.0, 1.0, 1.0, 1.0],
         );
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
@@ -900,7 +900,7 @@ impl Renderer {
             &scratch,
             warn_icon_x + icon_sz + icon_gap,
             text_y,
-            self.theme.diag_warn,
+            self.theme.fg,
             text_scale,
         );
 
@@ -908,10 +908,9 @@ impl Renderer {
             .and_then(|path| path.extension())
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
-        let lang = crate::highlighter::tree_sitter_lang_name_for_ext(ext);
-        let lang = if lang.is_empty() { "-" } else { lang };
+        let lang = language_display_name_for_ext(ext);
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("TS: {}", lang));
+        scratch.push_str(lang);
         let lang_w = self.measure_ui_width(&scratch, text_scale).round();
         let lang_x = (bar_x + bar_w - pad_x - lang_w).max(diag_x);
         self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
@@ -922,6 +921,10 @@ impl Renderer {
             &mut scratch,
             format_args!("Стр {}, Сим {}", line, character),
         );
+        if let Some(count) = selected_char_count(editor) {
+            let _ =
+                std::fmt::Write::write_fmt(&mut scratch, format_args!(" ({} выделено)", count));
+        }
         let pos_w = self.measure_ui_width(&scratch, text_scale).round();
         let pos_x = lang_x - 22.0 * s - pos_w;
         if pos_x > diag_x + diagnostics_w + 8.0 * s {
@@ -938,10 +941,13 @@ impl Renderer {
             scratch.clear();
             let _ = std::fmt::Write::write_fmt(
                 &mut scratch,
-                format_args!("Ляпы: {} error, {} warning", error_count, warning_count),
+                format_args!(
+                    "Ляпы: {} ошибок, {} предупреждений",
+                    error_count, warning_count
+                ),
             );
             let tip_w = self.measure_ui_width(&scratch, text_scale).round() + 16.0 * s;
-            let tip_h = 26.0 * s;
+            let tip_h = 24.0 * s;
             let tip_x = (diag_x - 4.0 * s)
                 .min(self.width - tip_w - 6.0 * s)
                 .max(6.0 * s);
