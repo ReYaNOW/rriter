@@ -1007,6 +1007,8 @@ pub fn highlight_python_hover_doc(
         at += line.len() + 1;
     }
     let mut spans = Vec::new();
+    let mut signature_brackets = Vec::new();
+    let mut signature_type_tokens = Vec::new();
 
     // signature block -> tree-sitter python highlight
     let mut sig_start_line = None;
@@ -1140,7 +1142,6 @@ pub fn highlight_python_hover_doc(
             }
         }
 
-        let mut signature_brackets = Vec::new();
         for line_no in start_line..=end_line {
             for (idx, ch) in lines[line_no].char_indices() {
                 if ch == '[' || ch == ']' {
@@ -1149,9 +1150,8 @@ pub fn highlight_python_hover_doc(
                 }
             }
         }
-        if !signature_brackets.is_empty() {
-            force_color_on_ranges(&mut spans, &signature_brackets, neutral);
-        }
+        signature_type_tokens =
+            signature_type_token_ranges(&lines, &line_starts, start_line, end_line);
     }
 
     let mut assignment_start = None;
@@ -1204,6 +1204,13 @@ pub fn highlight_python_hover_doc(
             continue;
         }
         i += 1;
+    }
+
+    if !signature_brackets.is_empty() {
+        force_color_on_ranges(&mut spans, &signature_brackets, neutral);
+    }
+    if !signature_type_tokens.is_empty() {
+        force_color_on_ranges(&mut spans, &signature_type_tokens, ty);
     }
 
     // light text lines after separator
@@ -1368,6 +1375,98 @@ fn force_color_on_ranges(
             .map(|&(start, end)| crate::highlighter::ColorSpan { start, end, color }),
     );
     *spans = out;
+}
+
+fn signature_type_token_ranges(
+    lines: &[&str],
+    line_starts: &[usize],
+    start_line: usize,
+    end_line: usize,
+) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    for line_no in start_line..=end_line {
+        let Some(line) = lines.get(line_no).copied() else {
+            continue;
+        };
+        let line_start = line_starts.get(line_no).copied().unwrap_or(0);
+        let mut scan_from = 0usize;
+        while let Some(colon_rel) = line[scan_from..].find(':') {
+            let start = scan_from + colon_rel + 1;
+            let end = type_slice_end(line, start);
+            push_type_tokens(line, line_start, start, end, &mut ranges);
+            scan_from = end.saturating_add(1).min(line.len());
+        }
+        scan_from = 0;
+        while let Some(arrow_rel) = line[scan_from..].find("->") {
+            let start = scan_from + arrow_rel + 2;
+            push_type_tokens(line, line_start, start, line.len(), &mut ranges);
+            scan_from = start;
+        }
+    }
+    ranges
+}
+
+fn type_slice_end(line: &str, start: usize) -> usize {
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut in_string = None;
+    for (idx, ch) in line[start..].char_indices() {
+        let abs = start + idx;
+        if let Some(quote) = in_string {
+            if ch == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            in_string = Some(ch);
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' if bracket_depth > 0 => bracket_depth -= 1,
+            ',' if paren_depth == 0 && bracket_depth == 0 => return abs,
+            _ => {}
+        }
+    }
+    line.len()
+}
+
+fn push_type_tokens(
+    line: &str,
+    line_start: usize,
+    start: usize,
+    end: usize,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let mut token_start = None;
+    let mut in_string = None;
+    for (idx, ch) in line[start..end].char_indices() {
+        let abs = start + idx;
+        if let Some(quote) = in_string {
+            if ch == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            if let Some(token_start) = token_start.take() {
+                ranges.push((line_start + token_start, line_start + abs));
+            }
+            in_string = Some(ch);
+            continue;
+        }
+        if ch.is_alphanumeric() || ch == '_' || ch == '.' {
+            token_start.get_or_insert(abs);
+        } else if let Some(token_start) = token_start.take() {
+            ranges.push((line_start + token_start, line_start + abs));
+        }
+    }
+    if let Some(token_start) = token_start {
+        ranges.push((line_start + token_start, line_start + end));
+    }
 }
 
 fn color_keyword_args_orange(

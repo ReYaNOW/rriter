@@ -165,6 +165,29 @@ fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
     .unwrap();
     assert_eq!(datetime_attr.module, None);
 
+    let imported_router = parse_completion_item_value(&serde_json::json!({
+        "label": "cars_router",
+        "kind": 6,
+        "labelDetails": {
+            "detail": ": Router",
+            "description": "car_wash.domains.cars.controller"
+        },
+        "detail": "(variable) cars_router: Router"
+    }))
+    .unwrap();
+    assert_eq!(
+        imported_router.module.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+    assert_eq!(
+        imported_router.detail.as_deref(),
+        Some("(variable) cars_router: Router")
+    );
+    assert_eq!(
+        imported_router.kind,
+        crate::highlighter::SymbolKind::Variable
+    );
+
     let data_module_type_attr = parse_completion_item_value(&serde_json::json!({
         "label": "car_wash",
         "kind": 7,
@@ -204,6 +227,20 @@ fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
         dotted_variable.module.as_deref(),
         Some("car_wash.core.db.repo_base")
     );
+
+    let class_detail = parse_completion_item_value(&serde_json::json!({
+        "label": "Router",
+        "kind": 6,
+        "labelDetails": {
+            "detail": "Router",
+            "description": "litestar.router"
+        },
+        "detail": "class Router"
+    }))
+    .unwrap();
+    assert_eq!(class_detail.kind, crate::highlighter::SymbolKind::Class);
+    assert_eq!(class_detail.detail.as_deref(), Some("class Router"));
+    assert_eq!(class_detail.module.as_deref(), Some("litestar.router"));
 }
 
 #[test]

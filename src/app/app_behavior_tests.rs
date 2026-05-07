@@ -450,6 +450,46 @@ fn autocomplete_detail_merge_hides_lowercase_type_source_without_detail() {
 }
 
 #[test]
+fn autocomplete_detail_merge_keeps_parameter_badge_when_ty_reports_type() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("def lifespan(_: Litestar, arg: str):\n    ar");
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TreeSitter;
+    app.autocomplete_detail_word = Some("arg".to_string());
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "arg".to_string(),
+            kind: SymbolKind::Parameter,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: None,
+            module_path: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+        label: "arg".to_string(),
+        kind: SymbolKind::Class,
+        module: Some("builtins.str".to_string()),
+        detail: Some("str".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.kind, SymbolKind::Parameter);
+    assert_eq!(item.detail.as_deref(), Some("str"));
+}
+
+#[test]
 fn autocomplete_orders_magic_names_after_regular_members_and_merges_lazy_detail() {
     let Some(mut app) = test_app() else {
         return;
@@ -535,6 +575,54 @@ fn autocomplete_detail_popup_uses_hover_text_and_selection_state() {
 }
 
 #[test]
+fn autocomplete_detail_request_replaces_stale_popup_with_placeholder() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("c");
+    app.file_path = Some(PathBuf::from("/tmp/current.py"));
+    app.file_extension = "py".to_string();
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TreeSitter;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "config".to_string(),
+            kind: SymbolKind::Variable,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: Some("car_wash.config".to_string()),
+            module_path: Some("car_wash.config".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+    app.autocomplete_detail_popup = Some(crate::app::mouse::HoverPopup {
+        text: "class BookingChangeToPreviousStateError".to_string(),
+        spans: Vec::new(),
+        line_kinds: vec![crate::lsp::HoverLineKindPublic::Text],
+        inline_code_ranges: Vec::new(),
+        byte_offset: 0,
+        anchor_x: 0.0,
+        anchor_y: 0.0,
+        offset_x: Some(0.0),
+        offset_y: Some(0.0),
+        anim_progress: 1.0,
+        scroll: crate::scroll::ScrollState::new(15.0),
+        layout_cache: None,
+    });
+
+    app.request_autocomplete_detail_for_index(0);
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(popup.text, "Unknown");
+    assert!(app.autocomplete_detail_rect.is_none());
+    assert_eq!(app.autocomplete_detail_placement, None);
+}
+
+#[test]
 fn autocomplete_detail_popup_prepends_full_module_path() {
     let Some(mut app) = test_app() else {
         return;
@@ -563,7 +651,7 @@ fn autocomplete_detail_popup_prepends_full_module_path() {
     assert!(
         popup
             .text
-            .starts_with("[[MODULE]] car_wash.core.db.repo_base.RepoBase\n")
+            .starts_with("[[MODULE]] car_wash.core.db.repo_base\n")
     );
     assert_eq!(
         popup.line_kinds.first().copied(),
@@ -604,7 +692,7 @@ fn autocomplete_detail_popup_cleans_source_attr_class_type_union() {
 
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert!(popup.text.starts_with(
-        "[[MODULE]] car_wash.domains.washes.bookings.repository.BookingRepository\nclass BookingRepository"
+        "[[MODULE]] car_wash.domains.washes.bookings.repository\nclass BookingRepository"
     ));
     assert!(!popup.text.contains("Unknown"));
     assert!(!popup.spans.is_empty());
@@ -666,6 +754,12 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
     assert!(popup.text.contains("def asynccontextmanager("));
     assert!(popup.text.contains("@asynccontextmanager decorator"));
     assert!(!popup.spans.is_empty());
+    let paramspec_pos = popup.text.find("ParamSpec").unwrap();
+    assert!(popup.spans.iter().any(|span| {
+        span.start <= paramspec_pos
+            && paramspec_pos < span.end
+            && span.color == crate::highlighter::DRACULA_CYAN
+    }));
 
     app.autocomplete_options[0].0 = AutocompleteItem {
         word: "cast".to_string(),
@@ -1308,6 +1402,210 @@ fn tree_sitter_autocomplete_shows_import_path_for_python_symbols() {
 }
 
 #[test]
+fn tree_sitter_autocomplete_keeps_top_level_python_prefix_local_and_fast() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.is_ide_mode = true;
+    app.editor = editor_with(
+        "from car_wash.core.db.repo_base import RepoBase\n\nRepoBase.initialize_all()\nR",
+    );
+    app.highlighter.completions = vec![
+        completion("RepoBase", SymbolKind::Variable, 0, 200),
+        completion("RatingType", SymbolKind::Unknown, 0, 200),
+    ];
+
+    app.update_autocomplete();
+
+    let words = app
+        .autocomplete_options
+        .iter()
+        .map(|(item, _)| item.word.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(app.autocomplete_mode, AutocompleteMode::TreeSitter);
+    assert_eq!(words, vec!["RepoBase", "RatingType"]);
+    assert_eq!(
+        app.autocomplete_options[0].0.module.as_deref(),
+        Some("car_wash.core.db.repo_base")
+    );
+}
+
+#[test]
+fn tree_sitter_autocomplete_classifies_imported_python_symbols_before_detail() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+
+    app.editor = editor_with(
+        "from contextlib import asynccontextmanager\nfrom typing import cast\nfrom car_wash.config import config\na",
+    );
+    app.highlighter.completions = vec![completion(
+        "asynccontextmanager",
+        SymbolKind::Unknown,
+        0,
+        200,
+    )];
+    app.update_autocomplete();
+    assert_eq!(app.autocomplete_options[0].0.word, "asynccontextmanager");
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Function);
+    assert_eq!(
+        app.autocomplete_options[0].0.module.as_deref(),
+        Some("contextlib")
+    );
+
+    app.editor = editor_with(
+        "from contextlib import asynccontextmanager\nfrom typing import cast\nfrom car_wash.config import config\nc",
+    );
+    app.highlighter.completions = vec![
+        completion("cast", SymbolKind::Unknown, 0, 200),
+        completion("config", SymbolKind::Unknown, 0, 200),
+    ];
+    app.update_autocomplete();
+
+    let cast_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "cast")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(cast_item.kind, SymbolKind::Function);
+    assert_eq!(cast_item.module.as_deref(), Some("typing"));
+
+    let config_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "config")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(config_item.kind, SymbolKind::Variable);
+    assert_eq!(config_item.module.as_deref(), Some("car_wash.config"));
+    assert_eq!(config_item.module_path.as_deref(), Some("car_wash.config"));
+}
+
+#[test]
+fn tree_sitter_autocomplete_always_shows_import_module_for_python_variables() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "from car_wash.domains.cars.controller import cars_router\n\
+from car_wash.utils.openapi.custom_docs import (\n\
+    docs_router,\n\
+)\n\
+\nR",
+    );
+    app.highlighter.completions = vec![
+        completion("cars_router", SymbolKind::Variable, 0, 200),
+        completion("docs_router", SymbolKind::Unknown, 0, 200),
+    ];
+
+    app.update_autocomplete();
+
+    let cars_router = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "cars_router")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(cars_router.kind, SymbolKind::Variable);
+    assert_eq!(
+        cars_router.module.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+    assert_eq!(
+        cars_router.module_path.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+
+    let docs_router = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "docs_router")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(docs_router.kind, SymbolKind::Variable);
+    assert_eq!(
+        docs_router.module.as_deref(),
+        Some("car_wash.utils.openapi.custom_docs")
+    );
+    assert_eq!(
+        docs_router.module_path.as_deref(),
+        Some("car_wash.utils.openapi.custom_docs")
+    );
+}
+
+#[test]
+fn autocomplete_detail_merge_keeps_import_module_and_uses_source_declaration() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_ts_detail_import_{stamp}"));
+    let package_dir = root.join("car_wash/utils/openapi");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("custom_docs.py"),
+        "docs_router = Router(path='/docs', route_handlers=[rapidoc, rapidoc_js, openapi_spec, unprocessable_entity_error_handler, final_handler])\n",
+    )
+    .unwrap();
+
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root.clone()];
+    app.editor = editor_with(
+        "from car_wash.utils.openapi.custom_docs import (\n\
+    docs_router,\n\
+)\n\
+\nrou",
+    );
+    app.highlighter.completions = vec![completion("docs_router", SymbolKind::Unknown, 0, 200)];
+
+    app.update_autocomplete();
+
+    let docs_idx = app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "docs_router")
+        .unwrap();
+    app.autocomplete_selected_idx = docs_idx;
+    app.autocomplete_detail_word = Some("docs_router".to_string());
+    app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+        label: "docs_router".to_string(),
+        kind: SymbolKind::Variable,
+        module: Some("Router".to_string()),
+        detail: Some("Router".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[docs_idx].0;
+    assert_eq!(
+        item.module.as_deref(),
+        Some("car_wash.utils.openapi.custom_docs")
+    );
+    assert_eq!(
+        item.module_path.as_deref(),
+        Some("car_wash.utils.openapi.custom_docs")
+    );
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(
+        popup.text.contains("\ndocs_router: Router = Router("),
+        "unexpected popup text: {}",
+        popup.text
+    );
+    assert!(popup.text.contains("..."));
+    assert_ne!(popup.text, "Router");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn tree_sitter_autocomplete_remaps_builtins_to_class_or_function() {
     let Some(mut app) = test_app() else {
         return;
@@ -1749,6 +2047,33 @@ fn ty_context_initial_typing_cast_is_function_before_detail_hover() {
 }
 
 #[test]
+fn ty_context_initial_overload_completion_is_function_before_detail_hover() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("from contextlib import asynccontextmanager\nasy");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "asynccontextmanager".to_string(),
+        kind: SymbolKind::Variable,
+        module: Some("contextlib".to_string()),
+        detail: Some(
+            "Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.word, "asynccontextmanager");
+    assert_eq!(item.kind, SymbolKind::Function);
+    assert_eq!(item.module.as_deref(), Some("contextlib"));
+}
+
+#[test]
 fn ty_context_initial_keywords_and_imported_config_have_stable_kinds() {
     let Some(mut app) = test_app() else {
         return;
@@ -1794,10 +2119,7 @@ fn ty_context_initial_keywords_and_imported_config_have_stable_kinds() {
         .unwrap();
     assert_eq!(config_item.kind, SymbolKind::Variable);
     assert_eq!(config_item.module.as_deref(), Some("car_wash.config"));
-    assert_eq!(
-        config_item.module_path.as_deref(),
-        Some("car_wash.config.Config")
-    );
+    assert_eq!(config_item.module_path.as_deref(), Some("car_wash.config"));
 
     let config_idx = app
         .autocomplete_options
@@ -1807,10 +2129,229 @@ fn ty_context_initial_keywords_and_imported_config_have_stable_kinds() {
     app.autocomplete_selected_idx = config_idx;
     app.refresh_autocomplete_detail_popup();
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup
+        .text
+        .starts_with("[[MODULE]] car_wash.config\n(variable) config: Config"));
+}
+
+#[test]
+fn ty_context_imported_router_variable_shows_import_module_and_variable_detail() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "from car_wash.domains.cars.controller import cars_router\ncar",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "cars_router".to_string(),
+        kind: SymbolKind::Variable,
+        module: Some("Router".to_string()),
+        detail: Some("Router".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.word, "cars_router");
+    assert_eq!(item.kind, SymbolKind::Variable);
+    assert_eq!(
+        item.module.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+    assert_eq!(
+        item.module_path.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert!(popup.text.starts_with(
-        "[[MODULE]] car_wash.config.Config\nclass Config"
+        "[[MODULE]] car_wash.domains.cars.controller\n(variable) cars_router: Router"
     ));
-    assert!(!popup.spans.is_empty());
+}
+
+#[test]
+fn autocomplete_detail_uses_module_path_when_module_is_only_type_label() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("from car_wash.domains.cars.controller import cars_router\ncar");
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "cars_router".to_string(),
+            kind: SymbolKind::Variable,
+            scope_start: 0,
+            scope_end: app.editor.len(),
+            module: Some("Router".to_string()),
+            module_path: Some("car_wash.domains.cars.controller".to_string()),
+            detail: Some("Router".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        vec![0, 1],
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(
+        popup.text,
+        "[[MODULE]] car_wash.domains.cars.controller\n(variable) cars_router: Router"
+    );
+}
+
+#[test]
+fn autocomplete_detail_variable_uses_source_declaration_with_middle_ellipsis() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_autocomplete_source_detail_{stamp}"));
+    let package_dir = root.join("car_wash/domains/cars");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("controller.py"),
+        "cars_router = Router(path='/cars', route_handlers=[rapidoc, rapidoc_js, openapi_spec, unprocessable_entity_error_handler, final_handler])\n",
+    )
+    .unwrap();
+
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root.clone()];
+    app.editor = editor_with(
+        "from car_wash.domains.cars.controller import cars_router\ncar",
+    );
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "cars_router".to_string(),
+            kind: SymbolKind::Variable,
+            scope_start: 0,
+            scope_end: app.editor.len(),
+            module: Some("Router".to_string()),
+            module_path: Some("car_wash.domains.cars.controller".to_string()),
+            detail: Some("Router".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        vec![0, 1],
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(
+        popup.text.starts_with(
+            "[[MODULE]] car_wash.domains.cars\nVariable cars_router of controller\n"
+        ),
+        "unexpected popup text: {}",
+        popup.text
+    );
+    assert!(popup.text.contains("\ncars_router: Router = Router("));
+    assert!(popup.text.contains("..."));
+    assert!(popup.text.contains("final_handler])"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn ty_context_pasted_litestar_app_imports_keep_router_sources() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "from contextlib import asynccontextmanager\n\
+from typing import Any, AsyncGenerator\n\
+\n\
+from litestar import Litestar, get\n\
+from car_wash.domains.auth.controller import AuthController\n\
+from car_wash.domains.cars.controller import cars_router\n\
+from car_wash.domains.users.controller import users_router\n\
+from car_wash.domains.washes.controller import car_washes_router\n\
+\n\
+setup_logging()\n\
+\n\
+@asynccontextmanager\n\
+async def lifespan(_: Litestar, arg: str) -> AsyncGenerator[None, Any]:\n\
+    RepoBase.initialize_all()\n\
+    ca",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "cars_router".to_string(),
+            kind: SymbolKind::Variable,
+            module: Some("Router".to_string()),
+            detail: Some("Router".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "car_washes_router".to_string(),
+            kind: SymbolKind::Variable,
+            module: Some("Router".to_string()),
+            detail: Some("Router".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "case".to_string(),
+            kind: SymbolKind::Unknown,
+            module: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    let cars = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "cars_router")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(cars.kind, SymbolKind::Variable);
+    assert_eq!(
+        cars.module.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+    assert_eq!(
+        cars.module_path.as_deref(),
+        Some("car_wash.domains.cars.controller")
+    );
+    assert_eq!(cars.detail.as_deref(), Some("Router"));
+
+    let washes = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "car_washes_router")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(
+        washes.module.as_deref(),
+        Some("car_wash.domains.washes.controller")
+    );
+    assert_eq!(
+        washes.module_path.as_deref(),
+        Some("car_wash.domains.washes.controller")
+    );
 }
 
 #[test]
@@ -2001,7 +2542,7 @@ fn ty_context_self_member_completion_uses_booking_service_instance_attrs() {
     app.refresh_autocomplete_detail_popup();
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert!(popup.text.starts_with(
-        "[[MODULE]] car_wash.domains.washes.bans.repository.CarWashBanRepository\nclass CarWashBanRepository"
+        "[[MODULE]] car_wash.domains.washes.bans.repository\nclass CarWashBanRepository"
     ));
     assert!(!popup.spans.is_empty());
 }

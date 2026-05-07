@@ -157,6 +157,32 @@ fn autocomplete_source_label<'a>(source: &'a str, word: &str) -> Option<Cow<'a, 
     }
 }
 
+fn autocomplete_source_is_type_label(source: &str) -> bool {
+    let source = source.trim();
+    !source.contains('.')
+        && source.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && source.chars().any(|c| c.is_ascii_lowercase())
+        && source.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn autocomplete_row_source<'a>(item: &'a crate::app::AutocompleteItem) -> Option<&'a str> {
+    match (item.module.as_deref(), item.module_path.as_deref()) {
+        (Some(module), Some(module_path))
+            if autocomplete_source_is_type_label(module)
+                && autocomplete_source_label(module_path, &item.word).is_some() =>
+        {
+            Some(module_path)
+        }
+        (Some(module), _) if autocomplete_source_label(module, &item.word).is_some() => {
+            Some(module)
+        }
+        (_, Some(module_path)) if autocomplete_source_label(module_path, &item.word).is_some() => {
+            Some(module_path)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct AutocompleteModuleLayout<'a> {
     x: f32,
@@ -364,6 +390,40 @@ mod tests {
             autocomplete_source_label("builtins", "bool").as_deref(),
             Some("builtins")
         );
+    }
+
+    #[test]
+    fn autocomplete_row_source_prefers_module_path_over_type_label() {
+        let item = crate::app::AutocompleteItem {
+            word: "cars_router".to_string(),
+            kind: SymbolKind::Variable,
+            scope_start: 0,
+            scope_end: 0,
+            module: Some("Router".to_string()),
+            module_path: Some("car_wash.domains.cars.controller".to_string()),
+            detail: Some("Router".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        };
+        assert_eq!(
+            autocomplete_row_source(&item),
+            Some("car_wash.domains.cars.controller")
+        );
+
+        let builtin = crate::app::AutocompleteItem {
+            word: "issubclass".to_string(),
+            kind: SymbolKind::Function,
+            scope_start: 0,
+            scope_end: 0,
+            module: Some("builtins".to_string()),
+            module_path: Some("builtins.issubclass".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        };
+        assert_eq!(autocomplete_row_source(&builtin), Some("builtins"));
     }
 }
 
@@ -726,7 +786,7 @@ impl Renderer {
             let module_min_x = cx + name_w + module_gap;
             let right_limit = x + max_w - right_pad;
             let ellipsis_w = self.measure_ui_width("...", module_scale);
-            let module_metrics = item.module.as_ref().and_then(|module| {
+            let module_metrics = autocomplete_row_source(item).and_then(|module| {
                 autocomplete_module_layout(
                     module,
                     &item.word,

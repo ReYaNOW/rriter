@@ -1,10 +1,20 @@
 use super::*;
 
 fn autocomplete_trace_enabled() -> bool {
-    false
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("RRITER_TRACE_AUTOCOMPLETE").is_some())
 }
 
 const AUTOCOMPLETE_CACHE_MAX_ITEMS: usize = 256;
+const AUTOCOMPLETE_DETAIL_DECL_MAX_CHARS: usize = 112;
+
+fn python_completion_context(file_extension: &str, text: &str) -> bool {
+    matches!(file_extension, "py" | "pyi")
+        || text.lines().take(200).any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("from ") || trimmed.starts_with("import ")
+        })
+}
 
 fn autocomplete_detail_cache_item(
     item: &crate::lsp::LspCompletionItem,
@@ -28,7 +38,7 @@ fn apply_autocomplete_detail_cache_item(
     } else {
         incoming_kind
     };
-    if matches!(item.word.as_str(), "self" | "cls") && item.kind == SymbolKind::Parameter {
+    if item.kind == SymbolKind::Parameter {
         if item.detail.is_none() && cached.detail.is_some() {
             item.detail = cached.detail.clone();
         }
@@ -55,6 +65,17 @@ fn apply_autocomplete_detail_cache_item(
         ) {
             item.kind = SymbolKind::Variable;
         }
+        if item
+            .module_path
+            .as_deref()
+            .is_some_and(completion_source_is_module_path)
+            || item
+                .module
+                .as_deref()
+                .is_some_and(completion_source_is_module_path)
+        {
+            return;
+        }
         item.module = None;
         item.module_path = None;
         return;
@@ -75,14 +96,237 @@ fn apply_autocomplete_detail_cache_item(
 fn autocomplete_source_attr_class_detail(
     item: &AutocompleteItem,
     detail: &str,
-    _owner: &str,
+    owner: &str,
 ) -> Option<String> {
     if !matches!(item.kind, SymbolKind::Variable | SymbolKind::Property) {
         return None;
     }
     let class_name = autocomplete_detail_type_name(detail)?;
     let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    if completion_source_is_module_path(owner) {
+        return Some(format!("(variable) {}: {class_label}", item.word));
+    }
     Some(format!("class {class_label}"))
+}
+
+fn autocomplete_detail_type_label(detail: Option<&str>) -> Option<String> {
+    let detail = detail?.trim();
+    if detail.is_empty() || detail.contains('\n') {
+        return None;
+    }
+    let detail = detail
+        .strip_prefix("(variable) ")
+        .or_else(|| detail.strip_prefix("(parameter) "))
+        .or_else(|| detail.strip_prefix("(property) "))
+        .unwrap_or(detail);
+    let ty = detail
+        .rsplit_once(':')
+        .map(|(_, ty)| ty.trim())
+        .unwrap_or(detail);
+    (!ty.is_empty()).then(|| ty.to_string())
+}
+
+fn autocomplete_middle_ellipsis(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars || max_chars <= 3 {
+        return text.to_string();
+    }
+    let keep = max_chars - 3;
+    let head = keep / 2;
+    let tail = keep - head;
+    let mut out = String::with_capacity(text.len().min(max_chars + 8));
+    out.extend(text.chars().take(head));
+    out.push_str("...");
+    out.extend(text.chars().skip(char_count.saturating_sub(tail)));
+    out
+}
+
+fn autocomplete_truncate_source_detail(text: String) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (idx, line) in text.lines().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if idx == 0 {
+            out.push_str(line);
+        } else if line.chars().count() > AUTOCOMPLETE_DETAIL_DECL_MAX_CHARS {
+            out.push_str(&autocomplete_middle_ellipsis(
+                line,
+                AUTOCOMPLETE_DETAIL_DECL_MAX_CHARS,
+            ));
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+fn autocomplete_push_dedent_line(out: &mut Vec<String>, line: &str, base_indent: usize) {
+    let current_indent = line.len() - line.trim_start().len();
+    if current_indent >= base_indent {
+        out.push(line[base_indent..].to_string());
+    } else {
+        out.push(line.trim_start().to_string());
+    }
+}
+
+fn autocomplete_scan_brackets(
+    line: &str,
+    paren_depth: &mut i32,
+    bracket_depth: &mut i32,
+    brace_depth: &mut i32,
+    in_string: &mut bool,
+    string_char: &mut char,
+) {
+    for c in line.chars() {
+        if *in_string {
+            if c == '\\' {
+                continue;
+            }
+            if c == *string_char {
+                *in_string = false;
+            }
+        } else {
+            match c {
+                '"' | '\'' => {
+                    *in_string = true;
+                    *string_char = c;
+                }
+                '(' => *paren_depth += 1,
+                ')' => *paren_depth -= 1,
+                '[' => *bracket_depth += 1,
+                ']' => *bracket_depth -= 1,
+                '{' => *brace_depth += 1,
+                '}' => *brace_depth -= 1,
+                _ => {}
+            }
+        }
+    }
+}
+
+fn autocomplete_collect_assignment(lines: &[&str], idx: usize) -> String {
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut brace_depth = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut statement_lines = vec![lines[idx].trim_end().to_string()];
+
+    autocomplete_scan_brackets(
+        lines[idx],
+        &mut paren_depth,
+        &mut bracket_depth,
+        &mut brace_depth,
+        &mut in_string,
+        &mut string_char,
+    );
+    let mut curr_idx = idx;
+    while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0) && curr_idx + 1 < lines.len() {
+        curr_idx += 1;
+        let line = lines[curr_idx].trim_end();
+        statement_lines.push(line.to_string());
+        autocomplete_scan_brackets(
+            line,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+            &mut in_string,
+            &mut string_char,
+        );
+    }
+    statement_lines.join("\n")
+}
+
+fn autocomplete_format_assignment(statement: &str, symbol: &str, lsp_type: Option<&str>) -> String {
+    let mut lines_iter = statement.lines();
+    let first = lines_iter.next().unwrap_or("");
+    let base_indent = first.len() - first.trim_start().len();
+    let mut out = vec![first.trim_start().to_string()];
+    for line in lines_iter {
+        autocomplete_push_dedent_line(&mut out, line, base_indent);
+    }
+    let mut assignment = out.join("\n").trim_end().to_string();
+    if let Some(ty) = lsp_type {
+        if assignment.starts_with(&format!("{symbol} =")) {
+            let replacement = format!("{symbol}: {ty} =");
+            assignment = assignment.replacen(&format!("{symbol} ="), &replacement, 1);
+        } else if assignment.starts_with(&format!("{symbol}=")) {
+            let replacement = format!("{symbol}: {ty} =");
+            assignment = assignment.replacen(&format!("{symbol}="), &replacement, 1);
+        }
+    }
+    assignment
+}
+
+fn autocomplete_source_variable_detail_from_text(
+    text: &str,
+    symbol: &str,
+    module_path: Option<&str>,
+    lsp_type: Option<&str>,
+) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim_start();
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        let matched = trimmed.strip_prefix(symbol).is_some_and(|rest| {
+            rest.starts_with(':') || rest.starts_with(" =") || rest.starts_with('=')
+        });
+        if !matched {
+            continue;
+        }
+
+        let statement = autocomplete_collect_assignment(&lines, idx);
+        let assignment = autocomplete_format_assignment(&statement, symbol, lsp_type);
+        let mut class_name = None;
+        for up in (0..idx).rev() {
+            let class_line = lines[up].trim_start();
+            if let Some(rest) = class_line.strip_prefix("class ") {
+                class_name = rest
+                    .split(|c: char| c == '(' || c == ':' || c.is_whitespace() || c == '[')
+                    .next()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                break;
+            }
+        }
+
+        let detail = if let Some(class_name) = class_name {
+            let owner = module_path
+                .filter(|module| !module.is_empty())
+                .map(|module| format!("{module}.{class_name}"))
+                .unwrap_or(class_name);
+            format!("## Class attribute {symbol} of {owner}\n{assignment}")
+        } else if let Some(module) = module_path.filter(|module| !module.is_empty()) {
+            format!("## Variable {symbol} of {module}\n{assignment}")
+        } else {
+            format!("## Variable {symbol}\n{assignment}")
+        };
+        return Some(autocomplete_truncate_source_detail(detail));
+    }
+    None
+}
+
+fn autocomplete_module_source_path(
+    module_path: &str,
+    workspaces: &[PathBuf],
+) -> Option<PathBuf> {
+    if !completion_source_is_module_path(module_path) {
+        return None;
+    }
+    let rel = module_path.replace('.', "/");
+    for root in workspaces {
+        let file = root.join(format!("{rel}.py"));
+        if file.is_file() {
+            return Some(file);
+        }
+        let init = root.join(&rel).join("__init__.py");
+        if init.is_file() {
+            return Some(init);
+        }
+    }
+    None
 }
 
 fn autocomplete_detail_class_name(detail: &str) -> Option<&str> {
@@ -383,11 +627,36 @@ impl App {
         if let Some(detail) = python_stdlib_completion_detail(item, detail) {
             return std::borrow::Cow::Borrowed(detail);
         }
-        let Some(owner) = item
+        let detail_type_label = autocomplete_detail_type_name(detail)
+            .map(|name| name.rsplit('.').next().unwrap_or(name));
+        let module_owner = item
             .module
             .as_deref()
-            .filter(|module| !is_type_like_completion_source(module))
-        else {
+            .filter(|module| !is_type_like_completion_source(module));
+        let path_owner = item
+            .module_path
+            .as_deref()
+            .filter(|module| completion_source_is_module_path(module));
+        let path_is_detail_type = path_owner.is_some_and(|path| {
+            detail_type_label.is_some_and(|label| path.ends_with(&format!(".{label}")))
+        });
+        if let Some(label) = detail_type_label {
+            let field_like = matches!(
+                item.kind,
+                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+            ) || completion_item_is_field_like(item);
+            if !field_like || path_is_detail_type {
+                return std::borrow::Cow::Owned(format!("class {label}"));
+            }
+        }
+        let owner = if item.module.as_deref().is_some_and(is_class_like_type_name)
+            && !path_is_detail_type
+        {
+            path_owner.or(module_owner)
+        } else {
+            module_owner.or(path_owner)
+        };
+        let Some(owner) = owner else {
             return std::borrow::Cow::Borrowed(detail);
         };
         if let Some(detail) = autocomplete_source_attr_class_detail(item, detail, owner) {
@@ -404,6 +673,42 @@ impl App {
             }
         }
         std::borrow::Cow::Borrowed(detail)
+    }
+
+    fn autocomplete_source_variable_detail(&self, item: &AutocompleteItem) -> Option<String> {
+        if self.file_extension != "py"
+            || !matches!(
+                item.kind,
+                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+            )
+        {
+            return None;
+        }
+
+        let lsp_type = autocomplete_detail_type_label(item.detail.as_deref());
+        let module_path = item
+            .module_path
+            .as_deref()
+            .filter(|module| completion_source_is_module_path(module));
+        let text = self.editor.get_full_text();
+        if let Some(detail) = autocomplete_source_variable_detail_from_text(
+            &text,
+            &item.word,
+            module_path,
+            lsp_type.as_deref(),
+        ) {
+            return Some(detail);
+        }
+
+        let path = module_path
+            .and_then(|module| autocomplete_module_source_path(module, &self.ide_workspaces))?;
+        let source = std::fs::read_to_string(path).ok()?;
+        autocomplete_source_variable_detail_from_text(
+            &source,
+            &item.word,
+            module_path,
+            lsp_type.as_deref(),
+        )
     }
 
     pub(crate) fn autocomplete_has_only_current_text_match(&self) -> bool {
@@ -466,14 +771,21 @@ impl App {
             self.trace_autocomplete_state("detail_refresh:no_item");
             return;
         };
-        let Some(detail) = item.detail.as_ref().filter(|s| !s.trim().is_empty()) else {
+        let source_detail = self.autocomplete_source_variable_detail(item);
+        let has_source_detail = source_detail.is_some();
+        let detail = item.detail.as_ref().filter(|s| !s.trim().is_empty());
+        if source_detail.is_none() && detail.is_none() {
             self.autocomplete_detail_popup = None;
             self.autocomplete_detail_rect = None;
             self.trace_autocomplete_state("detail_refresh:no_detail");
             return;
-        };
-        let module_path = autocomplete_detail_module_path(item).map(str::to_string);
-        let detail_text = Self::autocomplete_detail_text(item, detail);
+        }
+        let module_path = (!has_source_detail)
+            .then(|| autocomplete_detail_module_path(item).map(str::to_string))
+            .flatten();
+        let detail_text = source_detail
+            .map(std::borrow::Cow::Owned)
+            .unwrap_or_else(|| Self::autocomplete_detail_text(item, detail.unwrap()));
         let expected_text = module_path
             .as_ref()
             .map(|module_path| format!("[[MODULE]] {module_path}\n{}", detail_text.as_ref()))
@@ -514,6 +826,29 @@ impl App {
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
         self.trace_autocomplete_state("detail_refresh:rebuilt");
+    }
+
+    fn set_autocomplete_detail_placeholder(&mut self, text: &'static str) {
+        self.autocomplete_detail_popup = Some(crate::app::mouse::HoverPopup {
+            text: text.to_string(),
+            spans: Vec::new(),
+            line_kinds: vec![crate::lsp::HoverLineKindPublic::Text],
+            inline_code_ranges: Vec::new(),
+            byte_offset: self.editor.cursor,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: Some(0.0),
+            offset_y: Some(0.0),
+            anim_progress: self.autocomplete_anim_progress,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.autocomplete_detail_selection_anchor = None;
+        self.autocomplete_detail_selection_cursor = None;
+        self.autocomplete_detail_selecting = false;
     }
 
     fn current_autocomplete_detail_context_key(&self, text: &str, prefix: &str) -> String {
@@ -620,6 +955,7 @@ impl App {
             return;
         }
         let Some(path) = self.file_path.clone() else {
+            self.set_autocomplete_detail_placeholder("Unknown");
             self.trace_autocomplete_state("detail_request:no_path");
             return;
         };
@@ -630,6 +966,7 @@ impl App {
             self.trace_autocomplete_state("detail_request:cache_hit");
             return;
         }
+        self.set_autocomplete_detail_placeholder("Loading...");
         if self.autocomplete_detail_word.as_deref() == Some(target_word.as_str())
             && self.autocomplete_detail_request_id.is_some()
             && self.autocomplete_detail_request_path.as_ref() == Some(&path)
@@ -639,6 +976,7 @@ impl App {
             return;
         }
         let Some(lsp) = self.lsp.as_mut() else {
+            self.set_autocomplete_detail_placeholder("Unknown");
             self.trace_autocomplete_state("detail_request:no_lsp");
             return;
         };
@@ -877,11 +1215,11 @@ impl App {
         let mut items: Vec<AutocompleteItem> =
             items.into_iter().map(AutocompleteItem::from).collect();
         let current_text = self.editor.get_full_text();
-        let local_self_owner = (self.file_extension == "py")
+        let python_context = python_completion_context(&self.file_extension, &current_text);
+        let local_self_owner = python_context
             .then(|| python_enclosing_class_before_cursor(&current_text, self.editor.cursor))
             .flatten();
-        let imported_modules =
-            (self.file_extension == "py").then(|| imported_python_symbols(&current_text));
+        let imported_modules = python_context.then(|| imported_python_symbols(&current_text));
         let member_dot_context = cursor_after_python_member_dot(&self.editor);
         let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
             && member_dot_context)
@@ -1032,7 +1370,7 @@ impl App {
             if python_known_function_completion(item) {
                 item.kind = SymbolKind::Function;
             }
-            if self.file_extension == "py"
+            if python_context
                 && item.kind == SymbolKind::Unknown
                 && python_keyword_completion(&item.word)
             {
@@ -1210,6 +1548,36 @@ impl App {
                     }
                 }
             }
+        }
+        if python_context
+            && !member_dot_context
+            && let Some(imports) = imported_modules.as_ref()
+        {
+            for item in &mut items {
+                if let Some(module) = imports.get(&item.word) {
+                    apply_import_module_to_autocomplete_item(item, module);
+                }
+            }
+        }
+        if autocomplete_trace_enabled() {
+            let sample = items
+                .iter()
+                .take(12)
+                .map(|item| {
+                    format!(
+                        "{}:{:?}:m={:?}:mp={:?}:d={:?}",
+                        item.word, item.kind, item.module, item.module_path, item.detail
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            println!(
+                "Autocomplete update_ty normalized: prefix={:?} python_context={} imports={} items={}",
+                prefix,
+                python_context,
+                imported_modules.as_ref().map(|imports| imports.len()).unwrap_or(0),
+                sample
+            );
         }
 
         let prefix_lower = prefix.to_lowercase();

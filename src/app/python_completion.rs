@@ -581,15 +581,77 @@ pub(crate) fn set_completion_owner_source(
     item.module = Some(owner);
 }
 
+fn completion_detail_type_name(detail: &str) -> Option<&str> {
+    detail.split('|').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("<class '")
+            .and_then(|rest| rest.strip_suffix("'>"))
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                (is_class_like_type_name(part) && !part.contains('[')).then_some(part)
+            })
+    })
+}
+
+fn autocomplete_detail_parent_module_path<'a>(
+    item: &AutocompleteItem,
+    source: &'a str,
+) -> &'a str {
+    let source = normalized_completion_source(source);
+    let strip_label = |label: &str| {
+        let label = label.rsplit('.').next().unwrap_or(label).trim();
+        if label.is_empty() {
+            return None;
+        }
+        let suffix = format!(".{label}");
+        source
+            .strip_suffix(&suffix)
+            .filter(|parent| !parent.is_empty())
+    };
+
+    if let Some(parent) = item
+        .detail
+        .as_deref()
+        .and_then(completion_detail_type_name)
+        .and_then(strip_label)
+    {
+        return parent;
+    }
+
+    if let Some(parent) = item
+        .module
+        .as_deref()
+        .map(normalized_completion_source)
+        .filter(|module| is_class_like_type_name(module))
+        .and_then(strip_label)
+    {
+        return parent;
+    }
+
+    if let Some(parent) = strip_label(&item.word).filter(|parent| {
+        item.module
+            .as_deref()
+            .map(normalized_completion_source)
+            .is_some_and(|module| module == *parent)
+    }) {
+        return parent;
+    }
+
+    source
+}
+
 pub(crate) fn autocomplete_detail_module_path(item: &AutocompleteItem) -> Option<&str> {
-    item.module_path
+    let source = item
+        .module_path
         .as_deref()
         .filter(|source| completion_source_is_module_path(source))
         .or_else(|| {
             item.module
                 .as_deref()
                 .filter(|source| completion_source_is_module_path(source))
-        })
+        })?;
+    Some(autocomplete_detail_parent_module_path(item, source))
 }
 
 pub(crate) fn prepend_autocomplete_detail_module_path(
@@ -747,6 +809,8 @@ pub(crate) fn completion_detail_kind(kind: SymbolKind, detail: Option<&str>) -> 
         SymbolKind::Variable
     } else if detail.starts_with("(property)") || detail.starts_with("(field)") {
         SymbolKind::Property
+    } else if detail.starts_with("Overload[") {
+        SymbolKind::Function
     } else {
         kind
     }
@@ -882,22 +946,34 @@ pub(crate) fn apply_import_modules_to_autocomplete_items(
 ) {
     for (item, _) in items {
         if let Some(module) = imports.get(&item.word) {
-            if should_replace_completion_module(item.module.as_deref(), module) {
-                item.module = Some(module.clone());
-            }
-            if item.module_path.is_none() {
-                item.module_path = Some(module.clone());
-            }
-            if item
-                .word
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_uppercase())
-            {
-                item.kind = SymbolKind::Class;
-            }
+            apply_import_module_to_autocomplete_item(item, module);
         }
     }
+}
+
+pub(crate) fn apply_import_module_to_autocomplete_item(item: &mut AutocompleteItem, module: &str) {
+    item.module = Some(module.to_string());
+    item.module_path = Some(module.to_string());
+    if item
+        .word
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+    {
+        item.kind = SymbolKind::Class;
+    } else if python_imported_symbol_is_known_function(&item.word, module) {
+        item.kind = SymbolKind::Function;
+    } else {
+        item.kind = SymbolKind::Variable;
+    }
+}
+
+fn python_imported_symbol_is_known_function(word: &str, module: &str) -> bool {
+    let module = normalized_completion_source(module);
+    matches!(
+        (module, word),
+        ("contextlib", "asynccontextmanager") | ("typing", "cast")
+    )
 }
 
 pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<String>> {

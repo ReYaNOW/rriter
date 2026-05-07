@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn module_header_wrap_does_not_split_marker_from_path() {
+    assert!(!hover_wrap_space_can_break("[[MODULE]] ".chars().count()));
+    assert!(hover_wrap_space_can_break(
+        "[[MODULE]] car_wash.long.path ".chars().count()
+    ));
+}
+
+#[test]
 fn test_valid_diagnostic_popup_cache_drops_stale_indices() {
     let cache = vec![(0, 1.0, 2.0, 3.0, 4.0), (3, 5.0, 6.0, 7.0, 8.0)];
     assert_eq!(

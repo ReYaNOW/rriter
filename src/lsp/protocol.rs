@@ -820,6 +820,7 @@ fn refine_completion_kind(
         crate::highlighter::SymbolKind::Property
     } else if detail.starts_with("(function)")
         || detail.starts_with("(method)")
+        || detail.starts_with("Overload[")
         || detail.starts_with("def ")
         || detail.starts_with("async def ")
     {
@@ -867,7 +868,12 @@ fn completion_module(
             || detail.starts_with("(field)")
     });
     if detail_is_field_type {
-        return detail_owner;
+        return detail_owner.or_else(|| {
+            v.pointer("/labelDetails/description")
+                .and_then(|value| value.as_str())
+                .filter(|desc| looks_like_python_module_path(desc))
+                .and_then(completion_description_source)
+        });
     }
     if !matches!(
         kind,
@@ -957,6 +963,15 @@ fn completion_description_source(desc: &str) -> Option<String> {
 }
 
 fn completion_detail(v: &serde_json::Value) -> Option<String> {
+    if let Some(detail) = v
+        .get("detail")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter(|detail| completion_detail_is_more_specific_than_label_detail(detail))
+    {
+        return Some(detail.to_string());
+    }
     if let Some(label_detail) = v
         .pointer("/labelDetails/detail")
         .and_then(|value| value.as_str())
@@ -987,6 +1002,20 @@ fn completion_detail(v: &serde_json::Value) -> Option<String> {
         }
     }
     None
+}
+
+fn completion_detail_is_more_specific_than_label_detail(detail: &str) -> bool {
+    detail.starts_with("(variable)")
+        || detail.starts_with("(parameter)")
+        || detail.starts_with("(property)")
+        || detail.starts_with("(field)")
+        || detail.starts_with("(function)")
+        || detail.starts_with("(method)")
+        || detail.starts_with("Overload[")
+        || detail.starts_with("def ")
+        || detail.starts_with("async def ")
+        || detail.starts_with("class ")
+        || detail.starts_with("type[")
 }
 
 fn owner_from_completion_detail(label: &str, detail: &str) -> Option<String> {

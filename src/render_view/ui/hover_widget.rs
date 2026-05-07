@@ -177,6 +177,10 @@ fn stable_hover_animation_mouse(
     }
 }
 
+fn hover_wrap_space_can_break(cur_line_len_after_space: usize) -> bool {
+    cur_line_len_after_space != "[[MODULE]]".chars().count() + 1
+}
+
 pub fn compute_animated_popup_frame(
     mx: f32,
     my: f32,
@@ -1010,7 +1014,7 @@ impl Renderer {
             cur_line.push((c, color, offset));
             cur_line_w += adv;
 
-            if c == ' ' {
+            if c == ' ' && hover_wrap_space_can_break(cur_line.len()) {
                 last_space_idx = Some(cur_line.len() - 1);
             }
         }
