@@ -40,6 +40,7 @@ const LSP_LOG_RETENTION: Duration = Duration::from_secs(120);
 const LSP_LOG_MAX_ENTRIES: usize = 64;
 const LSP_LOG_MAX_BYTES: usize = 512 * 1024;
 const LSP_LOG_ENTRY_MAX_BYTES: usize = 64 * 1024;
+const LSP_LOG_HIGHLIGHT_MAX_BYTES: usize = 8 * 1024;
 
 #[inline(always)]
 fn next_id() -> i32 {
@@ -59,6 +60,20 @@ fn compact_lsp_log_message(message: &str) -> String {
         &message[..end],
         message.len().saturating_sub(end)
     )
+}
+
+fn format_lsp_log_entry(
+    message: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<(usize, usize, usize)>,
+) {
+    let compact_message = compact_lsp_log_message(message);
+    if compact_message.len() > LSP_LOG_HIGHLIGHT_MAX_BYTES {
+        return (compact_message, Vec::new(), Vec::new());
+    }
+    format_and_highlight_json(&compact_message)
 }
 
 fn trim_lsp_logs(logs: &mut Vec<LogEntry>, now: Instant) {
@@ -1283,8 +1298,7 @@ impl LspManager {
                     }
                 }
                 LspEvent::Log { name, message } => {
-                    let compact_message = compact_lsp_log_message(message);
-                    let (final_text, spans, folds) = format_and_highlight_json(&compact_message);
+                    let (final_text, spans, folds) = format_lsp_log_entry(message);
                     *message = final_text.clone();
                     let logs = self.server_logs.entry(*name).or_insert_with(Vec::new);
                     let now = Instant::now();
