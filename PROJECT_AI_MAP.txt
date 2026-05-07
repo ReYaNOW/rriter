@@ -337,14 +337,14 @@ F|273|10|1043||bounded_repeat_scroll_delta_ignores_stale_large_focus_jump||||
 F|274|10|1049||period_key_falls_back_to_dot_text_on_press||||
 F|275|11|3||apply_terminal_alt_q_shortcut|bool|||
 F|276|11|35||should_suppress_hover_for_keyboard|bool|||
-F|277|11|53|pe|App.handle_main_keyboard_input||&mut self|dialog_window,ide_panel,ide_workspaces,is_ide_mode,modifiers,renderer,search_focused,settings_ignore_editor,settings_tab,show_search,window,window_height,+1|ide_ignore_patterns.push(),last_action=,settings_ignore_focused=,show_fps=,show_settings=
-F|278|11|348||terminal_open|bool|||
-F|279|11|353||terminal_alt_q_opens_terminal_and_requests_spawn_when_missing||||
-F|280|11|364||terminal_alt_q_focuses_existing_closed_terminal_without_spawn||||
-F|281|11|375||terminal_alt_q_toggles_focus_when_open||||
-F|282|11|390||terminal_alt_shift_q_closes_or_opens_without_focus_toggle||||
-F|283|11|405||terminal_alt_q_closes_bottom_peer_panel_before_opening_terminal||||
-F|284|11|431||hover_keyboard_suppression_preserves_copy_and_alt_except_alt_tab||||
+F|277|11|51|pe|App.handle_main_keyboard_input||&mut self|dialog_window,ide_panel,ide_workspaces,is_ide_mode,modifiers,renderer,search_focused,settings_ignore_editor,settings_tab,show_search,window,window_height,+1|ide_ignore_patterns.push(),last_action=,settings_ignore_focused=,show_fps=,show_settings=
+F|278|11|346||terminal_open|bool|||
+F|279|11|351||terminal_alt_q_opens_terminal_and_requests_spawn_when_missing||||
+F|280|11|362||terminal_alt_q_focuses_existing_closed_terminal_without_spawn||||
+F|281|11|373||terminal_alt_q_toggles_focus_when_open||||
+F|282|11|388||terminal_alt_shift_q_closes_or_opens_without_focus_toggle||||
+F|283|11|403||terminal_alt_q_closes_bottom_peer_panel_before_opening_terminal||||
+F|284|11|429||hover_keyboard_suppression_only_allows_escape_and_arrows||||
 F|285|12|15||terminal_key_sequence|Option<Vec<u8>>|||
 F|286|12|84|p|App.handle_terminal_keyboard_input||&mut self|clipboard,ide_panel,modifiers,window|last_action=
 F|287|12|203|p|App.handle_terminal_search_keyboard_input||&mut self|ide_panel,modifiers,window|last_action=
@@ -444,10 +444,10 @@ F|380|17|56||terminal_mouse_sgr_sequence|String|||
 F|381|17|66||autocomplete_item_index_at|Option<usize>|||
 F|382|17|90||autocomplete_scroll_click_target|Option<(f32, f32)>|||
 F|383|17|125|pe|App.handle_main_mouse_input||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,base_title,dialog_window,editor,file_extension,file_path,+13|active_tab=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=,autocomplete_selected_idx=,is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_dragging_settings_ignore=,last_action=,lsp_actions_menu=,+5
-F|384|17|1179||hover_rect_helpers_union_and_padding_are_inclusive||||
-F|385|17|1207||terminal_mouse_helpers_match_sgr_protocol_edges||||
-F|386|17|1231||autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer||||
-F|387|17|1248||autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll||||
+F|384|17|1197||hover_rect_helpers_union_and_padding_are_inclusive||||
+F|385|17|1225||terminal_mouse_helpers_match_sgr_protocol_edges||||
+F|386|17|1249||autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer||||
+F|387|17|1266||autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll||||
 F|388|18|3||wheel_delta|(f32, f32)|||
 F|389|18|10||point_in_rect|bool|||
 F|390|18|14||panel_scroll_rect|(f32, f32, f32, f32)|||
@@ -455,12 +455,12 @@ F|391|18|48||autocomplete_max_scroll|f32|||
 F|392|18|55||scroll_autocomplete_list||||
 F|393|18|66||settings_ide_max_scroll|f32|||
 F|394|18|99|pe|App.handle_main_mouse_wheel||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,+14|lsp_actions_menu=
-F|395|18|570||wheel_delta_handles_line_and_pixel_units||||
-F|396|18|585||point_in_rect_uses_inclusive_edges||||
-F|397|18|595||panel_scroll_rect_covers_top_and_bottom_layouts||||
-F|398|18|607||autocomplete_max_scroll_matches_visible_limit||||
-F|399|18|615||scroll_autocomplete_list_clamps_without_closing_state||||
-F|400|18|625||settings_ide_max_scroll_counts_chip_wrapping||||
+F|395|18|574||wheel_delta_handles_line_and_pixel_units||||
+F|396|18|589||point_in_rect_uses_inclusive_edges||||
+F|397|18|599||panel_scroll_rect_covers_top_and_bottom_layouts||||
+F|398|18|611||autocomplete_max_scroll_matches_visible_limit||||
+F|399|18|619||scroll_autocomplete_list_clamps_without_closing_state||||
+F|400|18|629||settings_ide_max_scroll_counts_chip_wrapping||||
 F|401|20|2|p|initial_python_bracket_folds|Vec<(usize, usize)>|||
 F|402|20|53|p|is_python_ident_byte|bool|||
 F|403|20|57|p|is_plain_assignment_after_token|bool|||
@@ -1065,10 +1065,10 @@ F|1001|50|467|p|Renderer.draw_file_icon||&mut self|gl,texture|file_icon_cache.in
 F|1002|50|567||Renderer.push_autocomplete_row_bg||&mut self||
 F|1003|50|591||Renderer.push_autocomplete_badge_bg||&mut self||
 F|1004|50|615|p|Renderer.draw_autocomplete|(f32, f32, f32, f32)||gl,height,scale_factor,theme,width|
-F|1005|50|880|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mouse_y,scale_factor,theme|
-F|1006|50|992|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
-F|1007|50|1236|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
-F|1008|50|1301|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
+F|1005|50|881|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mouse_y,scale_factor,theme|
+F|1006|50|993|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
+F|1007|50|1237|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
+F|1008|50|1302|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
 T|1009|51|431|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
 T|1010|51|196|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
 F|1011|51|26|p|hover_trace_enabled|bool|||

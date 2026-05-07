@@ -174,6 +174,10 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if clear_hover_popup(self.renderer.as_mut()) {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {

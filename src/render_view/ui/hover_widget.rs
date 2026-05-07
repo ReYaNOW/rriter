@@ -595,7 +595,7 @@ impl Renderer {
             let max_scroll = state.diag_max_scroll;
             state.diag_scroll.clamp_target(0.0, max_scroll);
             state.diag_text = popup_text;
-            state.diag_scroll.current
+            state.diag_scroll.current.round()
         });
         let mut box_w = global_max_w.max(attached_hover_w);
         let combined_hover_h = attached_hover_h;
@@ -1183,7 +1183,7 @@ impl Renderer {
         }
 
         let max_scroll = (layout.total_text_h + pad * 2.0 - box_h).max(0.0);
-        let scroll_y = popup.scroll.current;
+        let scroll_y = popup.scroll.current.round();
 
         let anim_progress = popup.anim_progress;
         let attached_anim_progress = if attached_diag.is_some() {

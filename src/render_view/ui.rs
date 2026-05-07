@@ -716,7 +716,8 @@ impl Renderer {
             );
         }
 
-        let mut current_y = y + padding_top - scroll_y;
+        let render_scroll_y = scroll_y.round();
+        let mut current_y = y + padding_top - render_scroll_y;
 
         for (i, (item, matches)) in options.iter().enumerate() {
             if current_y + step < y || current_y > y + current_h {

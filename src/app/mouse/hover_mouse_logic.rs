@@ -773,7 +773,7 @@ pub(crate) fn hover_popup_byte_at(
         return 0;
     }
 
-    let mut current_top = by + pad - popup.scroll.current;
+    let mut current_top = by + pad - popup.scroll.current.round();
     let mut found_line_idx = lines.len().saturating_sub(1);
 
     for (i, line) in lines.iter().enumerate() {

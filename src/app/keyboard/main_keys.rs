@@ -33,19 +33,17 @@ fn apply_terminal_alt_q_shortcut(
 }
 
 fn should_suppress_hover_for_keyboard(physical_key: PhysicalKey, ctrl: bool, alt: bool) -> bool {
-    if alt && physical_key == PhysicalKey::Code(KeyCode::Tab) {
-        return true;
-    }
-    if alt {
-        return false;
-    }
-    if matches!(
+    let _ = (ctrl, alt);
+    matches!(
         physical_key,
-        PhysicalKey::Code(KeyCode::AltLeft | KeyCode::AltRight)
-    ) {
-        return false;
-    }
-    !(ctrl && physical_key == PhysicalKey::Code(KeyCode::KeyC))
+        PhysicalKey::Code(
+            KeyCode::Escape
+                | KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::ArrowDown
+        )
+    )
 }
 
 impl App {
@@ -428,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn hover_keyboard_suppression_preserves_copy_and_alt_except_alt_tab() {
+    fn hover_keyboard_suppression_only_allows_escape_and_arrows() {
         assert!(!should_suppress_hover_for_keyboard(
             PhysicalKey::Code(KeyCode::KeyC),
             true,
@@ -444,14 +442,24 @@ mod tests {
             false,
             false,
         ));
-        assert!(should_suppress_hover_for_keyboard(
+        assert!(!should_suppress_hover_for_keyboard(
             PhysicalKey::Code(KeyCode::Tab),
             false,
             true,
         ));
-        assert!(should_suppress_hover_for_keyboard(
+        assert!(!should_suppress_hover_for_keyboard(
             PhysicalKey::Code(KeyCode::KeyW),
             true,
+            false,
+        ));
+        assert!(should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::Escape),
+            false,
+            false,
+        ));
+        assert!(should_suppress_hover_for_keyboard(
+            PhysicalKey::Code(KeyCode::ArrowLeft),
+            false,
             false,
         ));
     }
