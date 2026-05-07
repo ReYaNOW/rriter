@@ -449,10 +449,10 @@ fn test_attached_hover_content_scissor_uses_shared_combined_animation() {
         Some((90.0, 70.0, 60.0, 30.0)),
         0.5,
     );
-    assert_eq!(sc_x, 86.0);
-    assert_eq!(sc_y, 66.0);
-    assert_eq!(sc_w, 34.0);
-    assert!((sc_h - 88.0 * smooth_hover_height_progress(0.5)).abs() < 0.001);
+    assert_eq!(sc_x, 90.0);
+    assert_eq!(sc_y, 70.0);
+    assert_eq!(sc_w, 30.0);
+    assert!((sc_h - 80.0 * smooth_hover_height_progress(0.5)).abs() < 0.001);
 }
 
 #[test]
@@ -468,16 +468,28 @@ fn test_attached_hover_content_scissor_above_cursor_expands_bottom_to_top() {
         Some((90.0, 70.0, 60.0, 30.0)),
         0.5,
     );
-    assert!((sc_x + sc_w - 154.0).abs() < 0.001);
-    assert!((sc_y + sc_h - 154.0).abs() < 0.001);
-    assert!(sc_y > 66.0);
+    assert!((sc_x + sc_w - 150.0).abs() < 0.001);
+    assert!((sc_y + sc_h - 150.0).abs() < 0.001);
+    assert!(sc_y > 70.0);
     assert!(sc_h > 0.0);
 }
 
 #[test]
 fn test_detached_hover_content_scissor_keeps_popup_animation() {
-    let direct = compute_animated_scissor(10.0, 20.0, 100.0, 100.0, 50.0, 50.0, 0.25);
+    let direct = compute_animated_popup_frame(10.0, 20.0, 100.0, 100.0, 50.0, 50.0, 0.25);
     let content =
         compute_hover_content_scissor(10.0, 20.0, 100.0, 100.0, 50.0, 50.0, 0.25, None, 1.0);
     assert_eq!(content, direct);
+}
+
+#[test]
+fn test_hover_content_scissor_stays_inside_animated_frame() {
+    let frame = compute_animated_popup_frame(10.0, 20.0, 100.0, 100.0, 500.0, 300.0, 0.25);
+    let content =
+        compute_hover_content_scissor(10.0, 20.0, 100.0, 100.0, 500.0, 300.0, 0.25, None, 1.0);
+    assert_eq!(content, frame);
+
+    let old_scissor = compute_animated_scissor(10.0, 20.0, 100.0, 100.0, 500.0, 300.0, 0.25);
+    assert!(old_scissor.0 < frame.0);
+    assert!(old_scissor.2 > frame.2);
 }

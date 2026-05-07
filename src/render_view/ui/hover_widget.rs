@@ -269,7 +269,7 @@ pub fn compute_hover_content_scissor(
     attached_anim_progress: f32,
 ) -> (f32, f32, f32, f32) {
     if let Some((diag_x, diag_y, diag_w, diag_h)) = attached_diag {
-        compute_animated_scissor(
+        compute_animated_popup_frame(
             mx,
             my,
             diag_x,
@@ -279,7 +279,7 @@ pub fn compute_hover_content_scissor(
             attached_anim_progress,
         )
     } else {
-        compute_animated_scissor(mx, my, bx, by, box_w, box_h, anim_progress)
+        compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress)
     }
 }
 
@@ -1287,14 +1287,28 @@ impl Renderer {
                     {
                         run_len += 1;
                     }
-                    self.push_rounded_rect(
-                        (bx + pad - 4.0 * s).round(),
-                        rounded_top,
-                        (box_w - pad * 2.0 + 8.0 * s).round(),
-                        (line_h * run_len as f32).round(),
-                        4.0 * s,
-                        [0.15, 0.16, 0.20, 0.96 * opacity],
+                    let code_x = (bx + pad - 4.0 * s).round();
+                    let code_y = rounded_top;
+                    let code_w = (box_w - pad * 2.0 + 8.0 * s).round();
+                    let code_h = (line_h * run_len as f32).round();
+                    let (code_x, code_y, code_w, code_h) = compute_hover_scissor_rect(
+                        (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h),
+                        code_x,
+                        code_y,
+                        code_w,
+                        code_h,
+                        None,
                     );
+                    if code_w > 0.0 && code_h > 0.0 {
+                        self.push_rounded_rect(
+                            code_x.round(),
+                            code_y.round(),
+                            code_w.round(),
+                            code_h.round(),
+                            4.0 * s,
+                            [0.15, 0.16, 0.20, 0.96 * opacity],
+                        );
+                    }
                 }
 
                 let is_module_header = line_kind == crate::lsp::HoverLineKindPublic::Text
