@@ -992,12 +992,12 @@ F|928|40|70||Renderer.draw_tree_label_clipped|f32|&mut self||
 F|929|40|107|p|Renderer.draw_ide_side_panels|||gl,theme|
 F|930|40|637|p|Renderer.draw_ide_bottom_panel|||height,theme,width|
 F|931|40|792|p|Renderer.draw_status_bar|||height,theme,width|scratch_buffer=
-F|932|40|999||Renderer.draw_file_tree_dialog_shell||&mut self|theme|
-F|933|40|1013||Renderer.draw_file_tree_dialog_input||&mut self|gl,height,scale_factor,theme|
-F|934|40|1134|p|Renderer.draw_file_tree_overlays|bool||gl,height,scale_factor,theme,width|
-F|935|40|1594||clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary||||
-F|936|40|1604||centered_dialog_button_positions_keep_pair_centered||||
-F|937|40|1613||file_tree_context_menu_groups_insert_logical_separators||||
+F|932|40|1032||Renderer.draw_file_tree_dialog_shell||&mut self|theme|
+F|933|40|1046||Renderer.draw_file_tree_dialog_input||&mut self|gl,height,scale_factor,theme|
+F|934|40|1167|p|Renderer.draw_file_tree_overlays|bool||gl,height,scale_factor,theme,width|
+F|935|40|1627||clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary||||
+F|936|40|1637||centered_dialog_button_positions_keep_pair_centered||||
+F|937|40|1646||file_tree_context_menu_groups_insert_logical_separators||||
 F|938|41|4||lsp_action_label|std::borrow::Cow<'a, str>|||
 F|939|41|59||lsp_action_label_formats_code_actions_and_noqa_codes||||
 F|940|41|83||lsp_action_label_formats_static_actions||||
@@ -1643,7 +1643,7 @@ E|927|926
 E|928|908 923 1068 1070
 E|929|191 904 908 911 928 941 1001 1070 1074 1075
 E|930|908 941 953 979 1017 1070 1075
-E|931|908 912 1000 1015 1016 1020 1021 1022 1023 1070 1075
+E|931|908 909 912 1000 1015 1016 1020 1021 1022 1023 1070 1075
 E|932|912
 E|933|195 904 911 1068 1072 1075
 E|934|188 189 190 191 194 904 908 911 912 924 926 927 932 933 1070 1075

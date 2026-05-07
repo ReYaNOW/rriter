@@ -916,46 +916,79 @@ impl Renderer {
         self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
 
         let (line, character) = cursor_line_and_character(editor);
-        let block_gap = 12.0 * s;
-        let line_block_w = 92.0 * s;
-        let char_block_w = 86.0 * s;
-        let selected_block_w = 132.0 * s;
-        let pos_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82];
-        let char_x = lang_x - 22.0 * s - char_block_w;
-        let line_x = char_x - block_gap - line_block_w;
-        let selected_x = line_x - block_gap - selected_block_w;
-        if selected_x > diag_x + diagnostics_w + 8.0 * s {
-            scratch.clear();
-            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("Стр {}", line));
-            let text_w = self.measure_ui_width(&scratch, text_scale).round();
-            self.draw_string_scaled(
-                &scratch,
-                line_x + line_block_w - text_w,
+        const ZERO_SAMPLE: &str = "00000000000000000000";
+        let item_gap = 14.0 * s;
+        let digit_gap = 4.0 * s;
+        let line_digits = line.to_string();
+        let char_digits = character.to_string();
+        let line_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..line_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let char_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..char_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let line_label_w = self.measure_ui_width("Стр", text_scale).round();
+        let char_label_w = self.measure_ui_width("Сим", text_scale).round();
+        let line_block_w = line_label_w + digit_gap + line_digits_w;
+        let char_block_w = char_label_w + digit_gap + char_digits_w;
+        let selected_count = selected_char_count(editor);
+        let selected_count_digits = selected_count.map(|count| count.to_string());
+        let selected_block_w = selected_count_digits
+            .as_ref()
+            .map(|digits| {
+                self.measure_ui_width("(", text_scale).round()
+                    + self
+                        .measure_mono_width(
+                            &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
+                            text_scale,
+                        )
+                        .round()
+                    + self.measure_ui_width(" выделено)", text_scale).round()
+            })
+            .unwrap_or(0.0);
+        let pos_color = self.theme.fg;
+        let mut group_w = line_block_w + item_gap + char_block_w;
+        if selected_block_w > 0.0 {
+            group_w += item_gap + selected_block_w;
+        }
+        let line_x = lang_x - 22.0 * s - group_w;
+        if line_x > diag_x + diagnostics_w + 8.0 * s {
+            self.draw_string_scaled("Стр", line_x, text_y, pos_color, text_scale);
+            self.draw_string_mono_scaled(
+                &line_digits,
+                line_x + line_label_w + digit_gap,
                 text_y,
                 pos_color,
                 text_scale,
             );
-            scratch.clear();
-            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("Сим {}", character));
-            let text_w = self.measure_ui_width(&scratch, text_scale).round();
-            self.draw_string_scaled(
-                &scratch,
-                char_x + char_block_w - text_w,
+            let char_x = line_x + line_block_w + item_gap;
+            self.draw_string_scaled("Сим", char_x, text_y, pos_color, text_scale);
+            self.draw_string_mono_scaled(
+                &char_digits,
+                char_x + char_label_w + digit_gap,
                 text_y,
                 pos_color,
                 text_scale,
             );
-            if let Some(count) = selected_char_count(editor) {
-                scratch.clear();
-                let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{} выделено", count));
-                let text_w = self.measure_ui_width(&scratch, text_scale).round();
-                self.draw_string_scaled(
-                    &scratch,
-                    selected_x + selected_block_w - text_w,
-                    text_y,
-                    pos_color,
-                    text_scale,
-                );
+            if let Some(digits) = selected_count_digits.as_deref() {
+                let selected_x = char_x + char_block_w + item_gap;
+                self.draw_string_scaled("(", selected_x, text_y, pos_color, text_scale);
+                let digit_x = selected_x + self.measure_ui_width("(", text_scale).round();
+                self.draw_string_mono_scaled(digits, digit_x, text_y, pos_color, text_scale);
+                let suffix_x = digit_x
+                    + self
+                        .measure_mono_width(
+                            &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
+                            text_scale,
+                        )
+                        .round();
+                self.draw_string_scaled(" выделено)", suffix_x, text_y, pos_color, text_scale);
             }
         }
 
