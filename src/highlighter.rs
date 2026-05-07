@@ -4,6 +4,7 @@
 mod runtime;
 use runtime::flatten_spans;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use tree_sitter::StreamingIterator;
@@ -103,6 +104,8 @@ pub enum HighlighterMessage {
         edits: Vec<SyncEdit>,
         edit_start_byte: Option<usize>,
         edit_end_byte: Option<usize>,
+        invalidate_start_byte: Option<usize>,
+        invalidate_end_byte: Option<usize>,
     },
 }
 
@@ -114,12 +117,19 @@ pub struct Highlighter {
         Vec<CompletionItem>,
         Vec<(usize, usize, bool, bool)>, // (start, end, is_autofold, is_sticky)
         Vec<(usize, usize)>,             // syntax errors
+        Option<tree_sitter::Tree>,
     )>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
     pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
     pub syntax_errors: Vec<(usize, usize)>,
     pub current_version: u64,
+    sync_text: String,
+    sync_ext: String,
+    sync_parser: tree_sitter::Parser,
+    sync_tree: Option<tree_sitter::Tree>,
+    sync_query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    sync_byte_colors_buf: Vec<[f32; 4]>,
 }
 
 pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
@@ -244,6 +254,275 @@ fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
     parent.child_by_field_name("attribute").is_some_and(|attr| {
         attr.start_byte() == node.start_byte() && attr.end_byte() == node.end_byte()
     })
+}
+
+fn collect_param_scopes(
+    lang: &tree_sitter::Language,
+    lang_name: &'static str,
+    tree: &tree_sitter::Tree,
+    text: &str,
+) -> Vec<Scope> {
+    let mut param_scopes = Vec::new();
+    let Some(q_str) = get_params_query(lang_name) else {
+        return param_scopes;
+    };
+    let Ok(func_query) = tree_sitter::Query::new(lang, q_str) else {
+        return param_scopes;
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&func_query, tree.root_node(), text.as_bytes());
+    while let Some(m) = matches.next() {
+        let mut p_node = None;
+        let mut b_node = None;
+        for cap in m.captures {
+            let cname = func_query.capture_names()[cap.index as usize];
+            if cname == "params" {
+                p_node = Some(cap.node);
+            }
+            if cname == "body" {
+                b_node = Some(cap.node);
+            }
+        }
+
+        let Some(params_node) = p_node else {
+            continue;
+        };
+        let scope_start = b_node
+            .map(|n| n.start_byte())
+            .unwrap_or(params_node.end_byte());
+        let scope_end = b_node.map(|n| n.end_byte()).unwrap_or(
+            params_node
+                .parent()
+                .map(|p| p.end_byte())
+                .unwrap_or(usize::MAX),
+        );
+
+        let mut params_set = HashSet::new();
+        let mut t_cursor = params_node.walk();
+        let mut exploring = true;
+        while exploring {
+            let c_node = t_cursor.node();
+            if c_node.kind() == "identifier" {
+                if let Ok(s) = std::str::from_utf8(
+                    &text.as_bytes()[c_node.start_byte()..c_node.end_byte()],
+                ) {
+                    params_set.insert(s.to_string());
+                }
+            }
+            if t_cursor.goto_first_child() {
+                continue;
+            }
+            while !t_cursor.goto_next_sibling() {
+                if !t_cursor.goto_parent() || t_cursor.node() == params_node {
+                    exploring = false;
+                    break;
+                }
+            }
+        }
+
+        if !params_set.is_empty() {
+            param_scopes.push(Scope {
+                start: scope_start,
+                end: scope_end,
+                params: params_set,
+            });
+        }
+    }
+
+    param_scopes
+}
+
+fn collect_query_highlight_spans(
+    lang: &tree_sitter::Language,
+    lang_name: &'static str,
+    queries: &[&'static str],
+    tree: &tree_sitter::Tree,
+    text: &str,
+    query_cache: &mut HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    byte_range: Option<Range<usize>>,
+    spans: &mut Vec<ColorSpan>,
+) {
+    let param_scopes = collect_param_scopes(lang, lang_name, tree, text);
+
+    for q_str in queries {
+        let cache_key = (lang_name, *q_str);
+        if !query_cache.contains_key(&cache_key) {
+            if let Ok(query) = tree_sitter::Query::new(lang, q_str) {
+                query_cache.insert(cache_key, query);
+            }
+        }
+
+        let Some(query) = query_cache.get(&cache_key) else {
+            continue;
+        };
+        let mut cursor = tree_sitter::QueryCursor::new();
+        if let Some(range) = &byte_range {
+            cursor.set_byte_range(range.clone());
+        }
+        let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let name = query.capture_names()[cap.index as usize];
+                let node_text = std::str::from_utf8(
+                    &text.as_bytes()[cap.node.start_byte()..cap.node.end_byte()],
+                )
+                .unwrap_or("");
+                if lang_name == "py" && name == "py_ident" && is_python_attribute_property(cap.node)
+                {
+                    continue;
+                }
+
+                let color = resolve_color(name, node_text, cap.node.start_byte(), &param_scopes);
+                if lang_name == "py" && name == "docstring" {
+                    crate::languages::python::push_docstring_highlight_spans(
+                        text,
+                        cap.node.start_byte(),
+                        cap.node.end_byte(),
+                        spans,
+                    );
+                    continue;
+                }
+
+                if color != DRACULA_FG {
+                    spans.push(ColorSpan {
+                        start: cap.node.start_byte(),
+                        end: cap.node.end_byte(),
+                        color,
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn cut_spans_by_ranges(base: &mut Vec<ColorSpan>, ranges: &mut Vec<(usize, usize)>) {
+    if ranges.is_empty() || base.is_empty() {
+        return;
+    }
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+
+    let mut merged_ranges: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for &(start, end) in ranges.iter() {
+        if let Some((_, last_end)) = merged_ranges.last_mut() {
+            if start <= *last_end {
+                *last_end = (*last_end).max(end);
+                continue;
+            }
+        }
+        merged_ranges.push((start, end));
+    }
+
+    let mut retained = Vec::with_capacity(base.len());
+    for span in base.iter() {
+        let mut pos = span.start;
+        for &(cut_start, cut_end) in &merged_ranges {
+            if cut_end <= pos {
+                continue;
+            }
+            if cut_start >= span.end {
+                break;
+            }
+            if cut_start > pos {
+                retained.push(ColorSpan {
+                    start: pos,
+                    end: cut_start.min(span.end),
+                    color: span.color,
+                });
+            }
+            pos = pos.max(cut_end);
+            if pos >= span.end {
+                break;
+            }
+        }
+        if pos < span.end {
+            retained.push(ColorSpan {
+                start: pos,
+                end: span.end,
+                color: span.color,
+            });
+        }
+    }
+
+    *base = retained;
+}
+
+fn overlay_spans_preserving_gaps(base: &mut Vec<ColorSpan>, overlays: &[ColorSpan]) {
+    let mut ranges: Vec<(usize, usize)> = overlays
+        .iter()
+        .filter_map(|span| (span.start < span.end).then_some((span.start, span.end)))
+        .collect();
+    cut_spans_by_ranges(base, &mut ranges);
+}
+
+fn is_highlight_ident_byte(b: u8) -> bool {
+    b == b'_' || b.is_ascii_alphanumeric()
+}
+
+fn expand_highlight_invalidation_range(
+    text: &str,
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut start = start?.min(bytes.len());
+    let mut end = end?.min(bytes.len());
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+
+    while start > 0 && is_highlight_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    while end < bytes.len() && is_highlight_ident_byte(bytes[end]) {
+        end += 1;
+    }
+
+    (start < end).then_some(start..end)
+}
+
+pub(crate) fn sync_edit_invalidation_byte_range(
+    edits: &[SyncEdit],
+) -> (Option<usize>, Option<usize>) {
+    let mut start = None::<usize>;
+    let mut end = None::<usize>;
+    for edit in edits {
+        let (edit_start, edit_end) = match edit {
+            SyncEdit::Insert { offset, text } => (*offset, offset + text.len()),
+            SyncEdit::Delete { offset, .. } => (*offset, *offset),
+        };
+        start = Some(start.map_or(edit_start, |current| current.min(edit_start)));
+        end = Some(end.map_or(edit_end, |current| current.max(edit_end)));
+    }
+    (start, end)
+}
+
+fn merge_highlight_spans(
+    mut base: Vec<ColorSpan>,
+    spans: Vec<ColorSpan>,
+    lang_name: &'static str,
+    text: &str,
+    replace_all: bool,
+    invalidation_range: Option<Range<usize>>,
+) -> Vec<ColorSpan> {
+    if replace_all {
+        base.clear();
+    } else {
+        if let Some(range) = invalidation_range {
+            let mut ranges = vec![(range.start, range.end)];
+            cut_spans_by_ranges(&mut base, &mut ranges);
+        }
+        overlay_spans_preserving_gaps(&mut base, &spans);
+    }
+    base.extend(spans);
+
+    if lang_name == "py" {
+        for (start, end) in crate::languages::python::python_class_attr_name_ranges(text) {
+            base.retain(|span| span.start != start || span.end != end);
+        }
+    }
+
+    base
 }
 
 pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
@@ -437,6 +716,7 @@ impl Highlighter {
             Vec<CompletionItem>,
             Vec<(usize, usize, bool, bool)>,
             Vec<(usize, usize)>,
+            Option<tree_sitter::Tree>,
         )>();
 
         thread::spawn(move || {
@@ -460,6 +740,8 @@ impl Highlighter {
                 let mut do_highlight = false;
                 let mut final_edit_start_byte: Option<usize> = None;
                 let mut final_edit_end_byte: Option<usize> = None;
+                let mut final_invalidate_start_byte: Option<usize> = None;
+                let mut final_invalidate_end_byte: Option<usize> = None;
 
                 for m in msgs {
                     match m {
@@ -476,10 +758,14 @@ impl Highlighter {
                             edits,
                             edit_start_byte,
                             edit_end_byte,
+                            invalidate_start_byte,
+                            invalidate_end_byte,
                         } => {
                             final_version = version;
                             final_edit_start_byte = edit_start_byte;
                             final_edit_end_byte = edit_end_byte;
+                            final_invalidate_start_byte = invalidate_start_byte;
+                            final_invalidate_end_byte = invalidate_end_byte;
                             for edit in edits {
                                 match edit {
                                     SyncEdit::Insert { offset, text } => {
@@ -897,157 +1183,24 @@ impl Highlighter {
                                     }
                                 }
 
-                                let mut param_scopes = Vec::new();
-                                if let Some(q_str) = get_params_query(lang_name) {
-                                    if let Ok(func_query) = tree_sitter::Query::new(&lang, q_str) {
-                                        let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) =
-                                            (final_edit_start_byte, final_edit_end_byte)
-                                        {
-                                            // Expand bounds to ensure we capture whole nodes/statements
-                                            let exp_sb = sb.saturating_sub(1000);
-                                            let exp_eb = (eb + 1000).min(text.len());
-                                            cursor.set_byte_range(exp_sb..exp_eb);
-                                        }
-                                        let mut matches = cursor.matches(
-                                            &func_query,
-                                            tree.root_node(),
-                                            text.as_bytes(),
-                                        );
-
-                                        while let Some(m) = matches.next() {
-                                            let mut p_node = None;
-                                            let mut b_node = None;
-                                            for cap in m.captures {
-                                                let cname =
-                                                    func_query.capture_names()[cap.index as usize];
-                                                if cname == "params" {
-                                                    p_node = Some(cap.node);
-                                                }
-                                                if cname == "body" {
-                                                    b_node = Some(cap.node);
-                                                }
-                                            }
-
-                                            if let Some(params_node) = p_node {
-                                                let scope_start = b_node
-                                                    .map(|n| n.start_byte())
-                                                    .unwrap_or(params_node.end_byte());
-                                                let scope_end =
-                                                    b_node.map(|n| n.end_byte()).unwrap_or(
-                                                        params_node
-                                                            .parent()
-                                                            .map(|p| p.end_byte())
-                                                            .unwrap_or(usize::MAX),
-                                                    );
-
-                                                let mut params_set = HashSet::new();
-                                                let mut t_cursor = params_node.walk();
-                                                let mut exploring = true;
-
-                                                while exploring {
-                                                    let c_node = t_cursor.node();
-                                                    if c_node.kind() == "identifier" {
-                                                        if let Ok(s) = std::str::from_utf8(
-                                                            &text.as_bytes()[c_node.start_byte()
-                                                                ..c_node.end_byte()],
-                                                        ) {
-                                                            params_set.insert(s.to_string());
-                                                        }
-                                                    }
-                                                    if t_cursor.goto_first_child() {
-                                                        continue;
-                                                    }
-                                                    while !t_cursor.goto_next_sibling() {
-                                                        if !t_cursor.goto_parent()
-                                                            || t_cursor.node() == params_node
-                                                        {
-                                                            exploring = false;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-
-                                                if !params_set.is_empty() {
-                                                    param_scopes.push(Scope {
-                                                        start: scope_start,
-                                                        end: scope_end,
-                                                        params: params_set,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                for q_str in queries {
-                                    let cache_key = (lang_name, q_str);
-                                    if !query_cache.contains_key(&cache_key) {
-                                        if let Ok(query) = tree_sitter::Query::new(&lang, q_str) {
-                                            query_cache.insert(cache_key, query);
-                                        }
-                                    }
-
-                                    if let Some(query) = query_cache.get(&cache_key) {
-                                        let mut cursor = tree_sitter::QueryCursor::new();
-                                        if let (Some(sb), Some(eb)) =
-                                            (final_edit_start_byte, final_edit_end_byte)
-                                        {
-                                            // Expand bounds to ensure we capture whole nodes/statements
-                                            let exp_sb = sb.saturating_sub(1000);
-                                            let exp_eb = (eb + 1000).min(text.len());
-                                            cursor.set_byte_range(exp_sb..exp_eb);
-                                        }
-                                        let mut matches = cursor.matches(
-                                            query,
-                                            tree.root_node(),
-                                            text.as_bytes(),
-                                        );
-
-                                        while let Some(m) = matches.next() {
-                                            for cap in m.captures {
-                                                let name =
-                                                    query.capture_names()[cap.index as usize];
-                                                let node_text = std::str::from_utf8(
-                                                    &text.as_bytes()[cap.node.start_byte()
-                                                        ..cap.node.end_byte()],
-                                                )
-                                                .unwrap_or("");
-                                                if lang_name == "py"
-                                                    && name == "py_ident"
-                                                    && is_python_attribute_property(cap.node)
-                                                {
-                                                    continue;
-                                                }
-
-                                                let color = resolve_color(
-                                                    name,
-                                                    node_text,
-                                                    cap.node.start_byte(),
-                                                    &param_scopes,
-                                                );
-
-                                                if lang_name == "py" && name == "docstring" {
-                                                    crate::languages::python::push_docstring_highlight_spans(
-                                                        text,
-                                                        cap.node.start_byte(),
-                                                        cap.node.end_byte(),
-                                                        &mut spans,
-                                                    );
-                                                    continue;
-                                                }
-
-                                                if color != DRACULA_FG {
-                                                    spans.push(ColorSpan {
-                                                        start: cap.node.start_byte(),
-                                                        end: cap.node.end_byte(),
-                                                        color,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                let byte_range =
+                                    if let (Some(sb), Some(eb)) =
+                                        (final_edit_start_byte, final_edit_end_byte)
+                                    {
+                                        Some(sb.saturating_sub(1000)..(eb + 1000).min(text.len()))
+                                    } else {
+                                        None
+                                    };
+                                collect_query_highlight_spans(
+                                    &lang,
+                                    lang_name,
+                                    &queries,
+                                    &tree,
+                                    &text,
+                                    &mut query_cache,
+                                    byte_range,
+                                    &mut spans,
+                                );
 
                                 // ---------------------------------------------------------
                                 // Обработка языковых инъекций (Language Injections)
@@ -1238,22 +1391,18 @@ impl Highlighter {
 
                 let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
-                let mut merged_spans = last_full_spans.clone();
-                if let (Some(sb), Some(eb)) = (final_edit_start_byte, final_edit_end_byte) {
-                    let exp_sb = sb.saturating_sub(1000);
-                    let exp_eb = (eb + 1000).min(text.len());
-                    merged_spans.retain(|s| s.end <= exp_sb || s.start >= exp_eb);
-                } else {
-                    merged_spans.clear();
-                }
-                merged_spans.extend(spans);
-                if lang_name == "py" {
-                    for (start, end) in
-                        crate::languages::python::python_class_attr_name_ranges(text)
-                    {
-                        merged_spans.retain(|span| span.start != start || span.end != end);
-                    }
-                }
+                let merged_spans = merge_highlight_spans(
+                    last_full_spans.clone(),
+                    spans,
+                    lang_name,
+                    &text,
+                    final_edit_start_byte.is_none() || final_edit_end_byte.is_none(),
+                    expand_highlight_invalidation_range(
+                        &text,
+                        final_invalidate_start_byte,
+                        final_invalidate_end_byte,
+                    ),
+                );
 
                 let flat_spans = flatten_spans(
                     merged_spans,
@@ -1475,6 +1624,7 @@ impl Highlighter {
                     completions,
                     foldable_ranges,
                     error_ranges,
+                    current_tree.clone(),
                 ));
             }
         });
@@ -1486,6 +1636,12 @@ impl Highlighter {
             foldable_ranges: vec![],
             syntax_errors: vec![],
             current_version: 0,
+            sync_text: String::new(),
+            sync_ext: String::new(),
+            sync_parser: tree_sitter::Parser::new(),
+            sync_tree: None,
+            sync_query_cache: HashMap::new(),
+            sync_byte_colors_buf: Vec::new(),
         }
     }
 }

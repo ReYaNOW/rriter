@@ -780,6 +780,8 @@ impl App {
                 }
                 let (line_start_byte, line_end_byte) =
                     sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
+                let (invalidate_start_byte, invalidate_end_byte) =
+                    crate::highlighter::sync_edit_invalidation_byte_range(&edits);
 
                 self.highlighter.apply_edits(
                     self.editor.version,
@@ -787,13 +789,22 @@ impl App {
                     line_start_byte,
                     line_end_byte,
                 );
+                self.highlighter.sync_highlight_after_edit(
+                    self.editor.version,
+                    line_start_byte,
+                    line_end_byte,
+                    invalidate_start_byte,
+                    invalidate_end_byte,
+                    std::time::Duration::from_millis(1),
+                );
             }
             if should_notify_lsp {
                 self.last_sent_version = self.editor.version;
             }
 
-            // Check poll once but don't sleep
-            if self.highlighter.poll(self.editor.version) {
+            let highlight_updated = self.highlighter.poll(self.editor.version);
+
+            if highlight_updated {
                 let autofold_threshold = match self.file_extension.as_str() {
                     "py" | "pyi" | "rs" | "dart" => 1,
                     _ => 2,

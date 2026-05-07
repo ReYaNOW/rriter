@@ -1,7 +1,10 @@
 use super::*;
 
 impl Highlighter {
-    pub fn reset(&self, version: u64, text: String, ext: String) {
+    pub fn reset(&mut self, version: u64, text: String, ext: String) {
+        self.sync_text = text.clone();
+        self.sync_ext = ext.clone();
+        self.sync_tree = None;
         let _ = self
             .tx
             .send(HighlighterMessage::Reset { version, text, ext });
@@ -15,18 +18,23 @@ impl Highlighter {
         edit_end_byte: Option<usize>,
     ) {
         if !edits.is_empty() {
+            let (invalidate_start_byte, invalidate_end_byte) =
+                sync_edit_invalidation_byte_range(&edits);
             let _ = self.tx.send(HighlighterMessage::Edits {
                 version,
                 edits,
                 edit_start_byte,
                 edit_end_byte,
+                invalidate_start_byte,
+                invalidate_end_byte,
             });
         }
     }
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((ver, spans, completions, foldable_ranges, syntax_errors)) = self.rx.try_recv()
+        while let Ok((ver, spans, completions, foldable_ranges, syntax_errors, tree)) =
+            self.rx.try_recv()
         {
             updated |= self.apply_poll_result(
                 current_editor_version,
@@ -35,6 +43,7 @@ impl Highlighter {
                 completions,
                 foldable_ranges,
                 syntax_errors,
+                tree,
             );
         }
         updated
@@ -48,6 +57,7 @@ impl Highlighter {
         completions: Vec<CompletionItem>,
         foldable_ranges: Vec<(usize, usize, bool, bool)>,
         syntax_errors: Vec<(usize, usize)>,
+        tree: Option<tree_sitter::Tree>,
     ) -> bool {
         if ver != current_editor_version || ver < self.current_version {
             return false;
@@ -58,6 +68,7 @@ impl Highlighter {
         self.completions = completions;
         self.foldable_ranges = foldable_ranges;
         self.syntax_errors = syntax_errors;
+        self.sync_tree = tree;
         true
     }
 
@@ -73,7 +84,7 @@ impl Highlighter {
             }
             let remaining = deadline - now;
             match self.rx.recv_timeout(remaining) {
-                Ok((ver, spans, completions, foldable_ranges, syntax_errors)) => {
+                Ok((ver, spans, completions, foldable_ranges, syntax_errors, tree)) => {
                     if self.apply_poll_result(
                         version,
                         ver,
@@ -81,6 +92,7 @@ impl Highlighter {
                         completions,
                         foldable_ranges,
                         syntax_errors,
+                        tree,
                     ) {
                         // Дренируем оставшиеся ожидающие результаты
                         self.poll(version);
@@ -94,6 +106,32 @@ impl Highlighter {
     }
 
     pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>) {
+        if let Some(text) = text_opt {
+            let start_byte = offset;
+            let old_end_byte = offset;
+            let new_end_byte = offset + text.len();
+            let start_position = get_point(&self.sync_text, start_byte);
+            let old_end_position = start_position;
+            if offset <= self.sync_text.len() && self.sync_text.is_char_boundary(offset) {
+                self.sync_text.insert_str(offset, text);
+                let new_end_position = get_point(&self.sync_text, new_end_byte);
+                if let Some(tree) = &mut self.sync_tree {
+                    tree.edit(&tree_sitter::InputEdit {
+                        start_byte,
+                        old_end_byte,
+                        new_end_byte,
+                        start_position,
+                        old_end_position,
+                        new_end_position,
+                    });
+                }
+            } else {
+                self.sync_tree = None;
+            }
+        } else {
+            self.sync_tree = None;
+        }
+
         let prev_offset = offset.saturating_sub(1);
         let mut predicted_color = DRACULA_FG;
 
@@ -191,6 +229,30 @@ impl Highlighter {
     }
 
     pub fn shift_delete(&mut self, offset: usize, len: usize) {
+        let start_byte = offset;
+        let old_end_byte = offset + len;
+        let new_end_byte = offset;
+        let start_position = get_point(&self.sync_text, start_byte);
+        let old_end_position = get_point(&self.sync_text, old_end_byte);
+        if offset + len <= self.sync_text.len()
+            && self.sync_text.is_char_boundary(offset)
+            && self.sync_text.is_char_boundary(offset + len)
+        {
+            self.sync_text.replace_range(offset..offset + len, "");
+            if let Some(tree) = &mut self.sync_tree {
+                tree.edit(&tree_sitter::InputEdit {
+                    start_byte,
+                    old_end_byte,
+                    new_end_byte,
+                    start_position,
+                    old_end_position,
+                    new_end_position: start_position,
+                });
+            }
+        } else {
+            self.sync_tree = None;
+        }
+
         let end_del = offset + len;
         for span in &mut self.spans {
             if span.start >= end_del {
@@ -205,6 +267,89 @@ impl Highlighter {
             }
         }
         self.spans.retain(|s| s.start < s.end);
+    }
+
+    pub fn sync_highlight_after_edit(
+        &mut self,
+        version: u64,
+        edit_start_byte: Option<usize>,
+        edit_end_byte: Option<usize>,
+        invalidate_start_byte: Option<usize>,
+        invalidate_end_byte: Option<usize>,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let text = self.sync_text.as_str();
+        if text.is_empty() || text.len() > 500_000 || self.sync_ext == "log" {
+            return false;
+        }
+
+        let lang_name = lang_name_for_ext_and_text(&self.sync_ext, text);
+        let Some((lang, queries)) = get_ts_config(lang_name) else {
+            return false;
+        };
+        if self.sync_parser.set_language(&lang).is_err() {
+            return false;
+        }
+
+        let deadline = std::time::Instant::now() + timeout;
+        let mut progress = |_state: &tree_sitter::ParseState| {
+            if std::time::Instant::now() >= deadline {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        };
+        let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+        let parsed_tree = self.sync_parser.parse_with_options(
+            &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+            self.sync_tree.as_ref(),
+            Some(options),
+        );
+        let Some(tree) = parsed_tree else {
+            return false;
+        };
+
+        let range = if let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) {
+            sb.saturating_sub(1000)..(eb + 1000).min(text.len())
+        } else {
+            0..text.len()
+        };
+        let mut spans = Vec::new();
+        collect_query_highlight_spans(
+            &lang,
+            lang_name,
+            &queries,
+            &tree,
+            text,
+            &mut self.sync_query_cache,
+            Some(range),
+            &mut spans,
+        );
+
+        let merged_spans = merge_highlight_spans(
+            self.spans.clone(),
+            spans,
+            lang_name,
+            text,
+            false,
+            expand_highlight_invalidation_range(text, invalidate_start_byte, invalidate_end_byte),
+        );
+        let flat_spans = flatten_spans(
+            merged_spans,
+            text.len(),
+            text,
+            &mut self.sync_byte_colors_buf,
+            &[],
+            !lang_name.is_empty() && lang_name != "bash",
+            false,
+        );
+
+        self.sync_tree = Some(tree);
+        self.current_version = version;
+        self.spans = flat_spans;
+        true
     }
 }
 pub(super) fn get_bracket_color(depth: usize) -> [f32; 4] {
@@ -399,6 +544,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            None,
         );
         assert!(!future_applied);
         assert_eq!(highlighter.current_version, 0);
@@ -411,10 +557,80 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            None,
         );
         assert!(current_applied);
         assert_eq!(highlighter.current_version, 2);
         assert_eq!(highlighter.spans[0].color, DRACULA_PINK);
+    }
+
+    #[test]
+    fn highlighter_sync_parse_after_seed_colors_python_constant_immediately() {
+        let mut highlighter = Highlighter::new();
+        highlighter.reset(1, "S\n".to_string(), "py".to_string());
+        assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
+        assert!(highlighter.sync_tree.is_some());
+
+        highlighter.shift_insert(1, 1, Some("S"));
+        assert!(highlighter.sync_highlight_after_edit(
+            2,
+            Some(0),
+            Some(2),
+            Some(1),
+            Some(2),
+            std::time::Duration::from_millis(10),
+        ));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= 0 && span.end >= 2 && span.color == DRACULA_PURPLE));
+    }
+
+    #[test]
+    fn highlighter_sync_parse_keeps_python_parameters_colored() {
+        let mut highlighter = Highlighter::new();
+        let source = "def f(session):\n    BoxRepository(session)\n";
+        highlighter.reset(1, source.to_string(), "py".to_string());
+        assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
+
+        let insert_at = source.find("    BoxRepository").unwrap();
+        highlighter.shift_insert(insert_at, 7, Some("    if\n"));
+        assert!(highlighter.sync_highlight_after_edit(
+            2,
+            Some(insert_at),
+            Some(insert_at + 7),
+            Some(insert_at),
+            Some(insert_at + 7),
+            std::time::Duration::from_millis(10),
+        ));
+
+        let text = &highlighter.sync_text;
+        let session_start = text.rfind("session").unwrap();
+        let session_end = session_start + "session".len();
+        assert!(highlighter.spans.iter().any(|span| {
+            span.start <= session_start && span.end >= session_end && span.color == DRACULA_ORANGE
+        }));
+    }
+
+    #[test]
+    fn highlighter_sync_parse_clears_stale_python_self_color_after_delete() {
+        let mut highlighter = Highlighter::new();
+        highlighter.reset(1, "self\n".to_string(), "py".to_string());
+        assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
+
+        highlighter.shift_delete(3, 1);
+        assert!(highlighter.sync_highlight_after_edit(
+            2,
+            Some(0),
+            Some(3),
+            Some(3),
+            Some(3),
+            std::time::Duration::from_millis(10),
+        ));
+        assert!(!highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= 0 && span.end >= 3 && span.color == DRACULA_PURPLE));
     }
 
     #[test]
