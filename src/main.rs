@@ -867,6 +867,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_detail_placement: None,
         autocomplete_detail_max_scroll: 0.0,
         autocomplete_min_width: 0.0,
+        autocomplete_detail_min_width: 0.0,
+        autocomplete_detail_min_height: 0.0,
         autocomplete_detail_selection_anchor: None,
         autocomplete_detail_selection_cursor: None,
         autocomplete_detail_selecting: false,

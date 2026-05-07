@@ -139,6 +139,8 @@ fn test_app() -> Option<App> {
         autocomplete_detail_placement: None,
         autocomplete_detail_max_scroll: 0.0,
         autocomplete_min_width: 0.0,
+        autocomplete_detail_min_width: 0.0,
+        autocomplete_detail_min_height: 0.0,
         autocomplete_detail_selection_anchor: None,
         autocomplete_detail_selection_cursor: None,
         autocomplete_detail_selecting: false,
@@ -571,6 +573,30 @@ fn autocomplete_detail_popup_uses_hover_text_and_selection_state() {
     assert_eq!(
         app.selected_autocomplete_detail_text().as_deref(),
         Some("BoxReadPublic")
+    );
+}
+
+#[test]
+fn autocomplete_detail_size_grows_without_shrinking_during_navigation() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    assert_eq!(
+        app.stable_autocomplete_detail_size(80.0, 40.0, 120.0),
+        (80.0, 40.0)
+    );
+    assert_eq!(
+        app.stable_autocomplete_detail_size(300.0, 160.0, 120.0),
+        (300.0, 120.0)
+    );
+    assert_eq!(
+        app.stable_autocomplete_detail_size(90.0, 50.0, 120.0),
+        (300.0, 120.0)
+    );
+    app.reset_autocomplete_detail_size();
+    assert_eq!(
+        app.stable_autocomplete_detail_size(90.0, 50.0, 120.0),
+        (90.0, 50.0)
     );
 }
 

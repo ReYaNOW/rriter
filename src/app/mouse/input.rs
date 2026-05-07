@@ -135,6 +135,11 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if state == ElementState::Released {
+            if let Some(popup) = &mut self.autocomplete_detail_popup {
+                popup.scroll.is_dragging = false;
+            }
+        }
 
         if state == ElementState::Pressed && self.file_tree_overlay_active() {
             match button {
@@ -185,6 +190,40 @@ impl App {
                     .autocomplete_detail_rect
                     .is_some_and(|(x, y, w, h)| mx >= x && mx <= x + w && my >= y && my <= y + h);
                 if in_detail {
+                    if self.autocomplete_detail_max_scroll > 0.0
+                        && self.ui_registry.find_at(mx, my)
+                            == Some(crate::ui_system::UiId::HoverPopupScroll)
+                    {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let max_scroll = self.autocomplete_detail_max_scroll;
+                        if let (Some(rect), Some(popup)) = (
+                            self.autocomplete_detail_rect,
+                            self.autocomplete_detail_popup.as_mut(),
+                        ) {
+                            let (_, by, _, box_h) = rect;
+                            let track_h = box_h - 16.0 * s;
+                            let thumb_h =
+                                (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
+                            let thumb_y = by
+                                + 8.0 * s
+                                + (popup.scroll.current / max_scroll) * (track_h - thumb_h);
+                            if my >= thumb_y && my <= thumb_y + thumb_h {
+                                popup.scroll.is_dragging = true;
+                                popup.scroll.drag_offset = my - thumb_y;
+                            } else {
+                                popup.scroll.anim_speed = 15.0;
+                                popup.scroll.drag_offset = thumb_h / 2.0;
+                                let ratio = (my - by - 8.0 * s - popup.scroll.drag_offset)
+                                    / (track_h - thumb_h).max(0.0001);
+                                popup.scroll.target =
+                                    (ratio * max_scroll).clamp(0.0, max_scroll);
+                                popup.scroll.current = popup.scroll.target;
+                                popup.scroll.is_dragging = true;
+                            }
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
                     if let (Some(rect), Some(popup)) = (
                         self.autocomplete_detail_rect,
                         self.autocomplete_detail_popup.as_ref(),
@@ -1070,6 +1109,9 @@ impl App {
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
             self.autocomplete_scroll.is_dragging = false;
+            if let Some(popup) = &mut self.autocomplete_detail_popup {
+                popup.scroll.is_dragging = false;
+            }
             self.scroll_x.is_dragging = false;
             for term in &mut self.ide_panel.terminals {
                 term.scroll_y.is_dragging = false;

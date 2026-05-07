@@ -102,6 +102,30 @@ impl App {
             return;
         }
 
+        if self
+            .autocomplete_detail_popup
+            .as_ref()
+            .is_some_and(|popup| popup.scroll.is_dragging)
+        {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            if let Some(rect) = self.autocomplete_detail_rect {
+                let (_, by, _, box_h) = rect;
+                let max_scroll = self.autocomplete_detail_max_scroll;
+                if max_scroll > 0.0 {
+                    let track_h = box_h - 16.0 * s;
+                    let thumb_h = (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
+                    if let Some(popup) = &mut self.autocomplete_detail_popup {
+                        let ratio = (py - by - 8.0 * s - popup.scroll.drag_offset)
+                            / (track_h - thumb_h).max(0.0001);
+                        popup.scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                        popup.scroll.current = popup.scroll.target;
+                    }
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if !self.autocomplete_detail_selecting && self.autocomplete_window_contains(px, py) {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);

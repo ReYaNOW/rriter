@@ -1093,6 +1093,7 @@ impl Renderer {
         render_scroll_y: f32,
         wants_pointer: &mut bool,
         opacity: f32,
+        stable_size: Option<(f32, f32)>,
     ) -> (f32, f32, f32, f32, f32) {
         let s = self.scale_factor;
         let opacity = opacity.clamp(0.0, 1.0);
@@ -1117,8 +1118,13 @@ impl Renderer {
         if let Some((_, _, diag_w, _)) = attached_diag {
             box_w = box_w.max(diag_w);
         }
+        let fixed_visible_size = stable_size.is_some();
         let max_visible_h = (self.height * 0.35).min(layout.total_text_h + pad * 2.0);
-        let box_h = max_visible_h;
+        let mut box_h = max_visible_h;
+        if let Some((stable_w, stable_h)) = stable_size {
+            box_w = box_w.max(stable_w);
+            box_h = stable_h.max(0.0);
+        }
 
         let phys_line = editor
             .line_offsets
@@ -1419,11 +1425,16 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        let scrollbar_alpha = compute_hover_scrollbar_alpha(anim_progress);
+        let scrollbar_alpha = if fixed_visible_size {
+            1.0
+        } else {
+            compute_hover_scrollbar_alpha(anim_progress)
+        };
         if max_scroll > 0.0 && scrollbar_alpha > 0.0 {
             let track_h = box_h - 16.0 * s;
             let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);
             let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
+            let thumb_alpha = if fixed_visible_size { 0.34 } else { 0.2 };
 
             self.push_rounded_rect(
                 bx + box_w - 8.0 * s,
@@ -1431,7 +1442,7 @@ impl Renderer {
                 4.0 * s,
                 thumb_h,
                 2.0 * s,
-                [1.0, 1.0, 1.0, 0.2 * scrollbar_alpha * opacity],
+                [1.0, 1.0, 1.0, thumb_alpha * scrollbar_alpha * opacity],
             );
 
             ui_registry.register_rect(

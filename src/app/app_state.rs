@@ -652,6 +652,8 @@ pub struct App {
     pub autocomplete_detail_placement: Option<i8>,
     pub autocomplete_detail_max_scroll: f32,
     pub autocomplete_min_width: f32,
+    pub autocomplete_detail_min_width: f32,
+    pub autocomplete_detail_min_height: f32,
     pub autocomplete_detail_selection_anchor: Option<usize>,
     pub autocomplete_detail_selection_cursor: Option<usize>,
     pub autocomplete_detail_selecting: bool,

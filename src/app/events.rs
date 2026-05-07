@@ -872,10 +872,19 @@ impl ApplicationHandler for App {
                             }
                             let (rx, ry, rw, rh) = rect;
                             let perf_layout_start = perf_enabled.then(Instant::now);
-                            let (popup_x, popup_y, line_top_y) = {
+                            let (natural_w, natural_h, max_h) = {
                                 let r = self.renderer.as_mut().unwrap();
                                 let pad = 12.0 * r.scale_factor;
                                 let line_h = 22.0 * r.scale_factor;
+                                let gap = 8.0 * r.scale_factor;
+                                let margin = 4.0 * r.scale_factor;
+                                let min_h = line_h + pad * 2.0;
+                                let available_below = r.height - (ry + rh + gap) - margin;
+                                let detail_cap_h = line_h * 6.0 + pad * 2.0;
+                                let max_h = (r.height * 0.28)
+                                    .min(detail_cap_h)
+                                    .min(available_below)
+                                    .max(min_h);
                                 let max_text_w = (r.width - 80.0 * r.scale_factor)
                                     .min(820.0 * r.scale_factor)
                                     .max(320.0 * r.scale_factor);
@@ -898,10 +907,14 @@ impl ApplicationHandler for App {
                                 let box_h = popup
                                     .layout_cache
                                     .as_ref()
-                                    .map(|layout| {
-                                        (r.height * 0.35).min(layout.total_text_h + pad * 2.0)
-                                    })
+                                    .map(|layout| layout.total_text_h + pad * 2.0)
                                     .unwrap_or(120.0 * r.scale_factor);
+                                (box_w, box_h, max_h)
+                            };
+                            let (box_w, box_h) =
+                                self.stable_autocomplete_detail_size(natural_w, natural_h, max_h);
+                            let (popup_x, popup_y, line_top_y) = {
+                                let r = self.renderer.as_mut().unwrap();
                                 let gap = 8.0 * r.scale_factor;
                                 let margin = 4.0 * r.scale_factor;
                                 let placement =
@@ -963,6 +976,7 @@ impl ApplicationHandler for App {
                                     render_scroll_y,
                                     &mut wants_pointer,
                                     detail_opacity,
+                                    Some((box_w, box_h)),
                                 );
                             if let Some(start) = perf_detail_draw_start {
                                 perf_detail_draw_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1237,6 +1251,8 @@ impl ApplicationHandler for App {
                     self.current_cursor = cursor_icon;
                     self.window.as_ref().unwrap().set_cursor(cursor_icon);
                 }
+
+                self.renderer.as_mut().unwrap().flush();
 
                 let autocomplete_swap_start = autocomplete_frame_start.map(|_| Instant::now());
                 let autocomplete_frame_metrics = if autocomplete_swap_start.is_some() {

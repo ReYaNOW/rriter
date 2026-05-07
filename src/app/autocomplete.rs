@@ -492,6 +492,31 @@ fn infer_python_member_owner(
 }
 
 impl App {
+    pub(crate) fn reset_autocomplete_detail_size(&mut self) {
+        self.autocomplete_detail_min_width = 0.0;
+        self.autocomplete_detail_min_height = 0.0;
+    }
+
+    pub(crate) fn stable_autocomplete_detail_size(
+        &mut self,
+        natural_w: f32,
+        natural_h: f32,
+        max_h: f32,
+    ) -> (f32, f32) {
+        self.autocomplete_detail_min_width = self
+            .autocomplete_detail_min_width
+            .max(natural_w);
+        let capped_h = natural_h.min(max_h);
+        self.autocomplete_detail_min_height = self
+            .autocomplete_detail_min_height
+            .min(max_h)
+            .max(capped_h);
+        (
+            self.autocomplete_detail_min_width,
+            self.autocomplete_detail_min_height,
+        )
+    }
+
     fn trace_autocomplete_state(&self, event: &str) {
         if !autocomplete_trace_enabled() {
             return;
@@ -592,6 +617,7 @@ impl App {
         self.autocomplete_detail_placement = None;
         self.autocomplete_detail_max_scroll = 0.0;
         self.autocomplete_min_width = 0.0;
+        self.reset_autocomplete_detail_size();
         self.autocomplete_detail_selection_anchor = None;
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
@@ -737,6 +763,7 @@ impl App {
         self.autocomplete_detail_placement = None;
         self.autocomplete_detail_max_scroll = 0.0;
         self.autocomplete_min_width = 0.0;
+        self.reset_autocomplete_detail_size();
         self.autocomplete_detail_selection_anchor = None;
         self.autocomplete_detail_selection_cursor = None;
         self.autocomplete_detail_selecting = false;
@@ -1690,6 +1717,7 @@ impl App {
             self.autocomplete_detail_rect = None;
             self.autocomplete_detail_placement = None;
             self.autocomplete_detail_max_scroll = 0.0;
+            self.reset_autocomplete_detail_size();
             crate::app::events::reset_autocomplete_frame_stats();
             self.trace_autocomplete_state("update_ty:inactive_end");
             return;
@@ -1739,6 +1767,7 @@ impl App {
             self.autocomplete_detail_rect = None;
             self.autocomplete_detail_placement = None;
             self.autocomplete_detail_max_scroll = 0.0;
+            self.reset_autocomplete_detail_size();
             crate::app::events::reset_autocomplete_frame_stats();
             self.trace_autocomplete_state("update_ts:empty_prefix");
             return;

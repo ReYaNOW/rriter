@@ -188,6 +188,19 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.autocomplete_active && app.autocomplete_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.autocomplete_active {
+        if let Some(popup) = &mut app.autocomplete_detail_popup {
+            popup
+                .scroll
+                .clamp_target(0.0, app.autocomplete_detail_max_scroll);
+            popup
+                .scroll
+                .clamp_current(0.0, app.autocomplete_detail_max_scroll);
+            if popup.scroll.update(dt) {
+                needs_redraw = true;
+            }
+        }
+    }
 
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
