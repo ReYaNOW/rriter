@@ -127,6 +127,9 @@ fn test_app() -> Option<App> {
         autocomplete_anchor: None,
         autocomplete_mode: AutocompleteMode::TreeSitter,
         autocomplete_pending_request_id: None,
+        autocomplete_pending_request_mode: None,
+        autocomplete_pending_request_path: None,
+        autocomplete_pending_context_key: None,
         autocomplete_detail_request_id: None,
         autocomplete_detail_word: None,
         autocomplete_detail_request_path: None,
@@ -154,6 +157,7 @@ fn test_app() -> Option<App> {
         ide_panel: IdePanelState::default(),
         file_tree_rx: None,
         file_tree_notify_rx: None,
+        external_changes_rx: None,
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,
@@ -568,6 +572,126 @@ fn autocomplete_detail_popup_prepends_full_module_path() {
 }
 
 #[test]
+fn autocomplete_detail_popup_cleans_source_attr_class_type_union() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("self.repository");
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "repository".to_string(),
+            kind: SymbolKind::Variable,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: Some("BookingService".to_string()),
+            module_path: Some(
+                "car_wash.domains.washes.bookings.repository.BookingRepository".to_string(),
+            ),
+            detail: Some(
+                "<class 'BookingRepository'> | type[AsyncpgRepository[Unknown, Unknown]]"
+                    .to_string(),
+            ),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.starts_with(
+        "[[MODULE]] car_wash.domains.washes.bookings.repository.BookingRepository\nclass BookingRepository"
+    ));
+    assert!(!popup.text.contains("Unknown"));
+    assert!(!popup.spans.is_empty());
+}
+
+#[test]
+fn autocomplete_detail_popup_formats_python_overload_docs() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("getattr");
+    app.autocomplete_active = true;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "getattr".to_string(),
+            kind: SymbolKind::Function,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: Some("builtins".to_string()),
+            module_path: Some("builtins.getattr".to_string()),
+            detail: Some("Overload[(o: object, name: str, /) -> Any]".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains("@overload"));
+    assert!(popup.text.contains("def getattr(__o: object,"));
+    assert!(popup.text.contains("Get a named attribute from an object"));
+    assert!(!popup.spans.is_empty());
+    assert!(
+        popup
+            .line_kinds
+            .iter()
+            .any(|kind| *kind == crate::lsp::HoverLineKindPublic::Separator)
+    );
+
+    app.autocomplete_options[0].0 = AutocompleteItem {
+        word: "asynccontextmanager".to_string(),
+        kind: SymbolKind::Function,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("contextlib".to_string()),
+        module_path: None,
+        detail: Some(
+            "Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    };
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains("def asynccontextmanager("));
+    assert!(popup.text.contains("@asynccontextmanager decorator"));
+    assert!(!popup.spans.is_empty());
+
+    app.autocomplete_options[0].0 = AutocompleteItem {
+        word: "cast".to_string(),
+        kind: SymbolKind::Function,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("typing".to_string()),
+        module_path: Some("typing".to_string()),
+        detail: Some(
+            "Overload[[_T](typ: type[_T], val: Any) -> _T, (typ: str, val: Any) -> Any, (typ: object, val: Any) -> Any]"
+                .to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    };
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains("def cast(typ: type[_T],"));
+    assert!(popup.text.contains("Cast a value to a type"));
+    assert!(!popup.text.contains("Overload["));
+    assert!(!popup.spans.is_empty());
+}
+
+#[test]
 fn close_autocomplete_clears_detail_popup_and_selection() {
     let Some(mut app) = test_app() else {
         return;
@@ -695,6 +819,109 @@ fn pending_ty_context_enter_applies_first_response_without_newline() {
     assert_eq!(app.editor.get_full_text(), "box.id");
     assert!(!app.autocomplete_apply_pending_response);
     assert!(!app.editor.get_full_text().contains('\n'));
+}
+
+#[test]
+fn ty_completion_cache_uses_request_context_not_current_cursor() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.file_path = Some(PathBuf::from("/tmp/main.py"));
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    let request_text = "box.";
+    let request_editor = editor_with(request_text);
+    let request_key = ty_autocomplete_context_key(
+        request_text,
+        &request_editor.line_offsets,
+        request_editor.cursor,
+        "",
+        AutocompleteMode::TyContext,
+    );
+    app.autocomplete_pending_request_id = Some(8);
+    app.autocomplete_pending_request_mode = Some(AutocompleteMode::TyContext);
+    app.autocomplete_pending_request_path = app.file_path.clone();
+    app.autocomplete_pending_context_key = Some(request_key.clone());
+
+    app.editor = editor_with("box.user_id.");
+    app.remember_ty_autocomplete_cache(vec![crate::lsp::LspCompletionItem {
+        label: "user_id".to_string(),
+        kind: SymbolKind::Variable,
+        module: Some("BoxRead".to_string()),
+        detail: Some("(variable) BoxRead.user_id: int | None".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let cache = app.autocomplete_cache.as_ref().unwrap();
+    assert_eq!(cache.context_key, request_key);
+    assert_ne!(
+        cache.context_key,
+        ty_autocomplete_context_key(
+            &app.editor.get_full_text(),
+            &app.editor.line_offsets,
+            app.editor.cursor,
+            "",
+            AutocompleteMode::TyContext,
+        )
+    );
+    assert_eq!(app.autocomplete_pending_request_mode, None);
+    assert_eq!(app.autocomplete_pending_request_path, None);
+    assert_eq!(app.autocomplete_pending_context_key, None);
+}
+
+#[test]
+fn ty_completion_cache_ignores_uncacheable_prefix_response() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let path = PathBuf::from("/tmp/main.py");
+    app.autocomplete_cache = Some(AutocompleteCacheEntry {
+        mode: AutocompleteMode::TyContext,
+        path: path.clone(),
+        context_key: "TyContext|box.".to_string(),
+        items: vec![
+            crate::lsp::LspCompletionItem {
+                label: "user_id".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) BoxRead.user_id: int | None".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "car_wash".to_string(),
+                kind: SymbolKind::Variable,
+                module: Some("BoxRead".to_string()),
+                detail: Some("(variable) BoxRead.car_wash: CarWashRead".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ],
+    });
+
+    app.autocomplete_pending_request_mode = None;
+    app.autocomplete_pending_request_path = None;
+    app.autocomplete_pending_context_key = None;
+    app.remember_ty_autocomplete_cache(vec![crate::lsp::LspCompletionItem {
+        label: "user_id".to_string(),
+        kind: SymbolKind::Variable,
+        module: Some("BoxRead".to_string()),
+        detail: Some("(variable) BoxRead.user_id: int | None".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let cache = app.autocomplete_cache.as_ref().unwrap();
+    assert_eq!(cache.path, path);
+    assert_eq!(cache.context_key, "TyContext|box.");
+    assert_eq!(cache.items.len(), 2);
+    assert!(cache.items.iter().any(|item| item.label == "car_wash"));
 }
 
 #[test]
@@ -1037,6 +1264,26 @@ fn inherited_python_attr_owner_uses_declaring_base_class() {
         imported.get("repo_base").map(String::as_str),
         Some("car_wash.core.db.repo_base")
     );
+    assert_eq!(python_member_dot_receiver("RepoBase.", 9), Some("RepoBase"));
+    assert_eq!(
+        python_member_dot_receiver("RepoBase.exe", 12),
+        Some("RepoBase")
+    );
+
+    let pep695_source = "class RepoBase[TModel: Base, TReadStruct: BasedStruct]:\n    model: ClassVar[type[SQLAlchemyModel | Base]]\n    read_struct: ClassVar[type[Struct]]\n    table_verbose_name: str\n\n    @typing.overload\n    async def execute_sql(\n        self,\n        sql: str,\n        args: list[SQLType],\n        *,\n        fetch_many: Literal[True],\n        modify: bool = False,\n    ) -> list[Record]: ...\n\n    @typing.overload\n    async def execute_sql(\n        self, sql: str, args: list[SQLType], *, modify: bool = False\n    ) -> str: ...\n";
+    assert_eq!(
+        python_class_attr_owner_in_source(pep695_source, "RepoBase", "model").as_deref(),
+        Some("RepoBase")
+    );
+    assert_eq!(
+        python_class_attr_owner_in_source(pep695_source, "RepoBase", "read_struct").as_deref(),
+        Some("RepoBase")
+    );
+    let overload_detail =
+        python_class_method_overload_detail(pep695_source, "RepoBase", "execute_sql").unwrap();
+    assert!(overload_detail.contains("@overload"));
+    assert!(overload_detail.contains("async def execute_sql("));
+    assert!(!overload_detail.contains("Overload["));
 }
 
 #[test]
@@ -1239,6 +1486,527 @@ fn tree_sitter_autocomplete_ignores_current_token_matches() {
 }
 
 #[test]
+fn tree_sitter_autocomplete_resets_scroll_after_filter_change() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("Rep");
+    app.highlighter.completions = vec![
+        completion("RepoBase", SymbolKind::Class, 0, 200),
+        completion("RepoSession", SymbolKind::Class, 0, 200),
+    ];
+
+    app.update_autocomplete();
+    assert!(app.autocomplete_active);
+    app.autocomplete_scroll.current = 480.0;
+    app.autocomplete_scroll.target = 480.0;
+    app.autocomplete_selected_idx = 1;
+
+    app.editor = editor_with("RepoB");
+    app.update_autocomplete();
+
+    assert!(app.autocomplete_active);
+    assert_eq!(app.autocomplete_scroll.current, 0.0);
+    assert_eq!(app.autocomplete_scroll.target, 0.0);
+    assert_eq!(app.autocomplete_selected_idx, 0);
+    assert_eq!(app.autocomplete_options[0].0.word, "RepoBase");
+}
+
+#[test]
+fn tree_sitter_autocomplete_keeps_parameter_kind_over_later_usage() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("class BookingService:\n    def __init__(self, session):\n        s");
+    app.highlighter.completions = vec![
+        completion("self", SymbolKind::Parameter, 35, 120),
+        completion("self", SymbolKind::Class, 55, 120),
+        completion("session", SymbolKind::Parameter, 41, 120),
+        completion("session", SymbolKind::Class, 70, 120),
+    ];
+
+    app.update_autocomplete();
+
+    assert_eq!(
+        app.autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "self")
+            .map(|(item, _)| item.kind),
+        Some(SymbolKind::Parameter)
+    );
+    assert_eq!(
+        app.autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == "session")
+            .map(|(item, _)| item.kind),
+        Some(SymbolKind::Parameter)
+    );
+}
+
+#[test]
+fn autocomplete_shows_self_owner_for_current_class() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("class BookingService:\n    async def create_booking(self):\n        s");
+    app.highlighter.completions = vec![completion("self", SymbolKind::Parameter, 50, 80)];
+
+    app.update_autocomplete();
+
+    let self_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "self")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(self_item.kind, SymbolKind::Parameter);
+    assert_eq!(self_item.module.as_deref(), Some("BookingService"));
+
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "self".to_string(),
+        kind: SymbolKind::Class,
+        module: None,
+        detail: Some("BookingService".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let self_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "self")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(self_item.kind, SymbolKind::Parameter);
+    assert_eq!(self_item.module.as_deref(), Some("BookingService"));
+}
+
+#[test]
+fn ty_context_keeps_cls_parameter_in_multiline_class_header_after_late_response() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "class GenericCRUDService(\n    Generic[TReadStruct, TListResponseStruct],\n):\n    def __init_subclass__(cls, **kwargs: Any):\n        super().__init_subclass__(**kwargs)\n        c",
+    );
+    app.highlighter.completions = vec![completion(
+        "cls",
+        SymbolKind::Parameter,
+        app.editor.get_full_text().find("cls").unwrap(),
+        app.editor.len(),
+    )];
+
+    app.update_autocomplete();
+
+    let cls_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "cls")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(cls_item.kind, SymbolKind::Parameter);
+    assert_eq!(cls_item.module.as_deref(), Some("GenericCRUDService"));
+
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "cls".to_string(),
+        kind: SymbolKind::Class,
+        module: Some("type[GenericCRUDService]".to_string()),
+        detail: Some("type[GenericCRUDService]".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let cls_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "cls")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(cls_item.kind, SymbolKind::Parameter);
+    assert_eq!(cls_item.module.as_deref(), Some("GenericCRUDService"));
+}
+
+#[test]
+fn autocomplete_detail_merge_keeps_cls_parameter_from_multiline_class_header() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "class GenericCRUDService(\n    Generic[TReadStruct, TListResponseStruct],  # noqa: UP046\n):\n    def __init_subclass__(cls, **kwargs: Any):\n        super().__init_subclass__(**kwargs)\n        c",
+    );
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TreeSitter;
+    app.autocomplete_detail_word = Some("cls".to_string());
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "cls".to_string(),
+            kind: SymbolKind::Parameter,
+            scope_start: 0,
+            scope_end: app.editor.len(),
+            module: Some("GenericCRUDService".to_string()),
+            module_path: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        vec![0],
+    )];
+
+    app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+        label: "cls".to_string(),
+        kind: SymbolKind::Class,
+        module: Some("GenericCRUDService".to_string()),
+        detail: Some("type[GenericCRUDService]".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let cls_item = &app.autocomplete_options[0].0;
+    assert_eq!(cls_item.kind, SymbolKind::Parameter);
+    assert_eq!(cls_item.module.as_deref(), Some("GenericCRUDService"));
+}
+
+#[test]
+fn autocomplete_detail_merge_does_not_downgrade_classvar_to_unknown() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "from typing import ClassVar\nclass GenericCRUDService:\n    list_resp_struct: ClassVar[type[GenericListResponse]]\n    Cla",
+    );
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TreeSitter;
+    app.autocomplete_detail_word = Some("ClassVar".to_string());
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "ClassVar".to_string(),
+            kind: SymbolKind::Class,
+            scope_start: 0,
+            scope_end: app.editor.len(),
+            module: Some("typing".to_string()),
+            module_path: Some("typing.ClassVar".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        vec![0, 1, 2],
+    )];
+
+    app.merge_autocomplete_details(vec![crate::lsp::LspCompletionItem {
+        label: "ClassVar".to_string(),
+        kind: SymbolKind::Unknown,
+        module: Some("typing".to_string()),
+        detail: None,
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.kind, SymbolKind::Class);
+    assert_eq!(item.module.as_deref(), Some("typing"));
+}
+
+#[test]
+fn ty_context_initial_typing_cast_is_function_before_detail_hover() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("from typing import cast\nca");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "cast".to_string(),
+        kind: SymbolKind::Unknown,
+        module: Some("typing".to_string()),
+        detail: Some(
+            "Overload[[_T](typ: type[_T], val: Any) -> _T, (typ: str, val: Any) -> Any]"
+                .to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.word, "cast");
+    assert_eq!(item.kind, SymbolKind::Function);
+    assert_eq!(item.module.as_deref(), Some("typing"));
+}
+
+#[test]
+fn ty_context_initial_keywords_and_imported_config_have_stable_kinds() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("from car_wash.config import config\nc");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "case".to_string(),
+            kind: SymbolKind::Unknown,
+            module: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "config".to_string(),
+            kind: SymbolKind::Unknown,
+            module: Some("Config".to_string()),
+            detail: Some("Config".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    let case_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "case")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(case_item.kind, SymbolKind::Keyword);
+
+    let config_item = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "config")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(config_item.kind, SymbolKind::Variable);
+    assert_eq!(config_item.module.as_deref(), Some("car_wash.config"));
+    assert_eq!(
+        config_item.module_path.as_deref(),
+        Some("car_wash.config.Config")
+    );
+
+    let config_idx = app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "config")
+        .unwrap();
+    app.autocomplete_selected_idx = config_idx;
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.starts_with(
+        "[[MODULE]] car_wash.config.Config\nclass Config"
+    ));
+    assert!(!popup.spans.is_empty());
+}
+
+#[test]
+fn ty_context_cls_member_completion_labels_multiline_class_owner() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "class GenericCRUDService(\n    Generic[TReadStruct, TListResponseStruct],\n):\n    repository: type[AsyncpgRepository]\n\n    def __init_subclass__(cls, **kwargs: Any):\n        cls.",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "read_entity".to_string(),
+            kind: SymbolKind::Function,
+            module: None,
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "repository".to_string(),
+            kind: SymbolKind::Class,
+            module: None,
+            detail: Some("type[AsyncpgRepository]".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    for word in ["read_entity", "repository"] {
+        let item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == word)
+            .map(|(item, _)| item)
+            .unwrap();
+        assert_eq!(item.module.as_deref(), Some("GenericCRUDService"));
+    }
+}
+
+#[test]
+fn ty_context_self_member_completion_uses_booking_service_instance_attrs() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_self_owner_repo_test_{stamp}"));
+    let repo_dir = root.join("car_wash/domains/cars");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("repository.py"),
+        "class UserCarRepository:\n    async def paginate_entities(self):\n        pass\n    tasks: list | None\n    add_serv: object\n    ban_repo: object\n    box_repo: object\n    user_repo: object\n    crud_repo: object\n",
+    )
+    .unwrap();
+    let current = root.join("car_wash/domains/washes/bookings/service.py");
+    std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(current);
+    app.ide_workspaces = vec![root];
+    app.file_extension = "py".to_string();
+    app.editor = editor_with(
+        "from car_wash.core.service import GenericCRUDService\nfrom car_wash.domains.cars.repository import UserCarRepository\nfrom car_wash.domains.washes.bans.repository import CarWashBanRepository\nfrom car_wash.domains.washes.bookings.repository import BookingRepository\n\nclass BookingService(GenericCRUDService[BookingRead, ListResponse]):\n    repository = BookingRepository\n\n    def __init__(self, session):\n        super().__init__(session)\n        self.ban_repo = CarWashBanRepository(session)\n        self.user_car_repo = UserCarRepository(session)\n        self.tasks: list | None = None\n        self.bank_commissions = {}\n\n    async def create_booking(self):\n        self.",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "paginate_entities".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("UserCarRepository".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "tasks".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("UserCarRepository".to_string()),
+            detail: Some("list | None".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "ban_repo".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("CarWashBanRepository".to_string()),
+            detail: Some("CarWashBanRepository".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "repository".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("type[BookingRepository]".to_string()),
+            detail: Some(
+                "<class 'BookingRepository'> | type[AsyncpgRepository[Unknown, Unknown]]"
+                    .to_string(),
+            ),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "user_car_repo".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("UserCarRepository".to_string()),
+            detail: Some("UserCarRepository".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "bank_commissions".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("dict".to_string()),
+            detail: Some("dict".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    for word in [
+        "paginate_entities",
+        "tasks",
+        "ban_repo",
+        "repository",
+        "user_car_repo",
+        "bank_commissions",
+    ] {
+        let item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == word)
+            .map(|(item, _)| item)
+            .unwrap();
+        assert_eq!(item.module.as_deref(), Some("BookingService"));
+    }
+    for word in [
+        "tasks",
+        "ban_repo",
+        "repository",
+        "user_car_repo",
+        "bank_commissions",
+    ] {
+        let item = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == word)
+            .map(|(item, _)| item)
+            .unwrap();
+        assert_eq!(item.kind, SymbolKind::Variable);
+    }
+    let repository = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "repository")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(
+        repository.module_path.as_deref(),
+        Some("car_wash.domains.washes.bookings.repository.BookingRepository")
+    );
+    let ban_repo_idx = app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "ban_repo")
+        .unwrap();
+    let ban_repo = &app.autocomplete_options[ban_repo_idx].0;
+    assert_eq!(
+        ban_repo.module_path.as_deref(),
+        Some("car_wash.domains.washes.bans.repository.CarWashBanRepository")
+    );
+    app.autocomplete_selected_idx = ban_repo_idx;
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.starts_with(
+        "[[MODULE]] car_wash.domains.washes.bans.repository.CarWashBanRepository\nclass CarWashBanRepository"
+    ));
+    assert!(!popup.spans.is_empty());
+}
+
+#[test]
 fn ty_context_completion_uses_declaring_owner_not_field_type() {
     let Some(mut app) = test_app() else {
         return;
@@ -1361,6 +2129,158 @@ fn ty_context_completion_uses_declaring_owner_not_field_type() {
         id_module_path,
         Some("car_wash.domains.washes.boxes.output.BoxReadPublic")
     );
+}
+
+#[test]
+fn ty_context_completion_formats_source_overloads_and_pep695_attr_owners() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_repo_base_detail_test_{stamp}"));
+    let package_dir = root.join("car_wash/core/db");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("repo_base.py"),
+        "class RepoBase[TModel: Base, TReadStruct: BasedStruct]:\n    model: ClassVar[type[SQLAlchemyModel | Base]]\n    read_struct: ClassVar[type[Struct]]\n    table_verbose_name: str\n\n    @typing.overload\n    async def execute_sql(\n        self,\n        sql: str,\n        args: list[SQLType],\n        *,\n        fetch_many: Literal[True],\n        modify: bool = False,\n    ) -> list[Record]: ...\n\n    @typing.overload\n    async def execute_sql(\n        self, sql: str, args: list[SQLType], *, modify: bool = False\n    ) -> str: ...\n",
+    )
+    .unwrap();
+    let current = root.join("car_wash/app.py");
+    std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(current);
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with("from car_wash.core.db.repo_base import RepoBase\nRepoBase.");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "execute_sql".to_string(),
+            kind: SymbolKind::Function,
+            module: None,
+            detail: Some(
+                "Overload[(self, sql: str, args: list[SQLType]) -> CoroutineType[Any, Any, str]]"
+                    .to_string(),
+            ),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "model".to_string(),
+            kind: SymbolKind::Class,
+            module: None,
+            detail: Some("type[SQLAlchemyModel | Base]".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "read_struct".to_string(),
+            kind: SymbolKind::Class,
+            module: None,
+            detail: Some("type[Struct]".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "table_verbose_name".to_string(),
+            kind: SymbolKind::Class,
+            module: None,
+            detail: Some("str".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    for name in ["model", "read_struct", "table_verbose_name"] {
+        let owner = app
+            .autocomplete_options
+            .iter()
+            .find(|(item, _)| item.word == name)
+            .and_then(|(item, _)| item.module.as_deref());
+        assert_eq!(owner, Some("RepoBase"));
+    }
+    let execute_detail = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "execute_sql")
+        .and_then(|(item, _)| item.detail.as_deref())
+        .unwrap();
+    assert!(execute_detail.contains("@overload"));
+    assert!(execute_detail.contains("async def execute_sql("));
+    assert!(!execute_detail.contains("Overload["));
+}
+
+#[test]
+fn ty_context_member_completion_uses_inherited_method_owner() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_inherited_method_owner_test_{stamp}"));
+    let package_dir = root.join("car_wash/core/db");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("crud.py"),
+        "class GenericCRUDService:\n    async def read_entity(self):\n        pass\n    async def create_entity(self):\n        pass\n",
+    )
+    .unwrap();
+    let current = root.join("car_wash/bookings/service.py");
+    std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(current);
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with(
+        "from car_wash.core.db.crud import GenericCRUDService\nclass BookingService(GenericCRUDService):\n    async def read_booking(self):\n        pass\n    async def create_booking(self):\n        self.rea",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "read_entity".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("BookingService".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "read_booking".to_string(),
+            kind: SymbolKind::Function,
+            module: Some("BookingService".to_string()),
+            detail: None,
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    let read_entity_owner = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "read_entity")
+        .and_then(|(item, _)| item.module.as_deref());
+    let read_booking_owner = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "read_booking")
+        .and_then(|(item, _)| item.module.as_deref());
+    assert_eq!(read_entity_owner, Some("GenericCRUDService"));
+    assert_eq!(read_booking_owner, Some("BookingService"));
 }
 
 #[test]

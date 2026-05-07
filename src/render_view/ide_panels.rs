@@ -916,25 +916,47 @@ impl Renderer {
         self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
 
         let (line, character) = cursor_line_and_character(editor);
-        scratch.clear();
-        let _ = std::fmt::Write::write_fmt(
-            &mut scratch,
-            format_args!("Стр {}, Сим {}", line, character),
-        );
-        if let Some(count) = selected_char_count(editor) {
-            let _ =
-                std::fmt::Write::write_fmt(&mut scratch, format_args!(" ({} выделено)", count));
-        }
-        let pos_w = self.measure_ui_width(&scratch, text_scale).round();
-        let pos_x = lang_x - 22.0 * s - pos_w;
-        if pos_x > diag_x + diagnostics_w + 8.0 * s {
+        let block_gap = 12.0 * s;
+        let line_block_w = 92.0 * s;
+        let char_block_w = 86.0 * s;
+        let selected_block_w = 132.0 * s;
+        let pos_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82];
+        let char_x = lang_x - 22.0 * s - char_block_w;
+        let line_x = char_x - block_gap - line_block_w;
+        let selected_x = line_x - block_gap - selected_block_w;
+        if selected_x > diag_x + diagnostics_w + 8.0 * s {
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("Стр {}", line));
+            let text_w = self.measure_ui_width(&scratch, text_scale).round();
             self.draw_string_scaled(
                 &scratch,
-                pos_x,
+                line_x + line_block_w - text_w,
                 text_y,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82],
+                pos_color,
                 text_scale,
             );
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("Сим {}", character));
+            let text_w = self.measure_ui_width(&scratch, text_scale).round();
+            self.draw_string_scaled(
+                &scratch,
+                char_x + char_block_w - text_w,
+                text_y,
+                pos_color,
+                text_scale,
+            );
+            if let Some(count) = selected_char_count(editor) {
+                scratch.clear();
+                let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{} выделено", count));
+                let text_w = self.measure_ui_width(&scratch, text_scale).round();
+                self.draw_string_scaled(
+                    &scratch,
+                    selected_x + selected_block_w - text_w,
+                    text_y,
+                    pos_color,
+                    text_scale,
+                );
+            }
         }
 
         if diagnostics_hovered {

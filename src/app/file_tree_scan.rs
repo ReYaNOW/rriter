@@ -186,12 +186,18 @@ pub(super) fn scan_dir_parallel(
     result
 }
 
+#[derive(Debug)]
+pub enum FileTreeScanMessage {
+    Nodes(Vec<FileNode>),
+    IconsReady,
+}
+
 /// Запускает фоновый поток сканирования. Возвращает канал для результата.
 pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
     user_patterns: Vec<String>,
-) -> mpsc::Receiver<Vec<FileNode>> {
+) -> mpsc::Receiver<FileTreeScanMessage> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
@@ -232,21 +238,21 @@ pub fn spawn_scan(
             })
             .collect();
 
-        // Отправляем полное дерево немедленно (текст появится мгновенно)
-        let _ = tx.send(full_nodes.clone());
-
-        // STEP 2: Параллельная растеризация иконок без блокировки UI
         let mut needed_icons = rustc_hash::FxHashSet::default();
         for node in &full_nodes {
             needed_icons.insert((node.icon_key, node.is_dir));
         }
 
+        // Отправляем полное дерево немедленно (текст появится мгновенно)
+        let _ = tx.send(FileTreeScanMessage::Nodes(full_nodes));
+
+        // STEP 2: Параллельная растеризация иконок без блокировки UI
         needed_icons.into_par_iter().for_each(|(key, is_dir)| {
             crate::app::file_tree::pre_rasterize_icon(key, is_dir);
         });
 
-        // STEP 3: Финальный триггер для перерисовки (иконки появятся)
-        let _ = tx.send(full_nodes);
+        // STEP 3: Финальный легкий триггер для перерисовки (иконки появятся)
+        let _ = tx.send(FileTreeScanMessage::IconsReady);
     });
     rx
 }

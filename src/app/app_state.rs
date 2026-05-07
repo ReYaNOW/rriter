@@ -28,6 +28,13 @@ pub struct EditorTab {
     pub icon_key: &'static str,
 }
 
+#[derive(Debug)]
+pub struct ExternalFileChange {
+    pub tab_idx: usize,
+    pub path: PathBuf,
+    pub disk_text: String,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum PendingAction {
     Quit,
@@ -633,6 +640,9 @@ pub struct App {
     pub autocomplete_anchor: Option<(f32, f32)>,
     pub autocomplete_mode: AutocompleteMode,
     pub autocomplete_pending_request_id: Option<i32>,
+    pub autocomplete_pending_request_mode: Option<AutocompleteMode>,
+    pub autocomplete_pending_request_path: Option<PathBuf>,
+    pub autocomplete_pending_context_key: Option<String>,
     pub autocomplete_detail_request_id: Option<i32>,
     pub autocomplete_detail_word: Option<String>,
     pub autocomplete_detail_request_path: Option<PathBuf>,
@@ -661,9 +671,12 @@ pub struct App {
     pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
-    pub file_tree_rx: Option<std::sync::mpsc::Receiver<Vec<crate::app::file_tree::FileNode>>>,
+    pub file_tree_rx: Option<
+        std::sync::mpsc::Receiver<crate::app::file_tree::FileTreeScanMessage>,
+    >,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
+    pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
     /// Меню быстрых действий LSP (Alt+Enter)

@@ -23,13 +23,24 @@ fn apply_autocomplete_detail_cache_item(
     member_dot_context: bool,
 ) {
     let incoming_kind = completion_detail_kind(cached.kind, cached.detail.as_deref());
-    item.kind = incoming_kind;
+    let effective_kind = if incoming_kind == SymbolKind::Unknown {
+        item.kind
+    } else {
+        incoming_kind
+    };
+    if matches!(item.word.as_str(), "self" | "cls") && item.kind == SymbolKind::Parameter {
+        if item.detail.is_none() && cached.detail.is_some() {
+            item.detail = cached.detail.clone();
+        }
+        return;
+    }
+    item.kind = effective_kind;
     if item.detail.is_none() && cached.detail.is_some() {
         item.detail = cached.detail.clone();
     }
     if !member_dot_context
         && (matches!(
-            incoming_kind,
+            effective_kind,
             SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
         ) || completion_is_lowercase_type_source(
             &item.word,
@@ -59,6 +70,122 @@ fn apply_autocomplete_detail_cache_item(
         item.module = Some(module.to_string());
     }
     assign_builtin_completion_module(item);
+}
+
+fn autocomplete_source_attr_class_detail(
+    item: &AutocompleteItem,
+    detail: &str,
+    _owner: &str,
+) -> Option<String> {
+    if !matches!(item.kind, SymbolKind::Variable | SymbolKind::Property) {
+        return None;
+    }
+    let class_name = autocomplete_detail_type_name(detail)?;
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    Some(format!("class {class_label}"))
+}
+
+fn autocomplete_detail_class_name(detail: &str) -> Option<&str> {
+    detail.split('|').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("<class '")
+            .and_then(|rest| rest.strip_suffix("'>"))
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    })
+}
+
+fn autocomplete_detail_type_name(detail: &str) -> Option<&str> {
+    autocomplete_detail_class_name(detail).or_else(|| {
+        let detail = detail.trim();
+        (is_class_like_type_name(detail) && !detail.contains('[')).then_some(detail)
+    })
+}
+
+fn autocomplete_detail_type_module_path(
+    detail: Option<&str>,
+    imports: Option<&FxHashMap<String, String>>,
+    fallback_module: Option<&str>,
+) -> Option<String> {
+    let class_name = autocomplete_detail_type_name(detail?)?;
+    if completion_source_is_module_path(class_name) {
+        return Some(class_name.to_string());
+    }
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    imports
+        .and_then(|imports| imports.get(class_label))
+        .map(|module| format!("{module}.{class_label}"))
+        .or_else(|| {
+            fallback_module
+                .map(normalized_completion_source)
+                .filter(|module| completion_source_is_module_path(module))
+                .map(|module| {
+                    if module.ends_with(&format!(".{class_label}")) {
+                        module.to_string()
+                    } else {
+                        format!("{module}.{class_label}")
+                    }
+                })
+        })
+}
+
+fn python_known_function_completion(item: &AutocompleteItem) -> bool {
+    matches!(item.word.as_str(), "cast")
+        && item
+            .module
+            .as_deref()
+            .or(item.module_path.as_deref())
+            .is_some_and(|module| {
+                let module = normalized_completion_source(module);
+                module == "typing" || module.starts_with("typing.")
+            })
+        && item
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.trim_start().starts_with("Overload["))
+}
+
+fn python_keyword_completion(word: &str) -> bool {
+    matches!(
+        word,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "case"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "match"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 fn python_scoped_self_priority(word: &str) -> u8 {
@@ -209,6 +336,9 @@ impl App {
         self.autocomplete_rect = None;
         self.autocomplete_anchor = None;
         self.autocomplete_pending_request_id = None;
+        self.autocomplete_pending_request_mode = None;
+        self.autocomplete_pending_request_path = None;
+        self.autocomplete_pending_context_key = None;
         self.autocomplete_detail_request_id = None;
         self.autocomplete_detail_word = None;
         self.autocomplete_detail_request_path = None;
@@ -250,6 +380,9 @@ impl App {
         item: &AutocompleteItem,
         detail: &'a str,
     ) -> std::borrow::Cow<'a, str> {
+        if let Some(detail) = python_stdlib_completion_detail(item, detail) {
+            return std::borrow::Cow::Borrowed(detail);
+        }
         let Some(owner) = item
             .module
             .as_deref()
@@ -257,6 +390,9 @@ impl App {
         else {
             return std::borrow::Cow::Borrowed(detail);
         };
+        if let Some(detail) = autocomplete_source_attr_class_detail(item, detail, owner) {
+            return std::borrow::Cow::Owned(detail);
+        }
         if detail.contains(owner) || detail.contains(&format!(".{}", item.word)) {
             return std::borrow::Cow::Borrowed(detail);
         }
@@ -597,6 +733,9 @@ impl App {
             self.autocomplete_options.clear();
             self.autocomplete_selected_idx = 0;
             self.autocomplete_pending_request_id = None;
+            self.autocomplete_pending_request_mode = None;
+            self.autocomplete_pending_request_path = None;
+            self.autocomplete_pending_context_key = None;
             self.autocomplete_anim_progress = 0.0;
             self.autocomplete_scroll.current = 0.0;
             self.autocomplete_scroll.target = 0.0;
@@ -619,6 +758,7 @@ impl App {
             &prefix,
             mode,
         );
+        let cacheable_response = prefix.is_empty();
         if let Some(items) = self
             .autocomplete_cache
             .as_ref()
@@ -629,6 +769,9 @@ impl App {
         {
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = None;
+            self.autocomplete_pending_request_mode = None;
+            self.autocomplete_pending_request_path = None;
+            self.autocomplete_pending_context_key = None;
             self.autocomplete_apply_pending_response = false;
             self.update_ty_autocomplete(items);
             self.trace_autocomplete_state("request_ty:cached_end");
@@ -661,6 +804,15 @@ impl App {
             }
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = Some(id);
+            if cacheable_response {
+                self.autocomplete_pending_request_mode = Some(mode);
+                self.autocomplete_pending_request_path = Some(path);
+                self.autocomplete_pending_context_key = Some(context_key);
+            } else {
+                self.autocomplete_pending_request_mode = None;
+                self.autocomplete_pending_request_path = None;
+                self.autocomplete_pending_context_key = None;
+            }
             self.autocomplete_apply_pending_response = false;
             if hide_exact_match {
                 self.hide_autocomplete_popup_keep_request();
@@ -673,26 +825,25 @@ impl App {
     }
 
     pub fn remember_ty_autocomplete_cache(&mut self, mut items: Vec<crate::lsp::LspCompletionItem>) {
-        let Some(path) = self.file_path.clone() else {
+        let (Some(mode), Some(path), Some(context_key)) = (
+            self.autocomplete_pending_request_mode,
+            self.autocomplete_pending_request_path.clone(),
+            self.autocomplete_pending_context_key.clone(),
+        ) else {
             return;
         };
         if items.len() > AUTOCOMPLETE_CACHE_MAX_ITEMS {
             items.truncate(AUTOCOMPLETE_CACHE_MAX_ITEMS);
         }
-        let text = self.editor.get_full_text();
-        let prefix = self.get_current_word_prefix();
         self.autocomplete_cache = Some(AutocompleteCacheEntry {
-            mode: self.autocomplete_mode,
+            mode,
             path,
-            context_key: ty_autocomplete_context_key(
-                &text,
-                &self.editor.line_offsets,
-                self.editor.cursor,
-                &prefix,
-                self.autocomplete_mode,
-            ),
+            context_key,
             items,
         });
+        self.autocomplete_pending_request_mode = None;
+        self.autocomplete_pending_request_path = None;
+        self.autocomplete_pending_context_key = None;
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
@@ -726,6 +877,9 @@ impl App {
         let mut items: Vec<AutocompleteItem> =
             items.into_iter().map(AutocompleteItem::from).collect();
         let current_text = self.editor.get_full_text();
+        let local_self_owner = (self.file_extension == "py")
+            .then(|| python_enclosing_class_before_cursor(&current_text, self.editor.cursor))
+            .flatten();
         let imported_modules =
             (self.file_extension == "py").then(|| imported_python_symbols(&current_text));
         let member_dot_context = cursor_after_python_member_dot(&self.editor);
@@ -733,19 +887,37 @@ impl App {
             && member_dot_context)
             .then(|| common_completion_owner(&items))
             .flatten();
-        let member_owner = if self.autocomplete_mode == AutocompleteMode::TyContext
-            && member_dot_context
-        {
+        let receiver_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
+            && member_dot_context)
+            .then(|| {
+                python_member_dot_receiver(&current_text, self.editor.cursor).and_then(
+                    |receiver| {
+                        if matches!(receiver, "self" | "cls") {
+                            return local_self_owner.clone();
+                        }
+                        let imported = imported_modules
+                            .as_ref()
+                            .is_some_and(|imports| imports.contains_key(receiver));
+                        (imported || is_class_like_type_name(receiver))
+                            .then(|| receiver.rsplit('.').next().unwrap_or(receiver).to_string())
+                    },
+                )
+            })
+            .flatten();
+        let fallback_owner = receiver_owner.as_deref().or(common_owner.as_deref());
+        let member_owner = if receiver_owner.is_some() {
+            receiver_owner.clone()
+        } else if self.autocomplete_mode == AutocompleteMode::TyContext && member_dot_context {
             infer_python_member_owner(
                 &current_text,
                 imported_modules.as_ref(),
                 &self.ide_workspaces,
                 self.file_path.as_deref(),
                 &items,
-                common_owner.as_deref(),
+                fallback_owner,
             )
         } else {
-            common_owner.clone()
+            fallback_owner.map(str::to_string)
         };
         if autocomplete_trace_enabled() {
             println!(
@@ -772,7 +944,7 @@ impl App {
         } else {
             FxHashSet::default()
         };
-        let inherited_owner_source = if !source_attr_words.is_empty() {
+        let member_owner_source = if member_dot_context {
             member_owner.as_ref().and_then(|owner| {
                 imported_python_class_source(
                     &current_text,
@@ -780,12 +952,17 @@ impl App {
                     self.file_path.as_deref(),
                     owner,
                 )
+                .or_else(|| {
+                    let owner_label = owner.rsplit('.').next().unwrap_or(owner);
+                    source_contains_python_class(&current_text, owner_label)
+                        .then(|| current_text.clone())
+                })
             })
         } else {
             None
         };
         let source_attr_owners = if let (Some(owner), Some(source)) =
-            (member_owner.as_deref(), inherited_owner_source.as_deref())
+            (member_owner.as_deref(), member_owner_source.as_deref())
         {
             python_class_attr_owners_with_imports(
                 source,
@@ -797,8 +974,31 @@ impl App {
         } else {
             FxHashMap::default()
         };
+        let source_member_words: FxHashSet<String> = if member_dot_context && member_owner.is_some()
+        {
+            items
+                .iter()
+                .filter(|item| item.kind == SymbolKind::Function)
+                .map(|item| item.word.clone())
+                .collect()
+        } else {
+            FxHashSet::default()
+        };
+        let source_member_owners = if let (Some(owner), Some(source)) =
+            (member_owner.as_deref(), member_owner_source.as_deref())
+        {
+            python_class_member_owners_with_imports(
+                source,
+                &self.ide_workspaces,
+                self.file_path.as_deref(),
+                owner,
+                &source_member_words,
+            )
+        } else {
+            FxHashMap::default()
+        };
         let member_owner_depths = if let (Some(owner), Some(source)) =
-            (member_owner.as_deref(), inherited_owner_source.as_deref())
+            (member_owner.as_deref(), member_owner_source.as_deref())
         {
             python_class_owner_depths_with_imports(
                 source,
@@ -816,7 +1016,28 @@ impl App {
             depths
         };
         for item in &mut items {
+            if member_dot_context
+                && item
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.trim_start().starts_with("Overload["))
+                && let (Some(owner), Some(source)) =
+                    (member_owner.as_deref(), member_owner_source.as_deref())
+                && let Some(detail) =
+                    python_class_method_overload_detail(source, owner, &item.word)
+            {
+                item.detail = Some(detail);
+            }
             item.kind = completion_detail_kind(item.kind, item.detail.as_deref());
+            if python_known_function_completion(item) {
+                item.kind = SymbolKind::Function;
+            }
+            if self.file_extension == "py"
+                && item.kind == SymbolKind::Unknown
+                && python_keyword_completion(&item.word)
+            {
+                item.kind = SymbolKind::Keyword;
+            }
             if self.autocomplete_mode == AutocompleteMode::TyImports {
                 normalize_ty_import_kind(item);
             }
@@ -842,6 +1063,11 @@ impl App {
                     {
                         item.module = Some(module.clone());
                         item.module_path.get_or_insert_with(|| module.clone());
+                        if item.kind == SymbolKind::Unknown
+                            && completion_word_starts_lower(&item.word)
+                        {
+                            item.kind = SymbolKind::Variable;
+                        }
                     } else {
                         assign_builtin_completion_module(item);
                     }
@@ -849,16 +1075,37 @@ impl App {
                 if completion_item_is_argument_like(item) {
                     item.kind = SymbolKind::Parameter;
                 }
+                if !member_dot_context
+                    && matches!(item.word.as_str(), "self" | "cls")
+                    && let Some(owner) = local_self_owner.as_ref()
+                {
+                    item.kind = SymbolKind::Parameter;
+                    item.module = Some(owner.clone());
+                    item.module_path = None;
+                    continue;
+                }
                 let source_attr_owner = if member_dot_context {
                     source_attr_owners.get(&item.word).cloned()
                 } else {
                     None
                 };
+                let top_level_import_module = (!member_dot_context)
+                    .then(|| {
+                        imported_modules
+                            .as_ref()
+                            .and_then(|imports| imports.get(&item.word))
+                    })
+                    .flatten();
                 if completion_item_is_field_like(item) || source_attr_owner.is_some() {
                     if !member_dot_context {
                         item.kind = SymbolKind::Variable;
-                        item.module = None;
-                        item.module_path = None;
+                        if let Some(module) = top_level_import_module {
+                            item.module = Some(module.clone());
+                            item.module_path.get_or_insert_with(|| module.clone());
+                        } else {
+                            item.module = None;
+                            item.module_path = None;
+                        }
                     } else if let Some(owner) = source_attr_owner {
                         item.kind = SymbolKind::Variable;
                         set_completion_owner_source(
@@ -890,34 +1137,55 @@ impl App {
                                 imported_modules.as_ref(),
                                 common_owner_module,
                             );
-                        } else if inherited_owner_source.is_none() {
-                            if let Some(owner) = member_owner.as_ref() {
-                                set_completion_owner_source(
-                                    item,
-                                    owner.clone(),
-                                    imported_modules.as_ref(),
-                                    common_owner_module,
-                                );
-                            }
+                        } else if let Some(owner) = member_owner.as_ref() {
+                            set_completion_owner_source(
+                                item,
+                                owner.clone(),
+                                imported_modules.as_ref(),
+                                common_owner_module,
+                            );
                         } else {
                             item.module = None;
                             item.module_path = None;
                         }
                     }
+                    let module_is_known_owner = item
+                        .module
+                        .as_deref()
+                        .is_some_and(|module| member_owner_depths.contains_key(module));
                     if item
                         .module
                         .as_deref()
                         .is_some_and(is_type_like_completion_source)
-                        || completion_item_source_is_field_type(item)
+                        || !module_is_known_owner && completion_item_source_is_field_type(item)
                     {
                         item.module = None;
+                    }
+                    if let Some(type_path) = autocomplete_detail_type_module_path(
+                        item.detail.as_deref(),
+                        imported_modules.as_ref(),
+                        item.module_path.as_deref().or(item.module.as_deref()),
+                    ) {
+                        item.module_path = Some(type_path);
                     }
                 } else {
                     if !member_dot_context {
                         if let Some(module) = completion_parent_module_label(item) {
                             item.module = Some(module);
                         }
-                    } else if let Some(owner) = completion_item_owner_label(item) {
+                    } else if let Some(owner) = source_member_owners.get(&item.word).cloned() {
+                        set_completion_owner_source(
+                            item,
+                            owner,
+                            imported_modules.as_ref(),
+                            common_owner_module,
+                        );
+                    } else if let Some(owner) = completion_item_owner_label(item).filter(|owner| {
+                        receiver_owner.is_none() || {
+                            let owner_label = owner.rsplit('.').next().unwrap_or(owner);
+                            member_owner_depths.contains_key(owner_label)
+                        }
+                    }) {
                         set_completion_owner_source(
                             item,
                             owner,
@@ -929,8 +1197,16 @@ impl App {
                         .as_deref()
                         .is_some_and(is_type_like_completion_source)
                         || item.module.is_none()
+                        || receiver_owner.is_some() && completion_item_owner_label(item).is_some()
                     {
-                        item.module = member_owner.clone();
+                        if let Some(owner) = member_owner.clone() {
+                            set_completion_owner_source(
+                                item,
+                                owner,
+                                imported_modules.as_ref(),
+                                common_owner_module,
+                            );
+                        }
                     }
                 }
             }
@@ -1120,7 +1396,11 @@ impl App {
                 let current_size = comp.scope_end.saturating_sub(comp.scope_start);
                 if let Some(existing) = best_scopes.get(&comp.word) {
                     let ex_size = existing.scope_end.saturating_sub(existing.scope_start);
-                    if current_size < ex_size {
+                    let prefer_parameter = comp.kind == SymbolKind::Parameter
+                        && existing.kind != SymbolKind::Parameter;
+                    let keep_parameter = existing.kind == SymbolKind::Parameter
+                        && comp.kind != SymbolKind::Parameter;
+                    if prefer_parameter || (!keep_parameter && current_size < ex_size) {
                         best_scopes.insert(comp.word.clone(), comp.clone());
                     }
                 } else {
@@ -1220,14 +1500,30 @@ impl App {
             let imports = imported_python_symbols(&self.editor.get_full_text());
             apply_import_modules_to_autocomplete_items(&mut self.autocomplete_options, &imports);
         }
+        if self.file_extension == "py"
+            && !self.autocomplete_options.is_empty()
+            && let Some(owner) = python_enclosing_class_before_cursor(
+                &self.editor.get_full_text(),
+                self.editor.cursor,
+            )
+        {
+            for (item, _) in &mut self.autocomplete_options {
+                if item.kind == SymbolKind::Parameter
+                    && matches!(item.word.as_str(), "self" | "cls")
+                {
+                    item.module = Some(owner.clone());
+                    item.module_path = None;
+                }
+            }
+        }
 
         if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
                 self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_scroll.current = 0.0;
-                self.autocomplete_scroll.target = 0.0;
                 self.autocomplete_anchor = None;
             }
+            self.autocomplete_scroll.current = 0.0;
+            self.autocomplete_scroll.target = 0.0;
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;

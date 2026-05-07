@@ -1181,6 +1181,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub fn check_external_changes(&mut self) {
         self.sync_active_tab();
         let mut needs_redraw = false;
@@ -1240,6 +1241,120 @@ impl App {
                 w.request_redraw();
             }
         }
+    }
+
+    pub fn start_external_changes_check(&mut self) {
+        if self.external_changes_rx.is_some() {
+            return;
+        }
+        self.sync_active_tab();
+        let clean_tabs = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, tab)| {
+                (!tab.editor.is_dirty())
+                    .then(|| tab.file_path.clone().map(|path| (idx, path)))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        self.sync_active_tab();
+        if clean_tabs.is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut changes = Vec::new();
+            for (tab_idx, path) in clean_tabs {
+                if let Ok(disk_text) = std::fs::read_to_string(&path) {
+                    changes.push(crate::app::ExternalFileChange {
+                        tab_idx,
+                        path,
+                        disk_text,
+                    });
+                }
+            }
+            let _ = tx.send(changes);
+        });
+        self.external_changes_rx = Some(rx);
+    }
+
+    pub fn poll_external_changes(&mut self) -> bool {
+        let Some(rx) = &self.external_changes_rx else {
+            return false;
+        };
+        let changes = match rx.try_recv() {
+            Ok(changes) => changes,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.external_changes_rx = None;
+                return false;
+            }
+        };
+        self.external_changes_rx = None;
+        if changes.is_empty() {
+            return false;
+        }
+
+        self.sync_active_tab();
+        let mut needs_redraw = false;
+        let mut active_reloaded = false;
+        let active_idx = self.active_tab;
+        for change in changes {
+            let Some(tab) = self.tabs.get_mut(change.tab_idx) else {
+                continue;
+            };
+            if tab.file_path.as_ref() != Some(&change.path) || tab.editor.is_dirty() {
+                continue;
+            }
+            if change.disk_text == tab.editor.get_full_text() {
+                continue;
+            }
+            let old_version = tab.editor.version;
+            tab.editor = crate::editor::Editor::new(change.disk_text.len() + 8192);
+            tab.editor.version = old_version + 1;
+            let _ = tab.editor.insert_str(&change.disk_text);
+            tab.editor.cursor = 0;
+            tab.editor.clear_history();
+            tab.editor.set_original_text();
+            tab.editor.sync_edits.clear();
+            tab.completions.clear();
+            tab.foldable_ranges.clear();
+            tab.is_highlighted_once = false;
+            if self.is_ide_mode
+                && let Some(lsp) = &mut self.lsp
+            {
+                lsp.clear_diagnostics_for_path(&change.path);
+                lsp.notify_change(
+                    &change.path,
+                    &tab.file_extension,
+                    &change.disk_text,
+                    tab.editor.version as i32,
+                );
+            }
+            if change.tab_idx == active_idx {
+                active_reloaded = true;
+            }
+            needs_redraw = true;
+        }
+        self.sync_active_tab();
+        if active_reloaded {
+            while self.highlighter.rx.try_recv().is_ok() {}
+            self.highlighter.reset(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+            );
+            crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+            self.lsp_actions_menu = None;
+            self.last_sent_version = self.editor.version;
+        }
+        if needs_redraw
+            && let Some(w) = self.window.as_ref()
+        {
+            w.request_redraw();
+        }
+        needs_redraw
     }
 }
 

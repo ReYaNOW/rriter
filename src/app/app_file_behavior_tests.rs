@@ -454,6 +454,46 @@ fn check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone() {
 }
 
 #[test]
+fn async_external_changes_reload_clean_tabs_without_blocking_highlight_wait() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-tabs-async-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let clean_path = dir.join("clean.py");
+    std::fs::write(&clean_path, "def clean():\n    return 2\n").unwrap();
+
+    let mut clean_tab = tab_with(
+        "clean.py",
+        Some(clean_path.to_str().unwrap()),
+        "def clean():\n    return 1\n",
+    );
+    clean_tab.editor.set_original_text();
+    app.tabs = vec![clean_tab];
+    app.active_tab = 0;
+    app.editor = Editor::new(32);
+    app.base_title = "scratch".to_string();
+    app.sync_active_tab();
+
+    app.start_external_changes_check();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while std::time::Instant::now() < deadline && !app.poll_external_changes() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert_eq!(app.editor.get_full_text(), "def clean():\n    return 2\n");
+    assert!(!app.is_highlighted_once);
+
+    std::fs::remove_file(clean_path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
 fn app_tabs_recent_files_search_jump_and_autocomplete_empty_paths() {
     let Some(mut app) = test_app() else {
         return;

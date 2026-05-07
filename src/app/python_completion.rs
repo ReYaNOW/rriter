@@ -404,6 +404,7 @@ pub(crate) fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
     lower_attr
+        && item.kind != SymbolKind::Function
         && item.module.as_deref().is_some_and(is_class_like_type_name)
         && item.detail.as_deref().is_none_or(|detail| {
             detail.contains(&format!(": {}", item.module.as_deref().unwrap_or("")))
@@ -448,7 +449,7 @@ pub(crate) fn completion_needs_python_source_attr_owner(item: &AutocompleteItem)
             .detail
             .as_deref()
             .is_some_and(completion_detail_is_type_label)
-        || item.detail.is_none() && item.module.is_some()
+        || item.detail.is_none() && item.module.is_some() && item.kind != SymbolKind::Function
 }
 
 pub(crate) fn completion_owner_from_detail<'a>(word: &str, detail: &'a str) -> Option<&'a str> {
@@ -790,6 +791,75 @@ pub(crate) fn python_builtin_completion_module(word: &str) -> Option<&'static st
     }
 }
 
+pub(crate) fn python_stdlib_completion_detail(
+    item: &AutocompleteItem,
+    detail: &str,
+) -> Option<&'static str> {
+    if !detail.trim_start().starts_with("Overload[") {
+        return None;
+    }
+    let module = item
+        .module_path
+        .as_deref()
+        .or(item.module.as_deref())
+        .map(normalized_completion_source)
+        .unwrap_or("");
+    match item.word.as_str() {
+        "getattr" if module == "builtins" || module.starts_with("builtins.") => Some(
+            "@overload\n\
+def getattr(__o: object,\n\
+            __name: str) -> Any\n\
+getattr(object, name[, default]) -> value\n\
+-----\n\n\
+Get a named attribute from an object; getattr(x, 'y') is equivalent to x.y. \
+When a default argument is given, it is returned when the attribute doesn't \
+exist; without it, an exception is raised in that case.",
+        ),
+        "asynccontextmanager"
+            if module == "contextlib" || module.starts_with("contextlib.") =>
+        {
+            Some(
+                "def asynccontextmanager(func: (ParamSpec(\"_P\")) -> AsyncIterator[_T_co])\n\
+  -> (ParamSpec(\"_P\")) -> Any\n\
+@asynccontextmanager decorator.\n\
+Typical usage: @asynccontextmanager async def some_async_generator(<arguments>): \
+<setup> try: yield <value> finally: <cleanup> This makes this: async with \
+some_async_generator(<arguments>) as <variable>: <body> equivalent to this: \
+<setup> try: <variable> = <value> <body> finally: <cleanup>",
+            )
+        }
+        "cast" if module == "typing" || module.starts_with("typing.") => Some(
+            "def cast(typ: type[_T],\n\
+         val: Any) -> _T\n\
+def cast(typ: str,\n\
+         val: Any) -> Any\n\
+def cast(typ: object,\n\
+         val: Any) -> Any\n\
+Cast a value to a type.\n\
+This returns val unchanged at runtime.",
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn python_member_dot_receiver(text: &str, cursor: usize) -> Option<&str> {
+    let cursor = cursor.min(text.len());
+    let bytes = text.as_bytes();
+    let mut idx = cursor;
+    while idx > 0 && bytes.get(idx - 1).is_some_and(|&b| is_python_ident_byte(b)) {
+        idx -= 1;
+    }
+    if idx == 0 || bytes.get(idx - 1) != Some(&b'.') {
+        return None;
+    }
+    let dot = idx - 1;
+    let mut start = dot;
+    while start > 0 && bytes.get(start - 1).is_some_and(|&b| is_python_ident_byte(b)) {
+        start -= 1;
+    }
+    text.get(start..dot).filter(|s| !s.is_empty())
+}
+
 pub(crate) fn ty_autocomplete_context_key(
     text: &str,
     line_offsets: &[usize],
@@ -832,8 +902,9 @@ pub(crate) fn apply_import_modules_to_autocomplete_items(
 
 pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<String>> {
     let trimmed = line.trim_start();
-    let prefix = format!("class {class_name}");
-    let rest = trimmed.strip_prefix(&prefix)?;
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    let prefix = format!("class {class_label}");
+    let mut rest = trimmed.strip_prefix(&prefix)?;
     if rest
         .chars()
         .next()
@@ -841,7 +912,26 @@ pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<Str
     {
         return None;
     }
-    if rest.trim_start().starts_with(':') {
+    rest = rest.trim_start();
+    if rest.starts_with('[') {
+        let mut depth = 0usize;
+        let mut generic_end = None;
+        for (idx, ch) in rest.char_indices() {
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        generic_end = Some(idx + ch.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest = rest.get(generic_end?..).unwrap_or("").trim_start();
+    }
+    if rest.starts_with(':') {
         return Some(Vec::new());
     }
     let open = rest.find('(')?;
@@ -859,7 +949,14 @@ pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<Str
                     .next()
                     .unwrap_or("")
                     .trim();
-                (!name.is_empty()).then(|| name.to_string())
+                let valid = name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+                valid.then(|| name.to_string())
             })
             .collect(),
     )
@@ -884,6 +981,222 @@ pub(crate) fn class_direct_attr(line: &str) -> Option<&str> {
     (rest.starts_with(':') || rest.starts_with('=')).then_some(&trimmed[..end])
 }
 
+pub(crate) fn instance_attr_assignment_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed
+        .strip_prefix("self.")
+        .or_else(|| trimmed.strip_prefix("cls."))?;
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    let after = rest[end..].trim_start();
+    (after.starts_with(':') || is_plain_assignment_after_token(after)).then_some(&rest[..end])
+}
+
+pub(crate) fn class_header_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("class ")?;
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(rest.len());
+    (end > 0).then_some(&rest[..end])
+}
+
+fn python_header_depth_delta(line: &str) -> i32 {
+    let code = line.split('#').next().unwrap_or("");
+    code.chars().fold(0, |depth, ch| match ch {
+        '(' | '[' | '{' => depth + 1,
+        ')' | ']' | '}' => depth - 1,
+        _ => depth,
+    })
+}
+
+fn python_class_header_complete(line: &str, depth: i32) -> bool {
+    depth <= 0 && line.trim_end().ends_with(':')
+}
+
+fn python_class_bases_at(lines: &[&str], idx: usize, class_name: &str) -> Option<Vec<String>> {
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    let first = *lines.get(idx)?;
+    if class_header_name(first) != Some(class_label) {
+        return None;
+    }
+    let mut header = first.split('#').next().unwrap_or("").trim_end().to_string();
+    let mut depth = python_header_depth_delta(first);
+    let mut line_idx = idx;
+    while !python_class_header_complete(&header, depth) && line_idx + 1 < lines.len() {
+        line_idx += 1;
+        let segment = lines[line_idx].split('#').next().unwrap_or("").trim();
+        if !segment.is_empty() {
+            header.push(' ');
+            header.push_str(segment);
+        }
+        depth += python_header_depth_delta(lines[line_idx]);
+    }
+    class_header_bases(&header, class_label).or_else(|| Some(Vec::new()))
+}
+
+pub(crate) fn source_contains_python_class(source: &str, class_name: &str) -> bool {
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    source
+        .lines()
+        .any(|line| class_header_name(line) == Some(class_label))
+}
+
+fn python_def_name(trimmed: &str) -> Option<&str> {
+    let rest = trimmed
+        .strip_prefix("async def ")
+        .or_else(|| trimmed.strip_prefix("def "))?;
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(rest.len());
+    (end > 0).then_some(&rest[..end])
+}
+
+pub(crate) fn python_enclosing_class_before_cursor(text: &str, cursor: usize) -> Option<String> {
+    let cursor = cursor.min(text.len());
+    let mut classes: Vec<(usize, String)> = Vec::new();
+    let mut pending_class: Option<(usize, String, i32)> = None;
+    let mut byte = 0usize;
+    for line in text.lines() {
+        if byte > cursor {
+            break;
+        }
+        let trimmed = line.trim_start();
+        let indent = line.len().saturating_sub(trimmed.len());
+        if let Some((class_indent, name, depth)) = pending_class.take() {
+            let depth = depth + python_header_depth_delta(line);
+            if python_class_header_complete(line, depth) {
+                classes.push((class_indent, name));
+            } else {
+                pending_class = Some((class_indent, name, depth));
+            }
+            byte = byte.saturating_add(line.len()).saturating_add(1);
+            continue;
+        }
+        if !trimmed.is_empty() {
+            while classes.last().is_some_and(|(class_indent, _)| indent <= *class_indent) {
+                classes.pop();
+            }
+            if let Some(name) = class_header_name(line) {
+                let depth = python_header_depth_delta(line);
+                if python_class_header_complete(line, depth) {
+                    classes.push((indent, name.to_string()));
+                } else {
+                    pending_class = Some((indent, name.to_string(), depth));
+                }
+            }
+        }
+        byte = byte.saturating_add(line.len()).saturating_add(1);
+    }
+    classes.last().map(|(_, name)| name.clone())
+}
+
+fn trim_python_block_indent(line: &str, indent: usize) -> &str {
+    line.get(indent..).unwrap_or_else(|| line.trim_start())
+}
+
+fn python_signature_block(lines: &[&str], def_idx: usize, direct_indent: usize) -> String {
+    let mut out = String::new();
+    let mut paren_depth = 0i32;
+    for line in lines.iter().skip(def_idx) {
+        let trimmed = line.trim_start();
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(trim_python_block_indent(line, direct_indent).trim_end());
+        for ch in trimmed.chars() {
+            match ch {
+                '(' | '[' | '{' => paren_depth += 1,
+                ')' | ']' | '}' => paren_depth -= 1,
+                _ => {}
+            }
+        }
+        if trimmed.ends_with(": ...") || trimmed.ends_with(':') && paren_depth <= 0 {
+            break;
+        }
+    }
+    out
+}
+
+pub(crate) fn python_class_method_overload_detail(
+    source: &str,
+    class_name: &str,
+    method: &str,
+) -> Option<String> {
+    let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+    let lines: Vec<&str> = source.lines().collect();
+    let mut blocks = Vec::new();
+    for (class_idx, line) in lines.iter().enumerate() {
+        let class_indent = line.len().saturating_sub(line.trim_start().len());
+        if python_class_bases_at(&lines, class_idx, class_label).is_none() {
+            continue;
+        }
+        let direct_indent = class_indent + 4;
+        let mut idx = class_idx + 1;
+        while idx < lines.len() {
+            let line = lines[idx];
+            if line.trim().is_empty() {
+                idx += 1;
+                continue;
+            }
+            let indent = line.len().saturating_sub(line.trim_start().len());
+            if indent <= class_indent {
+                break;
+            }
+            if indent != direct_indent {
+                idx += 1;
+                continue;
+            }
+            let mut decorators = Vec::new();
+            while idx < lines.len() {
+                let trimmed = lines[idx].trim_start();
+                let indent = lines[idx].len().saturating_sub(trimmed.len());
+                if indent == direct_indent && trimmed.starts_with('@') {
+                    decorators.push(trimmed);
+                    idx += 1;
+                    continue;
+                }
+                break;
+            }
+            if idx >= lines.len() {
+                break;
+            }
+            let trimmed = lines[idx].trim_start();
+            if python_def_name(trimmed) == Some(method)
+                && decorators.iter().any(|line| line.contains("overload"))
+            {
+                let mut block = String::new();
+                for decorator in decorators {
+                    if !block.is_empty() {
+                        block.push('\n');
+                    }
+                    let normalized = if decorator == "@typing.overload"
+                        || decorator == "@typing_extensions.overload"
+                        || decorator.ends_with(".overload")
+                    {
+                        std::borrow::Cow::Borrowed("@overload")
+                    } else {
+                        std::borrow::Cow::Borrowed(decorator)
+                    };
+                    block.push_str(normalized.as_ref());
+                }
+                if !block.is_empty() {
+                    block.push('\n');
+                }
+                block.push_str(&python_signature_block(&lines, idx, direct_indent));
+                blocks.push(block);
+            }
+            idx += 1;
+        }
+        break;
+    }
+    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
 #[cfg(test)]
 pub(crate) fn class_body_declares_attr(
     lines: &[&str],
@@ -900,6 +1213,11 @@ pub(crate) fn class_body_declares_attr(
         let indent = body.len().saturating_sub(body.trim_start().len());
         if indent <= class_indent {
             break;
+        }
+        if let Some(instance_attr) = instance_attr_assignment_name(body)
+            && instance_attr == attr
+        {
+            return true;
         }
         if indent == direct_indent {
             type_checking_attr_indent = None;
@@ -937,6 +1255,12 @@ pub(crate) fn class_body_declared_attrs(
         if indent <= class_indent {
             break;
         }
+        if let Some(attr) = instance_attr_assignment_name(body)
+            && attrs.contains(attr)
+        {
+            out.entry(attr.to_string())
+                .or_insert_with(|| owner.to_string());
+        }
         if indent == direct_indent {
             type_checking_attr_indent = None;
             if let Some(attr) = class_direct_attr(body)
@@ -961,6 +1285,33 @@ pub(crate) fn class_body_declared_attrs(
     }
 }
 
+fn class_body_declared_methods(
+    lines: &[&str],
+    class_idx: usize,
+    class_indent: usize,
+    names: &FxHashSet<String>,
+    owner: &str,
+    out: &mut FxHashMap<String, String>,
+) {
+    let direct_indent = class_indent + 4;
+    for body in lines.iter().skip(class_idx + 1) {
+        if body.trim().is_empty() {
+            continue;
+        }
+        let indent = body.len().saturating_sub(body.trim_start().len());
+        if indent <= class_indent {
+            break;
+        }
+        if indent == direct_indent
+            && let Some(method) = python_def_name(body.trim_start())
+            && names.contains(method)
+        {
+            out.entry(method.to_string())
+                .or_insert_with(|| owner.to_string());
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn python_class_attr_owner_in_source(
     source: &str,
@@ -974,7 +1325,7 @@ pub(crate) fn python_class_attr_owner_in_source(
         let lines: Vec<&str> = source.lines().collect();
         for (idx, line) in lines.iter().enumerate() {
             let class_indent = line.len().saturating_sub(line.trim_start().len());
-            let Some(bases) = class_header_bases(line, class_name) else {
+            let Some(bases) = python_class_bases_at(&lines, idx, class_name) else {
                 continue;
             };
             if class_body_declares_attr(&lines, idx, class_indent, attr) {
@@ -1018,7 +1369,7 @@ pub(crate) fn python_class_attr_owners_with_imports(
         let lines: Vec<&str> = source.lines().collect();
         for (idx, line) in lines.iter().enumerate() {
             let class_indent = line.len().saturating_sub(line.trim_start().len());
-            let Some(bases) = class_header_bases(line, class_name) else {
+            let Some(bases) = python_class_bases_at(&lines, idx, class_name) else {
                 continue;
             };
             class_body_declared_attrs(&lines, idx, class_indent, attrs, class_name, out);
@@ -1076,6 +1427,93 @@ pub(crate) fn python_class_attr_owners_with_imports(
     out
 }
 
+pub(crate) fn python_class_member_owners_with_imports(
+    source: &str,
+    workspaces: &[PathBuf],
+    current_path: Option<&Path>,
+    class_name: &str,
+    names: &FxHashSet<String>,
+) -> FxHashMap<String, String> {
+    fn find(
+        source: &str,
+        workspaces: &[PathBuf],
+        current_path: Option<&Path>,
+        class_name: &str,
+        names: &FxHashSet<String>,
+        depth: usize,
+        seen: &mut FxHashSet<String>,
+        out: &mut FxHashMap<String, String>,
+    ) {
+        if depth > 8 || out.len() >= names.len() {
+            return;
+        }
+        let class_label = class_name.rsplit('.').next().unwrap_or(class_name);
+        let seen_key = format!("{:p}:{}:{class_label}", source.as_ptr(), source.len());
+        if !seen.insert(seen_key) {
+            return;
+        }
+        let lines: Vec<&str> = source.lines().collect();
+        for (idx, line) in lines.iter().enumerate() {
+            let class_indent = line.len().saturating_sub(line.trim_start().len());
+            let Some(bases) = python_class_bases_at(&lines, idx, class_label) else {
+                continue;
+            };
+            class_body_declared_methods(&lines, idx, class_indent, names, class_label, out);
+            if out.len() >= names.len() {
+                return;
+            }
+            for base in bases {
+                let base_label = base.rsplit('.').next().unwrap_or(&base);
+                find(
+                    source,
+                    workspaces,
+                    current_path,
+                    base_label,
+                    names,
+                    depth + 1,
+                    seen,
+                    out,
+                );
+                if out.len() >= names.len() {
+                    return;
+                }
+                if let Some(base_source) =
+                    imported_python_class_source(source, workspaces, current_path, base_label)
+                {
+                    find(
+                        &base_source,
+                        workspaces,
+                        current_path,
+                        base_label,
+                        names,
+                        depth + 1,
+                        seen,
+                        out,
+                    );
+                    if out.len() >= names.len() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = FxHashMap::default();
+    if !names.is_empty() {
+        find(
+            source,
+            workspaces,
+            current_path,
+            class_name,
+            names,
+            0,
+            &mut FxHashSet::default(),
+            &mut out,
+        );
+    }
+    out
+}
+
 pub(crate) fn python_class_owner_depths_with_imports(
     source: &str,
     workspaces: &[PathBuf],
@@ -1102,8 +1540,8 @@ pub(crate) fn python_class_owner_depths_with_imports(
             return;
         }
         let lines: Vec<&str> = source.lines().collect();
-        for line in &lines {
-            let Some(bases) = class_header_bases(line, class_label) else {
+        for (idx, _line) in lines.iter().enumerate() {
+            let Some(bases) = python_class_bases_at(&lines, idx, class_label) else {
                 continue;
             };
             for base in bases {

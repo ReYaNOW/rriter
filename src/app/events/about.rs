@@ -301,9 +301,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
         if fs_changed {
             app.refresh_file_tree();
-            app.check_external_changes();
+            app.start_external_changes_check();
             needs_redraw = true;
         }
+    }
+    if app.poll_external_changes() {
+        needs_redraw = true;
     }
     if app.ide_panel.explorer_scroll.update(dt) {
         needs_redraw = true;

@@ -674,6 +674,13 @@ impl App {
                         key_event.logical_key.to_text(),
                         shift,
                     ) {
+                        if txt == "."
+                            && self.autocomplete_active
+                            && !self.autocomplete_options.is_empty()
+                        {
+                            self.apply_autocomplete();
+                        }
+
                         let insert_txt = match txt {
                             "(" => "()",
                             "[" => "[]",

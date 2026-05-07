@@ -599,17 +599,30 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn poll_file_tree(&mut self) -> bool {
         let mut updated = false;
+        let mut disconnected = false;
         if let Some(rx) = &self.file_tree_rx {
-            while let Ok(nodes) = rx.try_recv() {
-                self.ide_panel.file_tree_nodes = nodes;
-                self.ide_panel
-                    .file_tree_selection
-                    .retain(|path| path.exists());
-                updated = true;
+            loop {
+                match rx.try_recv() {
+                    Ok(crate::app::file_tree::FileTreeScanMessage::Nodes(nodes)) => {
+                        self.ide_panel.file_tree_nodes = nodes;
+                        self.ide_panel
+                            .file_tree_selection
+                            .retain(|path| path.exists());
+                        updated = true;
+                    }
+                    Ok(crate::app::file_tree::FileTreeScanMessage::IconsReady) => {
+                        updated = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
             }
-            if let Err(std::sync::mpsc::TryRecvError::Disconnected) = rx.try_recv() {
-                self.file_tree_rx = None;
-            }
+        }
+        if disconnected {
+            self.file_tree_rx = None;
         }
         updated
     }

@@ -266,13 +266,15 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
         vec!["skip*".to_string()],
     );
 
-    let first = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    let first = match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+        FileTreeScanMessage::Nodes(nodes) => nodes,
+        FileTreeScanMessage::IconsReady => panic!("scan must send nodes before icon signal"),
+    };
     let second = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
 
     let names: Vec<_> = first.iter().map(|node| node.name.as_str()).collect();
-    let second_names: Vec<_> = second.iter().map(|node| node.name.as_str()).collect();
 
-    assert_eq!(names, second_names);
+    assert!(matches!(second, FileTreeScanMessage::IconsReady));
     assert!(names.contains(&"keep_dir"));
     assert!(names.contains(&"keep.rs"));
     assert!(!names.contains(&"missing"));

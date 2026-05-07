@@ -689,6 +689,14 @@ impl Highlighter {
                                         false
                                     }
                                 };
+                                let contains_node = |n1: Option<tree_sitter::Node>,
+                                                     n2: tree_sitter::Node|
+                                 -> bool {
+                                    n1.is_some_and(|n1| {
+                                        n2.start_byte() >= n1.start_byte()
+                                            && n2.end_byte() <= n1.end_byte()
+                                    })
+                                };
 
                                 let mut c_cursor = tree.walk();
                                 let mut visiting = true;
@@ -715,6 +723,7 @@ impl Highlighter {
                                                 let mut scope_end = usize::MAX;
                                                 let mut skip = false;
                                                 let mut scope_found = false;
+                                                let mut in_type_annotation = false;
 
                                                 if let Some(p) = node.parent() {
                                                     let p_kind = p.kind();
@@ -778,6 +787,22 @@ impl Highlighter {
                                                     while let Some(cp) = curr_parent {
                                                         let cp_kind = cp.kind();
 
+                                                        if lang_name == "py"
+                                                            && (cp_kind == "type"
+                                                                || contains_node(
+                                                                    cp.child_by_field_name("type"),
+                                                                    curr,
+                                                                )
+                                                                || contains_node(
+                                                                    cp.child_by_field_name(
+                                                                        "return_type",
+                                                                    ),
+                                                                    curr,
+                                                                ))
+                                                        {
+                                                            in_type_annotation = true;
+                                                        }
+
                                                         if cp_kind == "import_from_statement"
                                                             || cp_kind == "import_statement"
                                                         {
@@ -821,6 +846,11 @@ impl Highlighter {
                                                         }
                                                         curr = cp;
                                                         curr_parent = cp.parent();
+                                                    }
+                                                    if in_type_annotation
+                                                        && sym_kind != SymbolKind::Parameter
+                                                    {
+                                                        sym_kind = SymbolKind::Class;
                                                     }
                                                 }
 

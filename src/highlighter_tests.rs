@@ -230,6 +230,45 @@ fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
         }),
         "bare parameter msg must stay orange"
     );
+    assert!(
+        !highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "str" && item.kind == SymbolKind::Variable),
+        "annotation type str must not shadow builtin as variable"
+    );
+    assert!(
+        highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "str"
+                && matches!(item.kind, SymbolKind::Class | SymbolKind::Builtin)),
+        "annotation type str must stay class/builtin completion"
+    );
+}
+
+#[test]
+fn highlighter_keeps_typed_python_parameters_as_parameters() {
+    let mut highlighter = Highlighter::new();
+    let source = "class BookingService:\n    def __init__(\n        self,\n        session: AnnDBSession,\n    ):\n        super().__init__(session)\n        self.session = session\n";
+
+    highlighter.reset(1, source.to_string(), "py".to_string());
+    wait(&mut highlighter, 1);
+
+    assert!(
+        highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "self" && item.kind == SymbolKind::Parameter),
+        "self must stay a parameter completion"
+    );
+    assert!(
+        highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "session" && item.kind == SymbolKind::Parameter),
+        "typed session must stay a parameter completion"
+    );
 }
 
 #[test]
