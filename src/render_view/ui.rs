@@ -1238,23 +1238,20 @@ impl Renderer {
         &mut self,
         editor: &crate::editor::Editor,
         lsp_diags: &[crate::lsp::Diagnostic],
-        window_height: f32,
+        track_y: f32,
+        track_h: f32,
+        scrollbar_w: f32,
     ) {
-        if lsp_diags.is_empty() || editor.line_offsets.is_empty() {
+        if lsp_diags.is_empty() || editor.line_offsets.is_empty() || track_h <= 0.0 {
             return;
         }
 
         let s = self.scale_factor;
         let minimap_w = self.minimap_width;
 
-        let tab_bar_h = 44.0 * s;
-        let track_y = tab_bar_h;
-        let track_h = window_height - tab_bar_h;
-
-        let max_scroll = self.get_max_scroll(editor, track_h);
-        let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
-
-        let total_vis_lines = self.phys_to_visual.last().copied().unwrap_or(0) as f32 + 2.0;
+        let total_vis_lines = self.phys_to_visual.last().copied().unwrap_or(0) as f32 + 1.0;
+        let bottom_blank_lines = super::editor_bottom_blank_lines(track_h, self.line_height);
+        let ruler_lines = total_vis_lines + bottom_blank_lines;
         if total_vis_lines < 1.0 {
             return;
         }
@@ -1284,16 +1281,20 @@ impl Renderer {
         // Сначала рисуем предупреждения
         for &line_num in &lines_with_warnings {
             if !lines_with_errors.contains(&line_num) {
-                let vis_line = *self.phys_to_visual.get(line_num as usize).unwrap_or(&0) as f32;
-                let y = (track_y + (vis_line / total_vis_lines * track_h)).round();
+                let Some(&vis_line) = self.phys_to_visual.get(line_num as usize) else {
+                    continue;
+                };
+                let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
                 self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_warn);
             }
         }
 
         // Потом ошибки (поверх)
         for &line_num in &lines_with_errors {
-            let vis_line = *self.phys_to_visual.get(line_num as usize).unwrap_or(&0) as f32;
-            let y = (track_y + (vis_line / total_vis_lines * track_h)).round();
+            let Some(&vis_line) = self.phys_to_visual.get(line_num as usize) else {
+                continue;
+            };
+            let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
             self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_error);
         }
     }

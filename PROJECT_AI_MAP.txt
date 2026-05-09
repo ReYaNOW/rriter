@@ -1448,8 +1448,8 @@ F push_autocomplete_badge_bg@591>uv,10e
 F draw_autocomplete@615>uo,us,uv,xx,xy,xz,y0,y4,y5,yg,yh,106,107,109,10b
 F draw_dialog_window@881>uo,up,us,uv,ye,11a
 F draw_welcome@993>uo,up,us,uv,yd,109,10e,118
-F draw_diagnostics_ruler@1237>un,10e
-F draw_empty_ide@1302>uo,us,109,10e
+F draw_diagnostics_ruler@1237>10e
+F draw_empty_ide@1303>uo,us,109,10e
 M src/render_view.rs
 C struct ModInterval@431
 C struct Telemetry@196

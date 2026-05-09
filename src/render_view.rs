@@ -1298,11 +1298,6 @@ impl Renderer {
             );
         }
 
-        // --- 8.5. Линейка диагностики на скроллбаре ---
-        if !is_resizing && is_ide_mode && !dialog_window_open {
-            self.draw_diagnostics_ruler(editor, delayed_diagnostics, self.height);
-        }
-
         let mut tab_tooltip = None;
         if show_welcome && is_ide_mode {
             let anim_w = self.width - gutter_x;
@@ -1394,6 +1389,17 @@ impl Renderer {
                 tab_bar_h,
             )
         };
+
+        // --- 8.5. Линейка диагностики рядом со скроллбаром ---
+        if !is_resizing && is_ide_mode && !dialog_window_open {
+            self.draw_diagnostics_ruler(
+                editor,
+                delayed_diagnostics,
+                tab_bar_h,
+                editor_scroll_height,
+                scrollbar_width,
+            );
+        }
 
         if scrollbar_width > 0.0 {
             let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
