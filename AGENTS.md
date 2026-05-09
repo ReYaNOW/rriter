@@ -41,11 +41,13 @@ When source files unavailable:
 
 Map format:
 
-* `M|mid|path` -> source file
-* `T|sid|mid|line|kind|name|body` -> type symbol
-* `F|sid|mid|line|flags|qual|ret|self|rd|wr` -> fn/method
-* `E|caller_sid|callee_sid callee_sid` -> direct calls
-* flags: `p` public, `e` entry/root handler
+* `M path` -> source file. All following `C`, `I`, `F` rows belong to this file until next `M`.
+* `C kind name@line` -> type symbol (`struct` / `enum`) and source line.
+* `I owner` -> impl/type owner. Following `F` rows are methods for this owner until next `I` or `M`.
+* `F name@line>called_fn_ids` -> function/method declaration, source line, and direct calls.
+* Function id = zero-based order of all `F` rows in the whole map.
+* Call ids after `>` are base36 function ids.
+* Missing `>` means no known direct project calls.
 
 Required file request format:
 
@@ -53,11 +55,11 @@ Required file request format:
 Need files:
 1. path/to/file.rs
    Reason: exact code needed for `Owner.method` / behavior.
-   Map ref: `F|symbol_id|...`
+   Map ref: `M path/to/file.rs` -> `I Owner` -> `F method@line>...`
 
 2. path/to/other.rs
    Reason: called by / calls previous symbol.
-   Map ref: `E|caller|callee`
+   Map ref: call id `<base36_id>` from `F caller>...`
 ```
 
 Request minimum files:
@@ -346,11 +348,11 @@ Good:
 Need files:
 1. src/app/mouse/input.rs
    Reason: exact click routing needed for `App.handle_main_mouse_input`.
-   Map ref: `F|123|...`
+   Map ref: `M src/app/mouse/input.rs` -> `I App` -> `F handle_main_mouse_input@line>...`
 
 2. src/ui_system.rs
    Reason: hit-test and `UiId` registry may own click target.
-   Map ref: `E|123|87`
+   Map ref: call id from `F handle_main_mouse_input@line>...` resolves to `M src/ui_system.rs`
 ```
 
 Bad:

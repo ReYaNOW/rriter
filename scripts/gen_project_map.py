@@ -7,15 +7,12 @@ Output:
     PROJECT_AI_MAP.txt
 
 Format:
-    AIMAP3
-    # M|mid|path
-    # T|sid|mid|line|kind|name|body
-    # F|sid|mid|line|flags|qual|ret|self|rd|wr
-    # E|caller_sid|callee_sid callee_sid ...
-
-Flags:
-    p = public function/method
-    e = entry/root handler
+    AIMAP4
+    # M path
+    # C kind name@line
+    # I owner
+    # F name@line>called_fn_ids
+    # fn id = zero-based F line order, base36 in calls
 
 Purpose:
     - Let AI identify minimal exact source files to request.
@@ -98,6 +95,22 @@ SELF_MUTATE_RE = re.compile(
 
 def short_path(path):
     return str(path).replace("\\", "/")
+
+
+def base36(value):
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    n = int(value)
+
+    if n == 0:
+        return "0"
+
+    out = []
+
+    while n:
+        n, rem = divmod(n, 36)
+        out.append(digits[rem])
+
+    return "".join(reversed(out))
 
 
 def module_name(path_text):
@@ -560,75 +573,91 @@ def build(src_dir, include_tests):
 
 def create_map(file_data):
     lines = [
-        "AIMAP3",
-        "# M|mid|path",
-        "# T|sid|mid|line|kind|name|body",
-        "# F|sid|mid|line|flags|qual|ret|self|rd|wr",
-        "# E|caller_sid|callee_sid callee_sid",
-        "# flags:p=pub,e=entry",
+        "AIMAP4",
+        "# M path",
+        "# C kind name@line",
+        "# I owner",
+        "# F name@line>called_fn_ids",
+        "# fn id = zero-based F line order, base36 in calls",
         "# index only; request full source before exact patch",
     ]
 
-    for fd in file_data:
-        if not fd["types"] and not fd["fns"]:
-            continue
-
-        lines.append(f"M|{fd['id']}|{esc(fd['path'])}")
+    file_sections = []
+    output_fns = []
 
     for fd in file_data:
+        owner_fns = defaultdict(list)
+        free_fns = []
+
+        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
+            if fn["owner"]:
+                owner_fns[fn["owner"]].append(fn)
+            else:
+                free_fns.append(fn)
+
+        owner_sections = [(owner, owner_fns[owner]) for owner in sorted(owner_fns)]
+        file_sections.append((fd, free_fns, owner_sections))
+        output_fns.extend(free_fns)
+
+        for _, fns in owner_sections:
+            output_fns.extend(fns)
+
+    fn_output_id_by_internal_id = {
+        fn["id"]: output_id
+        for output_id, fn in enumerate(output_fns)
+    }
+
+    for fd, free_fns, owner_sections in file_sections:
+        lines.append(f"M {esc(fd['path'])}")
+
         for type_name in sorted(fd["types"]):
             type_info = fd["types"][type_name]
 
             lines.append(
-                "T|{}|{}|{}|{}|{}|{}".format(
-                    type_info["id"],
-                    fd["id"],
-                    type_info["line"],
+                "C {} {}@{}".format(
                     esc(type_info["kind"]),
                     esc(type_info["name"]),
-                    esc(type_info["body"]),
+                    type_info["line"],
                 )
             )
 
-        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
-            flags = ""
+        for fn in free_fns:
+            lines.append(create_fn_line(fn, fn_output_id_by_internal_id))
 
-            if fn["is_pub"]:
-                flags += "p"
+        for owner, fns in owner_sections:
+            lines.append(f"I {esc(owner)}")
 
-            if fn["entry"]:
-                flags += "e"
-
-            reads = compact_csv(",".join(fn["reads"]), MAX_RW_ITEMS)
-            writes = compact_csv(",".join(fn["writes"]), MAX_RW_ITEMS)
-
-            lines.append(
-                "F|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(
-                    fn["id"],
-                    fd["id"],
-                    fn["line"],
-                    flags,
-                    esc(fn["qual"]),
-                    esc(fn["ret"]),
-                    esc(fn["recv"]),
-                    esc(reads),
-                    esc(writes),
-                )
-            )
-
-    for fd in file_data:
-        for fn in sorted(fd["fns"], key=lambda item: item["line"]):
-            if fn["call_ids"]:
-                lines.append(f"E|{fn['id']}|{' '.join(str(x) for x in fn['call_ids'])}")
+            for fn in fns:
+                lines.append(create_fn_line(fn, fn_output_id_by_internal_id))
 
     return "\n".join(lines) + "\n"
+
+
+def create_fn_line(fn, fn_output_id_by_internal_id):
+    call_ids = [
+        base36(fn_output_id_by_internal_id[call_id])
+        for call_id in fn["call_ids"]
+        if call_id in fn_output_id_by_internal_id
+    ]
+    suffix = f">{','.join(call_ids)}" if call_ids else ""
+    return f"F {esc(fn['name'])}@{fn['line']}{suffix}"
+
+
+def count_tokens(map_text):
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(map_text))
+    except Exception:
+        return None
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", default="src", help="source dir, default: src")
     parser.add_argument("--out", default="PROJECT_AI_MAP.txt", help="output file, default: PROJECT_AI_MAP.txt")
-    parser.add_argument("--include-tests", action="store_true", help="include files with 'test' in filename")
+    parser.add_argument("--exclude-tests", action="store_true", help="exclude files with 'test' in filename")
+    parser.add_argument("--include-tests", action="store_true", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -637,7 +666,12 @@ def main():
         print(f"ERROR: {src_dir} not found. Run from project root or pass --src.", file=sys.stderr)
         sys.exit(1)
 
-    file_data = build(src_dir, args.include_tests)
+    include_tests = True
+
+    if args.exclude_tests:
+        include_tests = False
+
+    file_data = build(src_dir, include_tests)
     map_text = create_map(file_data)
 
     out_path = Path(args.out)
@@ -646,10 +680,12 @@ def main():
     total_types = sum(len(fd["types"]) for fd in file_data)
     total_fns = sum(len(fd["fns"]) for fd in file_data)
     total_edges = sum(len(fn["call_ids"]) for fd in file_data for fn in fd["fns"])
+    token_count = count_tokens(map_text)
+    token_suffix = f" tokens_cl100k={token_count}" if token_count is not None else ""
 
     print(
         f"OK {out_path} | files={len(file_data)} types={total_types} "
-        f"fns={total_fns} edges={total_edges}"
+        f"fns={total_fns} edges={total_edges}{token_suffix}"
     )
 
 

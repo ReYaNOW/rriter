@@ -1,1765 +1,1588 @@
-AIMAP3
-# M|mid|path
-# T|sid|mid|line|kind|name|body
-# F|sid|mid|line|flags|qual|ret|self|rd|wr
-# E|caller_sid|callee_sid callee_sid
-# flags:p=pub,e=entry
+AIMAP4
+# M path
+# C kind name@line
+# I owner
+# F name@line>called_fn_ids
+# fn id = zero-based F line order, base36 in calls
 # index only; request full source before exact patch
-M|0|src/app/app_state.rs
-M|1|src/app/autocomplete.rs
-M|2|src/app/events/about.rs
-M|3|src/app/events/source_hover.rs
-M|4|src/app/events.rs
-M|5|src/app/file_icons.rs
-M|6|src/app/file_tree.rs
-M|7|src/app/file_tree_dialog.rs
-M|8|src/app/file_tree_ops.rs
-M|9|src/app/file_tree_scan.rs
-M|10|src/app/keyboard/editor_keys.rs
-M|11|src/app/keyboard/main_keys.rs
-M|12|src/app/keyboard.rs
-M|13|src/app/lsp_actions.rs
-M|14|src/app/mouse/cursor.rs
-M|15|src/app/mouse/hover_mouse_logic.rs
-M|16|src/app/mouse/hover_state_core.rs
-M|17|src/app/mouse/input.rs
-M|18|src/app/mouse/wheel.rs
-M|20|src/app/python_completion.rs
-M|21|src/app/terminal.rs
-M|22|src/app/ui_handlers.rs
-M|23|src/app.rs
-M|24|src/editor.rs
-M|25|src/editor_navigation.rs
-M|26|src/highlighter.rs
-M|27|src/highlighter_runtime.rs
-M|28|src/languages/dart.rs
-M|30|src/languages/python.rs
-M|31|src/languages/rust.rs
-M|32|src/lsp/hover.rs
-M|33|src/lsp/protocol.rs
-M|34|src/lsp.rs
-M|35|src/main.rs
-M|36|src/queries.rs
-M|37|src/render_view/core_text.rs
-M|38|src/render_view/editor_text_layer.rs
-M|39|src/render_view/hover_overlays.rs
-M|40|src/render_view/ide_panels.rs
-M|41|src/render_view/lsp_ui.rs
-M|42|src/render_view/minimap_ui.rs
-M|43|src/render_view/search.rs
-M|44|src/render_view/settings_ui.rs
-M|45|src/render_view/sticky.rs
-M|46|src/render_view/tabs_ui.rs
-M|47|src/render_view/terminal_ui.rs
-M|48|src/render_view/ui/hover_widget.rs
-M|49|src/render_view/ui/problems_panel.rs
-M|50|src/render_view/ui.rs
-M|51|src/render_view.rs
-M|52|src/renderer/geometry.rs
-M|53|src/renderer.rs
-M|54|src/scroll.rs
-M|55|src/ui_system.rs
-M|56|src/widgets.rs
-T|0|0|553|struct|App|pending_key_log: Option<KeyLog>,gl_config: Option<glutin::config::Config>,gl_context: Option<PossiblyCurrentContext>,gl_surface: Option<Surface<WindowSurface>>,window: Option<std::sync::Arc<Window>>,dialog_window: Option<std::sync::Arc<Window>>,dialog_gl_surface: Option<Surface<WindowSurface>>,settings_scroll: crate::scroll::ScrollState,tab_scroll: crate::scroll::ScrollState,renderer: Option<Renderer>,+116
-T|1|0|225|struct|AutocompleteCacheEntry|mode: AutocompleteMode,path: PathBuf,context_key: String,items: Vec<crate::lsp::LspCompletionItem>
-T|2|0|241|struct|AutocompleteDetailCacheEntry|path: PathBuf,context_key: String,items: FxHashMap<String,AutocompleteDetailCacheItem>
-T|3|0|233|struct|AutocompleteDetailCacheItem|kind: SymbolKind,detail: Option<String>,module: Option<String>,module_path: Option<String>
-T|4|0|176|struct|AutocompleteItem|word: String,kind: SymbolKind,scope_start: usize,scope_end: usize,module: Option<String>,module_path: Option<String>,detail: Option<String>,insert_text: Option<String>,text_edit: Option<crate::lsp::TextChange>,additional_text_edits: Vec<crate::lsp::TextChange>
-T|5|0|169|enum|AutocompleteMode|TreeSitter,TyContext,TyImports
-T|6|0|546|struct|CtrlDefinitionState|request_id: Option<i32>,source_path: Option<PathBuf>,source_range: Option<(usize,usize)>,target: Option<DefinitionJumpTarget>
-T|7|0|539|struct|DefinitionJumpTarget|path: PathBuf,line: u32,col: u32
-T|8|0|13|struct|EditorTab|editor: crate::editor::Editor,file_path: Option<PathBuf>,base_title: String,file_extension: String,scroll_y: crate::scroll::ScrollState,scroll_x: crate::scroll::ScrollState,spans: Vec<crate::highlighter::ColorSpan>,completions: Vec<crate::highlighter::CompletionItem>,foldable_ranges: Vec<(usize,usize,+10
-T|9|0|32|struct|ExternalFileChange|tab_idx: usize,path: PathBuf,disk_text: String
-T|10|0|247|struct|IdePanelState|slots: Vec<PanelSlot>,left_width: f32,bottom_height: f32,drag: Option<PanelDragState>,is_resizing_left: bool,is_resizing_bottom: bool,file_tree_nodes: Vec<crate::app::file_tree::FileNode>,file_tree_expanded: FxHashSet<std::path::PathBuf>,explorer_scroll: crate::scroll::ScrollState,file_tree_hovered_idx: Option<usize>,+52
-T|11|0|531|struct|KeyLog|key: String,t0: std::time::Instant,t_highlight: Option<std::time::Instant>,t_render: Option<std::time::Instant>
-T|12|0|102|enum|LspActionItem|CodeAction(crate::lsp::CodeAction),AddNoqa { codes: Vec<String>
-T|13|0|118|struct|LspActionsMenu|cursor_line: u32,items: Vec<LspActionItem>,selected: usize,menu_x: f32,menu_y: f32,pending_request_id: Option<i32>
-T|14|0|131|struct|LspLogFilter|query: String,case_sensitive: bool,show_send: bool,show_recv: bool,show_other: bool
-T|15|0|86|struct|PanelDragState|panel_id: PanelId,start_y: f32,current_y: f32,threshold_passed: bool
-T|16|0|73|enum|PanelGroup|Top,Bottom
-T|17|0|46|enum|PanelId|Explorer,Terminal,Problems,LspServers
-T|18|0|79|struct|PanelSlot|id: PanelId,group: PanelGroup,open: bool
-T|19|0|39|enum|PendingAction|Quit,OpenFile,CloseFile
-T|20|0|94|struct|TabDragState|start_idx: usize,start_x: f32,current_x: f32,threshold_passed: bool
-F|21|0|54|p|PanelId.label|&'static str|self||
-F|22|0|62|p|PanelId.icon|crate::widgets::IconType|self||
-F|23|0|140|p|LspLogFilter.matches|bool|&self|case_sensitive,query,show_other,show_recv,show_send|
-F|24|0|190||AutocompleteItem.from|Self|||
-F|25|0|207||AutocompleteItem.from|Self|||
-F|26|0|306||IdePanelState.default|Self|||
-F|27|0|388|p|IdePanelState.current_lsp_log_filter|LspLogFilter|&self|lsp_log_filter_case_sensitive,lsp_log_filter_editor,lsp_log_filter_show_other,lsp_log_filter_show_recv,lsp_log_filter_show_send|
-F|28|0|398|p|IdePanelState.any_top_open|bool|&self|slots|
-F|29|0|403|p|IdePanelState.any_bottom_open|bool|&self|slots|
-F|30|0|408|p|IdePanelState.toggle||&mut self|slots|term_search_focused=,terminal_focused=
-F|31|0|436|p|IdePanelState.open||&mut self|slots|term_search_focused=,terminal_focused=
-F|32|0|462|p|IdePanelState.open_terminal_exclusive||&mut self|slots|term_search_focused=,terminal_focused=
-F|33|0|471|p|IdePanelState.enforce_single_open_per_group||&mut self|slots|term_search_focused=,terminal_focused=
-F|34|0|493|p|IdePanelState.is_open|bool|&self|slots|
-F|35|0|500|p|IdePanelState.bottom_panel_blocks_editor_hover|bool|&self|slots,terminal_focused|
-F|36|0|510|p|fuzzy_match|Option<Vec<usize>>|||
-F|37|0|706||panel_state_toggle_and_group_queries_end_to_end||||
-F|38|0|728||panel_state_keeps_one_open_panel_per_group||||
-F|39|0|759||open_terminal_exclusive_closes_bottom_peers_and_focuses_terminal||||
-F|40|0|773||open_panel_opens_without_toggling_closed_and_keeps_group_exclusive||||
-F|41|0|793||bottom_panel_blocks_editor_hover_except_unfocused_terminal||||
-F|42|0|808||fuzzy_match_preserves_target_indices_case_insensitively||||
-F|43|0|815||lsp_log_filter_matches_text_direction_and_case_modes||||
-F|44|0|857||panel_metadata_maps_to_labels_and_icons||||
-F|45|1|3||autocomplete_trace_enabled|bool|||
-F|46|1|11||python_completion_context|bool|||
-F|47|1|19||autocomplete_detail_cache_item|AutocompleteDetailCacheItem|||
-F|48|1|30||apply_autocomplete_detail_cache_item||||
-F|49|1|96||autocomplete_source_attr_class_detail|Option<String>|||
-F|50|1|112||autocomplete_detail_type_label|Option<String>|||
-F|51|1|129||autocomplete_middle_ellipsis|String|||
-F|52|1|144||autocomplete_truncate_source_detail|String|||
-F|53|1|164||autocomplete_push_dedent_line||||
-F|54|1|173||autocomplete_scan_brackets||||
-F|55|1|207||autocomplete_collect_assignment|String|||
-F|56|1|240||autocomplete_format_assignment|String|||
-F|57|1|261||autocomplete_source_variable_detail_from_text|Option<String>|||
-F|58|1|311||autocomplete_module_source_path|Option<PathBuf>|||
-F|59|1|332||autocomplete_detail_class_name|Option<&str>|||
-F|60|1|342||autocomplete_detail_type_name|Option<&str>|||
-F|61|1|349||autocomplete_detail_type_module_path|Option<String>|||
-F|62|1|376||python_known_function_completion|bool|||
-F|63|1|392||python_keyword_completion|bool|||
-F|64|1|435||python_scoped_self_priority|u8|||
-F|65|1|443||python_low_priority_member_name|bool|||
-F|66|1|447||infer_python_member_owner|Option<String>|||
-F|67|1|495|p|App.reset_autocomplete_detail_size||||autocomplete_detail_min_height=,autocomplete_detail_min_width=
-F|68|1|500|p|App.stable_autocomplete_detail_size|(f32, f32)|||autocomplete_detail_min_height=,autocomplete_detail_min_width=
-F|69|1|520||App.trace_autocomplete_state||&self|autocomplete_active,autocomplete_anchor,autocomplete_anim_progress,autocomplete_detail_rect,autocomplete_detail_request_id,autocomplete_detail_word,autocomplete_hovered_idx,autocomplete_min_width,autocomplete_mode,autocomplete_options,autocomplete_pending_request_id,autocomplete_rect,+3|
-F|70|1|561|p|App.nearest_assignment_usage_target|Option<DefinitionJumpTarget>||editor|
-F|71|1|578|p|App.get_current_word_prefix|String|&self|editor|
-F|72|1|598|p|App.close_autocomplete||&mut self|autocomplete_scroll|autocomplete_active=,autocomplete_anchor=,autocomplete_apply_pending_response=,autocomplete_detail_context_key=,autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_detail_request_id=,autocomplete_detail_request_path=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,+10
-F|73|1|629|p|App.autocomplete_detail_selection|Option<(usize, usize)>|&self|autocomplete_detail_selection_anchor,autocomplete_detail_selection_cursor|
-F|74|1|635|p|App.selected_autocomplete_detail_text|Option<String>|&self|autocomplete_detail_popup|
-F|75|1|649|p|App.autocomplete_detail_text|std::borrow::Cow<'a, str>|||
-F|76|1|704||App.autocomplete_source_variable_detail|Option<String>|&self|editor,file_extension,ide_workspaces|
-F|77|1|740|p|App.autocomplete_has_only_current_text_match|bool||autocomplete_options|
-F|78|1|747|p|App.hide_autocomplete_popup_keep_request|||autocomplete_scroll|autocomplete_active=,autocomplete_anchor=,autocomplete_apply_pending_response=,autocomplete_detail_context_key=,autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_detail_request_id=,autocomplete_detail_request_path=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,+7
-F|79|1|775|p|App.autocomplete_window_contains|bool|&self|autocomplete_active,autocomplete_detail_rect,autocomplete_rect|
-F|80|1|788|p|App.popup_blocks_background_at|bool|&self||
-F|81|1|792|p|App.refresh_autocomplete_detail_popup||&mut self|autocomplete_anim_progress,autocomplete_options,autocomplete_selected_idx,editor|autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=
-F|82|1|858||App.set_autocomplete_detail_placeholder||&mut self|autocomplete_anim_progress,editor|autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=
-F|83|1|881||App.current_autocomplete_detail_context_key|String|&self|editor|
-F|84|1|891||App.autocomplete_detail_wanted_words|FxHashSet<String>|&self|autocomplete_detail_word,autocomplete_options|
-F|85|1|903||App.apply_cached_autocomplete_detail_for_index|bool|&mut self|autocomplete_detail_cache,autocomplete_options,editor|
-F|86|1|929|p|App.remember_autocomplete_detail_cache||&mut self|autocomplete_detail_context_key,autocomplete_detail_request_path|autocomplete_detail_cache=
-F|87|1|960|p|App.finish_autocomplete_detail_request||&mut self||autocomplete_detail_context_key=,autocomplete_detail_request_id=,autocomplete_detail_request_path=,autocomplete_detail_word=
-F|88|1|967|p|App.request_autocomplete_detail_for_index||&mut self|autocomplete_mode,autocomplete_options,editor,file_extension,file_path,lsp|autocomplete_detail_context_key=,autocomplete_detail_request_id=,autocomplete_detail_request_path=,autocomplete_detail_word=
-F|89|1|1021|p|App.merge_autocomplete_details||&mut self|autocomplete_detail_word,autocomplete_options,editor|
-F|90|1|1062|p|App.request_ty_autocomplete||&mut self|autocomplete_scroll,editor,file_extension,file_path,is_ide_mode,lsp,show_welcome|autocomplete_active=,autocomplete_anchor=,autocomplete_anim_progress=,autocomplete_apply_pending_response=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_mode=,autocomplete_options.clear(),autocomplete_pending_context_key=,autocomplete_pending_request_id=,autocomplete_pending_request_mode=,autocomplete_pending_request_path=,+1
-F|91|1|1192|p|App.remember_ty_autocomplete_cache||&mut self||autocomplete_cache=,autocomplete_pending_context_key=,autocomplete_pending_request_mode=,autocomplete_pending_request_path=
-F|92|1|1214|p|App.update_ty_autocomplete||&mut self|autocomplete_mode,autocomplete_pending_request_id,autocomplete_scroll,editor,file_extension,file_path,ide_workspaces|autocomplete_active=,autocomplete_anchor=,autocomplete_anim_progress=,autocomplete_apply_pending_response=,autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_hovered_idx=,autocomplete_options.clear(),autocomplete_options=,autocomplete_selected_idx=
-F|93|1|1742|p|App.update_autocomplete||&mut self|autocomplete_scroll,editor,file_extension,highlighter|autocomplete_active=,autocomplete_anchor=,autocomplete_anim_progress=,autocomplete_detail_max_scroll=,autocomplete_detail_placement=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_mode=,autocomplete_options.clear(),autocomplete_options=,autocomplete_rect=,autocomplete_selected_idx=
-F|94|1|1935|p|App.ensure_autocomplete_visible||&mut self|autocomplete_options,autocomplete_scroll,autocomplete_selected_idx|
-F|95|1|1965|p|App.apply_autocomplete||&mut self|autocomplete_active,autocomplete_options,autocomplete_selected_idx,base_title,editor,highlighter,window|
-F|96|1|2005|p|App.apply_lsp_completion_item|||base_title,editor,file_path,highlighter,window|
-F|97|1|2057|p|App.sync_after_autocomplete|||editor,file_extension,file_path,highlighter,is_ide_mode,lsp|last_sent_version=
-F|98|1|2075|p|App.python_member_dot_receiver_is_unavailable_self|bool||editor,file_extension,highlighter|
-T|99|2|4|enum|AboutWaitPlan|Wait,WaitUntil(Instant)
-F|100|2|16||update_sticky_animation|bool|||
-F|101|2|61||drag_autoscroll_delta|f32|||
-F|102|2|75||drag_autoscroll_speed|f32|||
-F|103|2|86||drag_autoscroll_editor_bottom|f32|||
-F|104|2|91||earliest_wake|Instant|||
-F|105|2|106||compute_about_wait_plan|AboutWaitPlan|||
-F|106|2|148||earliest_optional_wake|Option<Instant>|||
-F|107|2|158|pe|about_to_wait||||
-F|108|2|1113||sticky_animation_add_remove_and_equal_length_are_pure_state_transitions||||
-F|109|2|1156||drag_autoscroll_uses_inside_edge_band_and_outside_window_distance||||
-F|110|2|1167||drag_autoscroll_bottom_edge_ignores_open_bottom_panel||||
-F|111|2|1190||about_wait_plan_prioritizes_redraw_highlight_hover_and_blink||||
-F|112|3|1|p|module_path_from_definition_path|Option<String>|||
-F|113|3|5||sanitize_module_path_parts|Option<String>|||
-F|114|3|63|p|prepend_hover_module_path||||
-F|115|3|95|p|source_line|Option<&'a str>|||
-F|116|3|109|p|source_signature_for_hover|Option<String>|||
-F|117|3|116||format_attribute_assignment_line|String|||
-F|118|3|156||source_attribute_hover_for_symbol|Option<String>|||
-F|119|3|315||def_name|Option<&str>|||
-F|120|3|326||enclosing_python_owner|(Option<String>, Option<String>)|||
-F|121|3|360||self_parameter_hover|Option<String>|||
-F|122|3|529|p|source_attribute_hover_from_definition_file|Option<String>|||
-F|123|3|535||format_attribute_assignment_line|String|||
-F|124|3|722|p|source_class_signature_from_definition_file|Option<String>|||
-F|125|3|804|p|is_ident_byte|bool|||
-F|126|3|808|p|symbol_at_offset|Option<String>|||
-F|127|3|837|p|wrap_signature_after_first_param|String|||
-F|128|3|879||wraps_asynccontextmanager_signature_after_first_param||||
-F|129|3|889||asynccontextmanager_source_signature_is_split_into_lines||||
-F|130|3|907||classmethod_asynccontextmanager_source_signature_keeps_both_decorators||||
-F|131|3|925||attribute_hover_uses_source_attribute_line||||
-F|132|3|943||simple_type_hover_triggers_source_replacement||||
-F|133|3|950||symbol_at_offset_reads_identifier_from_nearby_position||||
-F|134|3|964||strict_source_lookup_does_not_fallback_to_nearby_def||||
-F|135|3|978||definition_file_attribute_hover_includes_fq_class_name||||
-F|136|3|1002||definition_file_attribute_hover_includes_lsp_type||||
-F|137|3|1024||module_path_from_site_packages_strips_noise_segments||||
-F|138|3|1036||module_path_strips_trailing_init||||
-F|139|3|1043||module_path_covers_stdlib_stubs_workspace_and_empty_edges||||
-F|140|3|1071||prepend_hover_module_path_shifts_text_spans_and_inline_ranges_once||||
-F|141|3|1111||source_line_handles_middle_last_and_missing_lines||||
-F|142|3|1121||attribute_hover_merges_lsp_type_and_ignores_when_on_declaration||||
-F|143|3|1160||source_signature_handles_python_generics_in_def||||
-F|144|3|1174||definition_file_class_signature_handles_python_generics||||
-F|145|3|1193||source_attribute_hover_covers_class_object_type_cleanup_and_short_assignments||||
-F|146|3|1215||self_hover_uses_parameter_header_and_class_type||||
-F|147|3|1236||bound_method_hover_triggers_source_replacement||||
-F|148|3|1243|p|should_replace_hover_with_source_signature|bool|||
-F|149|3|1254|p|should_replace_simple_type_hover|bool|||
-T|150|4|39|struct|AutocompleteFrameStats|last_print: Instant,last_frame: Option<Instant>,was_active: bool,opens: u32,frames: u32,anim_frames: u32,measured_gaps: u32,slow_gaps: u32,gap_ms: f64,render_ms: f64,+12
-T|151|4|24|struct|AutocompletePopupStats|frames: u32,total_ms: f64,list_ms: f64,refresh_ms: f64,layout_ms: f64,detail_draw_ms: f64,max_total_ms: f64,max_list_ms: f64,max_detail_draw_ms: f64,last_options: usize,+2
-F|152|4|65||AutocompleteFrameStats.default|Self|||
-F|153|4|98||autocomplete_log_enabled|bool|||
-F|154|4|102||autocomplete_frame_start|(Option<Instant>, Option<Instant>)|||
-F|155|4|126|p|reset_autocomplete_frame_stats||||
-F|156|4|137||record_autocomplete_popup_perf||||
-F|157|4|168||record_autocomplete_frame_perf||||
-F|158|4|271||autocomplete_detail_placement|i8|||
-F|159|4|284||save_state_and_exit||||
-F|160|4|316|e|App.resumed||&mut self|base_title,editor,theme,window_height,window_width|gl_config=,gl_context=,gl_surface=,renderer=,window=
-F|161|4|400|e|App.window_event||&mut self|active_tab,autocomplete_active,autocomplete_anim_progress,autocomplete_detail_placement,autocomplete_hovered_idx,autocomplete_mode,autocomplete_options,autocomplete_scroll,autocomplete_selected_idx,base_title,ctrl_definition,current_sticky_lines,+45|autocomplete_detail_max_scroll=,autocomplete_detail_popup=,autocomplete_detail_rect=,autocomplete_min_width=,autocomplete_rect=,current_cursor=,is_dragging=,is_focused=,is_ready=,last_frame=,last_resize_time=,modifiers=,+4
-F|162|4|1335|e|App.about_to_wait||&mut self||
-F|163|4|1345||autocomplete_detail_placement_stays_below_completion_window||||
-T|164|5|21|struct|FallbackMatcher|set: RegexSet,keys: Vec<&'static str>
-F|165|5|41|p|file_icon_key|&'static str|||
-F|166|5|82|p|folder_icon_key|&'static str|||
-F|167|5|96|p|svg_for_key|&'static [u8]|||
-F|168|5|109||file_icon_resolution_covers_exact_extension_pattern_and_fallback||||
-F|169|5|120||folder_icon_resolution_covers_exact_pattern_and_fallback||||
-T|170|6|82|struct|FileNode|path: PathBuf,name: String,depth: usize,is_dir: bool,is_expanded: bool,icon_key: &'static str,is_ignored: bool
-T|171|6|179|struct|FileTreeClipboard|mode: FileTreeClipboardMode,paths: Vec<PathBuf>
-T|172|6|173|enum|FileTreeClipboardMode|Copy,Cut
-T|173|6|140|struct|FileTreeContextMenu|x: f32,y: f32,target_path: Option<PathBuf>,target_is_dir: bool,target_dir: Option<PathBuf>,entries: Vec<FileTreeMenuAction>,opened_at: Instant
-T|174|6|159|struct|FileTreeCreateDialog|kind: FileTreeCreateKind,parent_dir: PathBuf,editor: Editor,error: Option<String>
-T|175|6|94|enum|FileTreeCreateKind|File,Directory
-T|176|6|203|struct|FileTreeDeleteDialog|paths: Vec<PathBuf>,error: Option<String>
-T|177|6|241|enum|FileTreeDialogInputKind|Create,Rename
-T|178|6|185|struct|FileTreeDragState|paths: Vec<PathBuf>,start_x: f32,start_y: f32,current_x: f32,current_y: f32,target_idx: Option<usize>,threshold_passed: bool
-T|179|6|109|enum|FileTreeMenuAction|CreateFile,CreateDirectory,Paste,Delete,Copy,Cut,Rename,OpenContainedFolder,CopyAbsolutePath,CopyRelativePath
-T|180|6|196|struct|FileTreeMoveDialog|sources: Vec<PathBuf>,target_dir: PathBuf,error: Option<String>
-T|181|6|166|struct|FileTreeRenameDialog|path: PathBuf,editor: Editor,error: Option<String>
-T|182|6|209|struct|FileTreeTrashEntry|original_path: PathBuf,trash_path: PathBuf,info_path: PathBuf
-T|183|6|216|enum|FileTreeUndoAction|Created { paths: Vec<PathBuf>
-T|184|6|236|struct|FileTreeUndoEntry|action: FileTreeUndoAction
-F|185|6|53|p|matches_ignore_pattern|bool|||
-F|186|6|100|p|FileTreeCreateKind.title|&'static str|self||
-F|187|6|123|p|FileTreeMenuAction.label|&'static str|self||
-F|188|6|150|p|file_tree_context_menu_anim_progress|f32|||
-F|189|6|246|p|file_tree_move_dialog_message|String|||
-F|190|6|262|p|file_tree_delete_dialog_message|String|||
-F|191|6|274|p|file_tree_overlay_active_for_panel|bool|||
-F|192|6|288|p|file_tree_parent_path_prefix|String|||
-F|193|6|296|p|file_tree_clipped_path_suffix|String|||
-F|194|6|319|p|file_tree_path_input_layout|(String, f32, f32)|||
-F|195|6|348|p|file_tree_name_input_scroll_x|f32|||
-F|196|6|376|p|file_tree_name_input_hit_index|usize|||
-F|197|6|395||insert_file_tree_name_text||||
-F|198|6|423||handle_file_tree_name_editor_input|Option<String>|||
-F|199|6|525||App.push_file_tree_undo||&mut self|ide_panel|
-F|200|6|535|p|App.undo_file_tree_operation|Result<(), String>|&mut self|ide_panel,ide_workspaces|
-F|201|6|571|p|App.refresh_file_tree||&mut self|ide_ignore_patterns,ide_panel,ide_workspaces|file_tree_rx=
-F|202|6|600|p|App.poll_file_tree|bool|&mut self|ide_panel|file_tree_rx=
-F|203|6|633|p|App.start_file_watcher||&mut self|ide_workspaces|file_tree_notify_rx=
-F|204|6|645|p|App.toggle_file_tree_dir||&mut self|ide_panel|
-F|205|6|662|p|App.open_file_tree_node||&mut self|ide_panel|
-F|206|6|675|p|App.handle_file_tree_left_click||&mut self|ide_panel,modifiers|last_click_pos=,last_click_time=
-F|207|6|728|p|App.file_tree_selected_paths_for|Vec<PathBuf>|&self|ide_panel|
-F|208|6|737|p|App.open_file_tree_context_menu||&mut self|ide_panel,ide_workspaces|
-F|209|6|797|p|App.handle_file_tree_context_item||&mut self|ide_panel|
-F|210|6|809|p|App.handle_file_tree_menu_action||&mut self|ide_workspaces|
-F|211|6|886|p|App.open_file_tree_create_dialog||&mut self|ide_panel|
-F|212|6|897|p|App.open_file_tree_rename_dialog||&mut self|ide_panel,ide_workspaces|
-F|213|6|921|p|App.submit_file_tree_create_dialog||&mut self|ide_panel,ide_workspaces|
-F|214|6|958|p|App.submit_file_tree_rename_dialog||&mut self|ide_panel,ide_workspaces|
-F|215|6|980|p|App.update_open_paths_after_file_tree_rename||&mut self|editor,highlighter,lsp,tabs,window|base_title=,file_extension=,file_path=
-F|216|6|1041|p|App.copy_file_tree_paths||&mut self|ide_panel|
-F|217|6|1047|p|App.paste_file_tree_clipboard|Result<(), String>|&mut self|ide_panel,ide_workspaces|
-F|218|6|1099|p|App.open_file_tree_delete_dialog||&mut self|ide_panel|
-F|219|6|1109|p|App.confirm_file_tree_delete|Result<(), String>|&mut self|ide_panel,ide_workspaces|
-F|220|6|1132|p|App.file_tree_default_paste_dir|Option<PathBuf>|&self|ide_panel,ide_workspaces|
-F|221|6|1144|p|App.file_tree_single_selected_path|Option<PathBuf>|&self|ide_panel|
-F|222|6|1153|p|App.finish_file_tree_move||&mut self|ide_panel,ide_workspaces|
-F|223|6|1200|p|App.open_contained_folder||&mut self||
-F|224|6|1219|p|App.file_tree_node_at|Option<usize>|&self|dialog_window,ide_panel,is_ide_mode,renderer,show_settings|
-F|225|6|1258|p|App.file_tree_panel_contains|bool|&self|dialog_window,ide_panel,is_ide_mode,renderer,show_settings|
-F|226|6|1276|p|App.file_tree_drop_target_dir|Option<PathBuf>|&self|ide_panel|
-F|227|6|1286|p|App.file_tree_overlay_active|bool|&self|ide_panel|
-F|228|6|1290|p|App.ui_id_is_file_tree_overlay|bool|||
-F|229|7|5|p|App.file_tree_dialog_input_index_at|Option<usize>|&mut self|ide_panel,renderer|
-F|230|7|61|p|App.set_file_tree_dialog_input_cursor||&mut self||
-F|231|7|88|p|App.handle_file_tree_modal_keyboard|bool|&mut self|ide_panel,modifiers,window|last_action=,last_blink_state=
-F|232|7|269|p|App.handle_file_tree_shortcut|bool|&mut self|ide_panel,show_settings,window|
-F|233|8|2|p|validate_child_name|Result<(), String>|||
-F|234|8|16|p|is_workspace_path|bool|||
-F|235|8|20|p|is_workspace_root|bool|||
-F|236|8|24|p|can_modify_path|bool|||
-F|237|8|28|p|relative_path_for_workspace|PathBuf|||
-F|238|8|37|p|unique_child_path|PathBuf|||
-F|239|8|65|p|copy_path_recursive|std::io::Result<()>|||
-F|240|8|80|p|delete_path|std::io::Result<()>|||
-F|241|8|89|p|move_path_exact|Result<(), String>|||
-F|242|8|113|p|prune_nested_paths|Vec<PathBuf>|||
-F|243|8|133|p|trash_dirs|Result<(PathBuf, PathBuf), String>|||
-F|244|8|147|p|trash_info_path_value|String|||
-F|245|8|160|p|unix_days_to_ymd|(i32, u32, u32)|||
-F|246|8|174|p|trash_deletion_date|String|||
-F|247|8|188|p|trash_single_path|Result<FileTreeTrashEntry, String>|||
-F|248|8|219|p|trash_paths|Result<Vec<FileTreeTrashEntry>, String>|||
-F|249|8|248|p|restore_trash_entries|Result<Vec<PathBuf>, String>|||
-F|250|8|285|p|move_path_to_dir|Result<(PathBuf, PathBuf), String>|||
-F|251|8|313|p|rename_path|Result<PathBuf, String>|||
-F|252|8|336|p|path_after_rename|Option<PathBuf>|||
-F|253|8|346|p|copy_paths_to_dir|Result<Vec<PathBuf>, String>|||
-F|254|8|369|p|delete_paths|Result<(), String>|||
-F|255|8|383|p|selected_paths|Vec<PathBuf>|||
-T|256|9|190|enum|FileTreeScanMessage|Nodes(Vec<FileNode>),IconsReady
-F|257|9|8|p|pre_rasterize_icon||||
-F|258|9|51|p|read_children|(Vec<(String, PathBuf)>, Vec<(String, PathBuf)>)|||
-F|259|9|94|p|scan_dir_parallel|Vec<FileNode>|||
-F|260|9|196|p|spawn_scan|mpsc::Receiver<FileTreeScanMessage>|||
-F|261|9|264|p|spawn_watcher||||
-T|262|10|4|enum|AutocompleteKeyAction|None,DismissAndContinue,DismissAndConsume,MoveDown,MoveUp,Apply
-F|263|10|13||autocomplete_key_action|AutocompleteKeyAction|||
-F|264|10|28||autocomplete_next_index|usize|||
-F|265|10|55||sync_edit_line_range|(Option<usize>, Option<usize>)|||
-F|266|10|91||bounded_repeat_scroll_delta|Option<f32>|||
-F|267|10|95||key_text_for_editor_insert|Option<&'a str>|||
-F|268|10|116|pe|App.handle_editor_keyboard_input||&mut self|autocomplete_mode,autocomplete_options,autocomplete_pending_request_id,file_extension,highlighter,ide_ignore_patterns,ide_panel,ide_workspaces,is_ide_mode,lsp,modifiers,renderer,+6|active_tab=,autocomplete_active=,autocomplete_apply_pending_response=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=,autocomplete_selected_idx=,base_title=,editor=,file_path=,is_dragging=,+12
-F|269|10|944||autocomplete_key_action_maps_navigation_and_apply_keys||||
-F|270|10|980||autocomplete_ctrl_navigation_jumps_five_items||||
-F|271|10|989||autocomplete_ctrl_navigation_stops_at_edge_before_wrapping||||
-F|272|10|1002||sync_edit_line_range_covers_insert_delete_empty_and_last_line||||
-F|273|10|1054||bounded_repeat_scroll_delta_ignores_stale_large_focus_jump||||
-F|274|10|1060||period_key_falls_back_to_dot_text_on_press||||
-F|275|11|3||apply_terminal_alt_q_shortcut|bool|||
-F|276|11|35||should_suppress_hover_for_keyboard|bool|||
-F|277|11|51|pe|App.handle_main_keyboard_input||&mut self|dialog_window,ide_panel,ide_workspaces,is_ide_mode,modifiers,renderer,search_focused,settings_ignore_editor,settings_tab,show_search,window,window_height,+1|ide_ignore_patterns.push(),last_action=,settings_ignore_focused=,show_fps=,show_settings=
-F|278|11|346||terminal_open|bool|||
-F|279|11|351||terminal_alt_q_opens_terminal_and_requests_spawn_when_missing||||
-F|280|11|362||terminal_alt_q_focuses_existing_closed_terminal_without_spawn||||
-F|281|11|373||terminal_alt_q_toggles_focus_when_open||||
-F|282|11|388||terminal_alt_shift_q_closes_or_opens_without_focus_toggle||||
-F|283|11|403||terminal_alt_q_closes_bottom_peer_panel_before_opening_terminal||||
-F|284|11|429||hover_keyboard_suppression_only_allows_escape_and_arrows||||
-F|285|12|15||terminal_key_sequence|Option<Vec<u8>>|||
-F|286|12|84|p|App.handle_terminal_keyboard_input||&mut self|clipboard,ide_panel,modifiers,window|last_action=
-F|287|12|203|p|App.handle_terminal_search_keyboard_input||&mut self|ide_panel,modifiers,window|last_action=
-F|288|12|335|p|App.handle_search_keyboard_input||&mut self|modifiers,search_editor,window|last_action=,search_current_idx=,search_focused=,search_results.clear(),show_search=
-F|289|12|463|p|App.handle_lsp_log_filter_keyboard_input||&mut self|ide_panel,modifiers,window|last_action=
-F|290|12|558||seq|Option<Vec<u8>>|||
-F|291|12|563||terminal_key_sequence_covers_basic_control_and_text_input||||
-F|292|12|621||terminal_key_sequence_covers_function_keys||||
-F|293|12|646||terminal_key_sequence_covers_arrows_in_normal_and_alt_modes||||
-F|294|12|683||terminal_key_sequence_covers_ctrl_letter_bytes||||
-F|295|13|3|p|lsp_server_logs_h_for_content|f32|||
-F|296|13|13|p|lsp_server_logs_h_for_row|f32|||
-F|297|13|31||build_noqa_comment|String|||
-F|298|13|68|p|App.lsp_panel_bounds|Option<(f32, f32, f32, f32)>||ide_panel,renderer,window|
-F|299|13|110|p|App.lsp_panel_total_h|f32||ide_panel|
-F|300|13|119|p|App.lsp_server_logs_h|f32||ide_panel|
-F|301|13|131|p|App.lsp_server_inner_size|(f32, f32)||ide_panel|
-F|302|13|167|p|App.open_lsp_actions_menu|||editor,file_extension,file_path,is_ide_mode,lsp,renderer,scroll_y,show_welcome,window|lsp_actions_menu=
-F|303|13|263|p|App.apply_selected_lsp_action||&mut self|file_extension,file_path,lsp,lsp_actions_menu,window|pending_fix_all_id=
-F|304|13|310|p|App.insert_noqa_comment|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
-F|305|13|376|p|App.apply_workspace_edit|||base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,window|
-F|306|13|471||codes|Vec<String>|||
-F|307|13|476||build_noqa_comment_creates_plain_and_code_comments||||
-F|308|13|489||build_noqa_comment_merges_existing_codes_without_duplicates||||
-F|309|14|4||autocomplete_drag_target|f32|||
-F|310|14|26||autocomplete_scrollbar_track_margin|f32|||
-F|311|14|30||autocomplete_hovered_index|Option<usize>|||
-F|312|14|57||resized_left_width|f32|||
-F|313|14|63||resized_bottom_height|f32|||
-F|314|14|70||cursor_position_allows_editor_hover|bool|||
-F|315|14|79||should_suppress_editor_hover_for_scroll_drag|bool|||
-F|316|14|88|pe|App.handle_main_cursor_moved||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_detail_selecting,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,file_path,ide_panel,+17|autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=
-F|317|14|1318||autocomplete_drag_target_clamps_to_available_scroll||||
-F|318|14|1330||autocomplete_hovered_index_ignores_scrollbar_and_outside_rect||||
-F|319|14|1365||resize_helpers_clamp_left_width_and_bottom_height||||
-F|320|14|1376||cursor_hover_requires_pointer_inside_window||||
-F|321|14|1396||editor_scrollbar_drag_suppresses_hover_only_while_dragging||||
-F|322|15|11|p|advance_hover_anim_progress|f32|||
-F|323|15|24|p|compute_hover_visibility|(bool, bool, bool)|||
-F|324|15|51|p|compute_hover_visibility_from_matches|(bool, bool, bool)|||
-F|325|15|104|p|diagnostic_hover_target_byte_on_line|Option<usize>|||
-F|326|15|114|p|clear_hover_popup|bool|||
-F|327|15|142|p|suppress_hover_popup_until_mouse_move|bool|||
-F|328|15|152|p|is_hover_target_byte|bool|||
-F|329|15|160|p|is_python_hover_keyword|bool|||
-F|330|15|201|p|hover_token_text|Option<String>|||
-F|331|15|210||is_escaped_quote|bool|||
-F|332|15|220|p|diagnostic_hover_byte_range_on_line|Option<(usize, usize, usize)>|||
-F|333|15|357|p|hover_byte_on_line_at_x|Option<usize>|||
-F|334|15|422|p|diagnostic_hover_type_target_at_x|Option<usize>|||
-F|335|15|438|p|diagnostic_hover_range_on_line|Option<(u32, u32, usize)>|||
-F|336|15|473|p|normalize_hover_byte|Option<usize>|||
-F|337|15|489|p|hover_token_bounds|(usize, usize)|||
-F|338|15|571|p|hover_bytes_share_token|bool|||
-F|339|15|584|p|hover_screen_y_to_content_y|Option<f32>|||
-F|340|15|597|p|hover_content_y_in_line_hitbox|bool|||
-F|341|15|610|p|type_hover_screen_y_matches_byte_line|bool|||
-F|342|15|638|p|hover_anchor_for_byte|(f32, f32)|||
-F|343|15|690|p|compute_hover_x_offset|f32|||
-F|344|15|722||test_compute_hover_x_offset_uses_exact_byte_for_anchor||||
-F|345|15|745|p|hover_popup_byte_at|usize|||
-T|346|16|24|struct|HoverLayoutCache|(f32,f32,f32,f32,f32,f32,f32)
-T|347|16|2|struct|HoverPopup|text: String,spans: Vec<crate::highlighter::ColorSpan>,line_kinds: Vec<crate::lsp::HoverLineKindPublic>,inline_code_ranges: Vec<(usize,usize)>,byte_offset: usize,anchor_x: f32,anchor_y: f32,offset_x: Option<f32>,offset_y: Option<f32>,+3
-T|348|16|37|struct|HoverState|request_id: Option<i32>,definition_request_id: Option<i32>,popup: Option<HoverPopup>,pending_popup: Option<HoverPopup>,timer: f32,byte_offset: Option<usize>,rect: Option<(f32,f32,f32,f32)>,+22
-T|349|16|18|struct|HoverVisualLine|glyphs: Vec<(char,[f32; 4],usize)>,kind: crate::lsp::HoverLineKindPublic
-F|350|16|70||HoverState.default|Self|||
-F|351|16|106|p|HoverState.reset_diagnostic_popup||&mut self|diag_scroll|diag_anim_progress=,diag_hover_ready_after_stale=,diag_hover_timer=,diag_hover_timer_idx=,diag_href=,diag_max_scroll=,diag_rect=,diag_selecting=,diag_selection_anchor=,diag_selection_cursor=,diag_text.clear(),hovered_diag_type_target=,+5
-F|352|16|128|p|HoverState.hide_diagnostic_popup_until_ready||&mut self|diag_scroll,stale_combined_popup|diag_anim_progress=,diag_href=,diag_max_scroll=,diag_rect=,diag_selecting=,diag_selection_anchor=,diag_selection_cursor=,diag_text.clear()
-F|353|16|144|p|HoverState.advance_diagnostic_hover_timer|bool|&mut self||diag_hover_ready_after_stale=,diag_hover_timer=,diag_hover_timer_idx=
-F|354|16|169|p|HoverState.take_type_popup_for_draw|( Option<HoverPopup>, Option<(usize, usize)>, Option<(f32, f32, f32, f32)>, )|&mut self|diag_rect,popup,selection_anchor,selection_cursor|
-F|355|16|190|p|HoverState.put_type_popup_after_draw||||max_scroll=,popup=,rect=
-F|356|16|206|p|HoverState.should_show_stale_popup_while_target_loads|bool|&self|byte_offset,popup,stale_combined_popup|
-F|357|16|218|p|HoverState.begin_type_hover_transition|bool|&mut self|hovered_diags_cache|byte_offset=,definition_request_id=,pending_popup=,popup=,popup_diag_type_target=,rect=,request_id=,selecting=,selection_anchor=,selection_cursor=,stale_combined_popup=,stale_hovered_diags_cache.clear(),+1
-F|358|16|247|p|HoverState.reset_type_hover_wait_after_mouse_motion||&mut self||definition_request_id=,pending_popup=,request_id=,timer=
-F|359|16|254|p|HoverState.record_hovered_diagnostic|Option<usize>|&mut self|stale_combined_popup|hovered_diags_cache.push()
-F|360|16|288|p|HoverState.diagnostic_popup_cache|&[HoveredDiagnostic]|&self|hovered_diags_cache,stale_combined_popup,stale_hovered_diags_cache|
-F|361|16|296|p|HoverState.diagnostic_popup_cache_is_empty|bool|&self||
-F|362|16|300|p|HoverState.has_active_combined_type_popup|bool|&self|popup|
-F|363|16|308|p|HoverState.combined_type_target|Option<usize>|&self|diag_rect,hovered_diag_type_target,hovered_diags_cache,popup,popup_diag_type_target|
-F|364|16|320|p|HoverState.update_hovered_diag_type_target_for_frame||&mut self|stale_combined_popup|hovered_diag_type_target=
-F|365|16|328|p|HoverState.effective_hovered_diag_type_target|Option<usize>|&self|stale_combined_popup|
-F|366|16|338|p|HoverState.mark_type_popup_drawn||&mut self|stale_combined_popup|popup_diag_type_target=
-F|367|16|346|p|HoverState.finish_stale_combined_transition||&mut self|diag_scroll|diag_anim_progress=,diag_hover_ready_after_stale=,diag_href=,diag_max_scroll=,diag_rect=,diag_selecting=,diag_selection_anchor=,diag_selection_cursor=,diag_text.clear(),hovered_diag_type_target=,hovered_diags.clear(),hovered_diags_cache.clear(),+3
-F|368|16|368|p|HoverState.should_keep_popup_through_empty_space|bool|&self|definition_request_id,pending_popup,popup,request_id,stale_combined_popup|
-F|369|16|376|p|HoverState.should_lock_hover_target_while_popup_opens|bool|&self|definition_request_id,pending_popup,popup,rect,request_id|
-F|370|16|399|p|HoverState.keep_active_combined_popup_on_empty_space|bool|&mut self|stale_combined_popup|byte_offset=,request_id=,timer=
-F|371|16|418|p|HoverState.clear_type_popup_transition_markers||&mut self||diag_hover_ready_after_stale=,popup_diag_type_target=,stale_combined_popup=,stale_hovered_diags_cache.clear()
-F|372|16|425|p|HoverState.popup_or_bridge_contains|(bool, bool)|&self|diag_rect,popup,rect|
-F|373|16|476|p|hover_source_line_y_band|(f32, f32)|||
-F|374|16|481|p|is_in_hover_popup_or_bridge|bool|||
-F|375|17|5||union_rect|Option<Rect>|||
-F|376|17|19||point_in_padded_rect|bool|||
-F|377|17|26||terminal_mouse_button_code|u8|||
-F|378|17|35||terminal_mouse_cell_x|usize|||
-F|379|17|39||terminal_mouse_cell_y|usize|||
-F|380|17|56||terminal_mouse_sgr_sequence|String|||
-F|381|17|66||autocomplete_item_index_at|Option<usize>|||
-F|382|17|90||autocomplete_scroll_click_target|Option<(f32, f32)>|||
-F|383|17|125|pe|App.handle_main_mouse_input||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,base_title,dialog_window,editor,file_extension,file_path,+13|active_tab=,autocomplete_detail_selecting=,autocomplete_detail_selection_anchor=,autocomplete_detail_selection_cursor=,autocomplete_hovered_idx=,autocomplete_selected_idx=,is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_dragging_settings_ignore=,last_action=,lsp_actions_menu=,+5
-F|384|17|1197||hover_rect_helpers_union_and_padding_are_inclusive||||
-F|385|17|1225||terminal_mouse_helpers_match_sgr_protocol_edges||||
-F|386|17|1249||autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer||||
-F|387|17|1266||autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll||||
-F|388|18|3||wheel_delta|(f32, f32)|||
-F|389|18|10||point_in_rect|bool|||
-F|390|18|14||panel_scroll_rect|(f32, f32, f32, f32)|||
-F|391|18|48||autocomplete_max_scroll|f32|||
-F|392|18|55||scroll_autocomplete_list||||
-F|393|18|66||settings_ide_max_scroll|f32|||
-F|394|18|99|pe|App.handle_main_mouse_wheel||&mut self|autocomplete_active,autocomplete_detail_max_scroll,autocomplete_detail_popup,autocomplete_detail_rect,autocomplete_options,autocomplete_rect,autocomplete_scroll,dialog_window,editor,faq_editor,ide_ignore_patterns,ide_panel,+14|lsp_actions_menu=
-F|395|18|574||wheel_delta_handles_line_and_pixel_units||||
-F|396|18|589||point_in_rect_uses_inclusive_edges||||
-F|397|18|599||panel_scroll_rect_covers_top_and_bottom_layouts||||
-F|398|18|611||autocomplete_max_scroll_matches_visible_limit||||
-F|399|18|619||scroll_autocomplete_list_clamps_without_closing_state||||
-F|400|18|629||settings_ide_max_scroll_counts_chip_wrapping||||
-F|401|20|2|p|initial_python_bracket_folds|Vec<(usize, usize)>|||
-F|402|20|53|p|is_python_ident_byte|bool|||
-F|403|20|57|p|is_plain_assignment_after_token|bool|||
-F|404|20|73|p|plain_assignment_index|Option<usize>|||
-F|405|20|89|p|token_occurrence_at_word_boundary|Option<usize>|||
-F|406|20|110|p|previous_token_occurrence_at_word_boundary|Option<usize>|||
-F|407|20|127|p|nearest_python_assignment_usage|Option<usize>|||
-F|408|20|175|p|cursor_line_bounds|(usize, usize)|||
-F|409|20|190|p|cursor_in_python_string_or_comment|bool|||
-F|410|20|215|p|python_import_completion_allowed|bool|||
-F|411|20|242|p|is_magic_python_name|bool|||
-F|412|20|246|p|normalized_completion_source|&str|||
-F|413|20|260|p|is_plain_python_type_name|bool|||
-F|414|20|278|p|is_builtin_class_completion_detail|bool|||
-F|415|20|283|p|completion_source_missing_or_plain_builtin_type|bool|||
-F|416|20|295|p|should_assign_builtin_completion_module|bool|||
-F|417|20|318|p|assign_builtin_completion_module||||
-F|418|20|327|p|python_builtin_completion_kind|Option<SymbolKind>|||
-F|419|20|340|p|is_type_like_completion_source|bool|||
-F|420|20|359|p|is_class_like_type_name|bool|||
-F|421|20|367|p|completion_item_has_explicit_owner|bool|||
-F|422|20|386|p|completion_item_is_field_like|bool|||
-F|423|20|414|p|completion_item_is_argument_like|bool|||
-F|424|20|427|p|completion_detail_is_type_label|bool|||
-F|425|20|440|p|completion_needs_python_source_attr_owner|bool|||
-F|426|20|455|p|completion_owner_from_detail|Option<&'a str>|||
-F|427|20|472|p|completion_owner_label_from_source|Option<String>|||
-F|428|20|489|p|completion_source_label_is_clean|bool|||
-F|429|20|500|p|completion_source_is_module_path|bool|||
-F|430|20|511|p|completion_item_source_is_field_type|bool|||
-F|431|20|529|p|completion_item_owner_label|Option<String>|||
-F|432|20|545|p|completion_parent_module_label|Option<String>|||
-F|433|20|564|p|set_completion_owner_source||||
-F|434|20|584||completion_detail_type_name|Option<&str>|||
-F|435|20|597||autocomplete_detail_parent_module_path|&'a str|||
-F|436|20|644|p|autocomplete_detail_module_path|Option<&str>|||
-F|437|20|657|p|prepend_autocomplete_detail_module_path||||
-F|438|20|682|p|normalize_ty_import_kind||||
-F|439|20|695|p|common_completion_owner|Option<String>|||
-F|440|20|715|p|imported_python_module_for_symbol|Option<String>|||
-F|441|20|719|p|imported_python_symbols|FxHashMap<String, String>|||
-F|442|20|781|p|should_replace_completion_module|bool|||
-F|443|20|802|p|completion_detail_kind|SymbolKind|||
-F|444|20|819|p|completion_source_is_builtin|bool|||
-F|445|20|824|p|completion_word_starts_lower|bool|||
-F|446|20|830|p|completion_is_lowercase_type_source|bool|||
-F|447|20|845|p|python_builtin_completion_module|Option<&'static str>|||
-F|448|20|858|p|python_stdlib_completion_detail|Option<&'static str>|||
-F|449|20|909|p|python_member_dot_receiver|Option<&str>|||
-F|450|20|927|p|ty_autocomplete_context_key|String|||
-F|451|20|943|p|apply_import_modules_to_autocomplete_items||||
-F|452|20|954|p|apply_import_module_to_autocomplete_item||||
-F|453|20|971||python_imported_symbol_is_known_function|bool|||
-F|454|20|979|p|class_header_bases|Option<Vec<String>>|||
-F|455|20|1041|p|class_direct_attr|Option<&str>|||
-F|456|20|1060|p|instance_attr_assignment_name|Option<&str>|||
-F|457|20|1075|p|class_header_name|Option<&str>|||
-F|458|20|1084||python_header_depth_delta|i32|||
-F|459|20|1093||python_class_header_complete|bool|||
-F|460|20|1097||python_class_bases_at|Option<Vec<String>>|||
-F|461|20|1118|p|source_contains_python_class|bool|||
-F|462|20|1125||python_def_name|Option<&str>|||
-F|463|20|1135|p|python_enclosing_class_before_cursor|Option<String>|||
-F|464|20|1174||trim_python_block_indent|&str|||
-F|465|20|1178||python_signature_block|String|||
-F|466|20|1201|p|python_class_method_overload_detail|Option<String>|||
-F|467|20|1277|p|class_body_declares_attr|bool|||
-F|468|20|1316|p|class_body_declared_attrs||||
-F|469|20|1364||class_body_declared_methods||||
-F|470|20|1392|p|python_class_attr_owner_in_source|Option<String>|||
-F|471|20|1397||find|Option<String>|||
-F|472|20|1421|p|python_class_attr_owners_with_imports|FxHashMap<String, String>|||
-F|473|20|1428||find||||
-F|474|20|1506|p|python_class_member_owners_with_imports|FxHashMap<String, String>|||
-F|475|20|1513||find||||
-F|476|20|1593|p|python_class_owner_depths_with_imports|FxHashMap<String, u8>|||
-F|477|20|1599||find||||
-F|478|20|1664|p|imported_python_class_source|Option<String>|||
-F|479|20|1702|p|python_member_chain_too_deep|bool|||
-F|480|20|1717|p|cursor_after_python_member_dot|bool|||
-F|481|20|1741|p|python_member_receiver_before_cursor|Option<String>|||
-F|482|20|1765|p|cursor_inside_python_call_parens|bool|||
-T|483|21|7|struct|Cell|c: char,fg: u8,bg: u8
-T|484|21|23|struct|TermGrid|scrollback: std::collections::VecDeque<Vec<Cell>>,lines: std::collections::VecDeque<Vec<Cell>>,alt_lines: Option<std::collections::VecDeque<Vec<Cell>>>,alt_saved_cursor: Option<(usize,usize)>,is_alt: bool,cols: usize,visible_rows: usize,cur_x: usize,cur_y: usize,+17
-T|485|21|1176|struct|Terminal|grid: Arc<Mutex<TermGrid>>,writer: Arc<Mutex<Box<dyn Write + Send>>>,master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,scroll_y: crate::scroll::ScrollState,title: String
-F|486|21|14||Cell.default|Self|||
-F|487|21|48|p|TermGrid.new|Self|||
-F|488|21|78|p|TermGrid.resize||&mut self|alt_lines,alt_saved_cursor,is_alt,saved_cursor|cols=,cur_x=,cur_y=,dirty=,lines.pop_back(),lines.push_back(),pool.push(),scroll_region=,scrollback.pop_back(),scrollback.push_back(),visible_rows=
-F|489|21|207|p|TermGrid.put_char||&mut self|cols,cur_bg,cur_fg,lines,visible_rows|cur_x=,cur_y=
-F|490|21|227|p|TermGrid.newline||&mut self|scroll_region,visible_rows|cur_y=
-F|491|21|238|p|TermGrid.scroll_region_up||&mut self|cols,is_alt,scroll_region,visible_rows|dirty=,lines.insert(),pool.push(),scrollback.push_back()
-F|492|21|281|p|TermGrid.scroll_region_down||&mut self|cols,scroll_region|dirty=,lines.insert(),lines.remove(),pool.push()
-F|493|21|303|p|TermGrid.get_selection_text|String|&self|cols,lines,scrollback,selection|
-F|494|21|360||feed||||
-F|495|21|365||set_line||||
-F|496|21|372||terminal_grid_print_scroll_resize_and_selection_end_to_end||||
-F|497|21|399||terminal_csi_cursor_modes_colors_and_replies_end_to_end||||
-F|498|21|455||terminal_csi_erases_scroll_region_and_line_mutation_end_to_end||||
-F|499|21|499||terminal_resize_preserves_scrollback_saved_cursor_and_alt_buffer||||
-F|500|21|559||terminal_csi_defaults_scroll_modes_and_sgr_edges_end_to_end||||
-F|501|21|633||terminal_osc_insert_delete_and_truecolor_edges_end_to_end||||
-F|502|21|687||terminal_resize_selection_and_alt_growth_edges||||
-F|503|21|731||terminal_csi_more_erase_cursor_and_reply_edges||||
-F|504|21|790||TermGrid.print||&mut self||
-F|505|21|793||TermGrid.execute||&mut self||cur_x=
-F|506|21|807||TermGrid.hook||&mut self||
-F|507|21|808||TermGrid.put||&mut self||
-F|508|21|809||TermGrid.unhook||&mut self||
-F|509|21|810||TermGrid.osc_dispatch||&mut self|reply_tx|
-F|510|21|821||TermGrid.esc_dispatch||&mut self||cur_x=,cur_y=,saved_cursor=
-F|511|21|833||TermGrid.csi_dispatch||&mut self|cols,reply_tx,visible_rows|alt_lines=,alt_saved_cursor=,app_cursor_keys=,cur_bg=,cur_bold=,cur_fg=,cur_x=,cur_y=,cursor_visible=,dirty=,is_alt=,lines.insert(),+6
-F|512|21|1187|p|Terminal.spawn|Self|||
-F|513|21|1293|p|Terminal.resize_pty||&self|master_pty|
-F|514|22|8||scrollbar_x_click_target|Option<(f32, f32)>|||
-F|515|22|36||scrollbar_x_click_target_drags_thumb_or_jumps_to_pointer||||
-F|516|22|54|p|App.handle_ui_click||&mut self|file_extension,highlighter,ide_panel,lsp,pending_action,recent_files,renderer,scroll_x,scroll_y,search_editor,window,window_height,+1|base_title=,click_count=,dialog_window=,editor=,file_path=,ide_ignore_patterns.push(),ide_ignore_patterns.remove(),ide_workspaces.remove(),is_dragging=,is_dragging_lsp_log=,is_dragging_search=,is_ide_mode=,+12
-F|517|23|27||apply_initial_import_folds||||
-F|518|23|77|p|App.set_clipboard_text|||clipboard|
-F|519|23|84|p|App.get_clipboard_text|Option<String>||clipboard|
-F|520|23|89|p|App.enter_ide_mode||&mut self|editor,file_extension,ide_workspaces,is_highlighted_once,window|active_tab=,base_title=,file_path=,ide_panel=,is_ide_mode=,lsp=,show_welcome=,tabs.push()
-F|521|23|193|p|App.save_tabs_state||&mut self|active_tab,is_ide_mode,tabs|
-F|522|23|202|p|App.sync_active_tab||&mut self|active_tab,base_title,editor,file_extension,file_path,highlighter,is_highlighted_once,last_sent_version,scroll_x,scroll_y,search_current_idx,search_results,+1|
-F|523|23|249||App.next_tab_highlight_version|u64|&self|editor,highlighter,tabs|
-F|524|23|260|p|App.switch_to_tab||&mut self|base_title,editor,file_extension,file_path,highlighter,is_ide_mode,lsp,tabs,window|active_tab=,autocomplete_active=,show_welcome=
-F|525|23|309|p|App.open_new_tab||&mut self|highlighter,is_ide_mode,window|active_tab=,autocomplete_active=,base_title=,editor=,file_extension=,file_path=,show_welcome=,tabs.push()
-F|526|23|393|p|App.close_tab_at||&mut self|base_title,editor,file_extension,file_path,highlighter,is_ide_mode,window|active_tab=,show_welcome=,tabs.remove()
-F|527|23|439|p|App.open_file_in_tab||&mut self||
-F|528|23|443|p|App.open_file_in_tab_bg||&mut self||
-F|529|23|448|p|App.open_file_in_tab_internal||&mut self|active_tab,editor,file_path,is_ide_mode,tabs|
-F|530|23|484|p|App.ensure_cursor_visible||||
-F|531|23|523||App.abs_path_for_workspace|PathBuf|&self|ide_workspaces|
-F|532|23|533||App.current_abs_path|Option<PathBuf>|&self|file_path|
-F|533|23|539|p|App.ctrl_definition_highlight_range|Option<(usize, usize)>||ctrl_definition,modifiers|
-F|534|23|547|p|App.clear_ctrl_definition||||ctrl_definition=
-F|535|23|551|p|App.update_ctrl_definition_hover|||editor,file_extension,file_path,is_ide_mode,modifiers|ctrl_definition=
-F|536|23|600|p|App.ctrl_definition_target_from_lsp|Option<DefinitionJumpTarget>||ctrl_definition,editor|
-F|537|23|617|p|App.ctrl_definition_target_under_mouse|Option<DefinitionJumpTarget>||ctrl_definition,editor,is_ide_mode,renderer,scroll_y,show_welcome|
-F|538|23|634|p|App.jump_to_definition_target|||editor,ide_panel,is_ide_mode,renderer,scroll_x,scroll_y,show_welcome,window|
-F|539|23|682|p|App.update_terminal_search||&mut self|ide_panel|
-F|540|23|728|p|App.jump_to_terminal_search_result||&mut self|ide_panel,renderer|
-F|541|23|764|p|App.update_search||&mut self|editor,search_case_sensitive,search_editor|search_current_idx=,search_results.clear(),search_results.push()
-F|542|23|821|p|App.jump_to_search_result||&mut self|editor,ide_panel,is_ide_mode,renderer,scroll_y,search_current_idx,search_results,show_welcome,window|
-F|543|23|866|p|App.update_window_title||||
-F|544|23|876|p|App.show_action_dialog||&mut self|gl_config,scroll_x,scroll_y|dialog_gl_surface=,dialog_window=,is_dragging=,pending_action=
-F|545|23|919|p|App.close_dialog||&mut self|window|dialog_gl_surface=,dialog_window=
-F|546|23|927|p|App.close_current_file||&mut self|active_tab,file_path,highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,search_current_idx=,search_results.clear(),show_search=,show_welcome=,tabs.clear()
-F|547|23|974|p|App.trigger_file_picker||&mut self||open_file_rx=
-F|548|23|984|p|App.trigger_folder_picker||&mut self||open_folder_rx=
-F|549|23|996|p|App.trigger_save_as_picker||&mut self||save_file_rx=
-F|550|23|1008|p|App.save_current_file|bool|&mut self|editor,file_path|
-F|551|23|1047|p|App.add_recent_file||&mut self||recent_files.insert(),recent_files.retain(),recent_files.truncate()
-F|552|23|1056|p|App.apply_highlight_results||&mut self|editor,file_extension,highlighter|is_highlighted_once=
-F|553|23|1094||App.wait_for_current_highlight||&mut self|editor|
-F|554|23|1103|p|App.load_file_internal||&mut self|highlighter,is_ide_mode,lsp,scroll_x,scroll_y,window|autocomplete_active=,base_title=,editor=,file_extension=,file_path=,is_highlighted_once=,last_sent_version=,recent_files.retain(),search_current_idx=,search_results.clear(),show_welcome=
-F|555|23|1185|p|App.check_external_changes||&mut self|active_tab,editor,file_extension,highlighter,is_ide_mode,lsp,renderer,tabs,window|last_sent_version=,lsp_actions_menu=
-F|556|23|1246|p|App.start_external_changes_check||&mut self||external_changes_rx=
-F|557|23|1282|p|App.poll_external_changes|bool|&mut self|active_tab,editor,file_extension,highlighter,is_ide_mode,lsp,renderer,tabs,window|external_changes_rx=,last_sent_version=,lsp_actions_menu=
-T|558|24|69|enum|EditOp|Insert { offset: usize,text: String
-T|559|24|98|struct|Editor|data: Vec<u8>,gap_start: usize,gap_end: usize,cursor: usize,selection_anchor: Option<usize>,version: u64,line_offsets: Vec<usize>,longest_line_idx: usize,history: VecDeque<HistoryStep>,redo_stack: VecDeque<HistoryStep>,+17
-T|560|24|10|struct|HashSource|(&'a [u64])
-T|561|24|86|struct|HistoryStep|op: EditOp,cursor_before: usize,cursor_after: usize
-T|562|24|63|enum|LineModState|ModifiedUnsaved,ModifiedSaved
-T|563|24|92|enum|UndoRedoDelta|Insert(usize,usize,String),Delete(usize,usize),Replace(usize,usize,String,String)
-F|564|24|16||tokenize|Self::Tokenizer|&self||
-F|565|24|20||estimate_tokens|u32|&self||
-F|566|24|25||get_diff_info|(Vec<bool>, Vec<bool>)|||
-F|567|24|45||is_delimiter|bool|||
-F|568|24|52||char_class|u8|||
-F|569|24|130|p|Editor.new|Self|||
-F|570|24|159|p|Editor.shift_folds_insert||&mut self|foldable_ranges_bytes|folded_start_bytes=
-F|571|24|182|p|Editor.shift_folds_delete||&mut self|foldable_ranges_bytes|folded_start_bytes=
-F|572|24|211|p|Editor.rebuild_line_offsets||&mut self|foldable_ranges_bytes|foldable_lines.clear(),foldable_lines.insert(),folded_lines.clear(),folded_lines.insert(),folded_start_bytes.clear(),folded_start_bytes.insert(),line_offsets=,longest_line_idx=
-F|573|24|281||Editor.get_line_hashes|Vec<u64>|&self||
-F|574|24|304|p|Editor.ensure_indent_cache_updated||&mut self|version|indent_cache.clear(),last_indent_version=
-F|575|24|376|p|Editor.get_cached_indent_levels|&[u8]|&self|indent_cache|
-F|576|24|380|p|Editor.backspace|Option<(usize, usize)>|&mut self|gap_end,gap_start,version|cursor=,selection_anchor=,sync_edits.push()
-F|577|24|453|p|Editor.set_original_text||&mut self||original_hashes=,saved_hashes=
-F|578|24|459|p|Editor.mark_saved||&mut self||saved_hashes=
-F|579|24|464|p|Editor.is_dirty|bool|&self|is_dirty|
-F|580|24|468|p|Editor.get_line_modification_state|Option<LineModState>|&self|line_states|
-F|581|24|472|p|Editor.update_modifications||&mut self|original_hashes,saved_hashes|deleted_gaps=,is_dirty=,line_states=
-F|582|24|543|p|Editor.clear_history||&mut self||history.clear(),history_size=,redo_stack.clear(),sync_edits.clear()
-F|583|24|551||Editor.push_history||&mut self|history_size,is_working_history|history.push_back(),redo_stack.clear()
-F|584|24|635|p|Editor.undo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.pop_back(),is_working_history=,redo_stack.push_back(),selection_anchor=,sync_edits.push()
-F|585|24|693|p|Editor.redo|Option<UndoRedoDelta>|&mut self|gap_end,version|cursor=,history.push_back(),is_working_history=,redo_stack.pop_back(),selection_anchor=,sync_edits.push()
-F|586|24|751|p|Editor.text_parts|(&str, &str)|&self|data,gap_end,gap_start|
-F|587|24|759|p|Editor.get_full_text|String|&self||
-F|588|24|767||Editor.move_gap||&mut self|data,gap_end,gap_start|
-F|589|24|786||Editor.insert_str_internal|usize|&mut self|cursor,gap_start|data=,gap_end=,sync_edits.push()
-F|590|24|810|p|Editor.replace_range|(usize, usize, String)|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
-F|591|24|857|p|Editor.insert_str|(Option<(usize, usize)>, usize)|&mut self|cursor,version|selection_anchor=
-F|592|24|884|p|Editor.delete_selection|Option<(usize, usize)>|&mut self|gap_end,sync_edits,version|cursor=,selection_anchor=
-F|593|24|922|p|Editor.delete_forward|Option<(usize, usize)>|&mut self|cursor,gap_end,version|sync_edits.push()
-F|594|24|958|p|Editor.delete_word_backward|Option<(usize, usize)>|&mut self|cursor|selection_anchor=
-F|595|24|1001|p|Editor.delete_word_forward|Option<(usize, usize)>|&mut self||cursor=,selection_anchor=
-F|596|24|1035|p|Editor.get_auto_indent|String|&self|cursor|
-F|597|24|1071||editor_edit_history_dirty_state_end_to_end||||
-F|598|24|1096||editor_navigation_selection_indent_and_utf8_end_to_end||||
-F|599|24|1114||editor_fold_visibility_and_offsets_end_to_end||||
-F|600|24|1130||editor_navigation_expand_home_end_folds_and_utf16_edges||||
-F|601|24|1186||editor_delete_paths_pair_unicode_words_and_selection_replacement||||
-F|602|24|1232||editor_indent_cache_line_states_and_fold_shift_edges||||
-F|603|24|1277||editor_clear_history_empty_ops_and_navigation_edges_are_stable||||
-F|604|24|1315||editor_navigation_extra_boundaries_selection_and_fold_edges||||
-F|605|24|1381||editor_navigation_extra_word_and_file_movement_edges||||
-F|606|25|3||line_bounds|(usize, usize)|||
-F|607|25|13||trim_ascii_ws|(usize, usize)|||
-F|608|25|25||line_indent_and_blank|(usize, bool)|||
-F|609|25|40||editor_click_content_y|f32|||
-F|610|25|45|p|Editor.select_expand||&mut self|line_offsets|cursor=,selection_anchor=
-F|611|25|208|p|Editor.select_word||&mut self||cursor=,selection_anchor=
-F|612|25|225|p|Editor.select_line||&mut self||cursor=,selection_anchor=
-F|613|25|240|p|Editor.is_char_boundary|bool|||
-F|614|25|248|p|Editor.byte_at|u8|&self|data,gap_end,gap_start|
-F|615|25|256|p|Editor.len|usize|&self|data,gap_end,gap_start|
-F|616|25|264|p|Editor.utf16_col_to_byte_advance||&self|line_offsets|
-F|617|25|302|p|Editor.get_selection|Option<String>|&self|cursor,selection_anchor|
-F|618|25|316|p|Editor.get_visible_lines_count|usize|&self|foldable_lines,folded_lines,line_offsets|
-F|619|25|336|p|Editor.select_all||&mut self||cursor=,selection_anchor=
-F|620|25|341||Editor.handle_selection||&mut self|cursor|selection_anchor=
-F|621|25|350|p|Editor.snap_cursor_out_of_fold||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|622|25|390|p|Editor.move_left||&mut self||cursor=
-F|623|25|403|p|Editor.move_right||&mut self||cursor=
-F|624|25|416|p|Editor.move_word_left||&mut self||cursor=
-F|625|25|439|p|Editor.move_word_right||&mut self||cursor=
-F|626|25|462|p|Editor.move_home||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|627|25|502|p|Editor.move_end||&mut self|foldable_lines,folded_lines,line_offsets|cursor=
-F|628|25|542|p|Editor.move_start_of_file||&mut self||cursor=
-F|629|25|547|p|Editor.move_end_of_file||&mut self||cursor=
-F|630|25|553|p|Editor.move_up||&mut self||cursor=
-F|631|25|560|p|Editor.move_down||&mut self||cursor=
-F|632|25|567|p|Editor.set_cursor_at_pos||&mut self||cursor=,selection_anchor=
-F|633|25|583|p|Editor.move_page_up||&mut self||cursor=
-F|634|25|590|p|Editor.move_page_down||&mut self||cursor=
-F|635|25|602||editor_click_content_y_uses_ibeam_midpoint_without_top_edge_bias||||
-F|636|25|621||editor_click_content_y_clamps_negative_positions_to_document_start||||
-T|637|26|15|struct|ColorSpan|start: usize,end: usize,color: [f32; 4]
-T|638|26|83|struct|CompletionItem|word: String,kind: SymbolKind,scope_start: usize,scope_end: usize
-T|639|26|112|struct|Highlighter|tx: Sender<HighlighterMessage>,rx: Receiver<( u64,Vec<ColorSpan>,Vec<CompletionItem>,Vec<(usize,usize,bool,bool)>,Vec<(usize,usize)>,+19
-T|640|26|96|enum|HighlighterMessage|Reset { version: u64,text: String,ext: String
-T|641|26|148|struct|Scope|start: usize,end: usize,params: HashSet<String>
-T|642|26|70|enum|SymbolKind|Variable,Function,Class,Parameter,Property,Module,Builtin,Keyword,Unknown
-T|643|26|91|enum|SyncEdit|Insert { offset: usize,text: String
-F|644|26|21|p|flatten_color_spans_prefer_specific|Vec<ColorSpan>|||
-F|645|26|154||get_point|tree_sitter::Point|||
-F|646|26|167||resolve_color|[f32; 4]|||
-F|647|26|247||is_python_attribute_property|bool|||
-F|648|26|259||collect_param_scopes|Vec<Scope>|||
-F|649|26|336||collect_query_highlight_spans||||
-F|650|26|399||cut_spans_by_ranges||||
-F|651|26|450||overlay_spans_preserving_gaps||||
-F|652|26|458||is_highlight_ident_byte|bool|||
-F|653|26|462||expand_highlight_invalidation_range|Option<Range<usize>>|||
-F|654|26|484|p|sync_edit_invalidation_byte_range|(Option<usize>, Option<usize>)|||
-F|655|26|500||merge_highlight_spans|Vec<ColorSpan>|||
-F|656|26|528|p|tree_sitter_lang_name_for_ext|&'static str|||
-F|657|26|552||lang_name_for_ext_and_text|&'static str|||
-F|658|26|570||prev_char_start|usize|||
-F|659|26|581||push_ast_select_range||||
-F|660|26|618||push_ast_select_line_range||||
-F|661|26|640|p|ast_select_expand_range|Option<(usize, usize)>|||
-F|662|26|711|p|Highlighter.new|Self|||
-F|663|27|4|p|Highlighter.reset||&mut self||sync_ext=,sync_text=,sync_tree=
-F|664|27|13|p|Highlighter.apply_edits||&self|tx|
-F|665|27|34|p|Highlighter.poll|bool|&mut self|rx|
-F|666|27|52||Highlighter.apply_poll_result|bool|||completions=,current_version=,foldable_ranges=,spans=,sync_tree=,syntax_errors=
-F|667|27|78|p|Highlighter.wait_for_first_result|bool|&mut self|rx|
-F|668|27|108|p|Highlighter.shift_insert||&mut self|sync_text|spans.extend(),spans.push(),spans.retain(),spans=,sync_tree=
-F|669|27|231|p|Highlighter.shift_delete||&mut self|sync_text|spans.retain(),sync_tree=
-F|670|27|272|p|Highlighter.sync_highlight_after_edit|bool|&mut self|sync_byte_colors_buf,sync_ext,sync_parser,sync_query_cache,sync_text|current_version=,spans=,sync_tree=
-F|671|27|355|p|get_bracket_color|[f32; 4]|||
-F|672|27|369|p|flatten_spans|Vec<ColorSpan>|||
-F|673|27|496||highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end||||
-F|674|27|516||highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans||||
-F|675|27|527||highlighter_poll_ignores_non_current_versions_without_advancing_watermark||||
-F|676|27|568||highlighter_sync_parse_after_seed_colors_python_constant_immediately||||
-F|677|27|590||highlighter_sync_parse_keeps_python_parameters_colored||||
-F|678|27|616||highlighter_sync_parse_clears_stale_python_self_color_after_delete||||
-F|679|27|637||highlighter_shift_insert_predicts_colors_splits_and_merges_spans||||
-F|680|27|692||highlighter_shift_delete_clamps_overlapping_spans||||
-F|681|27|736||highlighter_flatten_spans_handles_empty_and_interpolation_markers||||
-T|682|28|2|struct|ImportBlock|start: usize,end: usize,keyword_start: usize,keyword_end: usize,line_count: usize
-F|683|28|10|p|import_blocks|Vec<ImportBlock>|||
-F|684|28|55||dart_import_keyword_len|Option<usize>|||
-F|685|28|63||finish_block||||
-F|686|28|76||dart_import_blocks_cover_contiguous_imports||||
-F|687|28|91||dart_import_blocks_keep_blank_lines_between_import_groups_only||||
-T|688|30|36|enum|HoverLineKind|Text,Code,Separator,Header1,Header2
-T|689|30|8|struct|ImportBlock|()
-F|690|30|44|p|import_blocks|Vec<ImportBlock>|||
-F|691|30|107|p|push_docstring_highlight_spans||||
-F|692|30|166||python_import_keyword_len|Option<usize>|||
-F|693|30|176||update_python_import_continuation||||
-F|694|30|187||finish_import_block||||
-F|695|30|195||push_docstring_line_spans||||
-F|696|30|269|p|normalize_inline_rst_code|(String, Vec<(usize, usize)>)|||
-F|697|30|294|p|normalize_rst_roles|(String, Vec<(usize, usize)>)|||
-F|698|30|335|p|flatten_rst_roles_and_code|String|||
-F|699|30|383|p|parse_param_line|Option<(String, String, String)>|||
-F|700|30|403||split_inline_python_after_colon|Option<(String, String)>|||
-F|701|30|423||normalize_coroutine_signature_line|String|||
-F|702|30|445|p|normalize_python_hover_doc|(String, Vec<HoverLineKind>, Vec<(usize, usize)>)|||
-F|703|30|873|p|ts_capture_color|Option<[f32; 4]>|||
-F|704|30|889|p|push_python_ts_spans||||
-F|705|30|954|p|python_class_attr_name_ranges|Vec<(usize, usize)>|||
-F|706|30|988|p|highlight_python_hover_doc|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
-F|707|30|1338||force_color_on_ranges||||
-F|708|30|1380||signature_type_token_ranges|Vec<(usize, usize)>|||
-F|709|30|1409||type_slice_end|usize|||
-F|710|30|1437||push_type_tokens||||
-F|711|30|1472||color_keyword_args_orange||||
-T|712|31|2|struct|ImportBlock|start: usize,end: usize,keyword_start: usize,keyword_end: usize,line_count: usize
-F|713|31|10|p|import_blocks|Vec<ImportBlock>|||
-F|714|31|73||rust_use_keyword_offset|Option<usize>|||
-F|715|31|91||update_use_continuation||||
-F|716|31|102||finish_block||||
-F|717|31|115||rust_import_blocks_cover_use_groups_and_pub_use_keyword||||
-F|718|31|124||rust_import_blocks_keep_multiline_use_inside_group||||
-F|719|31|132||rust_import_blocks_keep_blank_lines_between_use_groups_only||||
-T|720|32|818|enum|HoverLineKindPublic|Text,Code,Separator,Header1,Header2
-F|721|32|3|p|highlight_hover_text|( String, Vec<crate::highlighter::ColorSpan>, Vec<HoverLineKindPublic>, Vec<(usize, usize)>, )|||
-F|722|32|123||preprocess_hover_text|String|||
-F|723|32|140||normalize_special_form_repr|Option<String>|||
-F|724|32|153||looks_like_python_hover|bool|||
-F|725|32|184||looks_like_python_code_line|bool|||
-F|726|32|210||looks_like_type_expr_line|bool|||
-F|727|32|256||is_simple_type_token|bool|||
-F|728|32|277||is_simple_class_type_token|bool|||
-F|729|32|284||looks_like_simple_type_name_line|bool|||
-F|730|32|305||add_doc_arg_name_spans||||
-F|731|32|349||sanitize_hover_type_expr|String|||
-F|732|32|367||sanitize_module_path|String|||
-F|733|32|379||normalize_class_object_repr|Option<(Option<String>, String)>|||
-F|734|32|404||normalize_module_object_repr|Option<String>|||
-F|735|32|420||normalize_bound_method_signature|Option<String>|||
-F|736|32|476||add_bound_method_signature_spans|bool|||
-F|737|32|546||add_self_param_span_for_signature||||
-F|738|32|570||add_param_name_spans_for_signature||||
-F|739|32|610||add_class_keyword_spans_for_signature||||
-F|740|32|645||add_type_bracket_neutral_spans_for_signature||||
-F|741|32|665||add_type_expr_spans_for_line||||
-F|742|32|706||type_expr_token_color|[f32; 4]|||
-F|743|32|715||normalize_hover_text|(String, Vec<(usize, usize)>)|||
-F|744|32|782||wrap_signature_after_first_param|String|||
-F|745|32|806||normalize_asynccontextmanager_signature_line|Option<String>|||
-T|746|33|166|struct|CodeAction|title: String,kind: Option<String>,edit: Option<WorkspaceEdit>,code: Option<String>
-T|747|33|159|struct|DefinitionTarget|path: PathBuf,line: u32,col: u32
-T|748|33|174|struct|LspCompletionItem|label: String,kind: crate::highlighter::SymbolKind,module: Option<String>,detail: Option<String>,insert_text: Option<String>,text_edit: Option<TextChange>,additional_text_edits: Vec<TextChange>
-T|749|33|111|enum|LspEvent|Log { name: &'static str,message: String
-T|750|33|95|struct|TextChange|start_line: u32,start_col: u32,end_line: u32,end_col: u32,new_text: String
-T|751|33|105|struct|WorkspaceEdit|changes: HashMap<PathBuf,Vec<TextChange>>
-F|752|33|9|p|highlight_diagnostic_message|Vec<crate::highlighter::ColorSpan>|||
-F|753|33|276|p|offset_to_lsp_pos|(u32, u32)|||
-F|754|33|296|p|json_escape|String|||
-F|755|33|315|p|path_to_uri|String|||
-F|756|33|329|p|uri_to_path|PathBuf|||
-F|757|33|340|p|make_initialize|Vec<u8>|||
-F|758|33|371|p|make_initialized|Vec<u8>|||
-F|759|33|375|p|make_did_open|Vec<u8>|||
-F|760|33|386|p|make_did_change_full|Vec<u8>|||
-F|761|33|396|p|make_did_close|Vec<u8>|||
-F|762|33|404|p|make_code_action|Vec<u8>|||
-F|763|33|431|p|make_hover|Vec<u8>|||
-F|764|33|438|p|make_definition|Vec<u8>|||
-F|765|33|445|p|make_completion|Vec<u8>|||
-F|766|33|471|p|make_workspace_diagnostic|Vec<u8>|||
-F|767|33|479|p|make_shutdown|Vec<u8>|||
-F|768|33|483|p|make_exit|Vec<u8>|||
-F|769|33|489|p|write_frame|bool|||
-F|770|33|501|p|parse_diagnostic_value|Option<Diagnostic>|||
-F|771|33|608|p|parse_text_edit_value|Option<TextChange>|||
-F|772|33|633||parse_completion_text_edit_value|Option<TextChange>|||
-F|773|33|650|p|parse_workspace_edit_value|WorkspaceEdit|||
-F|774|33|686|p|parse_hover_value|Option<String>|||
-F|775|33|714||definition_position|Option<(u32, u32)>|||
-F|776|33|720|p|parse_definition_target|Option<DefinitionTarget>|||
-F|777|33|754|p|parse_code_action_value|Option<CodeAction>|||
-F|778|33|787||completion_kind|crate::highlighter::SymbolKind|||
-F|779|33|799||refine_completion_kind|crate::highlighter::SymbolKind|||
-F|780|33|835||completion_module|Option<String>|||
-F|781|33|920||looks_like_python_module_path|bool|||
-F|782|33|927||completion_description_source|Option<String>|||
-F|783|33|965||completion_detail|Option<String>|||
-F|784|33|1007||completion_detail_is_more_specific_than_label_detail|bool|||
-F|785|33|1021||owner_from_completion_detail|Option<String>|||
-F|786|33|1038|p|parse_completion_item_value|Option<LspCompletionItem>|||
-F|787|33|1074|p|parse_completion_items|Vec<LspCompletionItem>|||
-F|788|33|1088||configuration_response_for|serde_json::Value|||
-F|789|33|1103||emit_workspace_diagnostic_report||||
-F|790|33|1140||emit_workspace_diagnostics||||
-F|791|33|1164|p|dispatch_frame||||
-F|792|33|1387||recv_log_message|String|||
-T|793|34|117|enum|DiagSeverity|Error,Warning,Info,Hint
-T|794|34|131|struct|Diagnostic|start_line: u32,start_col: u32,end_line: u32,end_col: u32,severity: DiagSeverity,code: Option<String>,code_href: Option<String>,message: String,source: Option<String>,quickfixes: Vec<QuickFix>,+2
-T|795|34|102|struct|LogEntry|text: String,spans: Vec<crate::highlighter::ColorSpan>,folds: Vec<(usize,usize,usize)>,created_at: Instant
-T|796|34|826|struct|LspManager|python: Option<LspProcess>,ty_process: Option<LspProcess>,workspaces: Vec<PathBuf>,diagnostics: HashMap<PathBuf,Vec<Diagnostic>>,instant_diagnostics: HashMap<PathBuf,(i32,Vec<Diagnostic>)>,merged_instant_diagnostics: HashMap<PathBuf,(i32,+20
-T|797|34|591|struct|LspProcess|cmd_tx: Sender<Cmd>,event_rx: Receiver<LspEvent>,current_uri: Option<String>,def: &'static LspServerDef,open_file_data: Option<(String,String)>
-T|798|34|110|struct|LspServerInfo|name: &'static str,status: LspServerStatus,logs: Vec<LogEntry>
-T|799|34|94|enum|LspServerStatus|Starting,Running,Crashed,Disabled
-T|800|34|280|struct|OpenFile|uri: String,lang: &'static str,version: i32,text: String
-T|801|34|125|struct|QuickFix|title: String,edits: Vec<TextChange>
-T|802|34|150|struct|SpawnedProcess|child: Child,out_tx: Sender<Vec<u8>>
-F|803|34|46||next_id|i32|||
-F|804|34|50||compact_lsp_log_message|String|||
-F|805|34|65||format_lsp_log_entry|( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize, usize)>, )|||
-F|806|34|79||trim_lsp_logs||||
-F|807|34|156||spawn_server|Option<SpawnedProcess>|||
-F|808|34|287||send_and_log|Result<(), mpsc::SendError<Vec<u8>>>|||
-F|809|34|304||remove_sent_log_text_fields|String|||
-F|810|34|315||remove_json_text_fields|bool|||
-F|811|34|349||run_supervisor||||
-F|812|34|601||LspProcess.start|Self|||
-F|813|34|622|p|LspProcess.notify_open||&mut self|cmd_tx,def|current_uri=,open_file_data=
-F|814|34|641|p|LspProcess.restart||&mut self|cmd_tx|
-F|815|34|647|p|LspProcess.notify_change||&mut self|cmd_tx|current_uri=
-F|816|34|657|p|LspProcess.request_hover|i32|&mut self|cmd_tx|
-F|817|34|664|p|LspProcess.request_definition|i32|&mut self|cmd_tx|
-F|818|34|671|p|LspProcess.request_completion|i32|&mut self|cmd_tx|
-F|819|34|690|p|LspProcess.request_workspace_diagnostics|i32|&mut self|cmd_tx|
-F|820|34|700|p|LspProcess.notify_close||&mut self|cmd_tx|current_uri=
-F|821|34|708|p|LspProcess.request_code_actions|i32|&mut self|cmd_tx|
-F|822|34|738|p|LspProcess.poll||&self|event_rx|
-F|823|34|747|p|LspProcess.shutdown||self|cmd_tx|
-F|824|34|754||encode_diagnostics_json|String|||
-F|825|34|786||merged_diagnostics_for_path|(i32, Vec<Diagnostic>)|||
-F|826|34|804||merged_diagnostics_for_all_paths|Vec<(PathBuf, Vec<Diagnostic>)>|||
-F|827|34|852||LspManager.is_python_ext|bool|||
-F|828|34|856|p|LspManager.new|Self|||
-F|829|34|881||LspManager.ensure_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_diag_result_ids.clear(),ty_process=,ty_status=,ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|830|34|896|p|LspManager.restart_python||&mut self|python_disabled,workspaces|python=,python_status=,ty_diag_result_ids.clear(),ty_process=,ty_status=,ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|831|34|920|p|LspManager.disable_python||&mut self|python,ty_process|diagnostics.clear(),dirty_diagnostics=,instant_diagnostics.clear(),merged_instant_diagnostics.clear(),python_disabled=,python_status=,server_logs.clear(),ty_diag_result_ids.clear(),ty_instant_diagnostics.clear(),ty_status=,ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|832|34|942|p|LspManager.enable_python||&mut self|workspaces|python=,python_disabled=,python_status=,ty_diag_result_ids.clear(),ty_process=,ty_status=,ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|833|34|954||LspManager.reopen_current_python_file||&mut self|current_python_file,python,ty_process,workspaces|
-F|834|34|968|p|LspManager.servers_info|Vec<LspServerInfo>|&self|python_status,ty_status|
-F|835|34|993|p|LspManager.clear_server_logs||&mut self||server_logs.remove()
-F|836|34|998||LspManager.process_for_ext|Option<&mut LspProcess>|&mut self|python|
-F|837|34|1009|p|LspManager.notify_open||&mut self|python,ty_process,workspaces|current_path=,current_python_file=,suppress_diagnostics=,ty_workspace_diag_dirty=
-F|838|34|1036|p|LspManager.notify_change||&mut self|python,ty_process,workspaces|current_path=,current_python_file=,last_change=,suppress_diagnostics=,ty_workspace_diag_dirty=
-F|839|34|1060|p|LspManager.request_hover|Option<i32>|&mut self|ty_process,workspaces|
-F|840|34|1081|p|LspManager.request_definition|Option<i32>|&mut self|ty_process,workspaces|
-F|841|34|1102|p|LspManager.request_ty_completion|Option<i32>|&mut self|ty_process,workspaces|
-F|842|34|1127|p|LspManager.notify_close||&mut self|python,ty_process,workspaces|current_path=,current_python_file=,ty_workspace_diag_dirty=
-F|843|34|1153||LspManager.ty_workspace_result_ids_json|String|&self|ty_diag_result_ids|
-F|844|34|1170||LspManager.request_ty_workspace_diagnostics_if_ready||&mut self|python_disabled,suppress_diagnostics,ty_process,ty_status|ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|845|34|1195|p|LspManager.request_code_actions|Option<i32>|&mut self|workspaces|
-F|846|34|1227|p|LspManager.poll|Vec<LspEvent>|&mut self|instant_diagnostics,merged_instant_diagnostics,python,server_logs,suppress_diagnostics,ty_diag_result_ids,ty_instant_diagnostics,ty_process|diagnostics.insert(),dirty_diagnostics=,last_change=,python_status=,ty_status=,ty_workspace_diag_dirty=,ty_workspace_diag_pending=
-F|847|34|1347|p|LspManager.get_diagnostics|&[Diagnostic]|&self|diagnostics,workspaces|
-F|848|34|1361|p|LspManager.clear_diagnostics_for_path||&mut self|workspaces|diagnostics.remove(),dirty_diagnostics=,instant_diagnostics.remove(),merged_instant_diagnostics.remove(),ty_diag_result_ids.remove(),ty_instant_diagnostics.remove()
-F|849|34|1377|p|LspManager.get_instant_diagnostics_with_version|(i32, &[Diagnostic])|&self|merged_instant_diagnostics,workspaces|
-F|850|34|1391|p|LspManager.has_stale_instant_diagnostics|bool|&self|instant_diagnostics,ty_instant_diagnostics,workspaces|
-F|851|34|1408|p|LspManager.diagnostics_for_line|Vec<&Diagnostic>|&self||
-F|852|34|1416|p|LspManager.request_fix_all|Option<i32>|&mut self|workspaces|
-F|853|34|1440|p|LspManager.request_organize_imports|Option<i32>|&mut self|workspaces|
-F|854|34|1465|p|LspManager.shutdown||mut self|python,ty_process|python_disabled=
-F|855|34|1480|p|lsp_pos_to_offset|usize|||
-F|856|34|1506|p|format_and_highlight_json|( String, Vec<crate::highlighter::ColorSpan>, Vec<(usize, usize, usize)>, )|||
-F|857|34|1614||json_container_depth|usize|||
-T|858|35|27|struct|Config|window_width: f64,window_height: f64,maximized: bool,ide_workspaces: Vec<std::path::PathBuf>,ide_ignore_patterns: Vec<String>,enable_telemetry: bool
-F|859|35|37||Config.default|Self|||
-F|860|35|50||rriter_config_dir|PathBuf|||
-F|861|35|58||recent_files_path|PathBuf|||
-F|862|35|63||open_tabs_path|PathBuf|||
-F|863|35|68||panel_state_path|PathBuf|||
-F|864|35|73||config_path|PathBuf|||
-F|865|35|77||parse_recent_files|Vec<PathBuf>|||
-F|866|35|85||format_recent_files|String|||
-F|867|35|94|p|load_recent_files|Vec<PathBuf>|||
-F|868|35|99|p|load_recent_files|Vec<PathBuf>|||
-F|869|35|109|p|save_recent_files||||
-F|870|35|112|p|save_recent_files||||
-F|871|35|118||parse_open_tabs_content|(Vec<Option<PathBuf>>, usize)|||
-F|872|35|135||format_open_tabs_content|String|||
-F|873|35|149|p|load_open_tabs|(Vec<Option<PathBuf>>, usize)|||
-F|874|35|154|p|load_open_tabs|(Vec<Option<PathBuf>>, usize)|||
-F|875|35|164|p|save_open_tabs||||
-F|876|35|167|p|save_open_tabs||||
-F|877|35|176||format_panel_state_content|String|||
-F|878|35|202|p|save_panel_state||||
-F|879|35|205|p|save_panel_state||||
-F|880|35|211||parse_panel_state_content|crate::app::IdePanelState|||
-F|881|35|258|p|load_panel_state|crate::app::IdePanelState|||
-F|882|35|263|p|load_panel_state|crate::app::IdePanelState|||
-F|883|35|271||format_config_content|String|||
-F|884|35|292|p|save_config||||
-F|885|35|295|p|save_config||||
-F|886|35|308||parse_config_content|Config|||
-F|887|35|359||load_config|Config|||
-F|888|35|364||load_config|Config|||
-F|889|35|389||parse_kde_color|Option<[f32; 4]>|||
-F|890|35|409||get_kde_color|Option<[f32; 4]>|||
-F|891|35|415||load_dracula|Theme|||
-F|892|35|438||tab|crate::app::EditorTab|||
-F|893|35|459||recent_and_open_tabs_text_roundtrip||||
-F|894|35|486||panel_state_text_preserves_slots_and_sizes||||
-F|895|35|513||config_parser_handles_missing_invalid_and_empty_values||||
-F|896|35|546||panel_state_parser_keeps_defaults_for_unknown_and_missing_slots||||
-F|897|35|572||tab_and_recent_parsers_handle_empty_or_invalid_headers||||
-F|898|35|586||kde_color_parser_respects_group_boundaries_and_rgb_shape||||
-F|899|35|622||config_text_parse_format_and_kde_color_parse||||
-F|900|35|657|e|main||||
-F|901|35|663||mallopt|i32; } mallopt(-8, 2); } let args: Vec<String> = env::args().collect(); let run_ide_on_startup = args.iter().any(\pa\p a == "--ide" \p\p a == "ide"); let has_file_arg = args.iter().skip(1).any(\pa\p *a != "--ide" && *a != "ide"); let mut initial_text = String::new(); let mut title = "Безымянный".to_string(); let mut ext = String::new(); let mut file_path = None; let mut recent_files = load_recent_files(); if has_file_arg|||
-F|902|36|3|p|get_params_query|Option<&'static str>|||
-F|903|36|82|p|get_injection_query|Option<&'static str>|||
-F|904|36|131|p|get_folding_query|Option<&'static str>|||
-F|905|36|336|p|get_ts_config|Option<(tree_sitter::Language, Vec<&'static str>)>|||
-F|906|36|974||test_all_tree_sitter_queries_are_valid||||
-F|907|37|6||code_end_before_line_comment|usize|||
-F|908|37|31||folded_block_suffix|([char; 4], u8)|||
-F|909|37|102||editor_with_text|Editor|||
-F|910|37|109||folded_block_suffix_keeps_comma_before_inline_comment||||
-F|911|37|117||folded_block_suffix_keeps_plain_closer_and_comma||||
-F|912|37|127|p|Renderer.update_cache||&mut self|height,left_padding,line_height,scale_factor,width|last_editor_version=,last_height=,last_scroll_x=,last_scroll_y=,last_width=,visual_lines.clear(),visual_lines.push()
-F|913|37|269|p|Renderer.get_cursor_xy|(f32, f32)|&mut self|baseline_offset,last_scroll_x,left_padding,line_height,scale_factor|
-F|914|37|337|p|Renderer.get_byte_at_xy|usize|&mut self|last_scroll_x,left_padding,line_height|
-F|915|37|440|p|Renderer.measure_width|f32|&mut self||
-F|916|37|466|p|Renderer.get_max_scroll|f32|&mut self|line_height|
-F|917|37|474|p|Renderer.flush||&mut self|gl,height,proj_loc,vbo,width|vertices.clear()
-F|918|37|515|p|Renderer.push_vertical_gradient||&mut self|vertices|
-F|919|37|563|p|Renderer.push_horizontal_gradient||&mut self|vertices|
-F|920|37|611|p|Renderer.draw_string||&mut self||
-F|921|37|626|p|Renderer.draw_string_scaled||&mut self||
-F|922|37|648|p|Renderer.draw_string_mono_scaled||&mut self||
-F|923|37|670|p|Renderer.measure_mono_width|f32|&mut self||
-F|924|37|681|p|Renderer.push_rounded_rect||&mut self|vertices|
-F|925|37|725|p|Renderer.push_rounded_rect_border||&mut self||
-F|926|38|6||folded_import_keyword_range|Option<(usize, usize)>|||
-F|927|38|53|p|folded_import_display_end|usize|||
-F|928|38|63||starts_with_word|bool|||
-F|929|38|76||word_end|usize|||
-F|930|38|83||is_ident_byte|bool|||
-F|931|38|91||editor_with_text|Editor|||
-F|932|38|98||folded_import_keyword_range_covers_collapsed_click_words||||
-F|933|38|112|p|Renderer.draw_editor_visible_text|||baseline_offset,height,identical_words_cache,last_mouse_x,last_mouse_y,left_padding,line_height,theme,unused_spans_cache,vertices,visual_lines,width|merged_intervals_cache.clear(),merged_intervals_cache.push(),mod_intervals_cache.clear(),mod_intervals_cache.push()
-F|934|39|8|p|Renderer.draw_lsp_squiggles_and_collect_hovered_diag|Option<usize>||baseline_offset,height,hide_popups_until_mouse_move,left_padding,line_height,lsp_diagnostic_indices,scale_factor,visual_lines,width|
-F|935|39|205|p|Renderer.draw_hover_overlays|||height,left_padding,line_height,lsp_diagnostic_indices,scale_factor,visual_lines,width|last_draw_instant=
-F|936|40|9||clipped_label_prefix_len|usize|||
-F|937|40|34||centered_dialog_button_positions|(f32, f32)|||
-F|938|40|40||file_tree_menu_group|u8|||
-F|939|40|55||file_tree_menu_separator_before|bool|||
-F|940|40|62||file_tree_menu_separator_count|usize|||
-F|941|40|70||Renderer.draw_tree_label_clipped|f32|&mut self||
-F|942|40|107|p|Renderer.draw_ide_side_panels|||gl,theme|
-F|943|40|637|p|Renderer.draw_ide_bottom_panel|||height,theme,width|
-F|944|40|792|p|Renderer.draw_status_bar|||height,theme,width|scratch_buffer=
-F|945|40|1032||Renderer.draw_file_tree_dialog_shell||&mut self|theme|
-F|946|40|1046||Renderer.draw_file_tree_dialog_input||&mut self|gl,height,scale_factor,theme|
-F|947|40|1167|p|Renderer.draw_file_tree_overlays|bool||gl,height,scale_factor,theme,width|
-F|948|40|1627||clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary||||
-F|949|40|1637||centered_dialog_button_positions_keep_pair_centered||||
-F|950|40|1646||file_tree_context_menu_groups_insert_logical_separators||||
-F|951|41|4||lsp_action_label|std::borrow::Cow<'a, str>|||
-F|952|41|59||lsp_action_label_formats_code_actions_and_noqa_codes||||
-F|953|41|83||lsp_action_label_formats_static_actions||||
-F|954|41|114|p|Renderer.draw_lsp_servers_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|
-F|955|41|1117|p|Renderer.draw_lsp_actions_menu|bool|&mut self|height,last_mouse_x,last_mouse_y,scale_factor,theme,width|scratch_buffer=
-F|956|42|8|p|Renderer.draw_minimap||&mut self|line_height,minimap_width,theme,vertices,width|
-F|957|43|9|p|Renderer.draw_search_panel|bool||gl,height,last_mouse_x,last_mouse_y,minimap_width,scale_factor,theme,width|last_search_idx=,last_search_len=,search_res_string.clear(),search_res_string=,search_scroll_x=
-F|958|44|7|p|Renderer.get_faq_max_scroll|f32|&mut self|scale_factor|
-F|959|44|32|p|Renderer.draw_settings|u8|&mut self|gl,height,last_mouse_x,last_mouse_y,scale_factor,theme,width|
-F|960|45|8|p|Renderer.draw_sticky_lines|Vec<(usize, usize)>||baseline_offset,gl,height,last_mouse_x,last_mouse_y,left_padding,line_height,minimap_width,phys_to_visual,scale_factor,theme,width|sticky_scroll_rects.clear(),sticky_scroll_rects.push()
-F|961|46|7|p|tab_path_is_external|bool|||
-F|962|46|20|p|Renderer.draw_tab_bar|Option<(std::path::PathBuf, f32, f32)>|&mut self|gl,height,hide_popups_until_mouse_move,theme|max_tab_scroll_x=,tab_hover_idx=,tab_x_anim=
-F|963|46|432|p|Renderer.draw_tab_tooltip||&mut self|theme,width|
-F|964|46|499||tab_path_external_detection_requires_absolute_outside_workspace||||
-F|965|46|521||external_tab_title_color_is_orange||||
-F|966|47|8|p|Renderer.draw_terminal_panel||&mut self|baseline_offset,gl,height,line_height,theme,vertices|scratch_buffer=,terminal_row_search_results=
-T|967|48|6|struct|DiagChar|x: f32,y: f32,w: f32,h: f32,byte_offset: usize
-F|968|48|19||normalize_diagnostic_message|String|||
-F|969|48|45|p|compute_hover_y_position|f32|||
-F|970|48|77|p|compute_animated_scissor|(f32, f32, f32, f32)|||
-F|971|48|102||smooth_hover_anim_progress|f32|||
-F|972|48|107||fade_hover_color|[f32; 4]|||
-F|973|48|112||compute_hover_scrollbar_alpha|f32|||
-F|974|48|117||smooth_hover_width_progress|f32|||
-F|975|48|125||smooth_hover_height_progress|f32|||
-F|976|48|129||compute_hover_popup_anim_rect|(f32, f32, f32, f32)|||
-F|977|48|166||stable_hover_animation_mouse|(f32, f32)|||
-F|978|48|180||hover_wrap_space_can_break|bool|||
-F|979|48|184|p|compute_animated_popup_frame|(f32, f32, f32, f32)|||
-F|980|48|196||compute_combined_popup_frame|(f32, f32, f32, f32)|||
-F|981|48|209||compute_combined_separator_visible_rect|Option<(f32, f32)>|||
-F|982|48|228||compute_hover_scissor_rect|(f32, f32, f32, f32)|||
-F|983|48|244||compute_hover_frame_content_rect|(f32, f32, f32, f32)|||
-F|984|48|260|p|compute_hover_content_scissor|(f32, f32, f32, f32)|||
-F|985|48|286|p|compute_diagnostic_layout|(f32, f32)|||
-F|986|48|320|p|diag_popup_byte_at|usize|||
-F|987|48|357||valid_diagnostic_popup_cache|Vec<crate::app::mouse::HoveredDiagnostic>|||
-F|988|48|369||Renderer.push_hover_popup_frame||&mut self|theme|
-F|989|48|406|p|Renderer.draw_diagnostic_popup||&mut self|gl,height,scale_factor,theme,width|
-F|990|48|920|p|Renderer.build_hover_popup_layout|crate::app::mouse::HoverLayoutCache||scale_factor|
-F|991|48|1084|p|Renderer.draw_hover_popup|(f32, f32, f32, f32, f32)||gl,height,line_height,phys_to_visual,scale_factor,theme,width|
-F|992|49|5|p|Renderer.draw_problems_panel||&mut self|gl,height,last_mouse_x,last_mouse_y,theme|scratch_buffer=
-T|993|50|11|struct|AutocompleteBadgeStyle|letter: Option<char>,bg: [f32; 4],fg: [f32; 4]
-T|994|50|187|struct|AutocompleteModuleLayout|x: f32,width: f32,text: Cow<'a,str>
-T|995|50|68|struct|AutocompleteRowEdges|top: bool,bottom: bool
-F|996|50|17||autocomplete_badge_style|AutocompleteBadgeStyle|||
-F|997|50|73||autocomplete_row_edges|AutocompleteRowEdges|||
-F|998|50|86||autocomplete_scrollbar_track_margin|f32|||
-F|999|50|90||autocomplete_popup_width|f32|||
-F|1000|50|103||autocomplete_source_is_type_or_signature|bool|||
-F|1001|50|132||autocomplete_source_label|Option<Cow<'a, str>>|||
-F|1002|50|160||autocomplete_source_is_type_label|bool|||
-F|1003|50|168||autocomplete_row_source|Option<&'a str>|||
-F|1004|50|193||autocomplete_module_layout|f32, ) -> Option<AutocompleteModuleLayout<'a>>|||
-F|1005|50|250||autocomplete_badges_match_lapce_style_letters||||
-F|1006|50|287||autocomplete_module_layout_right_aligns_and_truncates_to_slot||||
-F|1007|50|317||autocomplete_row_edges_mark_visible_popup_corners||||
-F|1008|50|349||autocomplete_scrollbar_track_margin_stays_close_to_popup_edges||||
-F|1009|50|355||autocomplete_popup_width_is_stable_before_details_arrive||||
-F|1010|50|363||autocomplete_source_label_strips_duplicate_python_class_repr||||
-F|1011|50|396||autocomplete_row_source_prefers_module_path_over_type_label||||
-F|1012|50|432|p|Renderer.draw_icon||&mut self|gl,texture|
-F|1013|50|444|p|Renderer.draw_atlas_icon||&mut self|gl,icons,texture|
-F|1014|50|467|p|Renderer.draw_file_icon||&mut self|gl,texture|file_icon_cache.insert()
-F|1015|50|567||Renderer.push_autocomplete_row_bg||&mut self||
-F|1016|50|591||Renderer.push_autocomplete_badge_bg||&mut self||
-F|1017|50|615|p|Renderer.draw_autocomplete|(f32, f32, f32, f32)||gl,height,scale_factor,theme,width|
-F|1018|50|881|p|Renderer.draw_dialog_window|bool|&mut self|last_mouse_x,last_mouse_y,scale_factor,theme|
-F|1019|50|993|p|Renderer.draw_welcome|bool|&mut self|height,icon_logo,last_mouse_x,last_mouse_y,program,scale_factor,texture,vao,width|gl.clear()
-F|1020|50|1237|p|Renderer.draw_diagnostics_ruler||&mut self|minimap_width,phys_to_visual,scale_factor,theme,width|
-F|1021|50|1302|p|Renderer.draw_empty_ide||&mut self|height,scale_factor,theme,width|empty_ide_art_idx=,was_empty_ide=
-T|1022|51|431|struct|ModInterval|top: f32,bottom: f32,state: crate::editor::LineModState
-T|1023|51|196|struct|Telemetry|render_time: f32,render_count: u32,scroll_time: f32,scroll_count: u32,type_time: f32,type_count: u32,last_print: Instant
-F|1024|51|26|p|hover_trace_enabled|bool|||
-F|1025|51|31|p|editor_bottom_blank_lines|f32|||
-F|1026|51|39|p|editor_scroll_content_height|f32|||
-F|1027|51|52|p|editor_max_scroll_for_lines|f32|||
-F|1028|51|67|p|ide_status_bar_height|f32|||
-F|1029|51|72|p|ide_status_bar_y|f32|||
-F|1030|51|77|p|ide_bottom_panel_y|f32|||
-F|1031|51|82|p|editor_view_height|f32|||
-F|1032|51|98||utf8_char_width|usize|||
-F|1033|51|110|p|cursor_line_and_character|(usize, usize)|||
-F|1034|51|132|p|selected_char_count|Option<usize>|||
-F|1035|51|151|p|language_display_name_for_ext|&'static str|||
-F|1036|51|175|p|diagnostic_error_warning_counts|(usize, usize)|||
-F|1037|51|207||Telemetry.default|Self|||
-F|1038|51|220||transient_python_member_dot_byte|Option<usize>|||
-F|1039|51|229||diagnostic_overlaps_transient_member_dot|bool|||
-F|1040|51|239||should_draw_empty_ide_file_tree_overlay|bool|||
-F|1041|51|252||telemetry_default_starts_with_empty_counters_and_fresh_print_time||||
-F|1042|51|269||editor_max_scroll_keeps_five_text_lines_at_bottom||||
-F|1043|51|276||editor_max_scroll_handles_short_files_and_tiny_viewports||||
-F|1044|51|285||status_bar_y_sits_above_bottom_panel||||
-F|1045|51|295||editor_view_height_excludes_status_and_bottom_panel||||
-F|1046|51|309||cursor_line_and_character_counts_unicode_scalars||||
-F|1047|51|323||selected_char_count_counts_unicode_scalars||||
-F|1048|51|334||language_display_names_are_user_facing_not_short_codes||||
-F|1049|51|342||test_diagnostic|crate::lsp::Diagnostic|||
-F|1050|51|360||diagnostic_status_counts_errors_and_warnings_only||||
-F|1051|51|378||empty_ide_still_draws_file_tree_overlay||||
-F|1052|51|386||transient_python_member_dot_byte_accepts_single_dot_only||||
-F|1053|51|401||diagnostic_overlap_suppresses_single_dot_not_double_dot||||
-F|1054|51|439|p|Renderer.draw|(bool, Vec<(usize, usize)>)||baseline_offset,height,last_mouse_x,last_mouse_y,last_scroll_x,last_scroll_y,last_width,line_height,merged_intervals_cache,program,scale_factor,texture,+3|bracket_pair_cache=,bracket_pair_cache_cursor=,bracket_pair_cache_version=,fps=,fps_string.clear(),fps_string=,frame_count=,gl.clear(),identical_words_cache.clear(),identical_words_cache.push(),identical_words_cache_cursor=,identical_words_cache_selection_anchor=,+16
-T|1055|52|5|struct|Vertex|pos: [f32; 2],uv: [f32; 2],color: [f32; 4],mode: f32,sdf_params: [f32; 3]
-F|1056|52|16|p|quad_vertices|[Vertex; 6]|||
-F|1057|52|67|p|glyph_quad_rect|(f32, f32, f32, f32)|||
-F|1058|52|81|p|squiggle_vertices|[Vertex; 6]|||
-F|1059|52|139|p|rounded_rect_gradient_vertices|[Vertex; 6]|||
-F|1060|52|196||quad_vertices_round_positions_and_build_two_triangles||||
-F|1061|52|215||glyph_quad_rect_keeps_scaled_edges_for_consistent_baseline_rounding||||
-F|1062|52|239||squiggle_vertices_encode_wave_params_and_extent||||
-F|1063|52|254||rounded_rect_gradient_vertices_keep_top_and_bottom_colors||||
-T|1064|53|78|struct|FontData|source: FontSource,index: u32
-T|1065|53|67|enum|FontSource|Static(&'static [u8]),LoadedMmap(std::sync::Arc<memmap2::Mmap>),LoadedVec(std::sync::Arc<Vec<u8>>),Lazy( std::path::PathBuf,std::rc::Rc<std::cell::RefCell<Option<Result<std::sync::Arc<memmap2::Mmap>,()>>>>,)
-T|1066|53|39|struct|GlyphInfo|u: f32,v: f32,uw: f32,vh: f32,width: f32,height: f32,offset_x: f32,offset_y: f32,advance: f32,is_emoji: f32
-T|1067|53|138|struct|Renderer|gl: glow::Context,program: glow::Program,proj_loc: Option<glow::UniformLocation>,vao: glow::VertexArray,vbo: glow::Buffer,texture: glow::Texture,vertices: Vec<Vertex>,fonts: Vec<FontData>,ui_fonts: Vec<FontData>,scale_context: ScaleContext,+79
-T|1068|53|24|struct|Theme|bg: [f32; 4],fg: [f32; 4],sel: [f32; 4],minimap_bg: [f32; 4],line_num: [f32; 4],minimap_cursor: [f32; 4],modified_unsaved: [f32; 4],modified_saved: [f32; 4],diag_warn: [f32; 4],diag_error: [f32; 4],+1
-T|1069|53|55|struct|VisualLine|byte_idx: usize,physical_line: usize,is_soft_wrap: bool,whitespace_px_width: f32,text_px_width: f32,y_offset: f32,is_folded: bool,fold_suffix: [char; 4],fold_suffix_len: u8
-F|1070|53|18||popup_waiting_for_mouse_move|bool|||
-F|1071|53|84|p|FontData.new_lazy|Self|||
-F|1072|53|94|p|FontData.new_static|Self|||
-F|1073|53|101|p|FontData.ensure_loaded||&mut self||source=
-F|1074|53|128|p|FontData.data_slice|&[u8]|&self|source|
-F|1075|53|227|p|Renderer.suppress_popups_until_next_mouse_move||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
-F|1076|53|233|p|Renderer.popups_waiting_for_mouse_move_at|bool|&self|hide_popups_until_mouse_move,last_known_mouse|
-F|1077|53|243|p|Renderer.update_popup_mouse_move_gate||&mut self|last_mouse_x,last_mouse_y|hide_popups_until_mouse_move=,last_known_mouse=
-F|1078|53|251|p|Renderer.new|Self|||
-F|1079|53|576|p|Renderer.get_custom_svg_glyph|Option<GlyphInfo>|&mut self|atlas_y,font_size,gl,texture|atlas_x=,max_row_h=
-F|1080|53|648|p|Renderer.get_glyph|Option<GlyphInfo>|&mut self|font_size,fonts,gl,texture|atlas_x=,atlas_y=,glyphs.clear(),glyphs.insert(),max_row_h=,ui_glyphs.clear()
-F|1081|53|822|p|Renderer.get_ui_glyph|Option<GlyphInfo>|&mut self|font_size,gl,scale_factor,texture,ui_fonts|atlas_x=,atlas_y=,glyphs.clear(),max_row_h=,ui_glyphs.clear(),ui_glyphs.insert()
-F|1082|53|995|p|Renderer.resize||&mut self|gl|height=,width=
-F|1083|53|1006|p|Renderer.measure_ui_width|f32|&mut self||
-F|1084|53|1020|p|Renderer.char_advance|f32|&mut self|ascii_advances|
-F|1085|53|1038|p|Renderer.push_quad||&mut self|vertices|
-F|1086|53|1056|p|Renderer.load_builtin_icons||&mut self|gl,texture|icons.insert()
-F|1087|53|1247|p|Renderer.push_squiggle||&mut self|scale_factor,vertices|
-F|1088|53|1258|p|Renderer.push_rect||&mut self||
-F|1089|53|1263|p|Renderer.push_rounded_rect_gradient||&mut self|vertices|
-F|1090|53|1291||font_data_sources_return_expected_slices||||
-F|1091|53|1308||font_data_ensure_loaded_keeps_missing_lazy_source_empty||||
-F|1092|53|1317||font_data_ensure_loaded_maps_existing_lazy_source_once||||
-F|1093|53|1334||popup_mouse_move_gate_waits_for_real_motion_after_focus_restore||||
-F|1094|53|1348||vertex_layout_is_plain_data_and_visual_line_fields_are_stable||||
-F|1095|53|1379||renderer_constants_keep_expected_atlas_and_batch_sizes||||
-T|1096|54|2|struct|ScrollState|current: f32,target: f32,velocity: f32,anim_speed: f32,is_dragging: bool,drag_offset: f32
-F|1097|54|12|p|ScrollState.new|Self|||
-F|1098|54|23|p|ScrollState.update|bool|&mut self|anim_speed,target|current=,velocity=
-F|1099|54|48|p|ScrollState.clamp_target||&mut self||target=
-F|1100|54|52|p|ScrollState.clamp_current||&mut self||current=
-F|1101|54|56|p|ScrollState.scroll_by||&mut self|target|
-F|1102|54|60|p|ScrollState.set_target||&mut self||target=
-F|1103|54|64|p|ScrollState.stop_anim||&mut self||current=,target=,velocity=
-F|1104|54|76||scroll_state_clamps_animates_and_stops_end_to_end||||
-T|1105|55|117|enum|UiElement|Button { id: UiId,x: f32,y: f32,w: f32,h: f32
-T|1106|55|8|enum|UiId|WelcomeNewFile,WelcomeOpenFile,WelcomeIdeMode,WelcomeRecentFile(usize),DialogSave,DialogDiscard,DialogCancel,SettingsTab(usize),SettingsIdeAddWorkspace,SettingsIdeRemoveWorkspace(usize),+75
-T|1107|55|190|struct|UiRegistry|elements: Vec<UiElement>,hovered: Option<UiId>,wants_pointer: bool,wants_text: bool,overlay_mark: usize
-F|1108|55|152|p|UiElement.contains|bool|&self||
-F|1109|55|179|p|UiElement.id|UiId|&self||
-F|1110|55|203|p|UiRegistry.new|Self|||
-F|1111|55|214|p|UiRegistry.clear||&mut self||elements.clear(),hovered=,overlay_mark=,wants_pointer=,wants_text=
-F|1112|55|224|p|UiRegistry.mark_overlay_start||&mut self|elements|overlay_mark=
-F|1113|55|230|p|UiRegistry.find_overlay_at|Option<UiId>|&self|elements,overlay_mark|
-F|1114|55|240|p|UiRegistry.register_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1115|55|269|p|UiRegistry.register_icon_button|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1116|55|298|p|UiRegistry.register_text_input|bool|&mut self||elements.push(),hovered=,wants_text=
-F|1117|55|321|p|UiRegistry.register_blocker|bool|&mut self||elements.push()
-F|1118|55|338|p|UiRegistry.register_rect|bool|&mut self||elements.push(),hovered=,wants_pointer=
-F|1119|55|360|p|UiRegistry.find_at|Option<UiId>|&self|elements|
-F|1120|55|370|p|UiRegistry.hovered|Option<UiId>|&self|hovered|
-F|1121|55|377|p|UiRegistry.reset_cursor_state||&mut self||wants_pointer=,wants_text=
-F|1122|55|383|p|UiRegistry.wants_pointer|bool|&self|wants_pointer|
-F|1123|55|388|p|UiRegistry.wants_text|bool|&self|wants_text|
-F|1124|55|393|p|UiRegistry.cursor_code|u8|&self|wants_pointer,wants_text|
-F|1125|55|409||ui_registry_hit_testing_overlay_and_cursor_state_end_to_end||||
-F|1126|55|438||ui_element_icon_active_square_uses_fitts_law_hitbox||||
-F|1127|55|454||ui_element_ids_and_regular_icon_hitboxes_are_stable||||
-T|1128|56|23|struct|Button|x: f32,y: f32,w: f32,h: f32,text: String,icon: Option<IconType>,text_scale: f32,icon_size: f32
-T|1129|56|101|struct|IconButton|x: f32,y: f32,size: f32,icon: Option<IconType>,is_active: bool,icon_size: Option<f32>,active_square_width: Option<f32>,custom_color: Option<[f32; 4]>
-T|1130|56|4|enum|IconType|Save,Discard,Cancel,Warning,Error,CaseMatch,Up,Down,Close,Plus,+6
-F|1131|56|35|p|Button.is_hovered|bool|&self|h,w,x,y|
-F|1132|56|40|p|Button.render|bool|&self|h,icon,icon_size,text,text_scale,w,x,y|
-F|1133|56|113|p|IconButton.is_hovered|bool|&self|active_square_width,size,x,y|
-F|1134|56|124|p|IconButton.render|bool|&self|active_square_width,custom_color,icon,icon_size,is_active,size,x,y|
-F|1135|56|217|p|get_welcome_buttons|(Button, Button, Button)|||
-F|1136|56|230||welcome_buttons_from_widths|(Button, Button, Button)|||
-F|1137|56|285|p|get_dialog_buttons|(Button, Button, Button)|||
-F|1138|56|308||dialog_buttons_from_widths|(Button, Button, Button)|||
-F|1139|56|381||widget_hitboxes_cover_regular_and_sidebar_buttons||||
-F|1140|56|420||button_layout_helpers_scale_text_and_icons_consistently||||
-F|1141|56|449||layout_helpers_do_not_overlap_at_small_widths||||
-F|1142|56|468||welcome_and_dialog_button_layouts_are_stable||||
-E|33|34
-E|42|36
-E|48|417 442 443 446
-E|49|60 429
-E|52|51
-E|55|54
-E|56|53
-E|57|52 55 56
-E|58|429
-E|60|59 420
-E|61|60 429
-E|62|412
-E|66|431 476 478
-E|69|45 71
-E|70|407 532
-E|72|67 69 155
-E|74|73
-E|75|49 60 419 422 429 448
-E|76|50 57 58 429
-E|77|71
-E|78|67 69 155
-E|80|79 227
-E|81|69 75 76 436 437
-E|83|450
-E|85|48 81 480
-E|86|47 84
-E|88|69 71 81 82 83 85
-E|89|45 47 48 69 81 84 87 480
-E|90|45 69 71 72 77 78 92 98 450 479 480
-E|92|36 45 46 61 62 63 65 66 67 69 71 72 81 88 95 155 411 417 420 421 422 423 425 426 427 428 429 430 431 432 433 438 439 441 443 445 449 452 461 463 466 472 474 476 478 479 480 482
-E|93|36 45 64 67 69 71 72 88 155 411 417 418 441 451 463 479 480 482
-E|95|71 72 96 97 543
-E|96|97 305 543 855
-E|98|481
-E|105|104 106
-E|107|100 101 102 103 105 112 114 116 122 124 126 148 149 188 512 543 1024 1031
-E|108|100
-E|109|101 102
-E|110|101 103
-E|111|105
-E|112|113
-E|116|115 117 118 119 120 121 123 126 127
-E|118|115 117 123
-E|120|115 119
-E|121|120
-E|122|117 123
-E|126|125
-E|128|127
-E|129|116
-E|130|116
-E|131|116
-E|132|148
-E|133|126
-E|134|116
-E|135|122
-E|136|122
-E|137|112
-E|138|112
-E|139|112
-E|140|114
-E|141|115
-E|142|116
-E|143|116
-E|144|124
-E|145|116
-E|146|116
-E|147|148
-E|148|149
-E|154|153
-E|155|153
-E|156|153
-E|157|153
-E|160|543
-E|161|68 72 73 79 80 81 153 154 156 157 158 159 227 228 277 316 383 394 533 534 543 544 545 546 547 550 1030 1137
-E|162|107
-E|163|158
-E|168|165 167
-E|169|166 167
-E|194|192 193
-E|195|1084
-E|196|1084
-E|198|197
-E|200|201 215 241 248 249
-E|201|260
-E|204|201
-E|205|204 527
-E|206|204 205 207
-E|207|255
-E|208|224
-E|209|210
-E|210|207 211 212 216 217 218 221 223 237 518
-E|212|236
-E|213|199 201 233 234
-E|214|199 201 215 251
-E|215|165 252 521 543
-E|216|207
-E|217|199 201 215 234 236 242 250 253
-E|218|242
-E|219|199 201 248
-E|222|199 201 215 234 236 242 250
-E|227|191
-E|229|194 195 196
-E|231|198 213 214 219 222 518 519
-E|232|200 207 212 216 217 218 220 221
-E|236|234 235
-E|241|239 240
-E|246|245
-E|247|238 241 244 246
-E|248|236 242 243 247 249
-E|249|238 241
-E|250|238 239 240
-E|251|233 236
-E|253|238 239 242
-E|254|236 240
-E|257|167
-E|259|165 166 185 258
-E|260|259
-E|268|72 74 88 90 93 94 95 263 264 265 266 267 302 303 480 482 518 519 521 522 526 530 541 542 543 544 546 547 550 654 661
-E|269|263
-E|270|264
-E|271|264
-E|272|265
-E|273|266
-E|274|267
-E|277|201 231 232 268 275 276 286 287 288 289 512 518 519 545
-E|279|275 278
-E|280|275 278
-E|281|275 278
-E|282|275 278
-E|283|275
-E|284|276
-E|286|285 539 540
-E|287|518 519 539 540
-E|288|518 519 541 542
-E|289|518 519
-E|290|285
-E|291|285 290
-E|292|290
-E|293|290
-E|294|290
-E|296|295
-E|298|1030
-E|299|300
-E|300|295 301
-E|303|90 304 305
-E|304|297 543
-E|305|543 855
-E|307|297 306
-E|308|297 306
-E|309|310
-E|316|79 224 227 229 230 296 298 299 300 301 309 311 312 313 314 315 326 332 334 336 337 339 340 345 373 374 535 1024 1025 1026 1030 1031
-E|317|309 310
-E|318|311
-E|319|312 313
-E|320|314
-E|321|315
-E|323|324
-E|325|332
-E|327|326
-E|330|337
-E|332|328 336 337
-E|333|1084
-E|334|333 336
-E|335|332
-E|336|328 330
-E|337|328 331
-E|338|337
-E|341|339 340
-E|342|337 343
-E|343|1084
-E|344|343
-E|357|363
-E|359|363 365
-E|361|360
-E|362|363
-E|364|362
-E|365|362 363
-E|366|362
-E|370|363
-E|372|373 374
-E|383|72 79 88 90 95 201 208 225 226 227 228 304 305 326 345 375 376 377 378 379 380 381 516 521 522 537 538 1030 1031
-E|384|375 376
-E|385|377 378 379 380
-E|386|382
-E|387|381
-E|390|1030
-E|392|391
-E|394|72 296 298 299 300 301 326 388 389 390 392 393 1031
-E|395|388
-E|396|389
-E|397|390
-E|398|391
-E|399|392
-E|400|393
-E|405|402
-E|406|405
-E|407|404 405 406
-E|410|402 408 409
-E|414|412 413
-E|415|412 413 444
-E|416|412 413 414 415
-E|417|416 447
-E|419|412 413
-E|421|426 427
-E|425|421 422 445
-E|427|412 419
-E|428|412 419
-E|429|412 413 428
-E|431|426 427 430
-E|432|429
-E|433|429 430
-E|434|420
-E|435|412 420
-E|436|429 435
-E|439|420 425 431
-E|440|441
-E|444|412
-E|446|420 445
-E|449|402
-E|451|452
-E|452|453
-E|453|412
-E|456|403
-E|460|454 457 458 459
-E|461|457
-E|463|457 458 459
-E|465|464
-E|466|460 462 465
-E|467|455 456
-E|468|455 456
-E|469|462
-E|470|460 467
-E|471|460 467
-E|472|460 468 478
-E|473|460 468 478
-E|474|460 469 478
-E|475|460 469 478
-E|476|460 478
-E|477|460 478
-E|478|440
-E|479|408 409
-E|480|402 408 409
-E|481|402 408 409
-E|482|408 409
-E|489|490
-E|490|491
-E|497|494
-E|498|494 495
-E|499|494 495
-E|500|494 495
-E|501|494 495
-E|502|494 495
-E|503|494 495
-E|504|489
-E|505|489 490
-E|511|491 492
-E|515|514
-E|516|201 203 206 209 213 214 219 222 229 230 512 514 518 520 524 525 526 527 530 539 540 541 542 543 547 548 549 855 1025 1026
-E|517|401 683 690 713
-E|520|165 201 203 512 524 525 528 543 553
-E|521|522
-E|522|165
-E|524|521 522 523 543 553
-E|525|521 522 523 543 546
-E|526|72 521 522 523 534 543 546 553
-E|527|529
-E|528|529
-E|529|524 525 554
-E|532|531
-E|535|70 532 534
-E|536|70 531 855
-E|538|527 534 855 1031
-E|542|1031
-E|546|521 526 543
-E|550|521 549
-E|553|552
-E|554|517 521 543 551 553
-E|555|522 553
-E|556|522
-E|557|522
-E|572|586
-E|573|586
-E|574|586
-E|576|571 581 583 588 592 613 614
-E|577|573 581
-E|578|573 581
-E|581|566 572 573
-E|582|581
-E|584|570 571 581 588 589
-E|585|570 571 581 588 589
-E|587|586
-E|589|570 588
-E|590|571 581 583 588 589 614
-E|591|581 583 589 592
-E|592|571 581 583 588 614
-E|593|571 581 583 588 592 613 614
-E|594|567 576 592 614
-E|595|567 592 614
-E|596|614
-E|608|606
-E|610|568 606 607 608 614
-E|611|567 614
-E|612|614
-E|613|614
-E|616|614
-E|617|614
-E|621|627
-E|622|613 620 621
-E|623|613 620 621
-E|624|568 614 620 621
-E|625|568 614 620 621
-E|626|614 620
-E|627|614 620
-E|628|620
-E|629|620
-E|630|620
-E|631|620
-E|632|609
-E|633|620
-E|634|620
-E|635|609
-E|636|609
-E|648|902
-E|649|646 647 648 691
-E|651|650
-E|653|652
-E|655|650 651 705
-E|657|656
-E|661|657 658 659 660 905
-E|662|645 646 649 653 655 657 672 683 690 713 903 904 905
-E|664|654
-E|665|666
-E|667|665 666
-E|668|645
-E|669|645
-E|670|649 653 655 657 672 905
-E|672|671
-E|673|672
-E|674|672
-E|681|672
-E|683|684 685
-E|686|683
-E|687|683
-E|690|692 693 694
-E|691|695
-E|702|696 697 698 699 700 701
-E|704|703 705
-E|706|702 704 707 708 711
-E|708|709 710
-E|713|714 715 716
-E|717|713
-E|718|713
-E|719|713
-E|721|644 704 706 722 724 725 726 729 730 736 737 738 739 740 741 743
-E|722|745
-E|726|727 728
-E|733|732
-E|734|732
-E|735|731
-E|741|742
-E|742|727 728
-E|743|696 723 733 734 735 745
-E|745|744
-E|757|754 755
-E|759|754
-E|760|754
-E|761|754
-E|762|754
-E|763|754
-E|764|754
-E|765|754
-E|770|771
-E|772|771
-E|773|756
-E|776|756
-E|780|781 782 785
-E|783|784
-E|786|778 779 780 783
-E|789|756
-E|790|789
-E|791|756 770 773 774 776 787 788 790 792
-E|805|804 856
-E|807|769 791
-E|808|809
-E|809|810
-E|811|757 758 759 760 761 762 763 764 765 766 767 768 803 807 808
-E|812|811
-E|813|755
-E|815|755
-E|816|755 803
-E|817|755 803
-E|818|755 803
-E|819|803
-E|820|755
-E|821|755 803 824
-E|824|754
-E|826|825
-E|829|812
-E|830|812
-E|832|812 833
-E|836|829
-E|837|827 829
-E|838|827 829
-E|841|827 829
-E|842|827
-E|843|754 755
-E|844|843
-E|845|836
-E|846|805 806 825 826 844
-E|851|847
-E|852|755 803 836
-E|853|755 803 836
-E|856|857 904 905
-E|861|860
-E|862|860
-E|863|860
-E|864|860
-E|868|861 865
-E|870|860 866
-E|874|862 871
-E|876|860 862 872
-E|879|860 863 877
-E|882|863 880
-E|885|860 864 883
-E|888|860 884 885 886
-E|890|889
-E|891|890
-E|893|865 866 871 872 892
-E|894|877 880
-E|895|886
-E|896|880
-E|897|865 866 871
-E|898|889
-E|899|883 886 889
-E|900|867 868 869 870 887 888 891 901
-E|901|869 870
-E|906|902 903 904 905
-E|908|907
-E|910|908 909
-E|911|908 909
-E|912|908 927 1083 1084
-E|913|908 915 927 1083 1084
-E|914|927 1084
-E|915|1084
-E|920|1057 1080 1085
-E|921|1057 1081 1085
-E|922|1057 1080 1085
-E|923|1084
-E|925|924
-E|926|928 929
-E|927|926
-E|928|930
-E|929|930
-E|932|926 927 931
-E|933|915 917 921 924 926 927 1080 1083 1084 1085 1088
-E|934|917 1084 1087
-E|935|989 990 991 1024 1084
-E|936|1084
-E|939|938
-E|940|939
-E|941|921 936 1081 1083
-E|942|191 917 921 924 941 954 1014 1083 1087 1088
-E|943|921 954 966 992 1030 1083 1088
-E|944|921 922 925 1013 1028 1029 1033 1034 1035 1036 1083 1088
-E|945|925
-E|946|195 917 924 1081 1085 1088
-E|947|188 189 190 191 194 917 921 924 925 937 939 940 945 946 1083 1088
-E|948|936
-E|949|937
-E|950|939 940
-E|952|951
-E|953|951
-E|954|295 296 915 917 921 924 1080 1081 1083 1084 1085
-E|955|917 921 924 951 1083 1088
-E|956|917 1025 1088
-E|957|917 922 924 1081 1085 1088
-E|959|917 921 924 925 958 1013 1057 1081 1083 1085 1088 1089
-E|960|917 918 921 1080 1083 1084 1085 1088
-E|962|165 917 919 921 924 961 1013 1014 1083 1088
-E|963|921 924 1083
-E|964|961
-E|966|917 921 922 924 1013 1081 1083 1084 1085 1088
-E|970|976
-E|974|971
-E|975|971
-E|976|974 975
-E|979|976
-E|980|979
-E|984|979
-E|985|969
-E|988|924
-E|989|917 922 923 924 968 970 977 980 981 982 985 987 988 1013 1084 1088
-E|990|978 1083 1084
-E|991|917 922 924 969 972 973 977 979 982 983 984 988 990 1014 1081 1084 1085 1088
-E|992|917 921 924 1013 1083 1088
-E|1001|1000
-E|1003|1001 1002
-E|1004|1001
-E|1005|996
-E|1006|1004
-E|1007|997
-E|1008|998
-E|1009|999
-E|1010|1001
-E|1011|1003
-E|1012|917 1085
-E|1013|917 1085
-E|1014|917 1085
-E|1015|924 1088
-E|1016|924 1088
-E|1017|917 921 924 996 997 998 999 1003 1004 1015 1016 1080 1081 1083 1085
-E|1018|917 918 921 924 1013 1137
-E|1019|917 918 921 924 1012 1083 1088 1135
-E|1020|916 1088
-E|1021|917 921 1083 1088
-E|1026|1025
-E|1027|1026
-E|1029|1028
-E|1030|1028
-E|1031|1028
-E|1033|1032
-E|1034|1032
-E|1035|656
-E|1042|1025 1026 1027
-E|1043|1025 1027
-E|1044|1028 1029 1030
-E|1045|1031
-E|1046|1033
-E|1047|1034
-E|1048|1035
-E|1050|1036 1049
-E|1051|1040
-E|1052|1038
-E|1053|1038 1039
-E|1054|191 912 915 917 920 921 922 923 924 933 934 935 942 943 944 947 956 957 960 962 963 1019 1020 1021 1026 1027 1028 1029 1030 1031 1038 1039 1040 1075 1077 1083 1088
-E|1060|1056
-E|1061|1056 1057
-E|1062|1058
-E|1063|1059
-E|1076|1070
-E|1077|1076
-E|1078|1071 1072
-E|1080|1079
-E|1081|1079
-E|1083|1081
-E|1084|1080
-E|1085|1056
-E|1087|1058
-E|1088|1085
-E|1089|1059
-E|1090|1071 1072
-E|1091|1071
-E|1092|1071
-E|1093|1070
-E|1134|1131 1133
-E|1135|1136
-E|1137|1138
-E|1140|1136 1138
-E|1141|1136 1138
-E|1142|1136 1138
+M src/app/app_behavior_tests.rs
+F test_theme@6
+F editor_with@22
+F tab_with@32>1
+F test_app@55>0
+F completion@174
+F search_update_finds_nearest_match_preserves_previous_and_honors_case@189>1,3
+F autocomplete_filters_scores_scrolls_and_applies_selected_completion@218>1,3,4
+F ty_import_autocomplete_waits_for_prefix_and_requires_module@251>1,3
+F ty_import_autocomplete_promotes_unknown_items_with_module@301>1,3
+F ty_context_top_level_variable_keeps_variable_kind_and_hides_type_source@323>1,3
+F ty_context_top_level_lowercase_type_source_is_variable_without_detail@349>1,3
+F autocomplete_detail_merge_does_not_flip_top_level_variable_to_type@375>1,3
+F autocomplete_detail_merge_hides_lowercase_type_source_without_detail@415>1,3
+F autocomplete_detail_merge_keeps_parameter_badge_when_ty_reports_type@455>1,3
+F autocomplete_orders_magic_names_after_regular_members_and_merges_lazy_detail@495>1,3,4
+F autocomplete_detail_popup_uses_hover_text_and_selection_state@543>1,3
+F autocomplete_detail_size_grows_without_shrinking_during_navigation@580>3
+F autocomplete_detail_request_replaces_stale_popup_with_placeholder@604>1,3
+F autocomplete_detail_popup_prepends_full_module_path@652>1,3
+F autocomplete_detail_popup_cleans_source_attr_class_type_union@689>1,3
+F autocomplete_detail_popup_formats_python_overload_docs@728>1,3
+F close_autocomplete_clears_detail_popup_and_selection@815>3
+F tree_sitter_refresh_does_not_close_active_ty_member_completion@868>1,3
+F ty_context_completion_closes_after_deleted_dot_or_empty_argument@885>1,3
+F pending_ty_context_enter_applies_first_response_without_newline@909>1,3
+F ty_completion_cache_uses_request_context_not_current_cursor@945>1,3,gi
+F ty_completion_cache_ignores_uncacheable_prefix_response@996>3
+F ty_context_prioritizes_call_argument_completions@1048>1,3
+F ty_context_preserves_explicit_owner_and_hides_attribute_types@1080>1,3
+F ty_context_sources_drop_types_and_signatures_without_fallback@1178>1,3
+F ty_context_top_level_sources_use_parent_module_and_hide_value_types@1225>1,3
+F ty_context_top_level_uses_import_modules_and_builtin_fallbacks_when_ty_omits_source@1290>1,3
+F inherited_python_attr_owner_uses_declaring_base_class@1345>g8,g9,gh,gy,h2
+F tree_sitter_autocomplete_shows_import_path_for_python_symbols@1410>1,3,4
+F tree_sitter_autocomplete_keeps_top_level_python_prefix_local_and_fast@1431>1,3,4
+F tree_sitter_autocomplete_classifies_imported_python_symbols_before_detail@1461>1,3,4
+F tree_sitter_autocomplete_always_shows_import_module_for_python_variables@1514>1,3,4
+F autocomplete_detail_merge_keeps_import_module_and_uses_source_declaration@1567>1,3,4
+F tree_sitter_autocomplete_remaps_builtins_to_class_or_function@1635>1,3,4
+F tree_sitter_autocomplete_shows_builtin_module_for_python_builtins@1663>1,3,4
+F tree_sitter_autocomplete_prioritizes_scoped_self@1684>1,3,4
+F ty_context_suppresses_unscoped_self_member_completion@1704>1,3
+F scoped_self_member_completion_is_allowed@1723>1,3,4
+F tree_sitter_autocomplete_keeps_exact_word_when_other_matches_exist@1741>1,3,4
+F tree_sitter_autocomplete_ignores_current_token_matches@1774>1,3,4
+F tree_sitter_autocomplete_resets_scroll_after_filter_change@1813>1,3,4
+F tree_sitter_autocomplete_keeps_parameter_kind_over_later_usage@1841>1,3,4
+F autocomplete_shows_self_owner_for_current_class@1873>1,3,4
+F ty_context_keeps_cls_parameter_in_multiline_class_header_after_late_response@1914>1,3,4
+F autocomplete_detail_merge_keeps_cls_parameter_from_multiline_class_header@1962>1,3
+F autocomplete_detail_merge_does_not_downgrade_classvar_to_unknown@2005>1,3
+F ty_context_initial_typing_cast_is_function_before_detail_hover@2048>1,3
+F ty_context_initial_overload_completion_is_function_before_detail_hover@2076>1,3
+F ty_context_initial_keywords_and_imported_config_have_stable_kinds@2103>1,3
+F ty_context_imported_router_variable_shows_import_module_and_variable_detail@2164>1,3
+F autocomplete_detail_uses_module_path_when_module_is_only_type_label@2204>1,3
+F autocomplete_detail_variable_uses_source_declaration_with_middle_ellipsis@2238>1,3
+F ty_context_pasted_litestar_app_imports_keep_router_sources@2296>1,3
+F ty_context_cls_member_completion_labels_multiline_class_owner@2384>1,3
+F ty_context_self_member_completion_uses_booking_service_instance_attrs@2427>1,3
+F ty_context_completion_uses_declaring_owner_not_field_type@2577>1,3
+F ty_context_completion_formats_source_overloads_and_pep695_attr_owners@2702>1,3
+F ty_context_member_completion_uses_inherited_method_owner@2790>1,3
+F ty_context_member_completion_orders_owner_depth_and_private_names@2854>1,3
+M src/app/app_file_behavior_tests.rs
+F closing_definition_tab_resets_transient_editor_state@4>1,3
+F ty_context_exact_single_match_hides_without_waiting_for_response@70>1,3
+F python_import_completion_guard_rejects_def_async_and_strings@104>1,fe
+F python_completion_context_detects_member_dot_and_call_parens@123>1,hc,he
+F python_completion_closes_for_implausibly_deep_member_chain@144>1,3,hb
+F tab_sync_swaps_editor_metadata_and_current_icon@159>1,2,3
+F close_current_file_resets_editor_search_scroll_and_welcome_state@191>1,3
+F file_loading_saving_and_missing_file_cleanup_update_state_without_window@225>1,3
+F file_open_waits_for_tree_sitter_and_applies_folds_before_return@264>3
+F file_open_prefolds_imports_without_waiting_for_highlighter@297>3
+F file_open_prefolds_python_bracket_blocks_without_waiting_for_highlighter@323>3
+F late_highlight_does_not_autofold_extra_blocks_after_prefolded_open@352>1,3,ia
+F highlight_results_update_fold_maps_and_autofold_once@373>1,3
+F check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone@399>2,3
+F async_external_changes_reload_clean_tabs_without_blocking_highlight_wait@457>2,3
+F app_tabs_recent_files_search_jump_and_autocomplete_empty_paths@497>1,3,4
+F ide_mode_startup_tab_and_tab_close_paths_are_headless_safe@574>1,2,3
+F open_file_in_tab_reuses_existing_tabs_and_loads_into_empty_slot@612>2,3
+F switch_to_tab_waits_for_highlight_before_return@659>1,2,3
+F close_active_tab_uses_version_newer_than_removed_tab_highlighter_watermark@698>1,2,3
+F python_assignment_declaration_jump_prefers_nearest_usage@731>1,fb
+F python_assignment_declaration_ignores_def_and_comparisons@742>1,fb
+F python_assignment_declaration_ignores_annotation_type_tokens@759>1,fb
+F ctrl_definition_same_declaration_target_redirects_to_usage@775>1,3
+F highlight_thresholds_and_prefix_edges_cover_non_default_paths@808>1,3
+F lsp_actions_noqa_workspace_edit_and_panel_log_sizes_headless@829>1,3
+F ui_handlers_state_only_branches_work_without_window@958>3
+F ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe@1008>1,3
+M src/app/app_state.rs
+C struct App@553
+C struct AutocompleteCacheEntry@225
+C struct AutocompleteDetailCacheEntry@241
+C struct AutocompleteDetailCacheItem@233
+C struct AutocompleteItem@176
+C enum AutocompleteMode@169
+C struct CtrlDefinitionState@546
+C struct DefinitionJumpTarget@539
+C struct EditorTab@13
+C struct ExternalFileChange@32
+C struct IdePanelState@247
+C struct KeyLog@531
+C enum LspActionItem@102
+C struct LspActionsMenu@118
+C struct LspLogFilter@131
+C struct PanelDragState@86
+C enum PanelGroup@73
+C enum PanelId@46
+C struct PanelSlot@79
+C enum PendingAction@39
+C struct TabDragState@94
+F fuzzy_match@510
+F panel_state_toggle_and_group_queries_end_to_end@706
+F panel_state_keeps_one_open_panel_per_group@728
+F open_terminal_exclusive_closes_bottom_peers_and_focuses_terminal@759
+F open_panel_opens_without_toggling_closed_and_keeps_group_exclusive@773
+F bottom_panel_blocks_editor_hover_except_unfocused_terminal@793
+F fuzzy_match_preserves_target_indices_case_insensitively@808>2k
+F lsp_log_filter_matches_text_direction_and_case_modes@815
+F panel_metadata_maps_to_labels_and_icons@857
+I AutocompleteItem
+F from@190
+F from@207
+I IdePanelState
+F default@306
+F current_lsp_log_filter@388
+F any_top_open@398
+F any_bottom_open@403
+F toggle@408
+F open@436
+F open_terminal_exclusive@462
+F enforce_single_open_per_group@471>33
+F is_open@493
+F bottom_panel_blocks_editor_hover@500
+I LspLogFilter
+F matches@140
+I PanelId
+F label@54
+F icon@62
+M src/app/autocomplete.rs
+F autocomplete_trace_enabled@3
+F python_completion_context@11
+F autocomplete_detail_cache_item@19
+F apply_autocomplete_detail_cache_item@30>fl,ga,gb,ge
+F autocomplete_source_attr_class_detail@96>3n,fx
+F autocomplete_detail_type_label@112
+F autocomplete_middle_ellipsis@129
+F autocomplete_truncate_source_detail@144>3e
+F autocomplete_push_dedent_line@164
+F autocomplete_scan_brackets@173
+F autocomplete_collect_assignment@207>3h
+F autocomplete_format_assignment@240>3g
+F autocomplete_source_variable_detail_from_text@261>3f,3i,3j
+F autocomplete_module_source_path@311>fx
+F autocomplete_detail_class_name@332
+F autocomplete_detail_type_name@342>3m,fo
+F autocomplete_detail_type_module_path@349>3n,fx
+F python_known_function_completion@376>fg
+F python_keyword_completion@392
+F python_scoped_self_priority@435
+F python_low_priority_member_name@443
+F infer_python_member_owner@447>fz,h8,ha
+I App
+F reset_autocomplete_detail_size@495
+F stable_autocomplete_detail_size@500
+F trace_autocomplete_state@520>38,3y
+F nearest_assignment_usage_target@561>fb,ip
+F get_current_word_prefix@578
+F close_autocomplete@598>3u,3w,66
+F autocomplete_detail_selection@629
+F selected_autocomplete_detail_text@635>40
+F autocomplete_detail_text@649>3c,3n,fn,fq,fx,gg
+F autocomplete_source_variable_detail@704>3d,3k,3l,fx
+F autocomplete_has_only_current_text_match@740>3y
+F hide_autocomplete_popup_keep_request@747>3u,3w,66
+F autocomplete_window_contains@775
+F popup_blocks_background_at@788>46,7p
+F refresh_autocomplete_detail_popup@792>3w,42,43,g4,g5
+F set_autocomplete_detail_placeholder@858
+F current_autocomplete_detail_context_key@881>gi
+F autocomplete_detail_wanted_words@891
+F apply_cached_autocomplete_detail_for_index@903>3b,48,hc
+F remember_autocomplete_detail_cache@929>3a,4b
+F finish_autocomplete_detail_request@960
+F request_autocomplete_detail_for_index@967>3w,3y,48,49,4a,4c
+F merge_autocomplete_details@1021>38,3a,3b,3w,48,4b,4e,hc
+F request_ty_autocomplete@1062>38,3w,3y,3z,44,45,4j,4p,gi,hb,hc
+F remember_ty_autocomplete_cache@1192
+F update_ty_autocomplete@1214>2k,38,39,3o,3p,3q,3s,3t,3u,3w,3y,3z,48,4f,4m,66,ff,fl,fo,fp,fq,fr,ft,fu,fv,fw,fx,fy,fz,g0,g1,g6,g7,g9,gb,gd,gh,gk,gt,gv,gy,h4,h6,h8,ha,hb,hc,he
+F update_autocomplete@1742>2k,38,3r,3u,3w,3y,3z,4f,66,ff,fl,fm,g9,gj,gv,hb,hc,he
+F ensure_autocomplete_visible@1935
+F apply_autocomplete@1965>3y,3z,4n,4o,j0
+F apply_lsp_completion_item@2005>4o,ah,j0,rv
+F sync_after_autocomplete@2057
+F python_member_dot_receiver_is_unavailable_self@2075>hd
+M src/app/events/about.rs
+C enum AboutWaitPlan@4
+F update_sticky_animation@16
+F drag_autoscroll_delta@61
+F drag_autoscroll_speed@75
+F drag_autoscroll_editor_bottom@86
+F earliest_wake@91
+F compute_about_wait_plan@106>4u,4w
+F earliest_optional_wake@148
+F about_to_wait@158>4q,4r,4s,4t,4v,52,54,56,5c,5e,5g,62,63,6m,i5,j0,yn,yu
+F sticky_animation_add_remove_and_equal_length_are_pure_state_transitions@1113>4q
+F drag_autoscroll_uses_inside_edge_band_and_outside_window_distance@1156>4r,4s
+F drag_autoscroll_bottom_edge_ignores_open_bottom_panel@1167>4r,4t
+F about_wait_plan_prioritizes_redraw_highlight_hover_and_blink@1190>4v
+M src/app/events/source_hover.rs
+F module_path_from_definition_path@1>53
+F sanitize_module_path_parts@5
+F prepend_hover_module_path@63
+F source_line@95
+F source_signature_for_hover@109>55,57,58,59,5a,5b,5d,5g,5h
+F format_attribute_assignment_line@116
+F source_attribute_hover_for_symbol@156>55,57,5d
+F def_name@315
+F enclosing_python_owner@326>55,59
+F self_parameter_hover@360>5a
+F source_attribute_hover_from_definition_file@529>57,5d
+F format_attribute_assignment_line@535
+F source_class_signature_from_definition_file@722
+F is_ident_byte@804
+F symbol_at_offset@808>5f
+F wrap_signature_after_first_param@837
+F wraps_asynccontextmanager_signature_after_first_param@879>5h
+F asynccontextmanager_source_signature_is_split_into_lines@889>56
+F classmethod_asynccontextmanager_source_signature_keeps_both_decorators@907>56
+F attribute_hover_uses_source_attribute_line@925>56
+F simple_type_hover_triggers_source_replacement@943>62
+F symbol_at_offset_reads_identifier_from_nearby_position@950>5g
+F strict_source_lookup_does_not_fallback_to_nearby_def@964>56
+F definition_file_attribute_hover_includes_fq_class_name@978>5c
+F definition_file_attribute_hover_includes_lsp_type@1002>5c
+F module_path_from_site_packages_strips_noise_segments@1024>52
+F module_path_strips_trailing_init@1036>52
+F module_path_covers_stdlib_stubs_workspace_and_empty_edges@1043>52
+F prepend_hover_module_path_shifts_text_spans_and_inline_ranges_once@1071>54
+F source_line_handles_middle_last_and_missing_lines@1111>55
+F attribute_hover_merges_lsp_type_and_ignores_when_on_declaration@1121>56
+F source_signature_handles_python_generics_in_def@1160>56
+F definition_file_class_signature_handles_python_generics@1174>5e
+F source_attribute_hover_covers_class_object_type_cleanup_and_short_assignments@1193>56
+F self_hover_uses_parameter_header_and_class_type@1215>56
+F bound_method_hover_triggers_source_replacement@1236>62
+F should_replace_hover_with_source_signature@1243>63
+F should_replace_simple_type_hover@1254
+M src/app/events.rs
+C struct AutocompleteFrameStats@39
+C struct AutocompletePopupStats@24
+F autocomplete_log_enabled@98
+F autocomplete_frame_start@102>64
+F reset_autocomplete_frame_stats@126>64
+F record_autocomplete_popup_perf@137>64
+F record_autocomplete_frame_perf@168>64
+F autocomplete_detail_placement@271
+F save_state_and_exit@284
+F autocomplete_detail_placement_stays_below_completion_window@1345>69
+I App
+F resumed@316>j0
+F window_event@400>3v,3z,40,46,47,48,64,65,67,68,69,6a,7p,7q,9t,au,er,f4,iq,ir,j0,j1,j2,j3,j4,j7,yt,11a
+F about_to_wait@1335>4x
+I AutocompleteFrameStats
+F default@65
+M src/app/file_icons.rs
+C struct FallbackMatcher@21
+F file_icon_key@41
+F folder_icon_key@82
+F svg_for_key@96
+F file_icon_resolution_covers_exact_extension_pattern_and_fallback@109>6g,6i
+F folder_icon_resolution_covers_exact_pattern_and_fallback@120>6h,6i
+M src/app/file_tree.rs
+C struct FileNode@82
+C struct FileTreeClipboard@179
+C enum FileTreeClipboardMode@173
+C struct FileTreeContextMenu@140
+C struct FileTreeCreateDialog@159
+C enum FileTreeCreateKind@94
+C struct FileTreeDeleteDialog@203
+C enum FileTreeDialogInputKind@241
+C struct FileTreeDragState@185
+C enum FileTreeMenuAction@109
+C struct FileTreeMoveDialog@196
+C struct FileTreeRenameDialog@166
+C struct FileTreeTrashEntry@209
+C enum FileTreeUndoAction@216
+C struct FileTreeUndoEntry@236
+F matches_ignore_pattern@53
+F file_tree_context_menu_anim_progress@150
+F file_tree_move_dialog_message@246
+F file_tree_delete_dialog_message@262
+F file_tree_overlay_active_for_panel@274
+F file_tree_parent_path_prefix@288
+F file_tree_clipped_path_suffix@296
+F file_tree_path_input_layout@319>6q,6r
+F file_tree_name_input_scroll_x@348>10a
+F file_tree_name_input_hit_index@376>10a
+F insert_file_tree_name_text@395
+F handle_file_tree_name_editor_input@423>6v
+I App
+F push_file_tree_undo@525
+F undo_file_tree_operation@535>6z,7d,85,8c,8d
+F refresh_file_tree@571>8n
+F poll_file_tree@600
+F start_file_watcher@633
+F toggle_file_tree_dir@645>6z
+F open_file_tree_node@662>72,ik
+F handle_file_tree_left_click@675>72,73,75
+F file_tree_selected_paths_for@728>8j
+F open_file_tree_context_menu@737>7m
+F handle_file_tree_context_item@797>78
+F handle_file_tree_menu_action@809>75,79,7a,7e,7f,7g,7j,7l,81,ib
+F open_file_tree_create_dialog@886
+F open_file_tree_rename_dialog@897>80
+F submit_file_tree_create_dialog@921>6x,6z,7x,7y
+F submit_file_tree_rename_dialog@958>6x,6z,7d,8f
+F update_open_paths_after_file_tree_rename@980>6g,8g,ie,j0
+F copy_file_tree_paths@1041>75
+F paste_file_tree_clipboard@1047>6x,6z,7d,7y,80,86,8e,8h
+F open_file_tree_delete_dialog@1099>86
+F confirm_file_tree_delete@1109>6x,6z,8c
+F file_tree_default_paste_dir@1132
+F file_tree_single_selected_path@1144
+F finish_file_tree_move@1153>6x,6z,7d,7y,80,86,8e
+F open_contained_folder@1200
+F file_tree_node_at@1219
+F file_tree_panel_contains@1258
+F file_tree_drop_target_dir@1276
+F file_tree_overlay_active@1286>6p
+F ui_id_is_file_tree_overlay@1290
+I FileTreeCreateKind
+F title@100
+I FileTreeMenuAction
+F label@123
+M src/app/file_tree_dialog.rs
+I App
+F file_tree_dialog_input_index_at@5>6s,6t,6u
+F set_file_tree_dialog_input_cursor@61
+F handle_file_tree_modal_keyboard@88>6w,7b,7c,7h,7k,ib,ic
+F handle_file_tree_shortcut@269>6y,75,7a,7e,7f,7g,7i,7j
+M src/app/file_tree_ops.rs
+F validate_child_name@2
+F is_workspace_path@16
+F is_workspace_root@20
+F can_modify_path@24>7y,7z
+F relative_path_for_workspace@28
+F unique_child_path@37
+F copy_path_recursive@65
+F delete_path@80
+F move_path_exact@89>83,84
+F prune_nested_paths@113
+F trash_dirs@133
+F trash_info_path_value@147
+F unix_days_to_ymd@160
+F trash_deletion_date@174>89
+F trash_single_path@188>82,85,88,8a
+F trash_paths@219>80,86,87,8b,8d
+F restore_trash_entries@248>82,85
+F move_path_to_dir@285>82,83,84
+F rename_path@313>7x,80
+F path_after_rename@336
+F copy_paths_to_dir@346>82,83,86
+F delete_paths@369>80,84
+F selected_paths@383
+M src/app/file_tree_scan.rs
+C enum FileTreeScanMessage@190
+F pre_rasterize_icon@8>6i
+F read_children@51
+F scan_dir_parallel@94>6g,6h,6l,8l
+F spawn_scan@196>8m
+F spawn_watcher@264
+M src/app/file_tree_tests.rs
+F test_root@4
+F file_tree_ignore_patterns_cover_exact_prefix_and_suffix@9>6l
+F file_tree_name_input_stays_single_line_and_bounded@19>6v
+F file_tree_name_input_edit_keys_cover_undo_redo_and_copy@35>6w
+F file_tree_name_input_hit_testing_accounts_for_scroll@129>6t,6u
+F file_tree_scan_sorts_expands_and_skips_ignored_nodes_end_to_end@145>8m,8p
+F file_tree_scan_covers_collapsed_depth_limit_and_gitignore_marks@180>8m,8p
+F spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree@253>8n,8p
+F file_tree_new_child_validation_blocks_empty_paths_and_traversal@289>7x
+F file_tree_relative_path_uses_first_matching_workspace@298>81
+F file_tree_move_dialog_message_names_source_and_target@309>6n
+F file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids@327>6p,7q
+F file_tree_path_input_layout_clips_parent_and_preserves_input_width@388>6q,6s
+F file_tree_trash_single_path_and_restore_roundtrip@405>8b,8d,8p
+F file_tree_context_menu_labels_and_anim_progress_are_stable@432>6m
+F file_tree_copy_move_delete_paths_end_to_end@447>8e,8h,8i,8p
+F file_tree_rename_path_updates_file_and_rejects_workspace_root@485>8f,8p
+F file_tree_path_after_rename_updates_nested_open_paths@502>8g
+F file_tree_selected_paths_preserve_visible_tree_order@516>8j
+M src/app/keyboard/editor_keys.rs
+C enum AutocompleteKeyAction@4
+F autocomplete_key_action@13
+F autocomplete_next_index@28
+F sync_edit_line_range@55
+F bounded_repeat_scroll_delta@91
+F key_text_for_editor_insert@95
+F autocomplete_key_action_maps_navigation_and_apply_keys@944>98
+F autocomplete_ctrl_navigation_jumps_five_items@980>99
+F autocomplete_ctrl_navigation_stops_at_edge_before_wrapping@989>99
+F sync_edit_line_range_covers_insert_delete_empty_and_last_line@1002>9a
+F bounded_repeat_scroll_delta_ignores_stale_large_focus_jump@1054>9b
+F period_key_falls_back_to_dot_text_on_press@1060>9c
+I App
+F handle_editor_keyboard_input@116>3z,41,4f,4h,4k,4l,4m,98,99,9a,9b,9c,ae,af,hc,he,ib,ic,ie,if,ij,in,iy,iz,j0,j1,j3,j4,j7,lq,lx
+M src/app/keyboard/main_keys.rs
+F apply_terminal_alt_q_shortcut@3
+F should_suppress_hover_for_keyboard@35
+F terminal_open@346
+F terminal_alt_q_opens_terminal_and_requests_spawn_when_missing@351>9k,9m
+F terminal_alt_q_focuses_existing_closed_terminal_without_spawn@362>9k,9m
+F terminal_alt_q_toggles_focus_when_open@373>9k,9m
+F terminal_alt_shift_q_closes_or_opens_without_focus_toggle@388>9k,9m
+F terminal_alt_q_closes_bottom_peer_panel_before_opening_terminal@403>9k
+F hover_keyboard_suppression_only_allows_escape_and_arrows@429>9l
+I App
+F handle_main_keyboard_input@51>6z,7v,7w,9j,9k,9l,a0,a1,a2,a3,i5,ib,ic,j2
+M src/app/keyboard.rs
+F terminal_key_sequence@15
+F seq@558>9u
+F terminal_key_sequence_covers_basic_control_and_text_input@563>9u,9v
+F terminal_key_sequence_covers_function_keys@621>9v
+F terminal_key_sequence_covers_arrows_in_normal_and_alt_modes@646>9v
+F terminal_key_sequence_covers_ctrl_letter_bytes@683>9v
+I App
+F handle_terminal_keyboard_input@84>9u,iw,ix
+F handle_terminal_search_keyboard_input@203>ib,ic,iw,ix
+F handle_search_keyboard_input@335>ib,ic,iy,iz
+F handle_lsp_log_filter_keyboard_input@463>ib,ic
+M src/app/lsp_actions.rs
+F lsp_server_logs_h_for_content@3
+F lsp_server_logs_h_for_row@13>a4
+F build_noqa_comment@31
+F codes@471
+F build_noqa_comment_creates_plain_and_code_comments@476>a6,a7
+F build_noqa_comment_merges_existing_codes_without_duplicates@489>a6,a7
+I App
+F lsp_panel_bounds@68>yt
+F lsp_panel_total_h@110>ac
+F lsp_server_logs_h@119>a4,ad
+F lsp_server_inner_size@131
+F open_lsp_actions_menu@167
+F apply_selected_lsp_action@263>4h,ag,ah
+F insert_noqa_comment@310>a6,j0
+F apply_workspace_edit@376>j0,rv
+M src/app/mouse/cursor.rs
+F autocomplete_drag_target@4>aj
+F autocomplete_scrollbar_track_margin@26
+F autocomplete_hovered_index@30
+F resized_left_width@57
+F resized_bottom_height@63
+F cursor_position_allows_editor_hover@70
+F should_suppress_editor_hover_for_scroll_drag@79
+F autocomplete_drag_target_clamps_to_available_scroll@1318>ai,aj
+F autocomplete_hovered_index_ignores_scrollbar_and_outside_rect@1330>ak
+F resize_helpers_clamp_left_width_and_bottom_height@1365>al,am
+F cursor_hover_requires_pointer_inside_window@1376>an
+F editor_scrollbar_drag_suppresses_hover_only_while_dragging@1396>ao
+I App
+F handle_main_cursor_moved@88>46,7m,7p,7t,7u,a5,aa,ab,ac,ad,ai,ak,al,am,an,ao,bz,c5,c7,c9,ca,cc,cd,ci,cj,ck,is,yn,yo,yp,yt,yu
+M src/app/mouse/hover_bridge_tests.rs
+F hover_bridge_reaches_full_source_line_when_popup_is_above@15>ck
+F hover_source_line_band_is_tight_around_anchor_y@34>cj
+F type_hover_y_hitbox_uses_middle_half_of_rendered_line@41>ce
+F type_hover_y_hitbox_shrinks_first_line_after_top_clamp@110>cc,ce
+F hover_bridge_does_not_capture_below_type_anchor_band_when_popup_is_above@138>cj,ck
+F hover_bridge_does_not_capture_above_type_anchor_band_when_popup_is_below@178>cj,ck
+F hover_bridge_handles_popup_shifted_away_from_anchor@218>ck
+F hover_bridge_keeps_popup_when_moving_up_from_token_anchor@237>ck
+F hover_bridge_does_not_capture_next_line_when_popup_is_above@256>ck
+F hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways@275>ck
+F global_test_hover_token_bounds@296>ca
+F global_test_hover_identifier_pipeline_end_to_end@311>c3,c5,c9,ca
+F global_test_hover_f_string_pipeline_end_to_end@338>c3,c5,c9,ca
+F global_test_hover_popup_state_end_to_end_without_glow@362>bw
+F global_test_normalize_hover_byte@409>c9
+F global_test_is_python_hover_keyword@425>c2
+F global_test_is_hover_target_byte@434>c1
+F global_test_hover_state_machine@447
+M src/app/mouse/hover_diagnostic_range_tests.rs
+F diagnostic_hover_range_expands_when_target_is_string_prefix@15>c5
+F hover_visibility_shows_only_one_popup_during_conflict@31>bw
+F hover_state_bridge_keeps_diagnostic_and_type_as_one_popup_area@49
+F hover_byte_ignores_whitespace_next_to_identifier@81>c9
+F hover_byte_ignores_python_keywords_so_diagnostics_can_show@98>c9
+F diagnostic_hover_range_expands_to_whole_f_string_literal@109>c5,c8,c9
+F diagnostic_hover_target_is_stable_for_expanded_f_string_literal@133>by
+F diagnostic_hover_range_does_not_create_type_target_for_keyword@151>c8
+F diagnostic_hover_range_returns_none_for_missing_line_or_empty_span@159>c5,c8
+F diagnostic_hover_range_handles_utf16_columns_and_line_end_fallback@169>c5,c8
+F diagnostic_hover_range_targets_self_crud_repo_dotted_attr_tail@186>c5,c9,ca
+F diagnostic_hover_range_keeps_plain_identifier_first_token@211>c5
+F diagnostic_hover_x_selects_self_or_crud_repo_on_same_dotted_span@226>c6,c9
+F diagnostic_hover_x_keeps_right_edge_of_self_on_self_not_attr_tail@244>c3,c5,c6,c7,c9
+F diagnostic_hover_x_uses_line_relative_x_with_nonzero_line_start@282>c5,c7
+F diagnostic_hover_x_over_dot_falls_back_to_dotted_attr_tail@312>c5,c6,c9
+F diagnostic_hover_range_does_not_leak_self_crud_repo_to_next_line@334>c5
+F hover_token_bounds_handles_empty_and_escaped_string_literal@356>c3,ca,cb
+M src/app/mouse/hover_mouse_logic.rs
+F advance_hover_anim_progress@11
+F compute_hover_visibility@24>bx
+F compute_hover_visibility_from_matches@51
+F diagnostic_hover_target_byte_on_line@104>c5
+F clear_hover_popup@114
+F suppress_hover_popup_until_mouse_move@142>bz
+F is_hover_target_byte@152
+F is_python_hover_keyword@160
+F hover_token_text@201>ca
+F is_escaped_quote@210
+F diagnostic_hover_byte_range_on_line@220>c1,c9,ca
+F hover_byte_on_line_at_x@357>10a
+F diagnostic_hover_type_target_at_x@422>c6,c9
+F diagnostic_hover_range_on_line@438>c5
+F normalize_hover_byte@473>c1,c3
+F hover_token_bounds@489>c1,c4
+F hover_bytes_share_token@571>ca
+F hover_screen_y_to_content_y@584
+F hover_content_y_in_line_hitbox@597
+F type_hover_screen_y_matches_byte_line@610>cc,cd
+F hover_anchor_for_byte@638>ca,cg
+F compute_hover_x_offset@690>10a
+F test_compute_hover_x_offset_uses_exact_byte_for_anchor@722>cg
+F hover_popup_byte_at@745
+M src/app/mouse/hover_mouse_tests.rs
+M src/app/mouse/hover_state_core.rs
+C struct HoverLayoutCache@24
+C struct HoverPopup@2
+C struct HoverState@37
+C struct HoverVisualLine@18
+F hover_source_line_y_band@476
+F is_in_hover_popup_or_bridge@481
+I HoverState
+F default@70
+F reset_diagnostic_popup@106
+F hide_diagnostic_popup_until_ready@128
+F advance_diagnostic_hover_timer@144
+F take_type_popup_for_draw@169
+F put_type_popup_after_draw@190
+F should_show_stale_popup_while_target_loads@206
+F begin_type_hover_transition@218>cy
+F reset_type_hover_wait_after_mouse_motion@247
+F record_hovered_diagnostic@254>cy,d0
+F diagnostic_popup_cache@288
+F diagnostic_popup_cache_is_empty@296>cv
+F has_active_combined_type_popup@300>cy
+F combined_type_target@308
+F update_hovered_diag_type_target_for_frame@320>cx
+F effective_hovered_diag_type_target@328>cx,cy
+F mark_type_popup_drawn@338>cx
+F finish_stale_combined_transition@346
+F should_keep_popup_through_empty_space@368
+F should_lock_hover_target_while_popup_opens@376
+F keep_active_combined_popup_on_empty_space@399>cy
+F clear_type_popup_transition_markers@418
+F popup_or_bridge_contains@425>cj,ck
+M src/app/mouse/hover_transition_tests.rs
+F stale_transition_completion_keeps_diagnostic_timer_ready_for_new_popup@15
+F empty_space_keeps_popup_while_hover_transition_is_pending@46
+F far_empty_space_does_not_keep_in_flight_hover_before_popup_rect_exists@101
+F opening_popup_locks_hover_target_against_new_editor_word@150
+F pending_hover_response_locks_target_before_popup_rect_exists@177
+F far_empty_space_does_not_keep_active_combined_popup_without_pending_request@207
+F far_empty_space_does_not_keep_combined_popup_or_opening_popup@234
+F mouse_motion_resets_type_hover_request_wait@274
+F stale_combined_popup_uses_frozen_diagnostics_not_live_cache@304
+F stale_combined_popup_ignores_new_hovered_diagnostic_until_new_popup_ready@341
+F active_combined_popup_switches_target_for_same_diagnostic@372
+F active_combined_popup_does_not_collect_different_target_diagnostic@398
+F stale_completion_clears_frozen_diagnostics_before_handlers_popup@428
+F hover_response_preserves_pending_diagnostic_context_for_combined_popup@454
+M src/app/mouse/hover_visibility_tests.rs
+F hover_visibility_linter_error_only@15>bw
+F hover_visibility_type_only@31>bw
+F hover_visibility_combined@47>bw
+F hover_visibility_during_transition@63>bw
+F hover_visibility_stale_combined_keeps_old_popup_when_cursor_moves@79>bx
+F hover_visibility_keeps_old_type_popup_without_diagnostic_match@97>bx
+F hover_visibility_waits_for_matching_type_before_showing_combined_type@115>bw
+F hover_animation_progress_uses_shared_slightly_slower_curve@136>bv
+F hover_animation_progress_snap_delta_is_subpixel_for_large_popup@147>bv
+F hover_visibility_combines_offsets_inside_same_identifier@154>bx,cb
+F hover_state_resets_all_diagnostic_popup_fields@184
+F clear_hover_popup_reports_and_resets_thread_local_state@228>bz
+F keyboard_suppression_clears_hover_timer_and_target@269>c0
+F diagnostic_hover_timer_resets_when_hovered_diagnostic_changes@290
+F diagnostic_hover_timer_keeps_ticking_during_type_popup_transition@304
+F pending_linter_popup_hide_does_not_reset_hover_timer_or_cache@316
+F keyword_linter_popup_becomes_visible_after_delay_without_type_target@357>bw
+F type_popup_draw_flow_does_not_hold_hover_state_borrow@382
+F stale_type_popup_stays_visible_while_new_target_loads@421
+F stale_type_popup_stays_visible_when_cursor_moves_to_whitespace@447
+F combined_popup_stays_visible_while_next_word_loads@470
+F combined_popup_stays_visible_when_diag_rect_was_cleared_before_transition@514>bw
+F combined_popup_stays_visible_when_only_diag_cache_survived@561>bw
+F type_only_popup_stays_visible_while_next_word_loads@605
+F stale_visibility_can_still_show_existing_combined_popup@631>bx
+F stale_combined_popup_freezes_diagnostic_target_during_new_hover@651
+F active_combined_popup_keeps_target_during_whitespace_frame@667
+F non_stale_frame_accepts_new_diagnostic_target@695
+F mark_type_popup_drawn_tracks_combined_target_only@709
+M src/app/mouse/input.rs
+F union_rect@5
+F point_in_padded_rect@19
+F terminal_mouse_button_code@26
+F terminal_mouse_cell_x@35
+F terminal_mouse_cell_y@39
+F terminal_mouse_sgr_sequence@56
+F autocomplete_item_index_at@66
+F autocomplete_scroll_click_target@90
+F hover_rect_helpers_union_and_padding_are_inclusive@1197>ef,eg
+F terminal_mouse_helpers_match_sgr_protocol_edges@1225>eh,ei,ej,ek
+F autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer@1249>em
+F autocomplete_item_index_at_ignores_scrollbar_and_accounts_for_scroll@1266>el
+I App
+F handle_main_mouse_input@125>3z,46,4f,4h,4m,6z,76,7n,7o,7p,7q,ag,ah,bz,ci,ef,eg,eh,ei,ej,ek,el,i9,ie,if,iu,iv,yt,yu
+M src/app/mouse/wheel.rs
+F wheel_delta@3
+F point_in_rect@10
+F panel_scroll_rect@14>yt
+F autocomplete_max_scroll@48
+F scroll_autocomplete_list@55>ev
+F settings_ide_max_scroll@66
+F wheel_delta_handles_line_and_pixel_units@574>es
+F point_in_rect_uses_inclusive_edges@589>et
+F panel_scroll_rect_covers_top_and_bottom_layouts@599>eu
+F autocomplete_max_scroll_matches_visible_limit@611>ev
+F scroll_autocomplete_list_clamps_without_closing_state@619>ew
+F settings_ide_max_scroll_counts_chip_wrapping@629>ex
+I App
+F handle_main_mouse_wheel@99>3z,a5,aa,ab,ac,ad,bz,es,et,eu,ew,ex,yu
+M src/app/mouse.rs
+M src/app/python_completion.rs
+F initial_python_bracket_folds@2
+F is_python_ident_byte@53
+F is_plain_assignment_after_token@57
+F plain_assignment_index@73
+F token_occurrence_at_word_boundary@89>f6
+F previous_token_occurrence_at_word_boundary@110>f9
+F nearest_python_assignment_usage@127>f8,f9,fa
+F cursor_line_bounds@175
+F cursor_in_python_string_or_comment@190
+F python_import_completion_allowed@215>f6,fc,fd
+F is_magic_python_name@242
+F normalized_completion_source@246
+F is_plain_python_type_name@260
+F is_builtin_class_completion_detail@278>fg,fh
+F completion_source_missing_or_plain_builtin_type@283>fg,fh,gc
+F should_assign_builtin_completion_module@295>fg,fh,fi,fj
+F assign_builtin_completion_module@318>fk,gf
+F python_builtin_completion_kind@327
+F is_type_like_completion_source@340>fg,fh
+F is_class_like_type_name@359
+F completion_item_has_explicit_owner@367>fu,fv
+F completion_item_is_field_like@386
+F completion_item_is_argument_like@414
+F completion_detail_is_type_label@427
+F completion_needs_python_source_attr_owner@440>fp,fq,gd
+F completion_owner_from_detail@455
+F completion_owner_label_from_source@472>fg,fn
+F completion_source_label_is_clean@489>fg,fn
+F completion_source_is_module_path@500>fg,fh,fw
+F completion_item_source_is_field_type@511
+F completion_item_owner_label@529>fu,fv,fy
+F completion_parent_module_label@545>fx
+F set_completion_owner_source@564>fx,fy
+F completion_detail_type_name@584>fo
+F autocomplete_detail_parent_module_path@597>fg,fo
+F autocomplete_detail_module_path@644>fx,g3
+F prepend_autocomplete_detail_module_path@657
+F normalize_ty_import_kind@682
+F common_completion_owner@695>fo,ft,fz
+F imported_python_module_for_symbol@715>g9
+F imported_python_symbols@719
+F should_replace_completion_module@781
+F completion_detail_kind@802
+F completion_source_is_builtin@819>fg
+F completion_word_starts_lower@824
+F completion_is_lowercase_type_source@830>fo,gd
+F python_builtin_completion_module@845
+F python_stdlib_completion_detail@858
+F python_member_dot_receiver@909>f6
+F ty_autocomplete_context_key@927
+F apply_import_modules_to_autocomplete_items@943>gk
+F apply_import_module_to_autocomplete_item@954>gl
+F python_imported_symbol_is_known_function@971>fg
+F class_header_bases@979
+F class_direct_attr@1041
+F instance_attr_assignment_name@1060>f7
+F class_header_name@1075
+F python_header_depth_delta@1084
+F python_class_header_complete@1093
+F python_class_bases_at@1097>gm,gp,gq,gr
+F source_contains_python_class@1118>gp
+F python_def_name@1125
+F python_enclosing_class_before_cursor@1135>gp,gq,gr
+F trim_python_block_indent@1174
+F python_signature_block@1178>gw
+F python_class_method_overload_detail@1201>gs,gu,gx
+F class_body_declares_attr@1277>gn,go
+F class_body_declared_attrs@1316>gn,go
+F class_body_declared_methods@1364>gu
+F python_class_attr_owner_in_source@1392>gs,gz
+F find@1397>gs,gz
+F python_class_attr_owners_with_imports@1421>gs,h0,ha
+F find@1428>gs,h0,ha
+F python_class_member_owners_with_imports@1506>gs,h1,ha
+F find@1513>gs,h1,ha
+F python_class_owner_depths_with_imports@1593>gs,ha
+F find@1599>gs,ha
+F imported_python_class_source@1664>g8
+F python_member_chain_too_deep@1702>fc,fd
+F cursor_after_python_member_dot@1717>f6,fc,fd
+F python_member_receiver_before_cursor@1741>f6,fc,fd
+F cursor_inside_python_call_parens@1765>fc,fd
+M src/app/terminal.rs
+C struct Cell@7
+C struct TermGrid@23
+C struct Terminal@1176
+F feed@360
+F set_line@365
+F terminal_grid_print_scroll_resize_and_selection_end_to_end@372
+F terminal_csi_cursor_modes_colors_and_replies_end_to_end@399>hf
+F terminal_csi_erases_scroll_region_and_line_mutation_end_to_end@455>hf,hg
+F terminal_resize_preserves_scrollback_saved_cursor_and_alt_buffer@499>hf,hg
+F terminal_csi_defaults_scroll_modes_and_sgr_edges_end_to_end@559>hf,hg
+F terminal_osc_insert_delete_and_truecolor_edges_end_to_end@633>hf,hg
+F terminal_resize_selection_and_alt_growth_edges@687>hf,hg
+F terminal_csi_more_erase_cursor_and_reply_edges@731>hf,hg
+I Cell
+F default@14
+I TermGrid
+F new@48
+F resize@78
+F put_char@207>ht
+F newline@227>hu
+F scroll_region_up@238
+F scroll_region_down@281
+F get_selection_text@303
+F print@790>hs
+F execute@793>hs,ht
+F hook@807
+F put@808
+F unhook@809
+F osc_dispatch@810
+F esc_dispatch@821
+F csi_dispatch@833>hu,hv
+I Terminal
+F spawn@1187
+F resize_pty@1293
+M src/app/ui_handlers.rs
+F scrollbar_x_click_target@8
+F scrollbar_x_click_target_drags_thumb_or_jumps_to_pointer@36>i7
+I App
+F handle_ui_click@54>6z,71,74,77,7b,7c,7h,7k,7t,7u,i5,i7,ib,id,ih,ii,ij,ik,in,iw,ix,iy,iz,j0,j4,j5,j6,rv,yo,yp
+M src/app.rs
+F apply_initial_import_folds@27>f5,ms,mx,nt
+I App
+F set_clipboard_text@77
+F get_clipboard_text@84
+F enter_ide_mode@89>6g,6z,71,i5,ih,ii,il,j0,ja
+F save_tabs_state@193>if
+F sync_active_tab@202>6g
+F next_tab_highlight_version@249
+F switch_to_tab@260>ie,if,ig,j0,ja
+F open_new_tab@309>ie,if,ig,j0,j3
+F close_tab_at@393>3z,ie,if,ig,ir,j0,j3,ja
+F open_file_in_tab@439>im
+F open_file_in_tab_bg@443>im
+F open_file_in_tab_internal@448>ih,ii,jb
+F ensure_cursor_visible@484
+F abs_path_for_workspace@523
+F current_abs_path@533>io
+F ctrl_definition_highlight_range@539
+F clear_ctrl_definition@547
+F update_ctrl_definition_hover@551>3x,ip,ir
+F ctrl_definition_target_from_lsp@600>3x,io,rv
+F ctrl_definition_target_under_mouse@617
+F jump_to_definition_target@634>ik,ir,rv,yu
+F update_terminal_search@682
+F jump_to_terminal_search_result@728
+F update_search@764
+F jump_to_search_result@821>yu
+F update_window_title@866
+F show_action_dialog@876
+F close_dialog@919
+F close_current_file@927>ie,ij,j0
+F trigger_file_picker@974
+F trigger_folder_picker@984
+F trigger_save_as_picker@996
+F save_current_file@1008>ie,j6
+F add_recent_file@1047
+F apply_highlight_results@1056
+F wait_for_current_highlight@1094>j9
+F load_file_internal@1103>ia,ie,j0,j8,ja
+F check_external_changes@1185>if,ja
+F start_external_changes_check@1246>if
+F poll_external_changes@1282>if
+M src/editor.rs
+C enum EditOp@69
+C struct Editor@98
+C struct HashSource@10
+C struct HistoryStep@86
+C enum LineModState@63
+C enum UndoRedoDelta@92
+F tokenize@16
+F estimate_tokens@20
+F get_diff_info@25
+F is_delimiter@45
+F char_class@52
+F editor_edit_history_dirty_state_end_to_end@1071
+F editor_navigation_selection_indent_and_utf8_end_to_end@1096
+F editor_fold_visibility_and_offsets_end_to_end@1114
+F editor_navigation_expand_home_end_folds_and_utf16_edges@1130
+F editor_delete_paths_pair_unicode_words_and_selection_replacement@1186
+F editor_indent_cache_line_states_and_fold_shift_edges@1232
+F editor_clear_history_empty_ops_and_navigation_edges_are_stable@1277
+F editor_navigation_extra_boundaries_selection_and_fold_edges@1315
+F editor_navigation_extra_word_and_file_movement_edges@1381
+I Editor
+F new@130
+F shift_folds_insert@159
+F shift_folds_delete@182
+F rebuild_line_offsets@211>ka
+F get_line_hashes@281>ka
+F ensure_indent_cache_updated@304>ka
+F get_cached_indent_levels@376
+F backspace@380>jv,k5,k7,kc,kg,ku,kv
+F set_original_text@453>jx,k5
+F mark_saved@459>jx,k5
+F is_dirty@464
+F get_line_modification_state@468
+F update_modifications@472>jh,jw,jx
+F clear_history@543>k5
+F push_history@551
+F undo@635>ju,jv,k5,kc,kd
+F redo@693>ju,jv,k5,kc,kd
+F text_parts@751
+F get_full_text@759>ka
+F move_gap@767
+F insert_str_internal@786>ju,kc
+F replace_range@810>jv,k5,k7,kc,kd,kv
+F insert_str@857>k5,k7,kd,kg
+F delete_selection@884>jv,k5,k7,kc,kv
+F delete_forward@922>jv,k5,k7,kc,kg,ku,kv
+F delete_word_backward@958>ji,k0,kg,kv
+F delete_word_forward@1001>ji,kg,kv
+F get_auto_indent@1035>kv
+M src/editor_navigation.rs
+F line_bounds@3
+F trim_ascii_ws@13
+F line_indent_and_blank@25>kl
+F editor_click_content_y@40
+F editor_click_content_y_uses_ibeam_midpoint_without_top_edge_bias@602>ko
+F editor_click_content_y_clamps_negative_positions_to_document_start@621>ko
+I Editor
+F select_expand@45>jj,kl,km,kn,kv
+F select_word@208>ji,kv
+F select_line@225>kv
+F is_char_boundary@240>kv
+F byte_at@248
+F len@256
+F utf16_col_to_byte_advance@264>kv
+F get_selection@302>kv
+F get_visible_lines_count@316
+F select_all@336
+F handle_selection@341
+F snap_cursor_out_of_fold@350>l8
+F move_left@390>ku,l1,l2
+F move_right@403>ku,l1,l2
+F move_word_left@416>jj,kv,l1,l2
+F move_word_right@439>jj,kv,l1,l2
+F move_home@462>kv,l1
+F move_end@502>kv,l1
+F move_start_of_file@542>l1
+F move_end_of_file@547>l1
+F move_up@553>l1
+F move_down@560>l1
+F set_cursor_at_pos@567>ko
+F move_page_up@583>l1
+F move_page_down@590>l1
+M src/highlighter.rs
+C struct ColorSpan@15
+C struct CompletionItem@83
+C struct Highlighter@112
+C enum HighlighterMessage@96
+C struct Scope@148
+C enum SymbolKind@70
+C enum SyncEdit@91
+F flatten_color_spans_prefer_specific@21
+F get_point@154
+F resolve_color@167
+F is_python_attribute_property@247
+F collect_param_scopes@259>u9
+F collect_query_highlight_spans@336>li,lj,lk,my
+F cut_spans_by_ranges@399
+F overlay_spans_preserving_gaps@450>lm
+F is_highlight_ident_byte@458
+F expand_highlight_invalidation_range@462>lo
+F sync_edit_invalidation_byte_range@484
+F merge_highlight_spans@500>lm,ln,nc
+F tree_sitter_lang_name_for_ext@528
+F lang_name_for_ext_and_text@552>ls
+F prev_char_start@570
+F push_ast_select_range@581
+F push_ast_select_line_range@618
+F ast_select_expand_range@640>lt,lu,lv,lw,uc
+I Highlighter
+F new@711>lh,li,ll,lp,lr,lt,m0,ms,mx,nt,ua,ub,uc
+M src/highlighter_runtime.rs
+F get_bracket_color@355
+F flatten_spans@369>lz
+F highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end@496>m0
+F highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans@516>m0
+F highlighter_poll_ignores_non_current_versions_without_advancing_watermark@527
+F highlighter_sync_parse_after_seed_colors_python_constant_immediately@568
+F highlighter_sync_parse_keeps_python_parameters_colored@590
+F highlighter_sync_parse_clears_stale_python_self_color_after_delete@616
+F highlighter_shift_insert_predicts_colors_splits_and_merges_spans@637
+F highlighter_shift_delete_clamps_overlapping_spans@692
+F highlighter_flatten_spans_handles_empty_and_interpolation_markers@736>m0
+I Highlighter
+F reset@4
+F apply_edits@13>lq
+F poll@34>md
+F apply_poll_result@52
+F wait_for_first_result@78>mc,md
+F shift_insert@108>lh
+F shift_delete@231>lh
+F sync_highlight_after_edit@272>ll,lp,lr,lt,m0,uc
+M src/highlighter_tests.rs
+F wait@5
+F tree_sitter_language_labels_follow_highlighter_extensions@14>ls
+F highlighter_thread_resets_parses_edits_and_injects_language_builtins@25>mi
+F highlighter_keeps_python_class_fields_plain_fg@113>mi
+F ast_select_expand_uses_tree_sitter_then_grows_to_parent@133>lx
+F ctrl_w_ast_expand_keeps_python_keyword_argument_line_before_argument_list@147>lx
+F highlighter_keeps_fold_map_after_far_incremental_edit@166>mi
+F highlighter_keeps_self_attribute_plain_but_parameter_orange@209>mi
+F highlighter_keeps_typed_python_parameters_as_parameters@251>mi
+F highlighter_thread_handles_shebang_log_and_invalid_incremental_edit@275>mi
+M src/languages/dart.rs
+C struct ImportBlock@2
+F import_blocks@10>mt,mu
+F dart_import_keyword_len@55
+F finish_block@63
+F dart_import_blocks_cover_contiguous_imports@76>ms
+F dart_import_blocks_keep_blank_lines_between_import_groups_only@91>ms
+M src/languages/mod.rs
+M src/languages/python.rs
+C enum HoverLineKind@36
+C struct ImportBlock@8
+F import_blocks@44>mz,n0,n1
+F push_docstring_highlight_spans@107>n2
+F python_import_keyword_len@166
+F update_python_import_continuation@176
+F finish_import_block@187
+F push_docstring_line_spans@195
+F normalize_inline_rst_code@269
+F normalize_rst_roles@294
+F flatten_rst_roles_and_code@335
+F parse_param_line@383
+F split_inline_python_after_colon@403
+F normalize_coroutine_signature_line@423
+F normalize_python_hover_doc@445>n3,n4,n5,n6,n7,n8
+F ts_capture_color@873
+F push_python_ts_spans@889>na,nc
+F python_class_attr_name_ranges@954
+F highlight_python_hover_doc@988>n9,nb,ne,nf,ni
+F force_color_on_ranges@1338
+F signature_type_token_ranges@1380>ng,nh
+F type_slice_end@1409
+F push_type_tokens@1437
+F color_keyword_args_orange@1472
+M src/languages/python_tests.rs
+F span_fragments@3
+F has_color_span@7
+F rst_inline_roles_params_and_wrapped_text_cover_edge_cases@19>n3,n4,n5,n6,nj
+F normalize_python_hover_doc_covers_rst_blocks_headers_and_inline_code@46>n9,nj
+F parameter_header_splits_module_and_owner_like_attributes@93>n9
+F highlight_python_hover_doc_colors_attrs_params_inline_code_and_keyword_args@105>nd,nj,nk
+F color_helpers_cover_capture_map_span_forcing_and_keyword_arg_edges@172>na,nb,ne,ni,nk
+F python_import_blocks_cover_from_and_import_groups@251
+F python_import_blocks_keep_blank_lines_between_groups_only@263
+F python_docstring_spans_color_text_header_and_inline_code@275>my
+M src/languages/rust.rs
+C struct ImportBlock@2
+F import_blocks@10>nu,nv,nw
+F rust_use_keyword_offset@73
+F update_use_continuation@91
+F finish_block@102
+F rust_import_blocks_cover_use_groups_and_pub_use_keyword@115>nt
+F rust_import_blocks_keep_multiline_use_inside_group@124>nt
+F rust_import_blocks_keep_blank_lines_between_use_groups_only@132>nt
+M src/lsp/hover.rs
+C enum HoverLineKindPublic@818
+F highlight_hover_text@3>lg,nb,nd,o1,o3,o4,o5,o8,o9,of,og,oh,oi,oj,ok,om
+F preprocess_hover_text@123>oo
+F normalize_special_form_repr@140
+F looks_like_python_hover@153
+F looks_like_python_code_line@184
+F looks_like_type_expr_line@210>o6,o7
+F is_simple_type_token@256
+F is_simple_class_type_token@277
+F looks_like_simple_type_name_line@284
+F add_doc_arg_name_spans@305
+F sanitize_hover_type_expr@349
+F sanitize_module_path@367
+F normalize_class_object_repr@379>ob
+F normalize_module_object_repr@404>ob
+F normalize_bound_method_signature@420>oa
+F add_bound_method_signature_spans@476
+F add_self_param_span_for_signature@546
+F add_param_name_spans_for_signature@570
+F add_class_keyword_spans_for_signature@610
+F add_type_bracket_neutral_spans_for_signature@645
+F add_type_expr_spans_for_line@665>ol
+F type_expr_token_color@706>o6,o7
+F normalize_hover_text@715>n3,o2,oc,od,oe,oo
+F wrap_signature_after_first_param@782
+F normalize_asynccontextmanager_signature_line@806>on
+M src/lsp/lsp_tests.rs
+F test_process@4>oq
+F test_process_with_events@9
+F open_cmd@24
+F test_diag@36
+F lsp_position_and_log_formatting_end_to_end@54>rv,rw
+F diagnostics_json_escapes_optional_fields_and_severity@75>os,rs
+F lsp_manager_keeps_and_reopens_saved_python_file_after_disable@98>op,or,pd
+F lsp_process_commands_update_local_state_and_send_expected_requests@120>op,or,os,pd
+F lsp_manager_tracks_python_reopen_state_across_open_change_and_close@223>op,or
+F lsp_manager_request_methods_use_existing_processes_without_spawning@275>op,os
+F lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs@332>oq,os
+F diagnostics_merge_combines_servers_and_tracks_max_version@425>os,rt,ru
+F send_and_log_removes_text_document_payloads_but_sends_original_body@457>ph,pl,ro
+F send_and_log_removes_only_sent_text_fields_and_keeps_json_shape@495>pi,ro
+F lsp_process_poll_drains_events_and_shutdown_sends_command@529>oq
+F manager_suppresses_diagnostics_then_flushes_after_delay@550>oq,os
+F manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids@600>oq,os
+F format_json_handles_send_prefix_invalid_json_plain_text_and_offsets@660>rv,rw
+F lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe@685>op,os
+F clear_diagnostics_for_path_removes_abs_and_relative_entries@761>os
+F lsp_format_json_pretty_prints_spans_and_folds_multiline_payloads@792>rw
+M src/lsp/protocol.rs
+C struct CodeAction@166
+C struct DefinitionTarget@159
+C struct LspCompletionItem@174
+C enum LspEvent@111
+C struct TextChange@95
+C struct WorkspaceEdit@105
+F highlight_diagnostic_message@9
+F offset_to_lsp_pos@276
+F json_escape@296
+F path_to_uri@315
+F uri_to_path@329
+F make_initialize@340>pc,pd
+F make_initialized@371
+F make_did_open@375>pc
+F make_did_change_full@386>pc
+F make_did_close@396>pc
+F make_code_action@404>pc
+F make_hover@431>pc
+F make_definition@438>pc
+F make_completion@445>pc
+F make_workspace_diagnostic@471
+F make_shutdown@479
+F make_exit@483
+F write_frame@489
+F parse_diagnostic_value@501>pt
+F parse_text_edit_value@608
+F parse_completion_text_edit_value@633>pt
+F parse_workspace_edit_value@650>pe
+F parse_hover_value@686
+F definition_position@714
+F parse_definition_target@720>pe
+F parse_code_action_value@754
+F completion_kind@787
+F refine_completion_kind@799
+F completion_module@835>q3,q4,q7
+F looks_like_python_module_path@920
+F completion_description_source@927
+F completion_detail@965>q6
+F completion_detail_is_more_specific_than_label_detail@1007
+F owner_from_completion_detail@1021
+F parse_completion_item_value@1038>q0,q1,q2,q5
+F parse_completion_items@1074
+F configuration_response_for@1088
+F emit_workspace_diagnostic_report@1103>pe
+F emit_workspace_diagnostics@1140>qb
+F dispatch_frame@1164>pe,ps,pv,pw,py,q9,qa,qc,qe
+F recv_log_message@1387
+M src/lsp/protocol_tests.rs
+F lsp_protocol_encodes_positions_paths_and_requests_end_to_end@7>pb,pd,pe,ph,pl
+F lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions@30>ps,pv,pw,pz,q8
+F completion_owner_comes_from_member_detail_and_detail_stays_full@131>q8
+F completion_kind_uses_ty_detail_for_property_parameter_and_type@247>q8
+F lsp_dispatch_routes_pending_responses_end_to_end@276>qd
+F recv_non_log@299
+F lsp_protocol_encodes_initialize_change_close_action_definition_shutdown@312>pd,pf,pi,pj,pk,pm,pn,po,pp,pq
+F lsp_protocol_parses_edge_shapes_and_dispatches_server_requests@400>pa,ps,pw,py,qd,qk
+F lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications@558>qd,qk
+M src/lsp/python_hover_tests.rs
+F rendered_color_at@4
+F variable_header_highlights_name_pink@13>o0
+F uses_python_hover_pipeline_for_builtin_signatures@31>o0
+F plain_bound_method_prose_stays_uncolored@51>o0
+F inline_for_fragment_becomes_separate_code_line@88>o0
+F rich_rst_docstring_path_is_preserved@99>o0
+F bound_method_signature_line_is_highlighted_but_prose_stays_plain@120>o0
+F coroutine_return_bound_method_becomes_async_def@140>o0
+F coroutine_return_signature_becomes_async_def@147>o0
+F long_bound_method_signature_is_normalized_and_highlighted@163>o0
+F class_object_repr_is_normalized_and_highlighted@190>o0
+F qualified_class_object_repr_prepends_module_path@212>o0
+F backticked_qualified_class_repr_prepends_module_path@230>o0
+F generic_type_line_gets_cyan_types_and_white_brackets@240>o0
+F literal_type_line_is_highlighted@280>o0
+F callable_type_expr_line_gets_type_highlighting@306>o0
+F special_form_annotated_hover_is_normalized_and_highlighted@325>o0
+F simple_type_expr_lines_get_type_highlighting@341>o0
+F assignment_line_is_highlighted_in_hover_text@367>o0
+F module_object_repr_is_normalized_to_module_header@380>o0
+F site_packages_and_init_are_removed_from_module_and_class_repr@387>o0
+F builtin_dict_class_hover_is_normalized_without_angle_brackets@398>o0
+F builtin_str_heading_line_is_highlighted_as_type@411>o0
+F builtin_any_heading_line_is_highlighted_as_type@426>o0
+F header_with_inline_code_preserves_correct_spans_without_byte_shift_panic@441>o0
+F class_attribute_hover_is_translated_to_english_with_pink_name_and_orange_args@448>o0
+F class_signature_is_highlighted@480>o0
+F litestar_giant_class_hover_signature_and_args_doc_are_parsed@496>o0,qo
+F litestar_hover_hidden_chars_do_not_shift_rendered_arg_colors@711>o0,qo
+F double_backticks_are_stripped_and_highlighted_as_inline_code@744>o0
+F asynccontextmanager_one_line_signature_is_wrapped_and_highlighted@773>o0
+M src/lsp.rs
+C enum DiagSeverity@117
+C struct Diagnostic@131
+C struct LogEntry@102
+C struct LspManager@826
+C struct LspProcess@591
+C struct LspServerInfo@110
+C enum LspServerStatus@94
+C struct OpenFile@280
+C struct QuickFix@125
+C struct SpawnedProcess@150
+F next_id@46
+F compact_lsp_log_message@50
+F format_lsp_log_entry@65>rk,rw
+F trim_lsp_logs@79
+F spawn_server@156>pr,qd
+F send_and_log@287>rp
+F remove_sent_log_text_fields@304>rq
+F remove_json_text_fields@315
+F run_supervisor@349>pf,pg,ph,pi,pj,pk,pl,pm,pn,po,pp,pq,rj,rn,ro
+F encode_diagnostics_json@754>pc
+F merged_diagnostics_for_path@786
+F merged_diagnostics_for_all_paths@804>rt
+F lsp_pos_to_offset@1480
+F format_and_highlight_json@1506>rx,ub,uc
+F json_container_depth@1614
+I LspManager
+F is_python_ext@852
+F new@856
+F ensure_python@881>sq
+F restart_python@896>sq
+F disable_python@920
+F enable_python@942>sq,s4
+F reopen_current_python_file@954
+F servers_info@968
+F clear_server_logs@993
+F process_for_ext@998>s0
+F notify_open@1009>ry,s0
+F notify_change@1036>ry,s0
+F request_hover@1060
+F request_definition@1081
+F request_ty_completion@1102>ry,s0
+F notify_close@1127>ry
+F ty_workspace_result_ids_json@1153>pc,pd
+F request_ty_workspace_diagnostics_if_ready@1170>se
+F request_code_actions@1195>s7
+F poll@1227>rl,rm,rt,ru,sf
+F get_diagnostics@1347
+F clear_diagnostics_for_path@1361
+F get_instant_diagnostics_with_version@1377
+F has_stale_instant_diagnostics@1391
+F diagnostics_for_line@1408>si
+F request_fix_all@1416>pd,rj,s7
+F request_organize_imports@1440>pd,rj,s7
+F shutdown@1465
+I LspProcess
+F start@601>rr
+F notify_open@622>pd
+F restart@641
+F notify_change@647>pd
+F request_hover@657>pd,rj
+F request_definition@664>pd,rj
+F request_completion@671>pd,rj
+F request_workspace_diagnostics@690>rj
+F notify_close@700>pd
+F request_code_actions@708>pd,rj,rs
+F poll@738
+F shutdown@747
+M src/main.rs
+C struct Config@27
+F rriter_config_dir@50
+F recent_files_path@58>t2
+F open_tabs_path@63>t2
+F panel_state_path@68>t2
+F config_path@73>t2
+F parse_recent_files@77
+F format_recent_files@85
+F load_recent_files@94
+F load_recent_files@99>t3,t7
+F save_recent_files@109
+F save_recent_files@112>t2,t8
+F parse_open_tabs_content@118
+F format_open_tabs_content@135
+F load_open_tabs@149
+F load_open_tabs@154>t4,td
+F save_open_tabs@164
+F save_open_tabs@167>t2,t4,te
+F format_panel_state_content@176
+F save_panel_state@202
+F save_panel_state@205>t2,t5,tj
+F parse_panel_state_content@211
+F load_panel_state@258
+F load_panel_state@263>t5,tm
+F format_config_content@271
+F save_config@292
+F save_config@295>t2,t6,tp
+F parse_config_content@308
+F load_config@359
+F load_config@364>t2,tq,tr,ts
+F parse_kde_color@389
+F get_kde_color@409>tv
+F load_dracula@415>tw
+F tab@438
+F recent_and_open_tabs_text_roundtrip@459>t7,t8,td,te,ty
+F panel_state_text_preserves_slots_and_sizes@486>tj,tm
+F config_parser_handles_missing_invalid_and_empty_values@513>ts
+F panel_state_parser_keeps_defaults_for_unknown_and_missing_slots@546>tm
+F tab_and_recent_parsers_handle_empty_or_invalid_headers@572>t7,t8,td
+F kde_color_parser_respects_group_boundaries_and_rgb_shape@586>tv
+F config_text_parse_format_and_kde_color_parse@622>tp,ts,tv
+F main@657>t9,ta,tb,tc,tt,tu,tx,u7
+F mallopt@663>tb,tc
+I Config
+F default@37
+M src/queries.rs
+F get_params_query@3
+F get_injection_query@82
+F get_folding_query@131
+F get_ts_config@336
+F test_all_tree_sitter_queries_are_valid@974>u9,ua,ub,uc
+M src/render_view/core_text.rs
+F code_end_before_line_comment@6
+F folded_block_suffix@31>ue
+F editor_with_text@102
+F folded_block_suffix_keeps_comma_before_inline_comment@109>uf,ug
+F folded_block_suffix_keeps_plain_closer_and_comma@117>uf,ug
+I Renderer
+F update_cache@127>uf,uy,109,10a
+F get_cursor_xy@269>uf,um,uy,109,10a
+F get_byte_at_xy@337>uy,10a
+F measure_width@440>10a
+F get_max_scroll@466
+F flush@474
+F push_vertical_gradient@515
+F push_horizontal_gradient@563
+F draw_string@611>zj,106,10b
+F draw_string_scaled@626>zj,107,10b
+F draw_string_mono_scaled@648>zj,106,10b
+F measure_mono_width@670>10a
+F push_rounded_rect@681
+F push_rounded_rect_border@725>uv
+M src/render_view/editor_text_layer.rs
+F folded_import_keyword_range@6>uz,v0
+F folded_import_display_end@53>ux
+F starts_with_word@63>v1
+F word_end@76>v1
+F is_ident_byte@83
+F editor_with_text@91
+F folded_import_keyword_range_covers_collapsed_click_words@98>ux,uy,v2
+I Renderer
+F draw_editor_visible_text@112>um,uo,us,uv,ux,uy,106,109,10a,10b,10e
+M src/render_view/hover_overlays.rs
+I Renderer
+F draw_lsp_squiggles_and_collect_hovered_diag@8>uo,10a,10d
+F draw_hover_overlays@205>wn,wo,wp,yn,10a
+M src/render_view/ide_panels.rs
+F clipped_label_prefix_len@9>10a
+F centered_dialog_button_positions@34
+F file_tree_menu_group@40
+F file_tree_menu_separator_before@55>v9
+F file_tree_menu_separator_count@62>va
+F clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary@1627>v7
+F centered_dialog_button_positions_keep_pair_centered@1637>v8
+F file_tree_context_menu_groups_insert_logical_separators@1646>va,vb
+I Renderer
+F draw_tree_label_clipped@70>us,v7,107,109
+F draw_ide_side_panels@107>6p,uo,us,uv,vf,vp,yf,109,10d,10e
+F draw_ide_bottom_panel@637>us,vp,w1,xw,yt,109,10e
+F draw_status_bar@792>us,ut,uw,ye,yr,ys,yw,yx,yy,yz,109,10e
+F draw_file_tree_dialog_shell@1032>uw
+F draw_file_tree_dialog_input@1046>6t,uo,uv,107,10b,10e
+F draw_file_tree_overlays@1167>6m,6n,6o,6p,6s,uo,us,uv,uw,v8,va,vb,vj,vk,109,10e
+M src/render_view/lsp_ui.rs
+F lsp_action_label@4
+F lsp_action_label_formats_code_actions_and_noqa_codes@59>vm
+F lsp_action_label_formats_static_actions@83>vm
+I Renderer
+F draw_lsp_servers_panel@114>a4,a5,um,uo,us,uv,106,107,109,10a,10b
+F draw_lsp_actions_menu@1117>uo,us,uv,vm,109,10e
+M src/render_view/minimap_ui.rs
+I Renderer
+F draw_minimap@8>uo,yo,10e
+M src/render_view/search.rs
+I Renderer
+F draw_search_panel@9>uo,ut,uv,107,10b,10e
+M src/render_view/settings_ui.rs
+I Renderer
+F get_faq_max_scroll@7
+F draw_settings@32>uo,us,uv,uw,vt,ye,zj,107,109,10b,10e,10f
+M src/render_view/sticky.rs
+I Renderer
+F draw_sticky_lines@8>uo,up,us,106,109,10a,10b,10e
+M src/render_view/tabs_ui.rs
+F tab_path_is_external@7
+F tab_path_external_detection_requires_absolute_outside_workspace@499>vw
+F external_tab_title_color_is_orange@521
+I Renderer
+F draw_tab_bar@20>6g,uo,uq,us,uv,vw,ye,yf,109,10e
+F draw_tab_tooltip@432>us,uv,109
+M src/render_view/terminal_ui.rs
+I Renderer
+F draw_terminal_panel@8>uo,us,ut,uv,ye,107,109,10a,10b,10e
+M src/render_view/ui/hover_widget.rs
+C struct DiagChar@6
+F normalize_diagnostic_message@19
+F compute_hover_y_position@45
+F compute_animated_scissor@77>wa
+F smooth_hover_anim_progress@102
+F fade_hover_color@107
+F compute_hover_scrollbar_alpha@112
+F smooth_hover_width_progress@117>w5
+F smooth_hover_height_progress@125>w5
+F compute_hover_popup_anim_rect@129>w8,w9
+F stable_hover_animation_mouse@166
+F hover_wrap_space_can_break@180
+F compute_animated_popup_frame@184>wa
+F compute_combined_popup_frame@196>wd
+F compute_combined_separator_visible_rect@209
+F compute_hover_scissor_rect@228
+F compute_hover_frame_content_rect@244
+F compute_hover_content_scissor@260>wd
+F compute_diagnostic_layout@286>w3
+F diag_popup_byte_at@320
+F valid_diagnostic_popup_cache@357
+I Renderer
+F push_hover_popup_frame@369>uv
+F draw_diagnostic_popup@406>uo,ut,uu,uv,w2,w4,wb,we,wf,wg,wj,wl,wm,ye,10a,10e
+F build_hover_popup_layout@920>wc,109,10a
+F draw_hover_popup@1084>uo,ut,uv,w3,w6,w7,wb,wd,wg,wh,wi,wm,wo,yf,107,10a,10b,10e
+M src/render_view/ui/hover_widget_tests.rs
+F module_header_wrap_does_not_split_marker_from_path@4>wc
+F test_valid_diagnostic_popup_cache_drops_stale_indices@12>wl
+F test_hover_y_position_fits_above@21>w3
+F test_hover_y_position_fallback_below@29>w3
+F test_hover_y_position_clamped_top_when_both_fail_but_above_is_better@38>w3
+F test_hover_y_position_forced_below_when_both_fail_but_below_is_better@48>w3
+F test_diagnostic_layout_end_to_end_fits_above@58>wj
+F test_diagnostic_layout_end_to_end_shifts_x_when_out_of_bounds@66>wj
+F test_diagnostic_layout_end_to_end_considers_hover_anchor_x@73>wj
+F test_diagnostic_layout_end_to_end_forces_below_when_y_too_small@89>wj
+F test_diag_popup_byte_at_chooses_nearest_line_and_side@96
+F test_animated_scissor_keeps_nearest_corner_fixed@132>w4,w8,w9
+F test_animated_scissor_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor@147>w4,w8,w9
+F test_animated_scissor_is_full_popup_at_progress_one@159>w4
+F test_animated_scissor_is_zero_at_progress_zero@169>w4
+F test_animated_popup_frame_keeps_nearest_corner_fixed@179>w8,w9,wd
+F test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor@191>w8,w9,wd
+F test_opening_hover_popup_animation_uses_stable_source_anchor@203>wb,wd
+F test_opening_combined_popup_keeps_source_side_when_cursor_moves_inside@243>wb,we
+F test_fully_open_hover_popup_animation_uses_live_mouse@276>wb
+F test_popup_above_cursor_expands_bottom_to_top@284>wd
+F test_combined_popup_above_cursor_expands_bottom_to_top@295>we
+F test_combined_popup_below_cursor_expands_top_to_bottom@306>we
+F test_popup_below_cursor_expands_top_to_bottom@314>wd
+F test_animated_popup_frame_is_target_at_progress_one@322>wd
+F test_animated_popup_frame_is_visible_before_reaching_target@328>wd
+F test_animated_popup_frame_uses_settings_style_smooth_progress@337>w5,w9,wd
+F test_wide_popup_right_edge_settles_before_final_frames@347>wd
+F test_combined_separator_waits_until_frame_reaches_it@355>wf
+F test_combined_separator_clips_to_animated_frame_width@362>wf
+F test_combined_separator_reaches_full_width_with_frame@369>wf
+F test_combined_diagnostic_background_does_not_cover_moving_top_border@376>w4,we,wg
+F test_hover_frame_content_rect_insets_bottom_border@390>wh
+F test_hover_type_content_scissor_does_not_cover_bottom_border@397>wg,wh
+F test_animated_popup_frame_near_done_snap_is_invisible_with_smooth_progress@412>wd
+F test_hover_scrollbar_alpha_waits_until_popup_is_nearly_open@420>w7
+F test_hover_scrollbar_alpha_fades_smoothly_near_end@426>w7
+F test_hover_scrollbar_alpha_is_full_at_end@434>w7
+F test_attached_hover_content_scissor_uses_shared_combined_animation@440>w9,wi
+F test_attached_hover_content_scissor_above_cursor_expands_bottom_to_top@459>wi
+F test_detached_hover_content_scissor_keeps_popup_animation@478>wd,wi
+F test_hover_content_scissor_stays_inside_animated_frame@486>w4,wd,wi
+M src/render_view/ui/problems_panel.rs
+I Renderer
+F draw_problems_panel@5>uo,us,uv,ye,109,10e
+M src/render_view/ui.rs
+C struct AutocompleteBadgeStyle@11
+C struct AutocompleteModuleLayout@187
+C struct AutocompleteRowEdges@68
+F autocomplete_badge_style@17
+F autocomplete_row_edges@73
+F autocomplete_scrollbar_track_margin@86
+F autocomplete_popup_width@90
+F autocomplete_source_is_type_or_signature@103
+F autocomplete_source_label@132>y1
+F autocomplete_source_is_type_label@160
+F autocomplete_row_source@168>y2,y3
+F autocomplete_module_layout@193>y2
+F autocomplete_badges_match_lapce_style_letters@250>xx
+F autocomplete_module_layout_right_aligns_and_truncates_to_slot@287>y5
+F autocomplete_row_edges_mark_visible_popup_corners@317>xy
+F autocomplete_scrollbar_track_margin_stays_close_to_popup_edges@349>xz
+F autocomplete_popup_width_is_stable_before_details_arrive@355>y0
+F autocomplete_source_label_strips_duplicate_python_class_repr@363>y2
+F autocomplete_row_source_prefers_module_path_over_type_label@396>y4
+I Renderer
+F draw_icon@432>uo,10b
+F draw_atlas_icon@444>uo,10b
+F draw_file_icon@467>uo,10b
+F push_autocomplete_row_bg@567>uv,10e
+F push_autocomplete_badge_bg@591>uv,10e
+F draw_autocomplete@615>uo,us,uv,xx,xy,xz,y0,y4,y5,yg,yh,106,107,109,10b
+F draw_dialog_window@881>uo,up,us,uv,ye,11a
+F draw_welcome@993>uo,up,us,uv,yd,109,10e,118
+F draw_diagnostics_ruler@1237>un,10e
+F draw_empty_ide@1302>uo,us,109,10e
+M src/render_view.rs
+C struct ModInterval@431
+C struct Telemetry@196
+F hover_trace_enabled@26
+F editor_bottom_blank_lines@31
+F editor_scroll_content_height@39>yo
+F editor_max_scroll_for_lines@52>yp
+F ide_status_bar_height@67
+F ide_status_bar_y@72>yr
+F ide_bottom_panel_y@77>yr
+F editor_view_height@82>yr
+F utf8_char_width@98
+F cursor_line_and_character@110>yv
+F selected_char_count@132>yv
+F language_display_name_for_ext@151>ls
+F diagnostic_error_warning_counts@175
+F transient_python_member_dot_byte@220
+F diagnostic_overlaps_transient_member_dot@229
+F should_draw_empty_ide_file_tree_overlay@239
+F telemetry_default_starts_with_empty_counters_and_fresh_print_time@252
+F editor_max_scroll_keeps_five_text_lines_at_bottom@269>yo,yp,yq
+F editor_max_scroll_handles_short_files_and_tiny_viewports@276>yo,yq
+F status_bar_y_sits_above_bottom_panel@285>yr,ys,yt
+F editor_view_height_excludes_status_and_bottom_panel@295>yu
+F cursor_line_and_character_counts_unicode_scalars@309>yw
+F selected_char_count_counts_unicode_scalars@323>yx
+F language_display_names_are_user_facing_not_short_codes@334>yy
+F test_diagnostic@342
+F diagnostic_status_counts_errors_and_warnings_only@360>yz,zb
+F empty_ide_still_draws_file_tree_overlay@378>z2
+F transient_python_member_dot_byte_accepts_single_dot_only@386>z0
+F diagnostic_overlap_suppresses_single_dot_not_double_dot@401>z0,z1
+I Renderer
+F draw@439>6p,uj,um,uo,ur,us,ut,uu,uv,v4,v5,v6,vg,vh,vi,vl,vr,vs,vv,vz,w0,yk,yl,ym,yp,yq,yr,ys,yt,yu,z0,z1,z2,101,103,109,10e
+I Telemetry
+F default@207
+M src/renderer/geometry.rs
+C struct Vertex@5
+F quad_vertices@16
+F glyph_quad_rect@67
+F squiggle_vertices@81
+F rounded_rect_gradient_vertices@139
+F quad_vertices_round_positions_and_build_two_triangles@196>zi
+F glyph_quad_rect_keeps_scaled_edges_for_consistent_baseline_rounding@215>zi,zj
+F squiggle_vertices_encode_wave_params_and_extent@239>zk
+F rounded_rect_gradient_vertices_keep_top_and_bottom_colors@254>zl
+M src/renderer.rs
+C struct FontData@78
+C enum FontSource@67
+C struct GlyphInfo@39
+C struct Renderer@138
+C struct Theme@24
+C struct VisualLine@55
+F popup_waiting_for_mouse_move@18
+F font_data_sources_return_expected_slices@1291>zx,zy
+F font_data_ensure_loaded_keeps_missing_lazy_source_empty@1308>zx
+F font_data_ensure_loaded_maps_existing_lazy_source_once@1317>zx
+F popup_mouse_move_gate_waits_for_real_motion_after_focus_restore@1334>zq
+F vertex_layout_is_plain_data_and_visual_line_fields_are_stable@1348
+F renderer_constants_keep_expected_atlas_and_batch_sizes@1379
+I FontData
+F new_lazy@84
+F new_static@94
+F ensure_loaded@101
+F data_slice@128
+I Renderer
+F suppress_popups_until_next_mouse_move@227
+F popups_waiting_for_mouse_move_at@233>zq
+F update_popup_mouse_move_gate@243>102
+F new@251>zx,zy
+F get_custom_svg_glyph@576
+F get_glyph@648>105
+F get_ui_glyph@822>105
+F resize@995
+F measure_ui_width@1006>107
+F char_advance@1020>106
+F push_quad@1038>zi
+F load_builtin_icons@1056
+F push_squiggle@1247>zk
+F push_rect@1258>10b
+F push_rounded_rect_gradient@1263>zl
+M src/scroll.rs
+C struct ScrollState@2
+F scroll_state_clamps_animates_and_stops_end_to_end@76
+I ScrollState
+F new@12
+F update@23
+F clamp_target@48
+F clamp_current@52
+F scroll_by@56
+F set_target@60
+F stop_anim@64
+M src/ui_system.rs
+C enum UiElement@117
+C enum UiId@8
+C struct UiRegistry@190
+F ui_registry_hit_testing_overlay_and_cursor_state_end_to_end@409
+F ui_element_icon_active_square_uses_fitts_law_hitbox@438
+F ui_element_ids_and_regular_icon_hitboxes_are_stable@454
+I UiElement
+F contains@152
+F id@179
+I UiRegistry
+F new@203
+F clear@214
+F mark_overlay_start@224
+F find_overlay_at@230
+F register_button@240
+F register_icon_button@269
+F register_text_input@298
+F register_blocker@321
+F register_rect@338
+F find_at@360
+F hovered@370
+F reset_cursor_state@377
+F wants_pointer@383
+F wants_text@388
+F cursor_code@393
+M src/widgets.rs
+C struct Button@23
+C struct IconButton@101
+C enum IconType@4
+F get_welcome_buttons@217>119
+F welcome_buttons_from_widths@230
+F get_dialog_buttons@285>11b
+F dialog_buttons_from_widths@308
+F widget_hitboxes_cover_regular_and_sidebar_buttons@381
+F button_layout_helpers_scale_text_and_icons_consistently@420>119,11b
+F layout_helpers_do_not_overlap_at_small_widths@449>119,11b
+F welcome_and_dialog_button_layouts_are_stable@468>119,11b
+I Button
+F is_hovered@35
+F render@40
+I IconButton
+F is_hovered@113
+F render@124>11g,11i
