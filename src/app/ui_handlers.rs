@@ -55,7 +55,7 @@ impl App {
         match id {
             UiId::HoverPopupScroll | UiId::StatusBar => {}
             UiId::StatusDiagnostics => {
-                self.ide_panel.open(crate::app::PanelId::Problems);
+                self.ide_panel.toggle(crate::app::PanelId::Problems);
                 crate::save_panel_state(&self.ide_panel);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

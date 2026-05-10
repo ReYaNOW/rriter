@@ -405,6 +405,18 @@ impl IdePanelState {
             .iter()
             .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
+    pub fn open_bottom_panel_id(&self) -> Option<PanelId> {
+        self.slots
+            .iter()
+            .find(|s| s.group == PanelGroup::Bottom && s.open)
+            .map(|s| s.id)
+    }
+    pub fn editor_reserved_bottom_height(&self, scale: f32) -> f32 {
+        match self.open_bottom_panel_id() {
+            Some(PanelId::Terminal | PanelId::Problems) | None => 0.0,
+            Some(_) => self.bottom_height * scale,
+        }
+    }
     pub fn toggle(&mut self, id: PanelId) {
         let mut opened = false;
         let mut group = None;
@@ -796,12 +808,26 @@ mod tests {
 
         panels.toggle(PanelId::Problems);
         assert!(panels.bottom_panel_blocks_editor_hover());
+        assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
 
         panels.toggle(PanelId::Terminal);
         assert!(panels.bottom_panel_blocks_editor_hover());
+        assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
 
         panels.terminal_focused = false;
         assert!(!panels.bottom_panel_blocks_editor_hover());
+        assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
+
+        if let Some(slot) = panels.slots.iter_mut().find(|slot| slot.id == PanelId::LspServers) {
+            slot.group = PanelGroup::Bottom;
+            slot.open = true;
+        }
+        if let Some(slot) = panels.slots.iter_mut().find(|slot| slot.id == PanelId::Terminal) {
+            slot.open = false;
+        }
+        panels.bottom_height = 180.0;
+        assert_eq!(panels.open_bottom_panel_id(), Some(PanelId::LspServers));
+        assert_eq!(panels.editor_reserved_bottom_height(2.0), 360.0);
     }
 
     #[test]

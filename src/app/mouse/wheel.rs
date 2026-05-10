@@ -539,15 +539,15 @@ impl App {
         } else {
             38.0 * s
         };
-        let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-            self.ide_panel.bottom_height * s
+        let editor_bottom_h = if self.is_ide_mode {
+            self.ide_panel.editor_reserved_bottom_height(s)
         } else {
             0.0
         };
         let visible_h = crate::render_view::editor_view_height(
             wh,
             tab_bar_h,
-            panel_bottom_h,
+            editor_bottom_h,
             self.is_ide_mode,
             s,
         );

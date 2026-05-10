@@ -36,6 +36,22 @@ impl Renderer {
                 self.baseline_offset,
             )
             .unwrap_or(-1.0);
+            let mut effective_bottom_h = panel_bottom_h;
+            if is_ide_mode
+                && ide_panel.is_open(crate::app::PanelId::Terminal)
+                && !is_ui_disabled
+            {
+                effective_bottom_h = 0.0;
+            }
+            let blocking_bottom_y = if effective_bottom_h > 0.0 {
+                Some(crate::render_view::ide_bottom_panel_y(
+                    self.height,
+                    effective_bottom_h,
+                    self.scale_factor,
+                ))
+            } else {
+                None
+            };
             for i in 0..self.lsp_diagnostic_indices.len() {
                 let idx = self.lsp_diagnostic_indices[i];
                 let diag = &lsp_diagnostics[idx];
@@ -119,14 +135,9 @@ impl Renderer {
                 let top_y = v_line.y_offset - render_scroll_y;
 
                 let mut in_hitbox = false;
-                let mut effective_bottom_h = panel_bottom_h;
-                if is_ide_mode
-                    && ide_panel.is_open(crate::app::PanelId::Terminal)
-                    && !is_ui_disabled
-                {
-                    effective_bottom_h = 0.0;
-                }
-                let is_under_panel = top_y > self.height - effective_bottom_h - self.line_height;
+                let is_under_panel = blocking_bottom_y
+                    .map(|panel_y| my >= panel_y && my <= panel_y + effective_bottom_h)
+                    .unwrap_or(false);
 
                 if !self.hide_popups_until_mouse_move && !is_under_panel {
                     let squiggle_hit_y_top = v_line.y_offset;

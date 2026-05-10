@@ -118,6 +118,17 @@ impl Renderer {
         is_ui_disabled: bool,
     ) {
         let sb_w = 48.0 * s;
+        let blocking_bottom_y =
+            if ide_panel.any_bottom_open() && ide_panel.bottom_panel_blocks_editor_hover() {
+                Some(ide_bottom_panel_y(real_height, ide_panel.bottom_height * s, s))
+            } else {
+                None
+            };
+        let mouse_in_blocking_bottom = blocking_bottom_y
+            .map(|panel_y| my >= panel_y && my <= panel_y + ide_panel.bottom_height * s)
+            .unwrap_or(false);
+        let hit_mx = if mouse_in_blocking_bottom { -1.0 } else { mx };
+        let hit_my = if mouse_in_blocking_bottom { -1.0 } else { my };
 
         // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
         self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
@@ -244,7 +255,6 @@ impl Renderer {
                 0.173, // #2c
                 1.0,
             ];
-            // Левая панель не заходит под нижнюю — используем editor_height
             self.push_rect(panel_x, 0.0, panel_left_w, real_height, panel_bg);
             self.push_rect(
                 panel_x + panel_left_w - 1.0,
@@ -395,8 +405,8 @@ impl Renderer {
                                 row_y,
                                 panel_left_w,
                                 row_h,
-                                mx,
-                                my,
+                                hit_mx,
+                                hit_my,
                             );
                         }
 
@@ -475,8 +485,8 @@ impl Renderer {
                                     row_y,
                                     18.0 * s,
                                     row_h,
-                                    mx,
-                                    my,
+                                    hit_mx,
+                                    hit_my,
                                 );
                             }
                             let arrow_color = if node.is_ignored {
@@ -616,17 +626,18 @@ impl Renderer {
             // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
             // Не подсвечиваем, когда терминал в фокусе
             let resize_x = panel_x + panel_left_w;
+            let resize_max_y = blocking_bottom_y.unwrap_or(real_height);
             if !is_ui_disabled
                 && mx >= resize_x - 8.0 * s
                 && mx <= resize_x + 8.0 * s
                 && my >= 0.0
-                && my <= real_height
+                && my <= resize_max_y
             {
                 self.push_rect(
                     resize_x - 2.0,
                     0.0,
                     2.0,
-                    real_height,
+                    resize_max_y,
                     [0.60, 0.35, 0.85, 0.4],
                 );
             }
@@ -651,13 +662,14 @@ impl Renderer {
         let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
         let panel_w = self.width - panel_x;
 
-        let is_terminal = ide_panel.slots.iter().any(|sl| {
+        let uses_translucent_bg = ide_panel.slots.iter().any(|sl| {
             sl.group == crate::app::PanelGroup::Bottom
                 && sl.open
-                && sl.id == crate::app::PanelId::Terminal
+                && (sl.id == crate::app::PanelId::Terminal
+                    || sl.id == crate::app::PanelId::Problems)
         });
-        // Прозрачность терминала (0.0 - полностью прозрачный, 1.0 - непрозрачный)
-        let panel_alpha = if is_terminal { 0.80 } else { 1.0 };
+        // Прозрачность терминала/ляпов (0.0 - полностью прозрачный, 1.0 - непрозрачный)
+        let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
 
         let panel_bg = [
             0.129, // #21

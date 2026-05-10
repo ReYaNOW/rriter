@@ -679,6 +679,11 @@ impl Renderer {
         } else {
             0.0
         };
+        let editor_bottom_h = if is_ide_mode {
+            ide_panel.editor_reserved_bottom_height(s)
+        } else {
+            0.0
+        };
         let is_ui_disabled = is_ide_mode && ide_panel.terminal_focused;
 
         self.update_popup_mouse_move_gate();
@@ -699,7 +704,7 @@ impl Renderer {
             44.0 * s
         };
         let editor_height =
-            editor_view_height(real_height, tab_bar_h, panel_bottom_h, is_ide_mode, s);
+            editor_view_height(real_height, tab_bar_h, editor_bottom_h, is_ide_mode, s);
         let editor_scroll_height = editor_height;
 
         let target_minimap_w = 119.0 * s;
@@ -1270,7 +1275,7 @@ impl Renderer {
             } else {
                 0.0
             };
-            let track_y_bg = real_height - panel_bottom_h - status_bar_h - track_h_bg;
+            let track_y_bg = real_height - editor_bottom_h - status_bar_h - track_h_bg;
 
             self.push_rect(
                 self.left_padding,
@@ -1438,7 +1443,7 @@ impl Renderer {
             ui_registry.register_rect(
                 crate::ui_system::UiId::EditorScrollbarX,
                 self.left_padding,
-                real_height - panel_bottom_h - status_bar_h - 14.0 * s,
+                real_height - editor_bottom_h - status_bar_h - 14.0 * s,
                 track_w,
                 14.0 * s,
                 self.last_mouse_x,
@@ -1542,9 +1547,22 @@ impl Renderer {
             self.draw_tab_tooltip(&path, tx, ty, s);
         }
 
+        let mouse_in_blocking_bottom_panel = is_ide_mode
+            && panel_bottom_h > 0.0
+            && ide_panel.bottom_panel_blocks_editor_hover()
+            && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
+            && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
+
         if is_ide_mode {
-            wants_pointer |=
-                self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+            let overlay_mx = if mouse_in_blocking_bottom_panel { -1.0 } else { mx };
+            let overlay_my = if mouse_in_blocking_bottom_panel { -1.0 } else { my };
+            wants_pointer |= self.draw_file_tree_overlays(
+                ide_panel,
+                ui_registry,
+                overlay_mx,
+                overlay_my,
+                blink_alpha,
+            );
         }
 
         self.flush();
@@ -1553,12 +1571,17 @@ impl Renderer {
         // Блокируем resize, когда терминал в фокусе
         if is_ide_mode && panel_left_w > 0.0 && !is_ui_disabled {
             let resize_x = 48.0 * s + panel_left_w;
+            let resize_h = if panel_bottom_h > 0.0 && ide_panel.bottom_panel_blocks_editor_hover() {
+                ide_bottom_panel_y(self.height, panel_bottom_h, s)
+            } else {
+                real_height
+            };
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeLeft,
                 resize_x - 8.0 * s,
                 0.0,
                 16.0 * s,
-                real_height,
+                resize_h,
                 mx,
                 my,
             );

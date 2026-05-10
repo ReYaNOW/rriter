@@ -61,8 +61,10 @@ fn resized_left_width(px: f32, window_width: f32, scale: f32) -> f32 {
 }
 
 fn resized_bottom_height(py: f32, window_height: f32, scale: f32) -> f32 {
-    let max_h = (window_height / scale) - 50.0;
-    ((window_height - py) / scale)
+    let status_bar_h = crate::render_view::ide_status_bar_height(scale);
+    let available_h = (window_height - status_bar_h).max(0.0);
+    let max_h = (available_h / scale) - 50.0;
+    ((available_h - py) / scale)
         .max(60.0)
         .min(max_h.max(60.0))
 }
@@ -481,10 +483,13 @@ impl App {
         } else {
             0.0
         };
+        let bottom_panel_y =
+            crate::render_view::ide_bottom_panel_y(window_size.height as f32, bottom_panel_h, s);
         let in_blocking_bottom_panel = self.is_ide_mode
             && bottom_panel_h > 0.0
             && self.ide_panel.bottom_panel_blocks_editor_hover()
-            && position.y as f32 >= window_size.height as f32 - bottom_panel_h;
+            && position.y as f32 >= bottom_panel_y
+            && position.y as f32 <= bottom_panel_y + bottom_panel_h;
 
         if in_blocking_bottom_panel {
             clear_hover_popup(self.renderer.as_mut());
@@ -741,15 +746,15 @@ impl App {
         } else {
             38.0 * s
         };
-        let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-            self.ide_panel.bottom_height * s
+        let editor_bottom_h = if self.is_ide_mode {
+            self.ide_panel.editor_reserved_bottom_height(s)
         } else {
             0.0
         };
         let editor_visible_h = crate::render_view::editor_view_height(
             wh,
             tab_bar_h,
-            panel_bottom_h,
+            editor_bottom_h,
             self.is_ide_mode,
             s,
         );
@@ -1186,15 +1191,15 @@ impl App {
                 } else {
                     38.0 * s
                 };
-                let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-                    self.ide_panel.bottom_height * s
+                let editor_bottom_h = if self.is_ide_mode {
+                    self.ide_panel.editor_reserved_bottom_height(s)
                 } else {
                     0.0
                 };
                 let editor_height = crate::render_view::editor_view_height(
                     wh,
                     tab_bar_h,
-                    panel_bottom_h,
+                    editor_bottom_h,
                     self.is_ide_mode,
                     s,
                 );
@@ -1368,8 +1373,9 @@ mod tests {
         assert_eq!(resized_left_width(5000.0, 1200.0, 1.0), 852.0);
 
         assert_eq!(resized_bottom_height(2000.0, 900.0, 1.0), 60.0);
-        assert_eq!(resized_bottom_height(600.0, 900.0, 1.0), 300.0);
-        assert_eq!(resized_bottom_height(0.0, 900.0, 1.0), 850.0);
+        assert_eq!(resized_bottom_height(690.0, 900.0, 1.0), 180.0);
+        assert_eq!(resized_bottom_height(600.0, 900.0, 1.0), 270.0);
+        assert_eq!(resized_bottom_height(0.0, 900.0, 1.0), 820.0);
     }
 
     #[test]

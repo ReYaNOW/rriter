@@ -564,19 +564,20 @@ impl App {
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let mut effective_bottom_h = panel_bottom_h;
-                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                        && !self.ide_panel.terminal_focused
-                    {
-                        effective_bottom_h = 0.0;
-                    }
+                    let resize_bottom_limit =
+                        if panel_bottom_h > 0.0 && self.ide_panel.bottom_panel_blocks_editor_hover()
+                        {
+                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s)
+                        } else {
+                            wh
+                        };
 
                     let mut manual_resize = false;
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
                         if (mx - resize_x).abs() < 6.0 * s
                             && my >= 0.0
-                            && my < wh - effective_bottom_h
+                            && my < resize_bottom_limit
                         {
                             self.ide_panel.is_resizing_left = true;
                             manual_resize = true;
@@ -1033,16 +1034,15 @@ impl App {
                         } else {
                             38.0 * s
                         };
-                        let panel_bottom_h =
-                            if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-                                self.ide_panel.bottom_height * s
-                            } else {
-                                0.0
-                            };
+                        let editor_bottom_h = if self.is_ide_mode {
+                            self.ide_panel.editor_reserved_bottom_height(s)
+                        } else {
+                            0.0
+                        };
                         let visible_h = crate::render_view::editor_view_height(
                             wh,
                             tab_bar_h,
-                            panel_bottom_h,
+                            editor_bottom_h,
                             self.is_ide_mode,
                             s,
                         );

@@ -46,6 +46,10 @@ fn should_suppress_hover_for_keyboard(physical_key: PhysicalKey, ctrl: bool, alt
     )
 }
 
+fn apply_problems_alt_w_shortcut(panels: &mut crate::app::IdePanelState) {
+    panels.toggle(crate::app::PanelId::Problems);
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
@@ -272,6 +276,19 @@ impl App {
                 }
             }
 
+            if self.is_ide_mode
+                && alt
+                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyW)
+            {
+                apply_problems_alt_w_shortcut(&mut self.ide_panel);
+                crate::save_panel_state(&self.ide_panel);
+                self.last_action = std::time::Instant::now();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+
             if self.ide_panel.lsp_log_filter_focused {
                 self.handle_lsp_log_filter_keyboard_input(key_event);
                 return;
@@ -423,6 +440,21 @@ mod tests {
         assert!(panels.is_open(crate::app::PanelId::Terminal));
         assert!(!panels.is_open(crate::app::PanelId::Problems));
         assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn problems_alt_w_toggles_without_terminal_clickthrough_focus_mode() {
+        let mut panels = crate::app::IdePanelState::default();
+
+        apply_problems_alt_w_shortcut(&mut panels);
+        assert!(panels.is_open(crate::app::PanelId::Problems));
+        assert!(!panels.is_open(crate::app::PanelId::Terminal));
+        assert!(!panels.terminal_focused);
+        assert!(panels.bottom_panel_blocks_editor_hover());
+
+        apply_problems_alt_w_shortcut(&mut panels);
+        assert!(!panels.is_open(crate::app::PanelId::Problems));
+        assert!(!panels.bottom_panel_blocks_editor_hover());
     }
 
     #[test]

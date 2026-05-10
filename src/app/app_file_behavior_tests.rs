@@ -962,6 +962,10 @@ fn ui_handlers_state_only_branches_work_without_window() {
 
     app.handle_ui_click(crate::ui_system::UiId::HoverPopupScroll);
     app.handle_ui_click(crate::ui_system::UiId::BottomPanelBody);
+    app.handle_ui_click(crate::ui_system::UiId::StatusDiagnostics);
+    assert!(app.ide_panel.is_open(crate::app::PanelId::Problems));
+    app.handle_ui_click(crate::ui_system::UiId::StatusDiagnostics);
+    assert!(!app.ide_panel.is_open(crate::app::PanelId::Problems));
 
     app.ide_panel.terminal_focused = true;
     app.handle_ui_click(crate::ui_system::UiId::ResizeLeft);
