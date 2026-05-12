@@ -668,6 +668,101 @@ impl App {
             }
         }
     }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyEvent) {
+        if key_event.state == ElementState::Pressed {
+            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let shift = self.modifiers.shift_key();
+            let mut is_edit = false;
+
+            match key_event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    self.ide_panel.git.message_focused = false;
+                }
+                PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                    self.commit_git_panel();
+                }
+                PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                    if ctrl {
+                        self.ide_panel.git.message_editor.move_word_left(shift);
+                    } else {
+                        self.ide_panel.git.message_editor.move_left(shift);
+                    }
+                }
+                PhysicalKey::Code(KeyCode::ArrowRight) => {
+                    if ctrl {
+                        self.ide_panel.git.message_editor.move_word_right(shift);
+                    } else {
+                        self.ide_panel.git.message_editor.move_right(shift);
+                    }
+                }
+                PhysicalKey::Code(KeyCode::Home) => {
+                    self.ide_panel.git.message_editor.move_home(shift);
+                }
+                PhysicalKey::Code(KeyCode::End) => {
+                    self.ide_panel.git.message_editor.move_end(shift);
+                }
+                PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                    self.ide_panel.git.message_editor.select_all();
+                }
+                PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                    if let Some(text) = self.ide_panel.git.message_editor.get_selection() {
+                        self.set_clipboard_text(text);
+                    }
+                }
+                PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
+                    if let Some(text) = self.ide_panel.git.message_editor.get_selection() {
+                        self.set_clipboard_text(text);
+                        self.ide_panel.git.message_editor.delete_selection();
+                        is_edit = true;
+                    }
+                }
+                PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+                    if let Some(text) = self.get_clipboard_text() {
+                        let clean = text.replace('\n', "").replace('\r', "");
+                        self.ide_panel.git.message_editor.insert_str(&clean);
+                        is_edit = true;
+                    }
+                }
+                PhysicalKey::Code(KeyCode::Backspace) => {
+                    if ctrl {
+                        self.ide_panel.git.message_editor.delete_word_backward();
+                        is_edit = true;
+                    } else if self.ide_panel.git.message_editor.backspace().is_some() {
+                        is_edit = true;
+                    }
+                }
+                PhysicalKey::Code(KeyCode::Delete) => {
+                    if ctrl {
+                        self.ide_panel.git.message_editor.delete_word_forward();
+                        is_edit = true;
+                    } else if self.ide_panel.git.message_editor.delete_forward().is_some() {
+                        is_edit = true;
+                    }
+                }
+                _ => {
+                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                        if let Some(txt) = key_event.logical_key.to_text() {
+                            let clean_txt = txt.replace('\n', "");
+                            if !clean_txt.is_empty() {
+                                self.ide_panel.git.message_editor.insert_str(&clean_txt);
+                                is_edit = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if is_edit {
+                self.ide_panel.git.message_editor.sync_edits.clear();
+            }
+            self.last_action = Instant::now();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

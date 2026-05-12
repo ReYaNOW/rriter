@@ -3,6 +3,7 @@ mod autocomplete;
 pub mod events;
 pub mod file_icons;
 pub mod file_tree;
+pub mod git_panel;
 pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
@@ -184,6 +185,9 @@ impl App {
 
         self.refresh_file_tree();
         self.start_file_watcher();
+        if self.ide_panel.is_open(PanelId::Git) {
+            self.refresh_git_panel();
+        }
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());

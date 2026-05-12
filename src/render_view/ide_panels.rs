@@ -3,7 +3,7 @@ use crate::render_view::{
     ide_status_bar_height, ide_status_bar_y, language_display_name_for_ext, selected_char_count,
 };
 use crate::renderer::Renderer;
-use crate::widgets::IconButton;
+use crate::widgets::{Button, IconButton};
 use glow::HasContext;
 
 fn clipped_label_prefix_len<F>(
@@ -359,6 +359,26 @@ impl Renderer {
                 }
             }
 
+            // --- Git ---
+            if ide_panel.is_open(crate::app::PanelId::Git) {
+                let is_top = ide_panel.slots.iter().any(|s| {
+                    s.id == crate::app::PanelId::Git && s.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    self.draw_git_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        real_height - title_h,
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        hit_mx,
+                        hit_my,
+                    );
+                }
+            }
+
             // --- Дерево файлов проводника ---
             if ide_panel.is_open(crate::app::PanelId::Explorer) {
                 let file_tree_overlay_open =
@@ -643,6 +663,548 @@ impl Renderer {
                     2.0,
                     resize_max_y,
                     [0.60, 0.35, 0.85, 0.4],
+                );
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_git_panel(
+        &mut self,
+        panel_x: f32,
+        title_h: f32,
+        panel_w: f32,
+        content_h: f32,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
+        let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
+        let inner_w = (panel_w - pad * 2.0).max(1.0);
+        let controls_h = 92.0 * s;
+        let list_y = title_h + controls_h;
+        let list_h = (content_h - controls_h).max(40.0 * s);
+        let row_h = 26.0 * s;
+        let workspace_h = 30.0 * s;
+        let scroll = ide_panel.git.scroll.current.round();
+        let mut y = list_y - scroll;
+        let text_scale = 0.9;
+        let mut label_scratch = String::new();
+
+        let input_x = panel_x + pad;
+        let input_y = title_h + 8.0 * s;
+        let input_w = inner_w;
+        let input_h = 30.0 * s;
+        let input_border = if ide_panel.git.message_focused {
+            [0.60, 0.35, 0.85, 0.78]
+        } else {
+            [1.0, 1.0, 1.0, 0.10]
+        };
+        self.push_rounded_rect(
+            input_x - 1.0,
+            input_y - 1.0,
+            input_w + 2.0,
+            input_h + 2.0,
+            4.0 * s,
+            input_border,
+        );
+        self.push_rounded_rect(
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            4.0 * s,
+            if ide_panel.git.message_focused {
+                [0.18, 0.19, 0.25, 1.0]
+            } else {
+                [0.11, 0.12, 0.16, 1.0]
+            },
+        );
+        ui_registry.register_text_input(
+            crate::ui_system::UiId::GitMessageInput,
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            mx,
+            my,
+        );
+
+        self.flush();
+        unsafe {
+            let text = ide_panel.git.message_editor.get_full_text();
+            let text_y = input_y + input_h / 2.0 + 6.0 * s;
+            let text_start_x = input_x + 5.0 * s;
+            let visible_width = input_w - 10.0 * s;
+
+            let mut cursor_total_x = 0.0;
+            let mut total_text_width = 0.0;
+            for (byte_idx, c) in text.char_indices() {
+                let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                if byte_idx < ide_panel.git.message_editor.cursor {
+                    cursor_total_x += adv;
+                }
+                total_text_width += adv;
+            }
+
+            if ide_panel.git.message_focused {
+                if cursor_total_x - self.search_scroll_x > visible_width {
+                    self.search_scroll_x = cursor_total_x - visible_width;
+                }
+                if cursor_total_x - self.search_scroll_x < 0.0 {
+                    self.search_scroll_x = cursor_total_x;
+                }
+                self.search_scroll_x = self
+                    .search_scroll_x
+                    .min(total_text_width - visible_width)
+                    .max(0.0);
+            }
+
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (input_y + input_h);
+            self.gl.scissor(
+                input_x as i32,
+                scissor_y as i32,
+                input_w as i32,
+                input_h as i32,
+            );
+
+            if text.is_empty() {
+                self.draw_string_scaled(
+                    "Message",
+                    text_start_x,
+                    text_y,
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.34],
+                    1.0,
+                );
+            } else {
+                let sel_start = ide_panel
+                    .git
+                    .message_editor
+                    .selection_anchor
+                    .unwrap_or(ide_panel.git.message_editor.cursor)
+                    .min(ide_panel.git.message_editor.cursor);
+                let sel_end = ide_panel
+                    .git
+                    .message_editor
+                    .selection_anchor
+                    .unwrap_or(ide_panel.git.message_editor.cursor)
+                    .max(ide_panel.git.message_editor.cursor);
+
+                let mut current_x = text_start_x - self.search_scroll_x;
+                let mut byte_idx = 0usize;
+                let mut cursor_draw_x = current_x;
+
+                for c in text.chars() {
+                    if byte_idx == ide_panel.git.message_editor.cursor {
+                        cursor_draw_x = current_x;
+                    }
+                    let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                    if byte_idx >= sel_start && byte_idx < sel_end {
+                        self.push_rect(
+                            current_x,
+                            input_y + 4.0 * s,
+                            adv,
+                            input_h - 8.0 * s,
+                            self.theme.sel,
+                        );
+                    }
+                    if let Some(g) = self.get_ui_glyph(c) {
+                        self.push_quad(
+                            current_x + g.offset_x,
+                            text_y - g.offset_y,
+                            g.width,
+                            g.height,
+                            g.u,
+                            g.v,
+                            g.uw,
+                            g.vh,
+                            self.theme.fg,
+                            g.is_emoji,
+                        );
+                    }
+                    current_x += adv;
+                    byte_idx += c.len_utf8();
+                }
+                if byte_idx == ide_panel.git.message_editor.cursor {
+                    cursor_draw_x = current_x;
+                }
+                if ide_panel.git.message_focused && sel_start == sel_end {
+                    self.push_rect(
+                        cursor_draw_x,
+                        input_y + 4.0 * s,
+                        2.0 * s,
+                        input_h - 8.0 * s,
+                        self.theme.fg,
+                    );
+                }
+            }
+            self.flush();
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        let commit_y = title_h + 44.0 * s;
+        let arrow_w = (38.0 * s).min((inner_w * 0.28).max(22.0 * s));
+        let commit_main_w = (inner_w - arrow_w).max(1.0);
+        let commit_btn = Button {
+            x: panel_x + pad,
+            y: commit_y,
+            w: commit_main_w,
+            h: 28.0 * s,
+            text: if commit_main_w < 76.0 * s {
+                "✓".to_string()
+            } else {
+                "✓ Commit".to_string()
+            },
+            icon: None,
+            text_scale: if commit_main_w < 76.0 * s { 0.9 } else { 0.84 },
+            icon_size: 0.0,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::GitCommit,
+            &commit_btn,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        self.push_rect(
+            panel_x + pad + commit_main_w,
+            commit_y + 4.0 * s,
+            1.0,
+            20.0 * s,
+            [1.0, 1.0, 1.0, 0.18],
+        );
+        let menu_btn = Button {
+            x: panel_x + pad + commit_main_w,
+            y: commit_y,
+            w: arrow_w,
+            h: 28.0 * s,
+            text: "⌄".to_string(),
+            icon: None,
+            text_scale: 1.05,
+            icon_size: 0.0,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::GitCommitMenuToggle,
+            &menu_btn,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+
+        if let Some(notice) = &ide_panel.git.notice {
+            self.draw_tree_label_clipped(
+                notice,
+                panel_x + pad,
+                title_h + 84.0 * s,
+                inner_w,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.68],
+                0.78,
+                &mut label_scratch,
+            );
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (list_y + list_h);
+            self.gl.scissor(
+                panel_x as i32,
+                scissor_y.max(0.0) as i32,
+                panel_w as i32,
+                list_h as i32,
+            );
+        }
+
+        let staged_workspace = ide_panel.git.snapshot.active_staged_workspace_idx();
+        let mut drew_any = false;
+
+        for workspace in &ide_panel.git.snapshot.workspaces {
+            if staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
+                continue;
+            }
+            if staged_workspace.is_none()
+                && workspace.files.is_empty()
+                && workspace.error.is_none()
+                && workspace.ahead == 0
+            {
+                continue;
+            }
+
+            drew_any = true;
+            let row_visible = y + workspace_h >= list_y && y <= list_y + list_h;
+            if row_visible {
+                self.push_rect(
+                    panel_x,
+                    y,
+                    panel_w,
+                    workspace_h,
+                    [
+                        self.theme.bg[0] + 0.035,
+                        self.theme.bg[1] + 0.035,
+                        self.theme.bg[2] + 0.045,
+                        1.0,
+                    ],
+                );
+                let name = workspace
+                    .root
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("workspace");
+                let right_reserve = if workspace.ahead > 0 {
+                    92.0 * s
+                } else {
+                    12.0 * s
+                };
+                self.draw_tree_label_clipped(
+                    name,
+                    panel_x + pad,
+                    y + workspace_h / 2.0 + 5.5 * s,
+                    (panel_w - pad - right_reserve).max(0.0),
+                    self.theme.fg,
+                    0.9,
+                    &mut label_scratch,
+                );
+
+                if workspace.ahead > 0 {
+                    let mut ahead_text = String::new();
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut ahead_text,
+                        format_args!("↑{}", workspace.ahead),
+                    );
+                    let push_w = (46.0 * s).min((panel_w * 0.36).max(18.0 * s));
+                    let push_x = panel_x + panel_w - pad - push_w;
+                    let aw = self.measure_ui_width(&ahead_text, 0.78);
+                    self.draw_string_scaled(
+                        &ahead_text,
+                        (push_x - 8.0 * s - aw).max(panel_x + pad),
+                        y + workspace_h / 2.0 + 5.0 * s,
+                        [0.48, 0.74, 1.0, 1.0],
+                        0.78,
+                    );
+                    let push_btn = Button {
+                        x: push_x,
+                        y: y + 5.0 * s,
+                        w: push_w,
+                        h: 20.0 * s,
+                        text: if push_w < 38.0 * s { "↑" } else { "Push" }.to_string(),
+                        icon: None,
+                        text_scale: 0.76,
+                        icon_size: 0.0,
+                    };
+                    ui_registry.register_button(
+                        crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                        &push_btn,
+                        self,
+                        mx,
+                        my,
+                        s,
+                        false,
+                    );
+                }
+            }
+            y += workspace_h;
+
+            if let Some(err) = &workspace.error {
+                if y + row_h >= list_y && y <= list_y + list_h {
+                    self.draw_tree_label_clipped(
+                        err,
+                        panel_x + pad,
+                        y + row_h / 2.0 + 5.0 * s,
+                        inner_w,
+                        [0.95, 0.42, 0.46, 1.0],
+                        0.82,
+                        &mut label_scratch,
+                    );
+                }
+                y += row_h;
+                continue;
+            }
+
+            for row in &workspace.tree {
+                let visible = y + row_h >= list_y && y <= list_y + list_h;
+                if visible {
+                    let indent_x = panel_x + pad + row.depth as f32 * 16.0 * s;
+                    if let Some(file_idx) = row.file_idx {
+                        let Some(file) = workspace.files.get(file_idx) else {
+                            y += row_h;
+                            continue;
+                        };
+                        let hovered = ui_registry.register_rect(
+                            crate::ui_system::UiId::GitFile(workspace.workspace_idx, file_idx),
+                            panel_x,
+                            y,
+                            panel_w,
+                            row_h,
+                            mx,
+                            my,
+                        );
+                        if hovered {
+                            self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
+                        }
+
+                        let check_x = indent_x;
+                        let check_y = y + 7.0 * s;
+                        self.push_rounded_rect(
+                            check_x,
+                            check_y,
+                            12.0 * s,
+                            12.0 * s,
+                            2.0 * s,
+                            if file.staged {
+                                [0.48, 0.82, 0.52, 0.95]
+                            } else {
+                                [1.0, 1.0, 1.0, 0.12]
+                            },
+                        );
+                        if file.staged {
+                            self.draw_string_scaled(
+                                "✓",
+                                check_x + 2.0 * s,
+                                y + 18.0 * s,
+                                [0.07, 0.09, 0.12, 1.0],
+                                0.78,
+                            );
+                        }
+
+                        let status_w = 18.0 * s;
+                        let status_x = panel_x + panel_w - pad - status_w;
+                        self.draw_string_scaled(
+                            file.status.label(),
+                            status_x,
+                            y + row_h / 2.0 + 5.0 * s,
+                            file.status.color(),
+                            0.82,
+                        );
+
+                        let text_x = check_x + 22.0 * s;
+                        let max_w = (status_x - 8.0 * s - text_x).max(0.0);
+                        self.draw_tree_label_clipped(
+                            &row.name,
+                            text_x,
+                            y + row_h / 2.0 + 5.0 * s,
+                            max_w,
+                            [0.72, 0.76, 0.88, 1.0],
+                            text_scale,
+                            &mut label_scratch,
+                        );
+                    } else {
+                        self.draw_string_scaled(
+                            "▼",
+                            indent_x,
+                            y + row_h / 2.0 + 5.0 * s,
+                            [0.78, 0.80, 0.88, 0.75],
+                            1.0,
+                        );
+                        self.draw_tree_label_clipped(
+                            &row.name,
+                            indent_x + 16.0 * s,
+                            y + row_h / 2.0 + 5.0 * s,
+                            (panel_x + panel_w - pad - indent_x - 16.0 * s).max(0.0),
+                            self.theme.fg,
+                            text_scale,
+                            &mut label_scratch,
+                        );
+                    }
+                }
+                y += row_h;
+            }
+        }
+
+        if !drew_any {
+            let hint = if ide_panel.git.pending {
+                "Git scan..."
+            } else {
+                "No changes"
+            };
+            let tw = self.measure_ui_width(hint, text_scale);
+            self.draw_string_scaled(
+                hint,
+                panel_x + (panel_w - tw) / 2.0,
+                list_y + 30.0 * s,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.45],
+                text_scale,
+            );
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        let total_h = (y + scroll - list_y).max(0.0);
+        if total_h > list_h {
+            let max_s = (total_h - list_h).max(1.0);
+            let ratio = (scroll / max_s).clamp(0.0, 1.0);
+            let thumb_h = (list_h / total_h * (list_h - 8.0 * s)).max(20.0 * s);
+            let thumb_y = list_y + 4.0 * s + ratio * (list_h - 8.0 * s - thumb_h);
+            self.push_rounded_rect(
+                panel_x + panel_w - 5.0 * s,
+                thumb_y,
+                3.0 * s,
+                thumb_h,
+                1.5 * s,
+                [1.0, 1.0, 1.0, 0.22],
+            );
+        }
+
+        if ide_panel.git.commit_menu_open {
+            let menu_w = inner_w.min(230.0 * s).max(120.0 * s).min(panel_w);
+            let menu_x = (panel_x + pad + inner_w - menu_w).max(panel_x + 2.0 * s);
+            let item_h = 32.0 * s;
+            let menu_items = ["Commit", "Commit (Amend)", "Commit & Push"];
+            let menu_h = item_h * menu_items.len() as f32 + 8.0 * s;
+            let menu_y = commit_y + 30.0 * s;
+            self.push_rounded_rect(
+                menu_x,
+                menu_y,
+                menu_w,
+                menu_h,
+                8.0 * s,
+                [0.18, 0.19, 0.25, 0.98],
+            );
+            self.push_rect(
+                menu_x,
+                menu_y + item_h * 2.0 + 4.0 * s,
+                menu_w,
+                1.0,
+                [1.0, 1.0, 1.0, 0.14],
+            );
+            for (idx, label) in menu_items.iter().enumerate() {
+                let item_y = menu_y + 4.0 * s + idx as f32 * item_h;
+                let hovered = ui_registry.register_rect(
+                    crate::ui_system::UiId::GitCommitMenuItem(idx),
+                    menu_x,
+                    item_y,
+                    menu_w,
+                    item_h,
+                    mx,
+                    my,
+                );
+                if hovered {
+                    self.push_rounded_rect(
+                        menu_x + 5.0 * s,
+                        item_y + 3.0 * s,
+                        menu_w - 10.0 * s,
+                        item_h - 6.0 * s,
+                        5.0 * s,
+                        [1.0, 1.0, 1.0, 0.07],
+                    );
+                }
+                self.draw_tree_label_clipped(
+                    label,
+                    menu_x + 16.0 * s,
+                    item_y + item_h / 2.0 + 5.5 * s,
+                    menu_w - 32.0 * s,
+                    self.theme.fg,
+                    0.9,
+                    &mut label_scratch,
                 );
             }
         }

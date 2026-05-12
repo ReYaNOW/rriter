@@ -1129,20 +1129,38 @@ impl App {
             }
         } else if self.is_dragging_search {
             let search_w = 480.0 * s;
-            let input_x = if self.ide_panel.term_search_focused {
+            let input_x = if self.ide_panel.git.message_focused {
+                let panel_w = self.ide_panel.left_width * s;
+                let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
+                48.0 * s + pad
+            } else if self.ide_panel.term_search_focused {
                 let panel_w = self.window.as_ref().unwrap().inner_size().width as f32 - 48.0 * s;
                 48.0 * s + panel_w - search_w - 20.0 * s + 10.0 * s
             } else {
                 scrollbar_x - search_w - 20.0 * s + 10.0 * s
             };
 
-            let text = if self.ide_panel.term_search_focused {
+            let text = if self.ide_panel.git.message_focused {
+                self.ide_panel.git.message_editor.get_full_text()
+            } else if self.ide_panel.term_search_focused {
                 self.ide_panel.term_search_editor.get_full_text()
             } else {
                 self.search_editor.get_full_text()
             };
 
-            let x_offset = (position.x as f32 - (input_x + 5.0 * s)).max(0.0);
+            let x_offset = (position.x as f32 - (input_x + 5.0 * s)
+                + self
+                    .renderer
+                    .as_ref()
+                    .map(|r| {
+                        if self.ide_panel.git.message_focused {
+                            r.search_scroll_x
+                        } else {
+                            0.0
+                        }
+                    })
+                    .unwrap_or(0.0))
+            .max(0.0);
             let mut current_x = 0.0;
             let mut target_idx = text.len();
             let mut byte_idx = 0;
@@ -1162,7 +1180,9 @@ impl App {
                 current_x += adv;
                 byte_idx += c.len_utf8();
             }
-            if self.ide_panel.term_search_focused {
+            if self.ide_panel.git.message_focused {
+                self.ide_panel.git.message_editor.cursor = target_idx;
+            } else if self.ide_panel.term_search_focused {
                 self.ide_panel.term_search_editor.cursor = target_idx;
             } else {
                 self.search_editor.cursor = target_idx;

@@ -364,6 +364,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_file_tree() {
         needs_redraw = true;
     }
+    if app.poll_git_panel() {
+        needs_redraw = true;
+    }
 
     // Watcher сигнализирует об изменениях на диске — обновляем дерево
     {
@@ -375,6 +378,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
         if fs_changed {
             app.refresh_file_tree();
+            if app.ide_panel.is_open(crate::app::PanelId::Git) {
+                app.refresh_git_panel();
+            }
             app.start_external_changes_check();
             needs_redraw = true;
         }
@@ -383,6 +389,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
     if app.ide_panel.explorer_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.git.scroll.update(dt) {
         needs_redraw = true;
     }
     if app.ide_panel.problems_scroll.update(dt) {

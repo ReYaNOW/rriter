@@ -45,6 +45,7 @@ pub enum PendingAction {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PanelId {
     Explorer,
+    Git,
     Terminal,
     Problems,
     LspServers,
@@ -54,6 +55,7 @@ impl PanelId {
     pub fn label(self) -> &'static str {
         match self {
             PanelId::Explorer => "Проводник",
+            PanelId::Git => "Git",
             PanelId::Terminal => "Терминал",
             PanelId::Problems => "Ляпы",
             PanelId::LspServers => "Языковые серверы",
@@ -62,6 +64,7 @@ impl PanelId {
     pub fn icon(self) -> crate::widgets::IconType {
         match self {
             PanelId::Explorer => crate::widgets::IconType::Explorer,
+            PanelId::Git => crate::widgets::IconType::Git,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
             PanelId::Problems => crate::widgets::IconType::Problems,
             PanelId::LspServers => crate::widgets::IconType::LspServers,
@@ -266,6 +269,7 @@ pub struct IdePanelState {
     pub file_tree_delete_dialog: Option<crate::app::file_tree::FileTreeDeleteDialog>,
     pub file_tree_undo_stack: Vec<crate::app::file_tree::FileTreeUndoEntry>,
     pub file_tree_dialog_input_drag: Option<crate::app::file_tree::FileTreeDialogInputKind>,
+    pub git: crate::app::git_panel::GitPanelState,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
     pub lsp_logs_expanded: FxHashSet<String>,
@@ -312,6 +316,11 @@ impl Default for IdePanelState {
                     open: false,
                 },
                 PanelSlot {
+                    id: PanelId::Git,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
                     id: PanelId::LspServers,
                     group: PanelGroup::Top,
                     open: false,
@@ -347,6 +356,7 @@ impl Default for IdePanelState {
             file_tree_delete_dialog: None,
             file_tree_undo_stack: Vec::new(),
             file_tree_dialog_input_drag: None,
+            git: crate::app::git_panel::GitPanelState::default(),
             lsp_servers: Vec::new(),
             lsp_logs_expanded: FxHashSet::default(),
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -437,12 +447,16 @@ impl IdePanelState {
         if id == PanelId::Terminal && opened {
             self.terminal_focused = true;
             self.term_search_focused = false;
+            self.git.message_focused = false;
         } else if id == PanelId::Terminal && !opened {
             self.terminal_focused = false;
             self.term_search_focused = false;
         } else if opened && id != PanelId::Terminal && group == Some(PanelGroup::Bottom) {
             self.terminal_focused = false;
             self.term_search_focused = false;
+            self.git.message_focused = false;
+        } else if id != PanelId::Git && group == Some(PanelGroup::Top) {
+            self.git.message_focused = false;
         }
     }
     pub fn open(&mut self, id: PanelId) {
@@ -466,9 +480,13 @@ impl IdePanelState {
         if id == PanelId::Terminal {
             self.terminal_focused = true;
             self.term_search_focused = false;
+            self.git.message_focused = false;
         } else if group == Some(PanelGroup::Bottom) {
             self.terminal_focused = false;
             self.term_search_focused = false;
+            self.git.message_focused = false;
+        } else if id != PanelId::Git {
+            self.git.message_focused = false;
         }
     }
     pub fn open_terminal_exclusive(&mut self) {

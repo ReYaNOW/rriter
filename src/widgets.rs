@@ -14,6 +14,7 @@ pub enum IconType {
     Plus,
     Terminal,
     Explorer,
+    Git,
     Problems,
     LspServers,
     Copy,

@@ -224,6 +224,63 @@ impl App {
             }
         }
 
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Git) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let sb_w = 48.0 * s;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                self.ide_panel.bottom_height * s
+            } else {
+                0.0
+            };
+            let is_top = self.ide_panel.slots.iter().any(|sl| {
+                sl.id == crate::app::PanelId::Git && sl.group == crate::app::PanelGroup::Top
+            });
+            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
+            let (cx, cy, cw, ch) = panel_scroll_rect(
+                is_top,
+                s,
+                sb_w,
+                self.ide_panel.left_width,
+                panel_bottom_h,
+                panel_bottom_h,
+                ww,
+                wh,
+            );
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                self.ide_panel.git.scroll.anim_speed = 7.0;
+                self.ide_panel.git.scroll.scroll_by(dy);
+                let controls_h = 92.0 * s;
+                let list_h = (wh - 32.0 * s - controls_h).max(40.0 * s);
+                let mut total_h = 0.0;
+                let staged_workspace = self.ide_panel.git.snapshot.active_staged_workspace_idx();
+                for workspace in &self.ide_panel.git.snapshot.workspaces {
+                    if staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
+                        continue;
+                    }
+                    if staged_workspace.is_none()
+                        && workspace.files.is_empty()
+                        && workspace.error.is_none()
+                        && workspace.ahead == 0
+                    {
+                        continue;
+                    }
+                    total_h += 30.0 * s;
+                    total_h += if workspace.error.is_some() {
+                        26.0 * s
+                    } else {
+                        workspace.tree.len() as f32 * 26.0 * s
+                    };
+                }
+                let max_scroll = (total_h - list_h).max(0.0);
+                self.ide_panel.git.scroll.clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;

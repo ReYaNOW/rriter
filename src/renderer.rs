@@ -1104,6 +1104,10 @@ impl Renderer {
                 include_bytes!("icons/atom/icons/ui/files.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Git,
+                include_bytes!("icons/atom/icons/files/git.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Problems,
                 include_bytes!("icons/problems.svg").as_slice(),
             ),
@@ -1131,6 +1135,7 @@ impl Renderer {
             } else if icon_type == crate::widgets::IconType::Plus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
+                || icon_type == crate::widgets::IconType::Git
                 || icon_type == crate::widgets::IconType::LspServers
                 || icon_type == crate::widgets::IconType::Copy
                 || icon_type == crate::widgets::IconType::Check

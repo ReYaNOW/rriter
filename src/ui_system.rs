@@ -42,6 +42,14 @@ pub enum UiId {
     LspLogsFilterRecv,
     LspLogsFilterOther,
 
+    // Git panel
+    GitFile(usize, usize),
+    GitCommit,
+    GitCommitMenuToggle,
+    GitCommitMenuItem(usize),
+    GitPush(usize),
+    GitMessageInput,
+
     // Sidebar
     SidebarSlot(crate::app::PanelId),
 

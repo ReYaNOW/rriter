@@ -153,6 +153,7 @@ impl App {
             UiId::TerminalSearchInput => {
                 self.ide_panel.term_search_focused = true;
                 self.search_focused = false;
+                self.ide_panel.git.message_focused = false;
                 self.is_dragging_search = true;
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;
@@ -476,6 +477,81 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
 
+            // Git panel
+            UiId::GitFile(workspace_idx, file_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.toggle_git_file_stage(workspace_idx, file_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitCommit => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.commit_git_panel();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitCommitMenuToggle => {
+                self.ide_panel.git.commit_menu_open = !self.ide_panel.git.commit_menu_open;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitCommitMenuItem(idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.commit_git_panel_option(idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitPush(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.push_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitMessageInput => {
+                self.ide_panel.git.commit_menu_open = false;
+                let was_focused = self.ide_panel.git.message_focused;
+                self.ide_panel.git.message_focused = true;
+                self.search_focused = false;
+                self.ide_panel.term_search_focused = false;
+                self.ide_panel.lsp_log_filter_focused = false;
+                self.ide_panel.file_tree_focused = false;
+                self.is_dragging_search = true;
+                if let Some(r) = self.renderer.as_mut() {
+                    if !was_focused {
+                        r.search_scroll_x = 0.0;
+                    }
+                    let s = r.scale_factor;
+                    let panel_w = self.ide_panel.left_width * s;
+                    let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
+                    let input_x = 48.0 * s + pad;
+                    let x_offset =
+                        (r.last_mouse_x - (input_x + 5.0 * s) + r.search_scroll_x).max(0.0);
+                    let text = self.ide_panel.git.message_editor.get_full_text();
+                    let mut current_x = 0.0;
+                    let mut target_idx = text.len();
+                    let mut byte_idx = 0;
+                    for c in text.chars() {
+                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
+                        if x_offset <= current_x + adv / 2.0 {
+                            target_idx = byte_idx;
+                            break;
+                        }
+                        current_x += adv;
+                        byte_idx += c.len_utf8();
+                    }
+                    self.ide_panel.git.message_editor.cursor = target_idx;
+                    self.ide_panel.git.message_editor.selection_anchor = Some(target_idx);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+
             // Sidebar
             UiId::SidebarSlot(panel_id) => {
                 self.ide_panel.toggle(panel_id);
@@ -494,6 +570,9 @@ impl App {
                         self.refresh_file_tree();
                         self.start_file_watcher();
                     }
+                }
+                if panel_id == crate::app::PanelId::Git && self.ide_panel.is_open(panel_id) {
+                    self.refresh_git_panel();
                 }
                 crate::save_panel_state(&self.ide_panel);
                 self.window.as_ref().unwrap().request_redraw();
@@ -670,6 +749,7 @@ impl App {
             UiId::SearchInput => {
                 self.search_focused = true;
                 self.ide_panel.term_search_focused = false;
+                self.ide_panel.git.message_focused = false;
                 self.ide_panel.file_tree_focused = false;
                 self.is_dragging_search = true;
                 if let Some(r) = self.renderer.as_mut() {
@@ -856,6 +936,8 @@ impl App {
                 self.ide_panel.lsp_logs_focused = None;
                 self.search_focused = false;
                 self.ide_panel.term_search_focused = false;
+                self.ide_panel.git.message_focused = false;
+                self.ide_panel.git.commit_menu_open = false;
                 self.settings_ignore_focused = false;
 
                 if let Some(r) = self.renderer.as_mut() {

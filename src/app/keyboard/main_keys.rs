@@ -292,6 +292,13 @@ impl App {
                 return;
             }
 
+            if self.ide_panel.git.message_focused
+                && self.ide_panel.is_open(crate::app::PanelId::Git)
+            {
+                self.handle_git_message_keyboard_input(key_event);
+                return;
+            }
+
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
                 if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(&focused_name) {
                     let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
