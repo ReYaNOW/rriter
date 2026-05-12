@@ -350,7 +350,8 @@ impl App {
                         let term_scale = 1.05;
                         let char_h = lh * term_scale;
 
-                        let term_content_h = ch - 32.0 * s;
+                        let (_, term_content_h) =
+                            crate::render_view::terminal_ui::terminal_body_rect(cy, ch, s);
                         let max_scroll = ((total_lines as f32 * char_h) - term_content_h).max(0.0);
 
                         term.scroll_y.clamp_target(0.0, max_scroll);

@@ -333,8 +333,10 @@ impl App {
                     let content_y =
                         crate::render_view::ide_bottom_panel_y(wh, bottom_h, s) + 1.0 + tab_h;
                     let content_h = bottom_h - 1.0 - tab_h;
-                    let term_content_y = content_y + 32.0 * s;
-                    let term_content_h = content_h - 32.0 * s;
+                    let (term_content_y, term_content_h) =
+                        crate::render_view::terminal_ui::terminal_body_rect(
+                            content_y, content_h, s,
+                        );
 
                     let cell_x = terminal_mouse_cell_x(mx, panel_x, char_w);
 

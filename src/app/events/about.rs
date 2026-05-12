@@ -94,7 +94,7 @@ fn terminal_content_bounds(window_height: f32, bottom_height: f32, scale: f32) -
     let content_y =
         crate::render_view::ide_bottom_panel_y(window_height, bottom_h, scale) + 1.0 + tab_h;
     let content_h = bottom_h - 1.0 - tab_h;
-    (content_y + 32.0 * scale, content_h - 32.0 * scale)
+    crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, scale)
 }
 
 fn terminal_drag_cell(
@@ -324,11 +324,40 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if app.tab_scroll.update(dt) {
+    if app.ide_panel.tab_drag.is_some() {
         needs_redraw = true;
     }
 
     if app.ide_panel.tab_drag.is_some() {
+        if let Some(r) = app.renderer.as_ref() {
+            let s = r.scale_factor;
+            let tab_x = (48.0 * s + app.ide_panel.left_width * s).round() + 1.0;
+            let tab_w = (r.width - tab_x).max(0.0);
+            let mx = r.last_mouse_x;
+            let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
+            let drag_delta = drag_autoscroll_delta(mx, tab_x, tab_x + tab_w, edge);
+            let max_scroll = r.max_tab_scroll_x;
+
+            if drag_delta != 0.0 && max_scroll > 0.0 {
+                let speed = drag_autoscroll_speed(drag_delta, false);
+                let old_scroll = app.tab_scroll.current;
+                let new_scroll =
+                    (old_scroll + drag_delta.signum() * speed * dt).clamp(0.0, max_scroll);
+                let scroll_delta = new_scroll - old_scroll;
+
+                if scroll_delta != 0.0 {
+                    app.tab_scroll.current = new_scroll;
+                    app.tab_scroll.target = new_scroll;
+                    if let Some(drag) = &mut app.ide_panel.tab_drag {
+                        drag.start_x -= scroll_delta;
+                    }
+                    needs_redraw = true;
+                }
+            }
+        }
+    }
+
+    if app.tab_scroll.update(dt) {
         needs_redraw = true;
     }
 

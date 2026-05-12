@@ -257,6 +257,131 @@ impl App {
             .saturating_add(1)
     }
 
+    fn tab_display_titles(&self) -> Vec<String> {
+        let mut paths: Vec<Option<&PathBuf>> =
+            self.tabs.iter().map(|t| t.file_path.as_ref()).collect();
+        if self.active_tab < paths.len() {
+            paths[self.active_tab] = self.file_path.as_ref();
+        }
+
+        let mut display_titles = vec![String::new(); self.tabs.len()];
+        for i in 0..self.tabs.len() {
+            if let Some(p1) = paths[i] {
+                let mut diff_level = 0;
+                let mut collision = false;
+                for j in 0..self.tabs.len() {
+                    if i == j {
+                        continue;
+                    }
+                    if let Some(p2) = paths[j] {
+                        if p1.file_name() == p2.file_name() {
+                            collision = true;
+                            let mut it1 = p1.components().rev();
+                            let mut it2 = p2.components().rev();
+                            let mut level = 0;
+                            loop {
+                                let c1 = it1.next();
+                                let c2 = it2.next();
+                                if c1 != c2 {
+                                    diff_level = diff_level.max(level);
+                                    break;
+                                }
+                                if c1.is_none() && c2.is_none() {
+                                    break;
+                                }
+                                level += 1;
+                            }
+                        }
+                    }
+                }
+                if collision && diff_level > 0 {
+                    let comps: Vec<_> = p1.components().rev().collect();
+                    if diff_level < comps.len() {
+                        let diff_dir = comps[diff_level].as_os_str().to_string_lossy();
+                        let file_name = comps[0].as_os_str().to_string_lossy();
+                        display_titles[i] = if diff_level == 1 {
+                            format!("{}/{}", diff_dir, file_name)
+                        } else {
+                            format!("{}/.../{}", diff_dir, file_name)
+                        };
+                    } else {
+                        display_titles[i] = p1.to_string_lossy().into_owned();
+                    }
+                } else {
+                    display_titles[i] = p1
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                }
+            } else {
+                let title = if i == self.active_tab {
+                    if self.base_title.is_empty() {
+                        "Безымянный"
+                    } else {
+                        &self.base_title
+                    }
+                } else if self.tabs[i].base_title.is_empty() {
+                    "Безымянный"
+                } else {
+                    &self.tabs[i].base_title
+                };
+                display_titles[i] = title.to_string();
+            }
+        }
+        display_titles
+    }
+
+    fn reveal_tab_now(&mut self, idx: usize) {
+        if !self.is_ide_mode || idx >= self.tabs.len() {
+            return;
+        }
+
+        let titles = self.tab_display_titles();
+        if let Some(r) = self.renderer.as_mut() {
+            let s = r.scale_factor;
+            let tab_x = (48.0 * s + self.ide_panel.left_width * s).round() + 1.0;
+            let viewport_w = (r.width - tab_x).max(0.0);
+            if viewport_w <= 0.0 {
+                return;
+            }
+
+            let tab_pad = 16.0 * s;
+            let icon_size_tab = 20.0 * s;
+            let mut tab_left = 0.0;
+            let mut total_w = 0.0;
+            for (i, title) in titles.iter().enumerate() {
+                let title_w = r.measure_ui_width(title, 1.0);
+                let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
+                if i < idx {
+                    tab_left += tab_w;
+                }
+                total_w += tab_w;
+            }
+
+            let title_w = r.measure_ui_width(&titles[idx], 1.0);
+            let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
+            let tab_right = tab_left + tab_w;
+            let max_scroll = (total_w - viewport_w).max(0.0);
+            let margin = (12.0 * s).min(viewport_w * 0.25);
+            let mut target = self.tab_scroll.target;
+
+            if tab_left < target + margin {
+                target = tab_left - margin;
+            } else if tab_right > target + viewport_w - margin {
+                target = tab_right + margin - viewport_w;
+            }
+
+            let target = target.clamp(0.0, max_scroll);
+            self.tab_scroll.target = target;
+            self.tab_scroll.current = target;
+        }
+    }
+
+    fn reveal_active_tab_now(&mut self) {
+        self.reveal_tab_now(self.active_tab);
+    }
+
     pub fn switch_to_tab(&mut self, new_idx: usize) {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
@@ -299,6 +424,7 @@ impl App {
         self.autocomplete_active = false;
         self.show_welcome =
             self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+        self.reveal_active_tab_now();
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
@@ -382,6 +508,7 @@ impl App {
 
         self.autocomplete_active = false;
         self.show_welcome = false;
+        self.reveal_active_tab_now();
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
@@ -456,19 +583,28 @@ impl App {
             return;
         }
 
+        let mut matching_tab = None;
         for (i, tab) in self.tabs.iter().enumerate() {
             if i == self.active_tab {
                 if self.file_path.as_ref() == Some(&path) {
-                    return;
+                    matching_tab = Some(i);
+                    break;
                 }
             } else {
                 if tab.file_path.as_ref() == Some(&path) {
-                    if wait_highlight {
-                        self.switch_to_tab(i);
-                    }
-                    return;
+                    matching_tab = Some(i);
+                    break;
                 }
             }
+        }
+
+        if let Some(i) = matching_tab {
+            if i == self.active_tab {
+                self.reveal_active_tab_now();
+            } else if wait_highlight {
+                self.switch_to_tab(i);
+            }
+            return;
         }
 
         if self.tabs.is_empty()
@@ -480,6 +616,7 @@ impl App {
         }
 
         self.load_file_internal(path, add_to_history, wait_highlight);
+        self.reveal_active_tab_now();
     }
     pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,

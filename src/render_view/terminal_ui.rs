@@ -3,6 +3,14 @@ use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 use glow::HasContext;
 
+pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> (f32, f32) {
+    let tab_top_pad = 6.0 * scale;
+    let tab_h = 32.0 * scale;
+    let tab_bottom_gap = 4.0 * scale;
+    let body_offset = tab_top_pad + tab_h + tab_bottom_gap;
+    (content_y + body_offset, (content_h - body_offset).max(0.0))
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_terminal_panel(
@@ -151,8 +159,7 @@ impl Renderer {
             my,
         );
 
-        let term_content_y = cy + term_tab_h + 4.0 * s;
-        let term_content_h = content_h - (term_content_y - content_y);
+        let (term_content_y, term_content_h) = terminal_body_rect(content_y, content_h, s);
 
         let active = ide_panel.active_terminal;
         if let Some(term) = ide_panel.terminals.get(active) {
