@@ -1,4 +1,3 @@
-
 use super::{HoverLineKindPublic, highlight_hover_text};
 
 fn rendered_color_at(spans: &[crate::highlighter::ColorSpan], offset: usize) -> [f32; 4] {

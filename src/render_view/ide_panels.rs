@@ -1,8 +1,8 @@
-use crate::renderer::Renderer;
 use crate::render_view::{
     cursor_line_and_character, diagnostic_error_warning_counts, ide_bottom_panel_y,
     ide_status_bar_height, ide_status_bar_y, language_display_name_for_ext, selected_char_count,
 };
+use crate::renderer::Renderer;
 use crate::widgets::IconButton;
 use glow::HasContext;
 
@@ -120,7 +120,11 @@ impl Renderer {
         let sb_w = 48.0 * s;
         let blocking_bottom_y =
             if ide_panel.any_bottom_open() && ide_panel.bottom_panel_blocks_editor_hover() {
-                Some(ide_bottom_panel_y(real_height, ide_panel.bottom_height * s, s))
+                Some(ide_bottom_panel_y(
+                    real_height,
+                    ide_panel.bottom_height * s,
+                    s,
+                ))
             } else {
                 None
             };
@@ -890,13 +894,7 @@ impl Renderer {
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
         let error_text_x = diag_x + icon_sz + icon_gap;
-        self.draw_string_scaled(
-            &scratch,
-            error_text_x,
-            text_y,
-            self.theme.fg,
-            text_scale,
-        );
+        self.draw_string_scaled(&scratch, error_text_x, text_y, self.theme.fg, text_scale);
 
         let warn_icon_x = error_text_x + error_w + item_gap;
         self.draw_atlas_icon(

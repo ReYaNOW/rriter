@@ -31,11 +31,7 @@ fn panel_scroll_rect(
         )
     } else {
         let tab_h = 32.0 * scale;
-        let panel_y = crate::render_view::ide_bottom_panel_y(
-            window_height,
-            bottom_height,
-            scale,
-        );
+        let panel_y = crate::render_view::ide_bottom_panel_y(window_height, bottom_height, scale);
         (
             sidebar_w,
             panel_y + 1.0 + tab_h,

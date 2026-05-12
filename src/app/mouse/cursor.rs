@@ -64,9 +64,7 @@ fn resized_bottom_height(py: f32, window_height: f32, scale: f32) -> f32 {
     let status_bar_h = crate::render_view::ide_status_bar_height(scale);
     let available_h = (window_height - status_bar_h).max(0.0);
     let max_h = (available_h / scale) - 50.0;
-    ((available_h - py) / scale)
-        .max(60.0)
-        .min(max_h.max(60.0))
+    ((available_h - py) / scale).max(60.0).min(max_h.max(60.0))
 }
 
 fn cursor_position_allows_editor_hover(

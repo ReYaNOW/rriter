@@ -685,9 +685,7 @@ pub struct App {
     pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
-    pub file_tree_rx: Option<
-        std::sync::mpsc::Receiver<crate::app::file_tree::FileTreeScanMessage>,
-    >,
+    pub file_tree_rx: Option<std::sync::mpsc::Receiver<crate::app::file_tree::FileTreeScanMessage>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
@@ -818,11 +816,19 @@ mod tests {
         assert!(!panels.bottom_panel_blocks_editor_hover());
         assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
 
-        if let Some(slot) = panels.slots.iter_mut().find(|slot| slot.id == PanelId::LspServers) {
+        if let Some(slot) = panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::LspServers)
+        {
             slot.group = PanelGroup::Bottom;
             slot.open = true;
         }
-        if let Some(slot) = panels.slots.iter_mut().find(|slot| slot.id == PanelId::Terminal) {
+        if let Some(slot) = panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::Terminal)
+        {
             slot.open = false;
         }
         panels.bottom_height = 180.0;

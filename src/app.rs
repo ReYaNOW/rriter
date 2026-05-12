@@ -1349,9 +1349,7 @@ impl App {
             self.lsp_actions_menu = None;
             self.last_sent_version = self.editor.version;
         }
-        if needs_redraw
-            && let Some(w) = self.window.as_ref()
-        {
+        if needs_redraw && let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
         needs_redraw

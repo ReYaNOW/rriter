@@ -896,8 +896,9 @@ impl ApplicationHandler for App {
                                             && cache.text_len == popup.text.len()
                                     });
                                 if !cache_valid {
-                                    popup.layout_cache =
-                                        Some(r.build_hover_popup_layout(&popup, max_text_w, line_h));
+                                    popup.layout_cache = Some(
+                                        r.build_hover_popup_layout(&popup, max_text_w, line_h),
+                                    );
                                 }
                                 let box_w = popup
                                     .layout_cache
@@ -1089,11 +1090,8 @@ impl ApplicationHandler for App {
                         }
                     }
                     if panel_bottom_h > 0.0 && ide_resize_cursor.is_none() {
-                        let resize_y = crate::render_view::ide_bottom_panel_y(
-                            wh,
-                            panel_bottom_h,
-                            s,
-                        );
+                        let resize_y =
+                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
                         if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
                             ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                         }

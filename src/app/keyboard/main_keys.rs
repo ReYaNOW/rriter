@@ -276,9 +276,7 @@ impl App {
                 }
             }
 
-            if self.is_ide_mode
-                && alt
-                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyW)
+            if self.is_ide_mode && alt && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyW)
             {
                 apply_problems_alt_w_shortcut(&mut self.ide_panel);
                 crate::save_panel_state(&self.ide_panel);

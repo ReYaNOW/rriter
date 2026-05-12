@@ -37,10 +37,7 @@ impl Renderer {
             )
             .unwrap_or(-1.0);
             let mut effective_bottom_h = panel_bottom_h;
-            if is_ide_mode
-                && ide_panel.is_open(crate::app::PanelId::Terminal)
-                && !is_ui_disabled
-            {
+            if is_ide_mode && ide_panel.is_open(crate::app::PanelId::Terminal) && !is_ui_disabled {
                 effective_bottom_h = 0.0;
             }
             let blocking_bottom_y = if effective_bottom_h > 0.0 {

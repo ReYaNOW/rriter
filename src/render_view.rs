@@ -294,14 +294,8 @@ mod tests {
     #[test]
     fn editor_view_height_excludes_status_and_bottom_panel() {
         assert_eq!(editor_view_height(900.0, 44.0, 0.0, true, 1.0), 826.0);
-        assert_eq!(
-            editor_view_height(900.0, 44.0, 240.0, true, 1.0),
-            586.0
-        );
-        assert_eq!(
-            editor_view_height(900.0, 0.0, 240.0, false, 1.0),
-            660.0
-        );
+        assert_eq!(editor_view_height(900.0, 44.0, 240.0, true, 1.0), 586.0);
+        assert_eq!(editor_view_height(900.0, 0.0, 240.0, false, 1.0), 660.0);
         assert_eq!(editor_view_height(20.0, 44.0, 240.0, true, 1.0), 0.0);
     }
 
@@ -1554,8 +1548,16 @@ impl Renderer {
             && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
 
         if is_ide_mode {
-            let overlay_mx = if mouse_in_blocking_bottom_panel { -1.0 } else { mx };
-            let overlay_my = if mouse_in_blocking_bottom_panel { -1.0 } else { my };
+            let overlay_mx = if mouse_in_blocking_bottom_panel {
+                -1.0
+            } else {
+                mx
+            };
+            let overlay_my = if mouse_in_blocking_bottom_panel {
+                -1.0
+            } else {
+                my
+            };
             wants_pointer |= self.draw_file_tree_overlays(
                 ide_panel,
                 ui_registry,

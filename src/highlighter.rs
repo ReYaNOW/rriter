@@ -304,9 +304,9 @@ fn collect_param_scopes(
         while exploring {
             let c_node = t_cursor.node();
             if c_node.kind() == "identifier" {
-                if let Ok(s) = std::str::from_utf8(
-                    &text.as_bytes()[c_node.start_byte()..c_node.end_byte()],
-                ) {
+                if let Ok(s) =
+                    std::str::from_utf8(&text.as_bytes()[c_node.start_byte()..c_node.end_byte()])
+                {
                     params_set.insert(s.to_string());
                 }
             }
@@ -1183,14 +1183,13 @@ impl Highlighter {
                                     }
                                 }
 
-                                let byte_range =
-                                    if let (Some(sb), Some(eb)) =
-                                        (final_edit_start_byte, final_edit_end_byte)
-                                    {
-                                        Some(sb.saturating_sub(1000)..(eb + 1000).min(text.len()))
-                                    } else {
-                                        None
-                                    };
+                                let byte_range = if let (Some(sb), Some(eb)) =
+                                    (final_edit_start_byte, final_edit_end_byte)
+                                {
+                                    Some(sb.saturating_sub(1000)..(eb + 1000).min(text.len()))
+                                } else {
+                                    None
+                                };
                                 collect_query_highlight_spans(
                                     &lang,
                                     lang_name,

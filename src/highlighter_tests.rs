@@ -1,4 +1,3 @@
-
 use super::*;
 use std::time::Duration;
 
@@ -238,11 +237,8 @@ fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
         "annotation type str must not shadow builtin as variable"
     );
     assert!(
-        highlighter
-            .completions
-            .iter()
-            .any(|item| item.word == "str"
-                && matches!(item.kind, SymbolKind::Class | SymbolKind::Builtin)),
+        highlighter.completions.iter().any(|item| item.word == "str"
+            && matches!(item.kind, SymbolKind::Class | SymbolKind::Builtin)),
         "annotation type str must stay class/builtin completion"
     );
 }

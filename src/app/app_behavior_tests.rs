@@ -1,4 +1,3 @@
-
 use super::*;
 use arboard::Clipboard;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -767,9 +766,7 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
         scope_end: usize::MAX,
         module: Some("contextlib".to_string()),
         module_path: None,
-        detail: Some(
-            "Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string(),
-        ),
+        detail: Some("Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string()),
         insert_text: None,
         text_edit: None,
         additional_text_edits: Vec::new(),
@@ -1691,7 +1688,12 @@ fn tree_sitter_autocomplete_prioritizes_scoped_self() {
     app.highlighter.completions = vec![
         completion("set", SymbolKind::Builtin, 0, usize::MAX),
         completion("str", SymbolKind::Builtin, 0, usize::MAX),
-        completion("self", SymbolKind::Parameter, text.find("self").unwrap(), text.len()),
+        completion(
+            "self",
+            SymbolKind::Parameter,
+            text.find("self").unwrap(),
+            text.len(),
+        ),
     ];
 
     app.update_autocomplete();
@@ -1875,7 +1877,8 @@ fn autocomplete_shows_self_owner_for_current_class() {
         return;
     };
     app.file_extension = "py".to_string();
-    app.editor = editor_with("class BookingService:\n    async def create_booking(self):\n        s");
+    app.editor =
+        editor_with("class BookingService:\n    async def create_booking(self):\n        s");
     app.highlighter.completions = vec![completion("self", SymbolKind::Parameter, 50, 80)];
 
     app.update_autocomplete();
@@ -2085,9 +2088,7 @@ fn ty_context_initial_overload_completion_is_function_before_detail_hover() {
         label: "asynccontextmanager".to_string(),
         kind: SymbolKind::Variable,
         module: Some("contextlib".to_string()),
-        detail: Some(
-            "Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string(),
-        ),
+        detail: Some("Overload[[**_P, _T_co](func: (**_P) -> AsyncIterator[_T_co])]".to_string()),
         insert_text: None,
         text_edit: None,
         additional_text_edits: Vec::new(),
@@ -2155,9 +2156,11 @@ fn ty_context_initial_keywords_and_imported_config_have_stable_kinds() {
     app.autocomplete_selected_idx = config_idx;
     app.refresh_autocomplete_detail_popup();
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
-    assert!(popup
-        .text
-        .starts_with("[[MODULE]] car_wash.config\n(variable) config: Config"));
+    assert!(
+        popup
+            .text
+            .starts_with("[[MODULE]] car_wash.config\n(variable) config: Config")
+    );
 }
 
 #[test]
@@ -2166,9 +2169,7 @@ fn ty_context_imported_router_variable_shows_import_module_and_variable_detail()
         return;
     };
     app.file_extension = "py".to_string();
-    app.editor = editor_with(
-        "from car_wash.domains.cars.controller import cars_router\ncar",
-    );
+    app.editor = editor_with("from car_wash.domains.cars.controller import cars_router\ncar");
     app.autocomplete_mode = AutocompleteMode::TyContext;
 
     app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
@@ -2254,9 +2255,7 @@ fn autocomplete_detail_variable_uses_source_declaration_with_middle_ellipsis() {
 
     app.file_extension = "py".to_string();
     app.ide_workspaces = vec![root.clone()];
-    app.editor = editor_with(
-        "from car_wash.domains.cars.controller import cars_router\ncar",
-    );
+    app.editor = editor_with("from car_wash.domains.cars.controller import cars_router\ncar");
     app.autocomplete_active = true;
     app.autocomplete_mode = AutocompleteMode::TyContext;
     app.autocomplete_options = vec![(
@@ -2279,9 +2278,9 @@ fn autocomplete_detail_variable_uses_source_declaration_with_middle_ellipsis() {
 
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert!(
-        popup.text.starts_with(
-            "[[MODULE]] car_wash.domains.cars\nVariable cars_router of controller\n"
-        ),
+        popup
+            .text
+            .starts_with("[[MODULE]] car_wash.domains.cars\nVariable cars_router of controller\n"),
         "unexpected popup text: {}",
         popup.text
     );

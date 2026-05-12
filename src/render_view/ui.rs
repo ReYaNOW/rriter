@@ -160,9 +160,14 @@ fn autocomplete_source_label<'a>(source: &'a str, word: &str) -> Option<Cow<'a, 
 fn autocomplete_source_is_type_label(source: &str) -> bool {
     let source = source.trim();
     !source.contains('.')
-        && source.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && source
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
         && source.chars().any(|c| c.is_ascii_lowercase())
-        && source.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && source
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn autocomplete_row_source<'a>(item: &'a crate::app::AutocompleteItem) -> Option<&'a str> {

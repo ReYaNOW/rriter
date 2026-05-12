@@ -308,10 +308,7 @@ fn autocomplete_source_variable_detail_from_text(
     None
 }
 
-fn autocomplete_module_source_path(
-    module_path: &str,
-    workspaces: &[PathBuf],
-) -> Option<PathBuf> {
+fn autocomplete_module_source_path(module_path: &str, workspaces: &[PathBuf]) -> Option<PathBuf> {
     if !completion_source_is_module_path(module_path) {
         return None;
     }
@@ -503,14 +500,10 @@ impl App {
         natural_h: f32,
         max_h: f32,
     ) -> (f32, f32) {
-        self.autocomplete_detail_min_width = self
-            .autocomplete_detail_min_width
-            .max(natural_w);
+        self.autocomplete_detail_min_width = self.autocomplete_detail_min_width.max(natural_w);
         let capped_h = natural_h.min(max_h);
-        self.autocomplete_detail_min_height = self
-            .autocomplete_detail_min_height
-            .min(max_h)
-            .max(capped_h);
+        self.autocomplete_detail_min_height =
+            self.autocomplete_detail_min_height.min(max_h).max(capped_h);
         (
             self.autocomplete_detail_min_width,
             self.autocomplete_detail_min_height,
@@ -926,10 +919,7 @@ impl App {
         true
     }
 
-    pub fn remember_autocomplete_detail_cache(
-        &mut self,
-        items: &[crate::lsp::LspCompletionItem],
-    ) {
+    pub fn remember_autocomplete_detail_cache(&mut self, items: &[crate::lsp::LspCompletionItem]) {
         let (Some(path), Some(context_key)) = (
             self.autocomplete_detail_request_path.clone(),
             self.autocomplete_detail_context_key.clone(),
@@ -1189,7 +1179,10 @@ impl App {
         }
     }
 
-    pub fn remember_ty_autocomplete_cache(&mut self, mut items: Vec<crate::lsp::LspCompletionItem>) {
+    pub fn remember_ty_autocomplete_cache(
+        &mut self,
+        mut items: Vec<crate::lsp::LspCompletionItem>,
+    ) {
         let (Some(mode), Some(path), Some(context_key)) = (
             self.autocomplete_pending_request_mode,
             self.autocomplete_pending_request_path.clone(),
@@ -1255,18 +1248,16 @@ impl App {
         let receiver_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
             && member_dot_context)
             .then(|| {
-                python_member_dot_receiver(&current_text, self.editor.cursor).and_then(
-                    |receiver| {
-                        if matches!(receiver, "self" | "cls") {
-                            return local_self_owner.clone();
-                        }
-                        let imported = imported_modules
-                            .as_ref()
-                            .is_some_and(|imports| imports.contains_key(receiver));
-                        (imported || is_class_like_type_name(receiver))
-                            .then(|| receiver.rsplit('.').next().unwrap_or(receiver).to_string())
-                    },
-                )
+                python_member_dot_receiver(&current_text, self.editor.cursor).and_then(|receiver| {
+                    if matches!(receiver, "self" | "cls") {
+                        return local_self_owner.clone();
+                    }
+                    let imported = imported_modules
+                        .as_ref()
+                        .is_some_and(|imports| imports.contains_key(receiver));
+                    (imported || is_class_like_type_name(receiver))
+                        .then(|| receiver.rsplit('.').next().unwrap_or(receiver).to_string())
+                })
             })
             .flatten();
         let fallback_owner = receiver_owner.as_deref().or(common_owner.as_deref());
@@ -1373,9 +1364,7 @@ impl App {
             )
         } else {
             let mut depths = FxHashMap::default();
-            if member_dot_context
-                && let Some(owner) = member_owner.as_ref()
-            {
+            if member_dot_context && let Some(owner) = member_owner.as_ref() {
                 depths.insert(owner.clone(), 0);
             }
             depths
@@ -1388,8 +1377,7 @@ impl App {
                     .is_some_and(|detail| detail.trim_start().starts_with("Overload["))
                 && let (Some(owner), Some(source)) =
                     (member_owner.as_deref(), member_owner_source.as_deref())
-                && let Some(detail) =
-                    python_class_method_overload_detail(source, owner, &item.word)
+                && let Some(detail) = python_class_method_overload_detail(source, owner, &item.word)
             {
                 item.detail = Some(detail);
             }
@@ -1602,7 +1590,10 @@ impl App {
                 "Autocomplete update_ty normalized: prefix={:?} python_context={} imports={} items={}",
                 prefix,
                 python_context,
-                imported_modules.as_ref().map(|imports| imports.len()).unwrap_or(0),
+                imported_modules
+                    .as_ref()
+                    .map(|imports| imports.len())
+                    .unwrap_or(0),
                 sample
             );
         }
@@ -1835,13 +1826,12 @@ impl App {
         }
 
         matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
-            let scoped_self_priority = if self.file_extension == "py"
-                && comp.kind == SymbolKind::Parameter
-            {
-                python_scoped_self_priority(&comp.word)
-            } else {
-                2
-            };
+            let scoped_self_priority =
+                if self.file_extension == "py" && comp.kind == SymbolKind::Parameter {
+                    python_scoped_self_priority(&comp.word)
+                } else {
+                    2
+                };
             let type_priority = match comp.kind {
                 SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property => 0,
                 SymbolKind::Function => 1,

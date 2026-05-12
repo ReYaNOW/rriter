@@ -580,10 +580,12 @@ mod tests {
             Some(2),
             std::time::Duration::from_millis(10),
         ));
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start <= 0 && span.end >= 2 && span.color == DRACULA_PURPLE));
+        assert!(
+            highlighter
+                .spans
+                .iter()
+                .any(|span| span.start <= 0 && span.end >= 2 && span.color == DRACULA_PURPLE)
+        );
     }
 
     #[test]
@@ -627,10 +629,12 @@ mod tests {
             Some(3),
             std::time::Duration::from_millis(10),
         ));
-        assert!(!highlighter
-            .spans
-            .iter()
-            .any(|span| span.start <= 0 && span.end >= 3 && span.color == DRACULA_PURPLE));
+        assert!(
+            !highlighter
+                .spans
+                .iter()
+                .any(|span| span.start <= 0 && span.end >= 3 && span.color == DRACULA_PURPLE)
+        );
     }
 
     #[test]

@@ -220,8 +220,7 @@ impl App {
                         ) {
                             let (_, by, _, box_h) = rect;
                             let track_h = box_h - 16.0 * s;
-                            let thumb_h =
-                                (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
+                            let thumb_h = (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
                             let thumb_y = by
                                 + 8.0 * s
                                 + (popup.scroll.current / max_scroll) * (track_h - thumb_h);
@@ -233,8 +232,7 @@ impl App {
                                 popup.scroll.drag_offset = thumb_h / 2.0;
                                 let ratio = (my - by - 8.0 * s - popup.scroll.drag_offset)
                                     / (track_h - thumb_h).max(0.0001);
-                                popup.scroll.target =
-                                    (ratio * max_scroll).clamp(0.0, max_scroll);
+                                popup.scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
                                 popup.scroll.current = popup.scroll.target;
                                 popup.scroll.is_dragging = true;
                             }
@@ -508,8 +506,7 @@ impl App {
                     } else {
                         let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                         let tab_h = 32.0 * s;
-                        let panel_y =
-                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
+                        let panel_y = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
                         (
                             sb_w,
                             panel_y + 1.0 + tab_h,
@@ -564,20 +561,18 @@ impl App {
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let resize_bottom_limit =
-                        if panel_bottom_h > 0.0 && self.ide_panel.bottom_panel_blocks_editor_hover()
-                        {
-                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s)
-                        } else {
-                            wh
-                        };
+                    let resize_bottom_limit = if panel_bottom_h > 0.0
+                        && self.ide_panel.bottom_panel_blocks_editor_hover()
+                    {
+                        crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s)
+                    } else {
+                        wh
+                    };
 
                     let mut manual_resize = false;
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s
-                            && my >= 0.0
-                            && my < resize_bottom_limit
+                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < resize_bottom_limit
                         {
                             self.ide_panel.is_resizing_left = true;
                             manual_resize = true;

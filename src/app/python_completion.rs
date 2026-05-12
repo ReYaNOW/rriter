@@ -326,13 +326,15 @@ pub(crate) fn assign_builtin_completion_module(item: &mut AutocompleteItem) {
 
 pub(crate) fn python_builtin_completion_kind(word: &str) -> Option<SymbolKind> {
     match word {
-        "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool" | "float" | "type"
-        | "map" | "filter" | "range" | "reversed" | "super" | "Exception" | "ValueError"
-        | "TypeError" | "KeyError" | "IndexError" | "AttributeError" | "RuntimeError"
-        | "KeyboardInterrupt" => Some(SymbolKind::Class),
+        "int" | "str" | "list" | "dict" | "set" | "tuple" | "bool" | "float" | "type" | "map"
+        | "filter" | "range" | "reversed" | "super" | "Exception" | "ValueError" | "TypeError"
+        | "KeyError" | "IndexError" | "AttributeError" | "RuntimeError" | "KeyboardInterrupt" => {
+            Some(SymbolKind::Class)
+        }
         "print" | "len" | "sum" | "min" | "max" | "abs" | "isinstance" | "issubclass"
-        | "hasattr" | "getattr" | "setattr" | "delattr" | "dir" | "enumerate" | "zip"
-        | "open" => Some(SymbolKind::Function),
+        | "hasattr" | "getattr" | "setattr" | "delattr" | "dir" | "enumerate" | "zip" | "open" => {
+            Some(SymbolKind::Function)
+        }
         _ => None,
     }
 }
@@ -588,16 +590,11 @@ fn completion_detail_type_name(detail: &str) -> Option<&str> {
             .and_then(|rest| rest.strip_suffix("'>"))
             .map(str::trim)
             .filter(|name| !name.is_empty())
-            .or_else(|| {
-                (is_class_like_type_name(part) && !part.contains('[')).then_some(part)
-            })
+            .or_else(|| (is_class_like_type_name(part) && !part.contains('[')).then_some(part))
     })
 }
 
-fn autocomplete_detail_parent_module_path<'a>(
-    item: &AutocompleteItem,
-    source: &'a str,
-) -> &'a str {
+fn autocomplete_detail_parent_module_path<'a>(item: &AutocompleteItem, source: &'a str) -> &'a str {
     let source = normalized_completion_source(source);
     let strip_label = |label: &str| {
         let label = label.rsplit('.').next().unwrap_or(label).trim();
@@ -879,9 +876,7 @@ Get a named attribute from an object; getattr(x, 'y') is equivalent to x.y. \
 When a default argument is given, it is returned when the attribute doesn't \
 exist; without it, an exception is raised in that case.",
         ),
-        "asynccontextmanager"
-            if module == "contextlib" || module.starts_with("contextlib.") =>
-        {
+        "asynccontextmanager" if module == "contextlib" || module.starts_with("contextlib.") => {
             Some(
                 "def asynccontextmanager(func: (ParamSpec(\"_P\")) -> AsyncIterator[_T_co])\n\
   -> (ParamSpec(\"_P\")) -> Any\n\
@@ -918,7 +913,11 @@ pub(crate) fn python_member_dot_receiver(text: &str, cursor: usize) -> Option<&s
     }
     let dot = idx - 1;
     let mut start = dot;
-    while start > 0 && bytes.get(start - 1).is_some_and(|&b| is_python_ident_byte(b)) {
+    while start > 0
+        && bytes
+            .get(start - 1)
+            .is_some_and(|&b| is_python_ident_byte(b))
+    {
         start -= 1;
     }
     text.get(start..dot).filter(|s| !s.is_empty())
@@ -1154,7 +1153,10 @@ pub(crate) fn python_enclosing_class_before_cursor(text: &str, cursor: usize) ->
             continue;
         }
         if !trimmed.is_empty() {
-            while classes.last().is_some_and(|(class_indent, _)| indent <= *class_indent) {
+            while classes
+                .last()
+                .is_some_and(|(class_indent, _)| indent <= *class_indent)
+            {
                 classes.pop();
             }
             if let Some(name) = class_header_name(line) {

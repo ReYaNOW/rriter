@@ -88,6 +88,38 @@ fn drag_autoscroll_editor_bottom(window_height: f32, editor_top: f32, scale: f32
     (window_height - bottom_gap).max(editor_top + 24.0 * scale)
 }
 
+fn terminal_content_bounds(window_height: f32, bottom_height: f32, scale: f32) -> (f32, f32) {
+    let bottom_h = bottom_height * scale;
+    let tab_h = 32.0 * scale;
+    let content_y =
+        crate::render_view::ide_bottom_panel_y(window_height, bottom_h, scale) + 1.0 + tab_h;
+    let content_h = bottom_h - 1.0 - tab_h;
+    (content_y + 32.0 * scale, content_h - 32.0 * scale)
+}
+
+fn terminal_drag_cell(
+    mx: f32,
+    my: f32,
+    panel_x: f32,
+    term_y: f32,
+    term_h: f32,
+    scroll_offset: f32,
+    char_w: f32,
+    char_h: f32,
+    scale: f32,
+    cols: usize,
+    total_lines: usize,
+) -> (usize, usize) {
+    let offset_from_bottom =
+        (term_y + term_h - 8.0 * scale - my + scroll_offset) / char_h.max(0.0001);
+    let cell_y = total_lines
+        .saturating_sub(1)
+        .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
+        .min(total_lines.saturating_sub(1));
+    let cell_x = ((mx - panel_x) / char_w.max(0.0001)).floor().max(0.0) as usize;
+    (cell_x.min(cols.saturating_sub(1)), cell_y)
+}
+
 fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Instant {
     let mut wake_at = base;
     if let Some(t) = a {
@@ -450,6 +482,61 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         let speed = if app.show_search { 20.0 } else { 7.0 };
         app.search_anim_y += search_diff * speed * dt;
         needs_redraw = true;
+    }
+
+    if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings {
+        if let Some(w) = app.window.as_ref() {
+            if let Some(r) = app.renderer.as_mut() {
+                let s = r.scale_factor;
+                let wh = w.inner_size().height as f32;
+                let mx = r.last_mouse_x;
+                let my = r.last_mouse_y;
+                let panel_x = 48.0 * s + 10.0 * s;
+                let char_w = r.char_advance('A') * 1.05;
+                let char_h = r.line_height * 1.05;
+                let (term_y, term_h) = terminal_content_bounds(wh, app.ide_panel.bottom_height, s);
+                let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
+                let drag_delta = drag_autoscroll_delta(my, term_y, term_y + term_h, edge);
+
+                if drag_delta != 0.0 {
+                    let active = app.ide_panel.active_terminal;
+                    if let Some(term) = app.ide_panel.terminals.get_mut(active) {
+                        let mut grid = term.grid.lock().unwrap();
+                        if !grid.is_alt {
+                            let total_lines = grid.scrollback.len() + grid.lines.len();
+                            let max_scroll = ((total_lines as f32 * char_h) - term_h).max(0.0);
+                            if max_scroll > 0.0 && total_lines > 0 {
+                                let speed = drag_autoscroll_speed(drag_delta, drag_delta < 0.0);
+                                term.scroll_y.target = (term.scroll_y.target
+                                    - drag_delta.signum() * speed * dt)
+                                    .clamp(0.0, max_scroll);
+                                term.scroll_y.anim_speed = 15.0;
+
+                                let (cell_x, cell_y) = terminal_drag_cell(
+                                    mx,
+                                    my,
+                                    panel_x,
+                                    term_y,
+                                    term_h,
+                                    term.scroll_y.target.min(max_scroll).round(),
+                                    char_w,
+                                    char_h,
+                                    s,
+                                    grid.cols,
+                                    total_lines,
+                                );
+                                if let Some((sx, sy, _, _)) = grid.selection {
+                                    grid.selection = Some((sx, sy, cell_x, cell_y));
+                                } else {
+                                    grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                                }
+                                needs_redraw = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if app.is_dragging && !app.ide_panel.is_dragging_terminal && !app.scroll_y.is_dragging {
