@@ -94,6 +94,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
+        let closed_git_menu = self.ide_panel.git.commit_menu_open;
+        self.ide_panel.git.commit_menu_open = false;
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let shift = self.modifiers.shift_key();
@@ -269,9 +271,15 @@ impl App {
                     }
                     total_h += 30.0 * s;
                     total_h += if workspace.error.is_some() {
-                        26.0 * s
+                        crate::render_view::tree_ui::TREE_ROW_H * s
                     } else {
-                        workspace.tree.len() as f32 * 26.0 * s
+                        crate::app::git_panel::git_visible_tree_row_count(
+                            workspace.workspace_idx,
+                            &workspace.tree,
+                            &self.ide_panel.git.collapsed_dirs,
+                        ) as f32
+                            * crate::render_view::tree_ui::TREE_ROW_H
+                            * s
                     };
                 }
                 let max_scroll = (total_h - list_h).max(0.0);
@@ -279,6 +287,9 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
+        }
+        if closed_git_menu {
+            self.window.as_ref().unwrap().request_redraw();
         }
 
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {

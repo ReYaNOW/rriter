@@ -67,7 +67,7 @@ fn file_tree_menu_separator_count(entries: &[crate::app::file_tree::FileTreeMenu
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
-    fn draw_tree_label_clipped(
+    pub(crate) fn draw_tree_label_clipped(
         &mut self,
         text: &str,
         x: f32,
@@ -116,6 +116,7 @@ impl Renderer {
         real_height: f32,
         panel_left_w: f32,
         is_ui_disabled: bool,
+        blink_alpha: f32,
     ) {
         let sb_w = 48.0 * s;
         let blocking_bottom_y =
@@ -375,6 +376,7 @@ impl Renderer {
                         ui_registry,
                         hit_mx,
                         hit_my,
+                        blink_alpha,
                     );
                 }
             }
@@ -394,13 +396,13 @@ impl Renderer {
                     );
                 }
 
-                let row_h = 28.0 * s;
-                let indent_w = 18.0 * s;
+                let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
+                let indent_w = crate::render_view::tree_ui::TREE_INDENT_W * s;
                 let scroll = ide_panel.explorer_scroll.current.round();
                 let content_h = real_height - title_h;
                 let total_nodes = ide_panel.file_tree_nodes.len();
 
-                let tree_text_scale = 1.0;
+                let tree_text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
                 if total_nodes == 0 {
                     let hint = "Нет папок в проекте";
                     let tw = self.measure_ui_width(hint, tree_text_scale);
@@ -485,7 +487,6 @@ impl Renderer {
                             }
                         }
 
-                        let text_y = row_y + row_h / 2.0 + 5.5 * s;
                         let color: [f32; 4] = if node.is_ignored {
                             [0.973, 0.584, 0.502, 0.8]
                         } else if node.is_dir {
@@ -498,10 +499,7 @@ impl Renderer {
                         let icon_y = row_y + (row_h - icon_size) / 2.0;
 
                         if node.is_dir {
-                            // Стрелка ▶/▼ — такая же как fold-стрелки в гаттере
-                            let arrow_str = if node.is_expanded { "▼" } else { "▶" };
                             let arrow_x = indent_x - 2.0 * s;
-                            let arrow_y = row_y + row_h / 2.0 + 5.5 * s;
                             if !file_tree_overlay_open {
                                 ui_registry.register_rect(
                                     crate::ui_system::UiId::FileTreeArrow(i),
@@ -518,18 +516,17 @@ impl Renderer {
                             } else {
                                 [0.78, 0.68, 1.0, 0.7]
                             };
-                            self.draw_string_scaled(arrow_str, arrow_x, arrow_y, arrow_color, 1.0);
-                            // Иконка папки — правее стрелки
-                            let dir_icon_x = indent_x + 18.0 * s;
-                            self.draw_file_icon(node.icon_key, true, dir_icon_x, icon_y, icon_size);
-                            let text_x = dir_icon_x + icon_size + 4.0 * s;
-                            let max_text_w = (panel_x + panel_left_w - 10.0 * s - text_x).max(0.0);
-                            let label_w = self.draw_tree_label_clipped(
+                            let label = self.draw_tree_dir_entry(
                                 &node.name,
-                                text_x,
-                                text_y,
-                                max_text_w,
+                                node.icon_key,
+                                indent_x,
+                                row_y,
+                                row_h,
+                                panel_x + panel_left_w - 10.0 * s,
+                                node.is_expanded,
                                 color,
+                                arrow_color,
+                                s,
                                 tree_text_scale,
                                 &mut label_scratch,
                             );
@@ -539,7 +536,7 @@ impl Renderer {
                                 } else {
                                     self.theme.diag_warn
                                 };
-                                self.push_squiggle(text_x, text_y + 2.0 * s, label_w, sq_color);
+                                self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                             }
                         } else {
                             let file_icon_x = indent_x + 10.0 * s;
@@ -551,13 +548,14 @@ impl Renderer {
                                 icon_size,
                             );
                             let text_x = file_icon_x + icon_size + 4.0 * s;
-                            let max_text_w = (panel_x + panel_left_w - 10.0 * s - text_x).max(0.0);
-                            let label_w = self.draw_tree_label_clipped(
+                            let label = self.draw_tree_leaf_label(
                                 &node.name,
                                 text_x,
-                                text_y,
-                                max_text_w,
+                                row_y,
+                                row_h,
+                                panel_x + panel_left_w - 10.0 * s,
                                 color,
+                                s,
                                 tree_text_scale,
                                 &mut label_scratch,
                             );
@@ -567,7 +565,7 @@ impl Renderer {
                                 } else {
                                     self.theme.diag_warn
                                 };
-                                self.push_squiggle(text_x, text_y + 2.0 * s, label_w, sq_color);
+                                self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                             }
                         }
                     }
@@ -680,17 +678,18 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
+        blink_alpha: f32,
     ) {
         let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
         let inner_w = (panel_w - pad * 2.0).max(1.0);
         let controls_h = 92.0 * s;
         let list_y = title_h + controls_h;
         let list_h = (content_h - controls_h).max(40.0 * s);
-        let row_h = 26.0 * s;
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
         let workspace_h = 30.0 * s;
         let scroll = ide_panel.git.scroll.current.round();
         let mut y = list_y - scroll;
-        let text_scale = 0.9;
+        let text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
         let mut label_scratch = String::new();
 
         let input_x = panel_x + pad;
@@ -771,6 +770,20 @@ impl Renderer {
                 input_h as i32,
             );
 
+            let sel_start = ide_panel
+                .git
+                .message_editor
+                .selection_anchor
+                .unwrap_or(ide_panel.git.message_editor.cursor)
+                .min(ide_panel.git.message_editor.cursor);
+            let sel_end = ide_panel
+                .git
+                .message_editor
+                .selection_anchor
+                .unwrap_or(ide_panel.git.message_editor.cursor)
+                .max(ide_panel.git.message_editor.cursor);
+            let mut cursor_draw_x = text_start_x - self.search_scroll_x;
+
             if text.is_empty() {
                 self.draw_string_scaled(
                     "Message",
@@ -780,22 +793,8 @@ impl Renderer {
                     1.0,
                 );
             } else {
-                let sel_start = ide_panel
-                    .git
-                    .message_editor
-                    .selection_anchor
-                    .unwrap_or(ide_panel.git.message_editor.cursor)
-                    .min(ide_panel.git.message_editor.cursor);
-                let sel_end = ide_panel
-                    .git
-                    .message_editor
-                    .selection_anchor
-                    .unwrap_or(ide_panel.git.message_editor.cursor)
-                    .max(ide_panel.git.message_editor.cursor);
-
                 let mut current_x = text_start_x - self.search_scroll_x;
                 let mut byte_idx = 0usize;
-                let mut cursor_draw_x = current_x;
 
                 for c in text.chars() {
                     if byte_idx == ide_panel.git.message_editor.cursor {
@@ -831,15 +830,15 @@ impl Renderer {
                 if byte_idx == ide_panel.git.message_editor.cursor {
                     cursor_draw_x = current_x;
                 }
-                if ide_panel.git.message_focused && sel_start == sel_end {
-                    self.push_rect(
-                        cursor_draw_x,
-                        input_y + 4.0 * s,
-                        2.0 * s,
-                        input_h - 8.0 * s,
-                        self.theme.fg,
-                    );
-                }
+            }
+            if ide_panel.git.message_focused && sel_start == sel_end && blink_alpha > 0.5 {
+                self.push_rect(
+                    cursor_draw_x,
+                    input_y + 4.0 * s,
+                    2.0 * s,
+                    input_h - 8.0 * s,
+                    self.theme.fg,
+                );
             }
             self.flush();
             self.gl.disable(glow::SCISSOR_TEST);
@@ -847,7 +846,8 @@ impl Renderer {
 
         let commit_y = title_h + 44.0 * s;
         let arrow_w = (38.0 * s).min((inner_w * 0.28).max(22.0 * s));
-        let commit_main_w = (inner_w - arrow_w).max(1.0);
+        let commit_gap = (4.0 * s).min((inner_w * 0.06).max(0.0));
+        let commit_main_w = (inner_w - arrow_w - commit_gap).max(1.0);
         let commit_btn = Button {
             x: panel_x + pad,
             y: commit_y,
@@ -871,15 +871,8 @@ impl Renderer {
             s,
             false,
         );
-        self.push_rect(
-            panel_x + pad + commit_main_w,
-            commit_y + 4.0 * s,
-            1.0,
-            20.0 * s,
-            [1.0, 1.0, 1.0, 0.18],
-        );
         let menu_btn = Button {
-            x: panel_x + pad + commit_main_w,
+            x: panel_x + pad + commit_main_w + commit_gap,
             y: commit_y,
             w: arrow_w,
             h: 28.0 * s,
@@ -926,9 +919,8 @@ impl Renderer {
         let mut drew_any = false;
 
         for workspace in &ide_panel.git.snapshot.workspaces {
-            if staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
-                continue;
-            }
+            let workspace_disabled =
+                staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx);
             if staged_workspace.is_none()
                 && workspace.files.is_empty()
                 && workspace.error.is_none()
@@ -1027,43 +1019,60 @@ impl Renderer {
                 continue;
             }
 
-            for row in &workspace.tree {
+            let mut collapsed_depth = None;
+            let workspace_collapsed = ide_panel.git.collapsed_dirs.get(&workspace.workspace_idx);
+            for (row_idx, row) in workspace.tree.iter().enumerate() {
+                if let Some(depth) = collapsed_depth {
+                    if row.depth > depth {
+                        continue;
+                    }
+                    collapsed_depth = None;
+                }
                 let visible = y + row_h >= list_y && y <= list_y + list_h;
+                let row_collapsed = row.file_idx.is_none()
+                    && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_str()));
                 if visible {
-                    let indent_x = panel_x + pad + row.depth as f32 * 16.0 * s;
+                    let indent_x = panel_x
+                        + pad
+                        + row.depth as f32 * crate::render_view::tree_ui::TREE_INDENT_W * s;
                     if let Some(file_idx) = row.file_idx {
                         let Some(file) = workspace.files.get(file_idx) else {
                             y += row_h;
                             continue;
                         };
-                        let hovered = ui_registry.register_rect(
-                            crate::ui_system::UiId::GitFile(workspace.workspace_idx, file_idx),
-                            panel_x,
-                            y,
-                            panel_w,
-                            row_h,
-                            mx,
-                            my,
-                        );
+                        let hovered = if workspace_disabled {
+                            false
+                        } else {
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::GitFile(workspace.workspace_idx, file_idx),
+                                panel_x,
+                                y,
+                                panel_w,
+                                row_h,
+                                mx,
+                                my,
+                            )
+                        };
                         if hovered {
                             self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
                         }
 
                         let check_x = indent_x;
                         let check_y = y + 7.0 * s;
+                        let file_staged = file.staged && !workspace_disabled;
                         self.push_rounded_rect(
                             check_x,
                             check_y,
                             12.0 * s,
                             12.0 * s,
                             2.0 * s,
-                            if file.staged {
+                            if file_staged {
                                 [0.48, 0.82, 0.52, 0.95]
                             } else {
                                 [1.0, 1.0, 1.0, 0.12]
                             },
                         );
-                        if file.staged {
+                        if file_staged {
                             self.draw_string_scaled(
                                 "✓",
                                 check_x + 2.0 * s,
@@ -1079,41 +1088,60 @@ impl Renderer {
                             file.status.label(),
                             status_x,
                             y + row_h / 2.0 + 5.0 * s,
-                            file.status.color(),
+                            if workspace_disabled {
+                                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.28]
+                            } else {
+                                file.status.color()
+                            },
                             0.82,
                         );
 
                         let text_x = check_x + 22.0 * s;
-                        let max_w = (status_x - 8.0 * s - text_x).max(0.0);
-                        self.draw_tree_label_clipped(
+                        self.draw_tree_leaf_label(
                             &row.name,
                             text_x,
-                            y + row_h / 2.0 + 5.0 * s,
-                            max_w,
-                            [0.72, 0.76, 0.88, 1.0],
+                            y,
+                            row_h,
+                            status_x - 8.0 * s,
+                            if workspace_disabled {
+                                [0.72, 0.76, 0.88, 0.38]
+                            } else {
+                                [0.72, 0.76, 0.88, 1.0]
+                            },
+                            s,
                             text_scale,
                             &mut label_scratch,
                         );
                     } else {
-                        self.draw_string_scaled(
-                            "▼",
-                            indent_x,
-                            y + row_h / 2.0 + 5.0 * s,
-                            [0.78, 0.80, 0.88, 0.75],
-                            1.0,
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::GitFolder(workspace.workspace_idx, row_idx),
+                            panel_x,
+                            y,
+                            panel_w,
+                            row_h,
+                            mx,
+                            my,
                         );
-                        self.draw_tree_label_clipped(
+                        self.draw_tree_dir_entry(
                             &row.name,
-                            indent_x + 16.0 * s,
-                            y + row_h / 2.0 + 5.0 * s,
-                            (panel_x + panel_w - pad - indent_x - 16.0 * s).max(0.0),
+                            row.icon_key,
+                            indent_x,
+                            y,
+                            row_h,
+                            panel_x + panel_w - pad,
+                            !row_collapsed,
                             self.theme.fg,
+                            [0.78, 0.80, 0.88, 0.75],
+                            s,
                             text_scale,
                             &mut label_scratch,
                         );
                     }
                 }
                 y += row_h;
+                if row_collapsed {
+                    collapsed_depth = Some(row.depth);
+                }
             }
         }
 

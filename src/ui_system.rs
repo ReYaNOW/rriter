@@ -44,6 +44,7 @@ pub enum UiId {
 
     // Git panel
     GitFile(usize, usize),
+    GitFolder(usize, usize),
     GitCommit,
     GitCommitMenuToggle,
     GitCommitMenuItem(usize),

@@ -485,6 +485,13 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitFolder(workspace_idx, row_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.toggle_git_tree_folder(workspace_idx, row_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitCommit => {
                 self.ide_panel.git.commit_menu_open = false;
                 self.commit_git_panel();

@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::editor::Editor;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -42,6 +42,7 @@ pub struct GitFileEntry {
     pub workspace_idx: usize,
     pub repo_root: PathBuf,
     pub rel_path: String,
+    pub old_rel_path: Option<String>,
     pub display_path: String,
     pub depth: usize,
     pub staged: bool,
@@ -51,8 +52,10 @@ pub struct GitFileEntry {
 #[derive(Clone, Debug)]
 pub struct GitTreeRow {
     pub name: String,
+    pub path: String,
     pub depth: usize,
     pub file_idx: Option<usize>,
+    pub icon_key: &'static str,
 }
 
 #[derive(Clone, Debug)]
@@ -109,11 +112,13 @@ pub struct GitPanelState {
     pub message_focused: bool,
     pub amend: bool,
     pub commit_menu_open: bool,
+    pub collapsed_dirs: FxHashMap<usize, FxHashSet<String>>,
     pub scroll: crate::scroll::ScrollState,
     pub pending: bool,
     pub next_request_id: u64,
     pub latest_request_id: u64,
-    pub rx: Option<mpsc::Receiver<GitPanelEvent>>,
+    pub rx: Vec<mpsc::Receiver<GitPanelEvent>>,
+    stage_tx: Option<mpsc::Sender<GitStageCommand>>,
     pub notice: Option<String>,
 }
 
@@ -125,11 +130,13 @@ impl Default for GitPanelState {
             message_focused: false,
             amend: false,
             commit_menu_open: false,
+            collapsed_dirs: FxHashMap::default(),
             scroll: crate::scroll::ScrollState::new(15.0),
             pending: false,
             next_request_id: 1,
             latest_request_id: 0,
-            rx: None,
+            rx: Vec::new(),
+            stage_tx: None,
             notice: None,
         }
     }
@@ -142,11 +149,22 @@ pub struct GitPanelEvent {
     notice: Option<String>,
 }
 
+struct GitStageCommand {
+    request_id: u64,
+    repo_root: PathBuf,
+    rel_path: String,
+    old_rel_path: Option<String>,
+    staged: bool,
+    workspaces: Vec<PathBuf>,
+    tx: mpsc::Sender<GitPanelEvent>,
+}
+
 enum GitAction {
     Refresh,
     ToggleStage {
         repo_root: PathBuf,
         rel_path: String,
+        old_rel_path: Option<String>,
         staged: bool,
     },
     Commit {
@@ -174,8 +192,11 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn poll_git_panel(&mut self) -> bool {
         let mut updated = false;
-        let mut disconnected = false;
-        if let Some(rx) = &self.ide_panel.git.rx {
+        let mut stale_seen = false;
+        let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
+        let receivers = std::mem::take(&mut self.ide_panel.git.rx);
+        for rx in receivers {
+            let mut keep = true;
             loop {
                 match rx.try_recv() {
                     Ok(event) => {
@@ -185,26 +206,38 @@ impl App {
                             self.ide_panel.git.notice = event.notice;
                             self.ide_panel.git.pending = false;
                             updated = true;
+                        } else {
+                            stale_seen = true;
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
+                        keep = false;
                         break;
                     }
                 }
             }
+            if keep {
+                next_rx.push(rx);
+            }
         }
-        if disconnected {
-            self.ide_panel.git.rx = None;
-            self.ide_panel.git.pending = false;
+        self.ide_panel.git.rx = next_rx;
+        self.ide_panel.git.pending = !self.ide_panel.git.rx.is_empty();
+        if stale_seen && self.ide_panel.git.rx.is_empty() {
+            self.spawn_git_task(GitAction::Refresh);
         }
         updated
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn toggle_git_file_stage(&mut self, workspace_idx: usize, file_idx: usize) {
-        if self.ide_panel.git.pending {
+        if self
+            .ide_panel
+            .git
+            .snapshot
+            .active_staged_workspace_idx()
+            .is_some_and(|idx| idx != workspace_idx)
+        {
             return;
         }
         let Some(file) = self
@@ -219,9 +252,21 @@ impl App {
         else {
             return;
         };
+        if let Some(file_mut) = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.workspace_idx == workspace_idx)
+            .and_then(|workspace| workspace.files.get_mut(file_idx))
+        {
+            file_mut.staged = !file.staged;
+        }
         self.spawn_git_task(GitAction::ToggleStage {
             repo_root: file.repo_root,
             rel_path: file.rel_path,
+            old_rel_path: file.old_rel_path,
             staged: file.staged,
         });
     }
@@ -285,6 +330,32 @@ impl App {
         self.spawn_git_task(GitAction::Push { repo_root });
     }
 
+    pub fn toggle_git_tree_folder(&mut self, workspace_idx: usize, row_idx: usize) {
+        let Some(row) = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_idx == workspace_idx)
+            .and_then(|workspace| workspace.tree.get(row_idx))
+        else {
+            return;
+        };
+        if row.file_idx.is_some() {
+            return;
+        }
+        let dirs = self
+            .ide_panel
+            .git
+            .collapsed_dirs
+            .entry(workspace_idx)
+            .or_default();
+        if !dirs.remove(row.path.as_str()) {
+            dirs.insert(row.path.clone());
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn spawn_git_task(&mut self, action: GitAction) {
         let request_id = self.ide_panel.git.next_request_id;
@@ -295,7 +366,58 @@ impl App {
 
         let workspaces = self.ide_workspaces.clone();
         let (tx, rx) = mpsc::channel();
-        self.ide_panel.git.rx = Some(rx);
+        self.ide_panel.git.rx.push(rx);
+
+        if let GitAction::ToggleStage {
+            repo_root,
+            rel_path,
+            old_rel_path,
+            staged,
+        } = action
+        {
+            let mut command = Some(GitStageCommand {
+                request_id,
+                repo_root,
+                rel_path,
+                old_rel_path,
+                staged,
+                workspaces,
+                tx,
+            });
+            if let Some(stage_tx) = &self.ide_panel.git.stage_tx {
+                match stage_tx.send(command.take().unwrap()) {
+                    Ok(()) => return,
+                    Err(err) => command = Some(err.0),
+                }
+            }
+
+            let (stage_tx, stage_rx) = mpsc::channel();
+            self.ide_panel.git.stage_tx = Some(stage_tx.clone());
+            std::thread::spawn(move || {
+                for command in stage_rx {
+                    let notice = match toggle_stage(
+                        &command.repo_root,
+                        &command.rel_path,
+                        command.old_rel_path.as_deref(),
+                        command.staged,
+                    ) {
+                        Ok(()) => None,
+                        Err(err) => Some(err),
+                    };
+                    let snapshot = collect_git_status(&command.workspaces);
+                    let _ = command.tx.send(GitPanelEvent {
+                        request_id: command.request_id,
+                        snapshot,
+                        notice,
+                    });
+                }
+            });
+            if let Some(command) = command {
+                let _ = stage_tx.send(command);
+            }
+            return;
+        }
+
         std::thread::spawn(move || {
             let notice = run_git_action(action);
             let snapshot = collect_git_status(&workspaces);
@@ -314,8 +436,9 @@ fn run_git_action(action: GitAction) -> Option<String> {
         GitAction::ToggleStage {
             repo_root,
             rel_path,
+            old_rel_path,
             staged,
-        } => match toggle_stage(&repo_root, &rel_path, staged) {
+        } => match toggle_stage(&repo_root, &rel_path, old_rel_path.as_deref(), staged) {
             Ok(()) => None,
             Err(err) => Some(err),
         },
@@ -406,12 +529,13 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
     };
 
     let mut files = Vec::new();
+    let mut file_by_display_path: FxHashMap<String, usize> = FxHashMap::default();
     for entry in statuses.iter() {
         let status = entry.status();
         if status.is_ignored() || status.is_empty() {
             continue;
         }
-        let Some(rel_path) = status_entry_path(&entry) else {
+        let Some((rel_path, old_rel_path)) = status_entry_paths(&entry) else {
             continue;
         };
         let abs_path = repo_root.join(&rel_path);
@@ -433,10 +557,25 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
             .saturating_sub(1);
         let staged = status_intersects_index(status);
         let file_status = git_file_status(status, staged);
+        if let Some(existing_idx) = file_by_display_path.get(display_path.as_str()).copied() {
+            let existing: &mut GitFileEntry = &mut files[existing_idx];
+            existing.staged |= staged;
+            if staged {
+                existing.status = file_status;
+            }
+            if existing.old_rel_path.is_none() {
+                existing.old_rel_path = old_rel_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned());
+            }
+            continue;
+        }
+        file_by_display_path.insert(display_path.clone(), files.len());
         files.push(GitFileEntry {
             workspace_idx,
             repo_root: repo_root.clone(),
             rel_path: rel_path.to_string_lossy().into_owned(),
+            old_rel_path: old_rel_path.map(|path| path.to_string_lossy().into_owned()),
             display_path,
             depth,
             staged,
@@ -489,10 +628,29 @@ fn build_git_tree(files: &[GitFileEntry]) -> Vec<GitTreeRow> {
 
 fn flatten_git_tree(node: &GitTreeBuildNode, depth: usize, rows: &mut Vec<GitTreeRow>) {
     for (name, child) in &node.children {
+        let path = if let Some(parent) = rows
+            .iter()
+            .rev()
+            .find(|row| row.depth + 1 == depth && row.file_idx.is_none())
+        {
+            let mut path = parent.path.clone();
+            path.push('/');
+            path.push_str(name);
+            path
+        } else {
+            name.clone()
+        };
+        let icon_key = if child.file_idx.is_some() {
+            crate::app::file_icons::file_icon_key(&name.to_ascii_lowercase())
+        } else {
+            crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase())
+        };
         rows.push(GitTreeRow {
             name: name.clone(),
+            path,
             depth,
             file_idx: child.file_idx,
+            icon_key,
         });
         if !child.children.is_empty() {
             flatten_git_tree(child, depth + 1, rows);
@@ -500,16 +658,42 @@ fn flatten_git_tree(node: &GitTreeBuildNode, depth: usize, rows: &mut Vec<GitTre
     }
 }
 
-fn status_entry_path(entry: &git2::StatusEntry<'_>) -> Option<PathBuf> {
-    entry
+pub(crate) fn git_visible_tree_row_count(
+    workspace_idx: usize,
+    rows: &[GitTreeRow],
+    collapsed_dirs: &FxHashMap<usize, FxHashSet<String>>,
+) -> usize {
+    let mut count = 0usize;
+    let mut collapsed_depth = None;
+    let workspace_collapsed = collapsed_dirs.get(&workspace_idx);
+    for row in rows {
+        if let Some(depth) = collapsed_depth {
+            if row.depth > depth {
+                continue;
+            }
+            collapsed_depth = None;
+        }
+        count += 1;
+        if row.file_idx.is_none()
+            && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_str()))
+        {
+            collapsed_depth = Some(row.depth);
+        }
+    }
+    count
+}
+
+fn status_entry_paths(entry: &git2::StatusEntry<'_>) -> Option<(PathBuf, Option<PathBuf>)> {
+    let delta = entry
         .index_to_workdir()
-        .and_then(|delta| delta.new_file().path())
-        .or_else(|| {
-            entry
-                .head_to_index()
-                .and_then(|delta| delta.new_file().path())
-        })
-        .map(Path::to_path_buf)
+        .or_else(|| entry.head_to_index())?;
+    let new_path = delta.new_file().path()?.to_path_buf();
+    let old_path = delta
+        .old_file()
+        .path()
+        .filter(|path| *path != new_path.as_path())
+        .map(Path::to_path_buf);
+    Some((new_path, old_path))
 }
 
 fn status_intersects_index(status: git2::Status) -> bool {
@@ -570,13 +754,23 @@ fn branch_ahead(repo: &git2::Repository) -> Result<usize, git2::Error> {
     Ok(ahead)
 }
 
-fn toggle_stage(repo_root: &Path, rel_path: &str, staged: bool) -> Result<(), String> {
+fn toggle_stage(
+    repo_root: &Path,
+    rel_path: &str,
+    old_rel_path: Option<&str>,
+    staged: bool,
+) -> Result<(), String> {
     let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
     let path = Path::new(rel_path);
     if staged {
-        unstage_path(&repo, path).map_err(short_git_error)
+        unstage_path(&repo, path, old_rel_path.map(Path::new)).map_err(short_git_error)
     } else {
         let mut index = repo.index().map_err(short_git_error)?;
+        if let Some(old_path) = old_rel_path.map(Path::new)
+            && old_path != path
+        {
+            index.remove_path(old_path).map_err(short_git_error)?;
+        }
         if repo_root.join(path).exists() {
             index.add_path(path).map_err(short_git_error)?;
         } else {
@@ -586,15 +780,30 @@ fn toggle_stage(repo_root: &Path, rel_path: &str, staged: bool) -> Result<(), St
     }
 }
 
-fn unstage_path(repo: &git2::Repository, path: &Path) -> Result<(), git2::Error> {
+fn unstage_path(
+    repo: &git2::Repository,
+    path: &Path,
+    old_path: Option<&Path>,
+) -> Result<(), git2::Error> {
     let target = repo
         .head()
         .ok()
         .and_then(|head| head.peel(git2::ObjectType::Commit).ok());
     if let Some(target) = target.as_ref() {
-        repo.reset_default(Some(target), [path])
+        repo.reset_default(Some(target), [path])?;
+        if let Some(old_path) = old_path
+            && old_path != path
+        {
+            repo.reset_default(Some(target), [old_path])?;
+        }
+        Ok(())
     } else {
         let mut index = repo.index()?;
+        if let Some(old_path) = old_path
+            && old_path != path
+        {
+            index.remove_path(old_path)?;
+        }
         index.remove_path(path)?;
         index.write()
     }
@@ -682,5 +891,177 @@ fn short_git_error(err: git2::Error) -> String {
         format!("{}...", &msg[..end])
     } else {
         msg.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_git_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rriter_git_panel_{name}_{stamp}"))
+    }
+
+    fn git_file(display_path: &str, staged: bool, status: GitFileStatus) -> GitFileEntry {
+        GitFileEntry {
+            workspace_idx: 0,
+            repo_root: PathBuf::from("/repo"),
+            rel_path: display_path.to_string(),
+            old_rel_path: None,
+            display_path: display_path.to_string(),
+            depth: display_path.matches('/').count(),
+            staged,
+            status,
+        }
+    }
+
+    #[test]
+    fn git_file_status_maps_index_and_worktree_flags() {
+        assert_eq!(
+            git_file_status(git2::Status::WT_NEW, false),
+            GitFileStatus::Untracked
+        );
+        assert_eq!(
+            git_file_status(git2::Status::INDEX_NEW, true),
+            GitFileStatus::Added
+        );
+        assert_eq!(
+            git_file_status(git2::Status::WT_DELETED, false),
+            GitFileStatus::Deleted
+        );
+        assert_eq!(
+            git_file_status(git2::Status::INDEX_RENAMED, true),
+            GitFileStatus::Renamed
+        );
+        assert_eq!(
+            git_file_status(git2::Status::INDEX_TYPECHANGE, true),
+            GitFileStatus::TypeChange
+        );
+        assert_eq!(
+            git_file_status(git2::Status::WT_MODIFIED, false),
+            GitFileStatus::Modified
+        );
+    }
+
+    #[test]
+    fn staged_repo_roots_use_active_workspace_and_dedupe_roots() {
+        let repo_a = PathBuf::from("/repo/a");
+        let repo_b = PathBuf::from("/repo/b");
+        let snapshot = GitStatusSnapshot {
+            workspaces: vec![
+                GitWorkspaceStatus {
+                    workspace_idx: 0,
+                    root: PathBuf::from("/ws/a"),
+                    repo_root: Some(repo_a.clone()),
+                    files: vec![
+                        GitFileEntry {
+                            repo_root: repo_a.clone(),
+                            staged: true,
+                            ..git_file("src/main.rs", true, GitFileStatus::Added)
+                        },
+                        GitFileEntry {
+                            repo_root: repo_a.clone(),
+                            staged: true,
+                            ..git_file("src/lib.rs", true, GitFileStatus::Modified)
+                        },
+                    ],
+                    tree: Vec::new(),
+                    ahead: 0,
+                    error: None,
+                },
+                GitWorkspaceStatus {
+                    workspace_idx: 1,
+                    root: PathBuf::from("/ws/b"),
+                    repo_root: Some(repo_b.clone()),
+                    files: vec![GitFileEntry {
+                        workspace_idx: 1,
+                        repo_root: repo_b,
+                        rel_path: "other.rs".to_string(),
+                        old_rel_path: None,
+                        display_path: "other.rs".to_string(),
+                        depth: 0,
+                        staged: true,
+                        status: GitFileStatus::Added,
+                    }],
+                    tree: Vec::new(),
+                    ahead: 0,
+                    error: None,
+                },
+            ],
+        };
+
+        assert_eq!(snapshot.active_staged_workspace_idx(), Some(0));
+        assert_eq!(snapshot.staged_repo_roots(), vec![repo_a]);
+    }
+
+    #[test]
+    fn git_tree_builds_folder_rows_icons_and_collapse_counts() {
+        let files = vec![
+            git_file("README.md", false, GitFileStatus::Modified),
+            git_file("src/lib.rs", false, GitFileStatus::Modified),
+            git_file("src/main.rs", true, GitFileStatus::Added),
+        ];
+
+        let rows = build_git_tree(&files);
+
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.name.as_str(), row.path.as_str(), row.depth, row.file_idx))
+                .collect::<Vec<_>>(),
+            vec![
+                ("README.md", "README.md", 0, Some(0)),
+                ("src", "src", 0, None),
+                ("lib.rs", "src/lib.rs", 1, Some(1)),
+                ("main.rs", "src/main.rs", 1, Some(2)),
+            ]
+        );
+        assert_ne!(rows[0].icon_key, "default_file");
+        assert_ne!(rows[1].icon_key, "default");
+
+        let mut collapsed = FxHashMap::default();
+        assert_eq!(git_visible_tree_row_count(0, &rows, &collapsed), 4);
+        collapsed.insert(0, FxHashSet::from_iter(["src".to_string()]));
+        assert_eq!(git_visible_tree_row_count(0, &rows, &collapsed), 2);
+        assert_eq!(git_visible_tree_row_count(1, &rows, &collapsed), 4);
+    }
+
+    #[test]
+    fn git_status_stage_and_commit_round_trip_uses_libgit2_only() {
+        let root = temp_git_root("round_trip");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let workspace = collect_workspace_status(7, &root);
+        assert_eq!(workspace.workspace_idx, 7);
+        assert_eq!(workspace.files.len(), 1);
+        assert_eq!(workspace.files[0].display_path, "src/main.rs");
+        assert!(!workspace.files[0].staged);
+        assert_eq!(workspace.files[0].status, GitFileStatus::Untracked);
+        assert_eq!(
+            workspace
+                .tree
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src", "main.rs"]
+        );
+
+        toggle_stage(&root, "src/main.rs", false).unwrap();
+        let workspace = collect_workspace_status(7, &root);
+        assert!(workspace.files[0].staged);
+        assert_eq!(workspace.files[0].status, GitFileStatus::Added);
+
+        commit_repo(&root, "initial commit", false).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.message().unwrap(), "initial commit");
+        assert!(collect_workspace_status(7, &root).files.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

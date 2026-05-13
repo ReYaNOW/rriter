@@ -9,6 +9,7 @@ pub mod settings_ui;
 pub mod sticky;
 pub mod tabs_ui;
 pub mod terminal_ui;
+pub(crate) mod tree_ui;
 pub mod ui;
 
 use crate::editor::Editor;
@@ -779,6 +780,7 @@ impl Renderer {
                 real_height,
                 panel_left_w,
                 is_ui_disabled,
+                blink_alpha,
             );
         }
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора

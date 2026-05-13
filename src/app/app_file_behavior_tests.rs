@@ -1009,6 +1009,60 @@ fn ui_handlers_state_only_branches_work_without_window() {
 }
 
 #[test]
+fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            files: Vec::new(),
+            tree: vec![crate::app::git_panel::GitTreeRow {
+                name: "src".to_string(),
+                path: "src".to_string(),
+                depth: 0,
+                file_idx: None,
+                icon_key: "src",
+            }],
+            ahead: 0,
+            error: None,
+        }],
+    };
+
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuToggle);
+    assert!(app.ide_panel.git.commit_menu_open);
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFolder(0, 0));
+    assert!(!app.ide_panel.git.commit_menu_open);
+    assert!(app
+        .ide_panel
+        .git
+        .collapsed_dirs
+        .get(&0)
+        .is_some_and(|dirs| dirs.contains("src")));
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFolder(0, 0));
+    assert!(!app
+        .ide_panel
+        .git
+        .collapsed_dirs
+        .get(&0)
+        .is_some_and(|dirs| dirs.contains("src")));
+
+    app.handle_ui_click(crate::ui_system::UiId::GitCommit);
+    assert_eq!(
+        app.ide_panel.git.notice.as_deref(),
+        Some("Commit message empty")
+    );
+
+    let _ = app.ide_panel.git.message_editor.insert_str("ready");
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuItem(1));
+    assert_eq!(app.ide_panel.git.notice.as_deref(), Some("No staged files"));
+}
+
+#[test]
 fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
     let Some(mut app) = test_app() else {
         return;

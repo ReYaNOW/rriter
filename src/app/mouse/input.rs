@@ -183,6 +183,24 @@ impl App {
             return;
         }
 
+        if state == ElementState::Pressed && self.ide_panel.git.commit_menu_open {
+            let clicked_id = self.ui_registry.find_at(mx, my);
+            let keep_git_menu = matches!(
+                clicked_id,
+                Some(
+                    crate::ui_system::UiId::GitCommitMenuToggle
+                        | crate::ui_system::UiId::GitCommitMenuItem(_)
+                )
+            );
+            if !keep_git_menu {
+                self.ide_panel.git.commit_menu_open = false;
+                if clicked_id.is_none() {
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+        }
+
         if state == ElementState::Pressed
             && button != winit::event::MouseButton::Left
             && self.autocomplete_window_contains(mx, my)
@@ -595,7 +613,8 @@ impl App {
                     }
                 }
 
-                if let Some(clicked_id) = self.ui_registry.find_at(mx, my) {
+                let clicked_id = self.ui_registry.find_at(mx, my);
+                if let Some(clicked_id) = clicked_id {
                     let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
                         && HOVER_STATE.with(|hover_state| {
                             if let Some((x, y, w, h)) = hover_state.borrow().rect {
