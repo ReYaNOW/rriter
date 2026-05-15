@@ -1,5 +1,6 @@
 use super::*;
 use rayon::prelude::*;
+use std::path::Component;
 
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
     std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>>,
@@ -257,6 +258,18 @@ pub fn spawn_scan(
     rx
 }
 
+pub(super) fn path_has_git_dir(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        matches!(component, Component::Normal(name) if name == std::ffi::OsStr::new(".git"))
+    })
+}
+
+pub(super) fn notify_paths_need_file_tree_refresh<'a>(
+    paths: impl IntoIterator<Item = &'a std::path::Path>,
+) -> bool {
+    paths.into_iter().any(|path| !path_has_git_dir(path))
+}
+
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
 /// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
@@ -278,15 +291,39 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
         // Блокируемся в цикле — debouncer должен жить, пока работает watcher.
         loop {
             match drx.recv() {
-                Ok(result) => {
-                    if result.is_ok() {
+                Ok(Ok(events)) => {
+                    let paths = events.iter().map(|event| event.path.as_path());
+                    if notify_paths_need_file_tree_refresh(paths) {
                         if tx.send(()).is_err() {
                             break; // главный поток упал / rx закрыт
                         }
                     }
                 }
+                Ok(Err(_)) => {}
                 Err(_) => break,
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn git_internal_notify_paths_do_not_refresh_file_tree() {
+        assert!(!notify_paths_need_file_tree_refresh([
+            Path::new("/workspace/.git/index"),
+            Path::new("/workspace/.git/objects/aa/bb"),
+        ]));
+        assert!(notify_paths_need_file_tree_refresh([
+            Path::new("/workspace/.git/index"),
+            Path::new("/workspace/src/main.rs"),
+        ]));
+        assert!(notify_paths_need_file_tree_refresh([Path::new(
+            "/workspace/not.git/index"
+        )]));
+    }
+
 }

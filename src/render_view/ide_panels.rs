@@ -65,6 +65,287 @@ fn file_tree_menu_separator_count(entries: &[crate::app::file_tree::FileTreeMenu
         .count()
 }
 
+fn git_row_visual_hovered(
+    mx: f32,
+    my: f32,
+    panel_x: f32,
+    row_y: f32,
+    panel_w: f32,
+    row_h: f32,
+    workspace_disabled: bool,
+) -> bool {
+    !workspace_disabled
+        && mx >= panel_x
+        && mx <= panel_x + panel_w
+        && my >= row_y
+        && my <= row_y + row_h
+}
+
+fn git_folder_stage_hitbox_enabled(
+    folder_stage: Option<crate::app::git_panel::GitFolderStageState>,
+) -> bool {
+    folder_stage.is_some()
+}
+
+fn git_file_row_hitbox_enabled(_controls_disabled: bool) -> bool {
+    true
+}
+
+fn git_file_tooltip_hovered(row_hovered: bool, mx: f32, check_x: f32, check_size: f32) -> bool {
+    row_hovered && mx > check_x + check_size
+}
+
+fn git_stage_controls_disabled(workspace_disabled: bool, git_pending: bool) -> bool {
+    workspace_disabled || git_pending
+}
+
+fn git_checkbox_color(
+    staged: bool,
+    partial: bool,
+    controls_disabled: bool,
+) -> ([f32; 4], [f32; 4]) {
+    if staged {
+        let alpha = if controls_disabled { 0.42 } else { 0.95 };
+        ([0.48, 0.82, 0.52, alpha], [0.07, 0.09, 0.12, alpha])
+    } else if partial {
+        (
+            [1.0, 1.0, 1.0, if controls_disabled { 0.10 } else { 0.20 }],
+            [0.72, 0.76, 0.88, if controls_disabled { 0.36 } else { 0.86 }],
+        )
+    } else {
+        ([1.0, 1.0, 1.0, if controls_disabled { 0.07 } else { 0.12 }], [0.0; 4])
+    }
+}
+
+fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) {
+    let x = button.x.round();
+    let y = button.y.round();
+    let w = button.w.round();
+    let h = button.h.round();
+    let radius = 4.0 * s;
+    let border_w = (1.0 * s).round().max(1.0);
+    renderer.push_rounded_rect_border(
+        x,
+        y,
+        w,
+        h,
+        radius,
+        border_w,
+        [0.60, 0.35, 0.85, 0.34],
+        [0.18, 0.19, 0.22, 0.74],
+    );
+    if let Some(icon) = button.icon {
+        let icon_size = button.icon_size;
+        renderer.draw_atlas_icon(
+            icon,
+            x + (w - icon_size) / 2.0,
+            y + (h - icon_size) / 2.0,
+            icon_size,
+            [1.0, 1.0, 1.0, 0.34],
+        );
+    } else if !button.text.is_empty() {
+        let text_w = renderer.measure_ui_width(&button.text, button.text_scale);
+        renderer.draw_string_scaled(
+            &button.text,
+            x + (w - text_w) / 2.0,
+            y + h / 2.0 + 5.0 * s,
+            [1.0, 1.0, 1.0, 0.34],
+            button.text_scale,
+        );
+    }
+}
+
+fn register_git_locked_button_cursor(
+    ui_registry: &mut crate::ui_system::UiRegistry,
+    id: crate::ui_system::UiId,
+    button: &Button,
+    mx: f32,
+    my: f32,
+) {
+    ui_registry.register_rect(id, button.x, button.y, button.w, button.h, mx, my);
+}
+
+fn git_disabled_color(mut color: [f32; 4], workspace_disabled: bool, alpha: f32) -> [f32; 4] {
+    if workspace_disabled {
+        color[3] = alpha;
+    }
+    color
+}
+
+fn git_status_word(status: crate::app::git_panel::GitFileStatus) -> &'static str {
+    match status {
+        crate::app::git_panel::GitFileStatus::Added => "Добавлен",
+        crate::app::git_panel::GitFileStatus::Modified => "Изменен",
+        crate::app::git_panel::GitFileStatus::Deleted => "Удален",
+        crate::app::git_panel::GitFileStatus::Renamed => "Переименован",
+        crate::app::git_panel::GitFileStatus::TypeChange => "Изменен тип",
+        crate::app::git_panel::GitFileStatus::Untracked => "Не отслеживается",
+    }
+}
+
+fn git_file_tooltip_path(file: &crate::app::git_panel::GitFileEntry) -> std::path::PathBuf {
+    file.repo_root.join(file.rel_path.as_str())
+}
+
+fn compact_home_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    if let Some(home) = home
+        && let Ok(rest) = path.strip_prefix(home)
+    {
+        if rest.as_os_str().is_empty() {
+            return "~".to_string();
+        }
+        let rest = rest.to_string_lossy();
+        return if rest.starts_with('/') {
+            format!("~{rest}")
+        } else {
+            format!("~/{rest}")
+        };
+    }
+    path.to_string_lossy().into_owned()
+}
+
+fn git_file_tooltip_text(
+    file: &crate::app::git_panel::GitFileEntry,
+    home: Option<&std::path::Path>,
+) -> String {
+    let path = git_file_tooltip_path(file);
+    format!(
+        "{} • {}",
+        compact_home_path(&path, home),
+        git_status_word(file.status)
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GitTooltipTarget {
+    kind: u8,
+    workspace_idx: usize,
+    item_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GitTooltipTimer {
+    target: GitTooltipTarget,
+    start: std::time::Instant,
+    anchor_x: f32,
+    anchor_y: f32,
+}
+
+const GIT_TOOLTIP_DELAY_SECS: f32 = 0.4;
+const GIT_TOOLTIP_FILE: u8 = 0;
+const GIT_TOOLTIP_ROLLBACK: u8 = 1;
+const GIT_TOOLTIP_STAGE_ALL: u8 = 2;
+const GIT_TOOLTIP_UNSTAGE_ALL: u8 = 3;
+
+thread_local! {
+    static GIT_TOOLTIP_TIMER: std::cell::RefCell<Option<GitTooltipTimer>> = const { std::cell::RefCell::new(None) };
+}
+
+fn git_tooltip_anchor(
+    target: GitTooltipTarget,
+    mouse_x: f32,
+    mouse_y: f32,
+    now: std::time::Instant,
+) -> Option<(f32, f32)> {
+    GIT_TOOLTIP_TIMER.with(|timer| {
+        let mut timer = timer.borrow_mut();
+        let reset = timer
+            .as_ref()
+            .is_none_or(|state| state.target != target);
+        if reset {
+            *timer = Some(GitTooltipTimer {
+                target,
+                start: now,
+                anchor_x: mouse_x,
+                anchor_y: mouse_y,
+            });
+            return None;
+        }
+
+        timer.as_ref().and_then(|state| {
+            (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
+                .then_some((state.anchor_x, state.anchor_y))
+        })
+    })
+}
+
+fn git_tooltip_reset() {
+    GIT_TOOLTIP_TIMER.with(|timer| *timer.borrow_mut() = None);
+}
+
+const GIT_FOLDER_STAGE_GAP: f32 = 6.0;
+
+#[derive(Clone, Copy)]
+struct GitFolderRowLayout {
+    arrow_x: f32,
+    check_x: f32,
+    check_y: f32,
+    check_size: f32,
+    icon_x: f32,
+    icon_y: f32,
+    icon_size: f32,
+}
+
+#[derive(Clone, Copy)]
+struct GitFileRowLayout {
+    check_x: f32,
+    check_y: f32,
+    check_size: f32,
+    icon_x: f32,
+    icon_y: f32,
+    icon_size: f32,
+    text_x: f32,
+}
+
+fn git_folder_row_layout(
+    indent_x: f32,
+    row_y: f32,
+    row_h: f32,
+    scale: f32,
+) -> GitFolderRowLayout {
+    let arrow_x = indent_x - 2.0 * scale;
+    let check_size = 12.0 * scale;
+    let icon_size = 20.0 * scale;
+    let gap = GIT_FOLDER_STAGE_GAP * scale;
+    let check_x =
+        arrow_x + crate::render_view::tree_ui::TREE_DISCLOSURE_SLOT * scale + gap;
+    let icon_x = check_x + check_size + gap;
+
+    GitFolderRowLayout {
+        arrow_x,
+        check_x,
+        check_y: (row_y + (row_h - check_size) / 2.0).round(),
+        check_size,
+        icon_x,
+        icon_y: crate::render_view::tree_ui::tree_dir_icon_y(row_y, row_h, scale),
+        icon_size,
+    }
+}
+
+fn git_file_row_layout(
+    indent_x: f32,
+    row_y: f32,
+    row_h: f32,
+    scale: f32,
+) -> GitFileRowLayout {
+    let check_size = 12.0 * scale;
+    let icon_size = 20.0 * scale;
+    let gap = GIT_FOLDER_STAGE_GAP * scale;
+    let check_x = indent_x + 2.0 * scale;
+    let icon_x = check_x + check_size + gap;
+    let icon_y = crate::render_view::tree_ui::tree_dir_icon_y(row_y, row_h, scale);
+
+    GitFileRowLayout {
+        check_x,
+        check_y: (row_y + (row_h - check_size) / 2.0).round(),
+        check_size,
+        icon_x,
+        icon_y,
+        icon_size,
+        text_x: icon_x + icon_size + 4.0 * scale,
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub(crate) fn draw_tree_label_clipped(
@@ -118,6 +399,8 @@ impl Renderer {
         is_ui_disabled: bool,
         blink_alpha: f32,
     ) {
+        self.git_file_tooltip = None;
+
         let sb_w = 48.0 * s;
         let blocking_bottom_y =
             if ide_panel.any_bottom_open() && ide_panel.bottom_panel_blocks_editor_hover() {
@@ -539,7 +822,8 @@ impl Renderer {
                                 self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                             }
                         } else {
-                            let file_icon_x = indent_x + 10.0 * s;
+                            let file_icon_x =
+                                crate::render_view::tree_ui::tree_icon_x(indent_x, s);
                             self.draw_file_icon(
                                 node.icon_key,
                                 false,
@@ -667,6 +951,113 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn draw_git_file_tooltip(
+        &mut self,
+        text: &str,
+        mouse_x: f32,
+        mouse_y: f32,
+        s: f32,
+    ) {
+        let tooltip_scale = 0.88;
+        let pad_x = 12.0 * s;
+        let tooltip_h = 30.0 * s;
+        let tooltip_w = self.measure_ui_width(text, tooltip_scale) + pad_x * 2.0;
+        let tooltip_x = mouse_x + 14.0 * s;
+        let tooltip_y = mouse_y + 18.0 * s;
+
+        self.push_rounded_rect(
+            tooltip_x,
+            tooltip_y,
+            tooltip_w,
+            tooltip_h,
+            6.0 * s,
+            self.theme.sel,
+        );
+        self.push_rounded_rect(
+            tooltip_x + 1.0,
+            tooltip_y + 1.0,
+            tooltip_w - 2.0,
+            tooltip_h - 2.0,
+            5.0 * s,
+            [
+                self.theme.minimap_bg[0],
+                self.theme.minimap_bg[1],
+                self.theme.minimap_bg[2],
+                0.98,
+            ],
+        );
+        self.draw_string_scaled(
+            text,
+            tooltip_x + pad_x,
+            tooltip_y + tooltip_h / 2.0 + 5.0 * s,
+            self.theme.fg,
+            tooltip_scale,
+        );
+    }
+
+    pub(crate) fn draw_git_file_tooltip_overlay(&mut self, s: f32) {
+        self.git_tooltip_waiting = false;
+        let file_tooltip = self.git_file_tooltip.take().map(
+            |(workspace_idx, file_idx, tooltip, mouse_x, mouse_y)| {
+                (
+                    false,
+                    GitTooltipTarget {
+                        kind: GIT_TOOLTIP_FILE,
+                        workspace_idx,
+                        item_idx: file_idx,
+                    },
+                    tooltip,
+                    mouse_x,
+                    mouse_y,
+                )
+            },
+        );
+        let action_tooltip = self.git_action_tooltip.take().map(
+            |(kind, workspace_idx, tooltip, mouse_x, mouse_y)| {
+                (
+                    true,
+                    GitTooltipTarget {
+                        kind,
+                        workspace_idx,
+                        item_idx: 0,
+                    },
+                    tooltip,
+                    mouse_x,
+                    mouse_y,
+                )
+            },
+        );
+        let Some((is_action_tooltip, target, tooltip, mouse_x, mouse_y)) =
+            action_tooltip.or(file_tooltip)
+        else {
+            git_tooltip_reset();
+            return;
+        };
+
+        if self.hide_popups_until_mouse_move {
+            return;
+        }
+
+        if let Some((anchor_x, anchor_y)) = git_tooltip_anchor(
+            target,
+            mouse_x,
+            mouse_y,
+            std::time::Instant::now(),
+        ) {
+            self.draw_git_file_tooltip(&tooltip, anchor_x, anchor_y, s);
+        } else {
+            self.git_tooltip_waiting = is_action_tooltip;
+        }
+    }
+
+    pub(crate) fn reset_git_file_tooltip_overlay(&mut self) {
+        self.git_file_tooltip = None;
+        self.git_action_tooltip = None;
+        self.git_tooltip_waiting = false;
+        git_tooltip_reset();
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn draw_git_panel(
         &mut self,
         panel_x: f32,
@@ -691,6 +1082,7 @@ impl Renderer {
         let mut y = list_y - scroll;
         let text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
         let mut label_scratch = String::new();
+        let mut git_file_tooltip: Option<(usize, usize, String, f32, f32)> = None;
 
         let input_x = panel_x + pad;
         let input_y = title_h + 8.0 * s;
@@ -853,14 +1245,10 @@ impl Renderer {
             y: commit_y,
             w: commit_main_w,
             h: 28.0 * s,
-            text: if commit_main_w < 76.0 * s {
-                "✓".to_string()
-            } else {
-                "✓ Commit".to_string()
-            },
-            icon: None,
-            text_scale: if commit_main_w < 76.0 * s { 0.9 } else { 0.84 },
-            icon_size: 0.0,
+            text: "Commit".to_string(),
+            icon: Some(crate::widgets::IconType::Check),
+            text_scale: 0.92,
+            icon_size: 20.0 * s,
         };
         ui_registry.register_button(
             crate::ui_system::UiId::GitCommit,
@@ -876,10 +1264,10 @@ impl Renderer {
             y: commit_y,
             w: arrow_w,
             h: 28.0 * s,
-            text: "⌄".to_string(),
-            icon: None,
-            text_scale: 1.05,
-            icon_size: 0.0,
+            text: String::new(),
+            icon: Some(crate::widgets::IconType::Down),
+            text_scale: 0.0,
+            icon_size: 24.0 * s,
         };
         ui_registry.register_button(
             crate::ui_system::UiId::GitCommitMenuToggle,
@@ -915,7 +1303,7 @@ impl Renderer {
             );
         }
 
-        let staged_workspace = ide_panel.git.snapshot.active_staged_workspace_idx();
+        let staged_workspace = ide_panel.git.staged_workspace_lock();
         let mut drew_any = false;
 
         for workspace in &ide_panel.git.snapshot.workspaces {
@@ -932,6 +1320,37 @@ impl Renderer {
             drew_any = true;
             let row_visible = y + workspace_h >= list_y && y <= list_y + list_h;
             if row_visible {
+                let workspace_name_color =
+                    git_disabled_color(self.theme.fg, workspace_disabled, 0.38);
+                let show_stage_actions = !workspace.files.is_empty();
+                let stage_interaction_disabled =
+                    git_stage_controls_disabled(workspace_disabled, ide_panel.git.pending);
+                let changed_count = workspace.files.len();
+                let count_text_scale = 0.78;
+                let count_badge_h = 19.0 * s;
+                let (count_badge_w, count_text_w) = if changed_count > 0 {
+                    label_scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut label_scratch,
+                        format_args!("{changed_count}"),
+                    );
+                    let text_w = self.measure_ui_width(&label_scratch, count_text_scale).round();
+                    ((text_w + 12.0 * s).max(count_badge_h), text_w)
+                } else {
+                    (0.0, 0.0)
+                };
+                let count_reserve = if changed_count > 0 {
+                    count_badge_w + 6.0 * s
+                } else {
+                    0.0
+                };
+                let stage_btn_w = 26.0 * s;
+                let stage_btn_gap = 4.0 * s;
+                let stage_actions_w = if show_stage_actions {
+                    stage_btn_w * 3.0 + stage_btn_gap * 2.0 + 8.0 * s
+                } else {
+                    0.0
+                };
                 self.push_rect(
                     panel_x,
                     y,
@@ -950,20 +1369,73 @@ impl Renderer {
                     .and_then(|name| name.to_str())
                     .unwrap_or("workspace");
                 let right_reserve = if workspace.ahead > 0 {
-                    92.0 * s
+                    92.0 * s + stage_actions_w + count_reserve
                 } else {
-                    12.0 * s
+                    12.0 * s + stage_actions_w + count_reserve
                 };
-                self.draw_tree_label_clipped(
-                    name,
-                    panel_x + pad,
-                    y + workspace_h / 2.0 + 5.5 * s,
-                    (panel_w - pad - right_reserve).max(0.0),
-                    self.theme.fg,
-                    0.9,
-                    &mut label_scratch,
-                );
+                let label_w = (panel_w - pad - right_reserve).max(0.0);
+                let workspace_text_y = y + workspace_h / 2.0 + 4.5 * s;
+                if let Some(branch_name) = &workspace.branch_name {
+                    let branch_scale = 0.78;
+                    let chip_pad_x = 6.0 * s;
+                    let chip_h = 19.0 * s;
+                    let chip_w =
+                        self.measure_ui_width(branch_name, branch_scale) + chip_pad_x * 2.0;
+                    let gap = 8.0 * s;
+                    if label_w > chip_w + gap + 24.0 * s {
+                        let name_w = self.measure_ui_width(name, 0.9).min(label_w - chip_w - gap);
+                        self.draw_tree_label_clipped(
+                            name,
+                            panel_x + pad,
+                            workspace_text_y,
+                            name_w,
+                            workspace_name_color,
+                            0.9,
+                            &mut label_scratch,
+                        );
+                        let chip_x = (panel_x + pad + name_w + gap).round();
+                        let chip_y = (y + (workspace_h - chip_h) / 2.0).round();
+                        let branch_text_y = (chip_y + chip_h / 2.0 + 4.0 * s).round();
+                        let chip_w = chip_w.round();
+                        self.push_rounded_rect(
+                            chip_x,
+                            chip_y,
+                            chip_w,
+                            chip_h,
+                            4.0 * s,
+                            [0.20, 0.22, 0.30, 1.0],
+                        );
+                        self.draw_string_scaled(
+                            branch_name,
+                            (chip_x + chip_pad_x).round(),
+                            branch_text_y,
+                            [0.78, 0.82, 0.92, 1.0],
+                            branch_scale,
+                        );
+                    } else {
+                        self.draw_tree_label_clipped(
+                            name,
+                            panel_x + pad,
+                            workspace_text_y,
+                            label_w,
+                            workspace_name_color,
+                            0.9,
+                            &mut label_scratch,
+                        );
+                    }
+                } else {
+                    self.draw_tree_label_clipped(
+                        name,
+                        panel_x + pad,
+                        workspace_text_y,
+                        label_w,
+                        workspace_name_color,
+                        0.9,
+                        &mut label_scratch,
+                    );
+                }
 
+                let mut right_x = panel_x + panel_w - pad;
                 if workspace.ahead > 0 {
                     let mut ahead_text = String::new();
                     let _ = std::fmt::Write::write_fmt(
@@ -971,13 +1443,13 @@ impl Renderer {
                         format_args!("↑{}", workspace.ahead),
                     );
                     let push_w = (46.0 * s).min((panel_w * 0.36).max(18.0 * s));
-                    let push_x = panel_x + panel_w - pad - push_w;
+                    let push_x = right_x - push_w;
                     let aw = self.measure_ui_width(&ahead_text, 0.78);
                     self.draw_string_scaled(
                         &ahead_text,
                         (push_x - 8.0 * s - aw).max(panel_x + pad),
                         y + workspace_h / 2.0 + 5.0 * s,
-                        [0.48, 0.74, 1.0, 1.0],
+                        git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
                         0.78,
                     );
                     let push_btn = Button {
@@ -990,14 +1462,195 @@ impl Renderer {
                         text_scale: 0.76,
                         icon_size: 0.0,
                     };
-                    ui_registry.register_button(
-                        crate::ui_system::UiId::GitPush(workspace.workspace_idx),
-                        &push_btn,
-                        self,
-                        mx,
-                        my,
-                        s,
-                        false,
+                    if workspace_disabled {
+                        render_git_disabled_button(self, &push_btn, s);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            mx,
+                            my,
+                        );
+                    } else if ide_panel.git.pending {
+                        push_btn.render(self, -1.0, -1.0, s, false);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            mx,
+                            my,
+                        );
+                    } else {
+                        ui_registry.register_button(
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            self,
+                            mx,
+                            my,
+                            s,
+                            false,
+                        );
+                    }
+                    right_x = push_x - 6.0 * s;
+                }
+
+                if show_stage_actions {
+                    let stage_btn_h = 22.0 * s;
+                    let unstage_x = right_x - stage_btn_w;
+                    let stage_x = unstage_x - stage_btn_gap - stage_btn_w;
+                    let rollback_x = stage_x - stage_btn_gap - stage_btn_w;
+                    let btn_y = y + ((workspace_h - stage_btn_h) / 2.0).round();
+                    if changed_count > 0 {
+                        label_scratch.clear();
+                        let _ = std::fmt::Write::write_fmt(
+                            &mut label_scratch,
+                            format_args!("{changed_count}"),
+                        );
+                        let badge_x = rollback_x - stage_btn_gap - count_badge_w;
+                        let badge_y = y + ((workspace_h - count_badge_h) / 2.0).round();
+                        self.push_rounded_rect(
+                            badge_x,
+                            badge_y,
+                            count_badge_w,
+                            count_badge_h,
+                            count_badge_h / 2.0,
+                            git_disabled_color([0.24, 0.27, 0.34, 1.0], workspace_disabled, 0.34),
+                        );
+                        self.draw_string_scaled(
+                            &label_scratch,
+                            (badge_x + (count_badge_w - count_text_w) / 2.0).round(),
+                            (badge_y + count_badge_h / 2.0 + 4.0 * s).round(),
+                            git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
+                            count_text_scale,
+                        );
+                    }
+                    let rollback_btn = Button {
+                        x: rollback_x,
+                        y: btn_y,
+                        w: stage_btn_w,
+                        h: stage_btn_h,
+                        text: String::new(),
+                        icon: Some(crate::widgets::IconType::Rollback),
+                        text_scale: 0.98,
+                        icon_size: 21.0 * s,
+                    };
+                    let rollback_hovered = if workspace_disabled {
+                        render_git_disabled_button(self, &rollback_btn, s);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitRollbackStaged(workspace.workspace_idx),
+                            &rollback_btn,
+                            mx,
+                            my,
+                        );
+                        false
+                    } else if stage_interaction_disabled {
+                        rollback_btn.render(self, -1.0, -1.0, s, false);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitRollbackStaged(workspace.workspace_idx),
+                            &rollback_btn,
+                            mx,
+                            my,
+                        );
+                        false
+                    } else {
+                        ui_registry.register_button(
+                            crate::ui_system::UiId::GitRollbackStaged(workspace.workspace_idx),
+                            &rollback_btn,
+                            self,
+                            mx,
+                            my,
+                            s,
+                            false,
+                        )
+                    };
+                    if rollback_hovered {
+                        self.git_action_tooltip = Some((
+                            GIT_TOOLTIP_ROLLBACK,
+                            workspace.workspace_idx,
+                            "Откатить staged".to_string(),
+                            mx,
+                            my,
+                        ));
+                    }
+
+                    for (id, icon, bx, tooltip, kind) in [
+                        (
+                            crate::ui_system::UiId::GitStageAll(workspace.workspace_idx),
+                            crate::widgets::IconType::GitPlus,
+                            stage_x,
+                            "Добавить все",
+                            GIT_TOOLTIP_STAGE_ALL,
+                        ),
+                        (
+                            crate::ui_system::UiId::GitUnstageAll(workspace.workspace_idx),
+                            crate::widgets::IconType::GitMinus,
+                            unstage_x,
+                            "Убрать все",
+                            GIT_TOOLTIP_UNSTAGE_ALL,
+                        ),
+                    ] {
+                        let btn = Button {
+                            x: bx,
+                            y: btn_y,
+                            w: stage_btn_w,
+                            h: stage_btn_h,
+                            text: String::new(),
+                            icon: Some(icon),
+                            text_scale: 0.0,
+                            icon_size: 28.0 * s,
+                        };
+                        let hovered = if workspace_disabled {
+                            render_git_disabled_button(self, &btn, s);
+                            register_git_locked_button_cursor(
+                                ui_registry,
+                                id,
+                                &btn,
+                                mx,
+                                my,
+                            );
+                            false
+                        } else if stage_interaction_disabled {
+                            btn.render(self, -1.0, -1.0, s, false);
+                            register_git_locked_button_cursor(
+                                ui_registry,
+                                id,
+                                &btn,
+                                mx,
+                                my,
+                            );
+                            false
+                        } else {
+                            ui_registry.register_button(id, &btn, self, mx, my, s, false)
+                        };
+                        if hovered {
+                            self.git_action_tooltip =
+                                Some((kind, workspace.workspace_idx, tooltip.to_string(), mx, my));
+                        }
+                    }
+                } else if changed_count > 0 {
+                    label_scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut label_scratch,
+                        format_args!("{changed_count}"),
+                    );
+                    let badge_x = right_x - count_badge_w;
+                    let badge_y = y + ((workspace_h - count_badge_h) / 2.0).round();
+                    self.push_rounded_rect(
+                        badge_x,
+                        badge_y,
+                        count_badge_w,
+                        count_badge_h,
+                        count_badge_h / 2.0,
+                        git_disabled_color([0.24, 0.27, 0.34, 1.0], workspace_disabled, 0.34),
+                    );
+                    self.draw_string_scaled(
+                        &label_scratch,
+                        (badge_x + (count_badge_w - count_text_w) / 2.0).round(),
+                        (badge_y + count_badge_h / 2.0 + 4.0 * s).round(),
+                        git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
+                        count_text_scale,
                     );
                 }
             }
@@ -1040,9 +1693,21 @@ impl Renderer {
                             y += row_h;
                             continue;
                         };
-                        let hovered = if workspace_disabled {
-                            false
-                        } else {
+                        let file_layout = git_file_row_layout(indent_x, y, row_h, s);
+                        let check_x = file_layout.check_x;
+                        let check_y = file_layout.check_y;
+                        let stage_interaction_disabled =
+                            git_stage_controls_disabled(workspace_disabled, ide_panel.git.pending);
+                        let hovered = git_row_visual_hovered(
+                            mx,
+                            my,
+                            panel_x,
+                            y,
+                            panel_w,
+                            row_h,
+                            workspace_disabled,
+                        );
+                        if git_file_row_hitbox_enabled(stage_interaction_disabled) {
                             ui_registry.register_rect(
                                 crate::ui_system::UiId::GitFile(workspace.workspace_idx, file_idx),
                                 panel_x,
@@ -1051,33 +1716,45 @@ impl Renderer {
                                 row_h,
                                 mx,
                                 my,
-                            )
-                        };
+                            );
+                        }
                         if hovered {
                             self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
                         }
+                        if git_file_tooltip_hovered(
+                            hovered,
+                            mx,
+                            check_x,
+                            file_layout.check_size,
+                        ) {
+                            let home = std::env::var_os("HOME")
+                                .or_else(|| std::env::var_os("USERPROFILE"))
+                                .map(std::path::PathBuf::from);
+                            git_file_tooltip = Some((
+                                workspace.workspace_idx,
+                                file_idx,
+                                git_file_tooltip_text(file, home.as_deref()),
+                                mx,
+                                my,
+                            ));
+                        }
 
-                        let check_x = indent_x;
-                        let check_y = y + 7.0 * s;
-                        let file_staged = file.staged && !workspace_disabled;
+                        let (checkbox_color, check_color) =
+                            git_checkbox_color(file.staged, false, workspace_disabled);
                         self.push_rounded_rect(
                             check_x,
                             check_y,
-                            12.0 * s,
-                            12.0 * s,
+                            file_layout.check_size,
+                            file_layout.check_size,
                             2.0 * s,
-                            if file_staged {
-                                [0.48, 0.82, 0.52, 0.95]
-                            } else {
-                                [1.0, 1.0, 1.0, 0.12]
-                            },
+                            checkbox_color,
                         );
-                        if file_staged {
+                        if file.staged {
                             self.draw_string_scaled(
                                 "✓",
                                 check_x + 2.0 * s,
                                 y + 18.0 * s,
-                                [0.07, 0.09, 0.12, 1.0],
+                                check_color,
                                 0.78,
                             );
                         }
@@ -1096,10 +1773,16 @@ impl Renderer {
                             0.82,
                         );
 
-                        let text_x = check_x + 22.0 * s;
+                        self.draw_file_icon(
+                            row.icon_key,
+                            false,
+                            file_layout.icon_x,
+                            file_layout.icon_y,
+                            file_layout.icon_size,
+                        );
                         self.draw_tree_leaf_label(
                             &row.name,
-                            text_x,
+                            file_layout.text_x,
                             y,
                             row_h,
                             status_x - 8.0 * s,
@@ -1122,17 +1805,97 @@ impl Renderer {
                             mx,
                             my,
                         );
-                        self.draw_tree_dir_entry(
-                            &row.name,
-                            row.icon_key,
-                            indent_x,
+                        let folder_stage =
+                            crate::app::git_panel::git_folder_stage_state(workspace, row_idx);
+                        let folder_layout = git_folder_row_layout(indent_x, y, row_h, s);
+                        let stage_interaction_disabled =
+                            git_stage_controls_disabled(workspace_disabled, ide_panel.git.pending);
+                        let check_size = folder_layout.check_size;
+                        let check_x = folder_layout.check_x;
+                        let check_y = folder_layout.check_y;
+                        let (checkbox_color, check_color) = git_checkbox_color(
+                            matches!(
+                                folder_stage,
+                                Some(crate::app::git_panel::GitFolderStageState::All)
+                            ),
+                            matches!(
+                                folder_stage,
+                                Some(crate::app::git_panel::GitFolderStageState::Partial)
+                            ),
+                            workspace_disabled,
+                        );
+                        self.push_rounded_rect(
+                            check_x,
+                            check_y,
+                            check_size,
+                            check_size,
+                            2.0 * s,
+                            checkbox_color,
+                        );
+                        match folder_stage {
+                            Some(crate::app::git_panel::GitFolderStageState::All) => {
+                                self.draw_string_scaled(
+                                    "✓",
+                                    check_x + 2.0 * s,
+                                    y + 18.0 * s,
+                                    check_color,
+                                    0.78,
+                                );
+                            }
+                            Some(crate::app::git_panel::GitFolderStageState::Partial) => {
+                                let mark_w = 8.0 * s;
+                                let mark_h = 2.0 * s;
+                                self.push_rect(
+                                    check_x + (check_size - mark_w) / 2.0,
+                                    check_y + (check_size - mark_h) / 2.0,
+                                    mark_w,
+                                    mark_h,
+                                    check_color,
+                                );
+                            }
+                            _ => {}
+                        }
+                        if !stage_interaction_disabled
+                            && git_folder_stage_hitbox_enabled(folder_stage)
+                        {
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::GitFolderStage(
+                                    workspace.workspace_idx,
+                                    row_idx,
+                                ),
+                                check_x - 3.0 * s,
+                                y + 4.0 * s,
+                                check_size + 6.0 * s,
+                                row_h - 8.0 * s,
+                                mx,
+                                my,
+                            );
+                        }
+
+                        let text_y = Self::tree_row_text_y(y, row_h, s);
+                        let arrow_color = git_disabled_color(
+                            [0.78, 0.80, 0.88, 0.75],
+                            workspace_disabled,
+                            0.26,
+                        );
+                        self.draw_tree_disclosure_icon(
+                            !row_collapsed,
+                            folder_layout.arrow_x,
                             y,
                             row_h,
-                            panel_x + panel_w - pad,
-                            !row_collapsed,
-                            self.theme.fg,
-                            [0.78, 0.80, 0.88, 0.75],
-                            s,
+                            arrow_color,
+                        );
+                        let icon_size = folder_layout.icon_size;
+                        let icon_x = folder_layout.icon_x;
+                        let icon_y = folder_layout.icon_y;
+                        self.draw_file_icon(row.icon_key, true, icon_x, icon_y, icon_size);
+                        let text_x = icon_x + icon_size + 4.0 * s;
+                        self.draw_tree_label_clipped(
+                            &row.name,
+                            text_x,
+                            text_y,
+                            (panel_x + panel_w - pad - text_x).max(0.0),
+                            git_disabled_color(self.theme.fg, workspace_disabled, 0.38),
                             text_scale,
                             &mut label_scratch,
                         );
@@ -1236,6 +1999,8 @@ impl Renderer {
                 );
             }
         }
+
+        self.git_file_tooltip = git_file_tooltip;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1774,6 +2539,7 @@ impl Renderer {
     ) -> bool {
         let s = self.scale_factor;
         let mut wants_pointer = false;
+        let mut label_scratch = String::new();
         if crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel) {
             ui_registry.mark_overlay_start();
             ui_registry.reset_cursor_state();
@@ -2215,6 +2981,87 @@ impl Renderer {
             }
         }
 
+        if let Some(dialog) = &ide_panel.git.confirm_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 40.0) * s).min(self.width - 32.0 * s);
+            let visible_files = dialog.files.len().min(7);
+            let h = (172.0 * s + visible_files as f32 * 20.0 * s).min(self.height - 32.0 * s);
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+
+            let (title, message, confirm_label) = match dialog.action {
+                crate::app::git_panel::GitConfirmAction::RollbackStaged => (
+                    "Откатить staged файлы",
+                    "Отменить staged изменения в выбранных файлах?",
+                    "Откатить",
+                ),
+            };
+            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.theme.fg, 1.0);
+            self.draw_string_scaled(
+                message,
+                x + side_pad,
+                y + 70.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.86,
+            );
+
+            let list_x = x + side_pad;
+            let list_y = y + 92.0 * s;
+            let list_w = w - side_pad * 2.0;
+            for (idx, file) in dialog.files.iter().take(visible_files).enumerate() {
+                self.draw_tree_label_clipped(
+                    file.display_path.as_str(),
+                    list_x,
+                    list_y + idx as f32 * 20.0 * s,
+                    list_w,
+                    [0.72, 0.76, 0.88, 1.0],
+                    0.82,
+                    &mut label_scratch,
+                );
+            }
+            if dialog.files.len() > visible_files {
+                let more = format!("+{} more", dialog.files.len() - visible_files);
+                self.draw_string_scaled(
+                    &more,
+                    list_x,
+                    list_y + visible_files as f32 * 20.0 * s,
+                    [0.55, 0.57, 0.64, 1.0],
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            for (id, label, bx) in [
+                (crate::ui_system::UiId::GitConfirmAction, confirm_label, ok_x),
+                (crate::ui_system::UiId::GitConfirmCancel, "Отмена", cancel_x),
+            ] {
+                let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+                if hovered {
+                    wants_pointer = true;
+                }
+                let bg = if hovered {
+                    [0.30, 0.32, 0.38, 1.0]
+                } else {
+                    [0.22, 0.23, 0.28, 1.0]
+                };
+                self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+                let tw = self.measure_ui_width(label, 0.86);
+                self.draw_string_scaled(
+                    label,
+                    bx + (btn_w - tw) / 2.0,
+                    btn_y + 21.0 * s,
+                    self.theme.fg,
+                    0.86,
+                );
+            }
+        }
+
         wants_pointer
     }
 }
@@ -2240,6 +3087,239 @@ mod tests {
         assert_eq!(ok_x, 193.0);
         assert_eq!(cancel_x, 315.0);
         assert_eq!((ok_x + cancel_x + 112.0) / 2.0, 310.0);
+    }
+
+    #[test]
+    fn git_row_hover_stays_visual_even_when_stage_click_is_locked() {
+        assert!(git_row_visual_hovered(
+            84.0, 128.0, 48.0, 112.0, 260.0, 28.0, false
+        ));
+        assert!(git_row_visual_hovered(
+            260.0, 128.0, 48.0, 112.0, 260.0, 28.0, false
+        ));
+        assert!(!git_row_visual_hovered(
+            84.0, 128.0, 48.0, 112.0, 260.0, 28.0, true
+        ));
+
+        assert!(git_file_row_hitbox_enabled(false));
+        assert!(git_file_row_hitbox_enabled(true));
+        assert!(!git_file_tooltip_hovered(true, 100.0, 100.0, 16.0));
+        assert!(!git_file_tooltip_hovered(true, 116.0, 100.0, 16.0));
+        assert!(git_file_tooltip_hovered(true, 116.1, 100.0, 16.0));
+        assert!(!git_file_tooltip_hovered(false, 140.0, 100.0, 16.0));
+
+        assert!(git_folder_stage_hitbox_enabled(Some(
+            crate::app::git_panel::GitFolderStageState::All
+        )));
+        assert!(git_folder_stage_hitbox_enabled(Some(
+            crate::app::git_panel::GitFolderStageState::Empty
+        )));
+        assert!(!git_folder_stage_hitbox_enabled(None));
+    }
+
+    #[test]
+    fn git_disabled_color_dims_folder_text_alpha_only() {
+        assert_eq!(
+            git_disabled_color([0.2, 0.3, 0.4, 1.0], true, 0.38),
+            [0.2, 0.3, 0.4, 0.38]
+        );
+        assert_eq!(
+            git_disabled_color([0.2, 0.3, 0.4, 1.0], false, 0.38),
+            [0.2, 0.3, 0.4, 1.0]
+        );
+    }
+
+    #[test]
+    fn git_stage_controls_disable_for_pending_or_inactive_workspace() {
+        assert!(git_stage_controls_disabled(true, false));
+        assert!(git_stage_controls_disabled(false, true));
+        assert!(git_stage_controls_disabled(true, true));
+        assert!(!git_stage_controls_disabled(false, false));
+    }
+
+    #[test]
+    fn git_checkbox_color_keeps_staged_state_visible_when_disabled() {
+        let (active_bg, active_mark) = git_checkbox_color(true, false, false);
+        let (disabled_bg, disabled_mark) = git_checkbox_color(true, false, true);
+
+        assert_eq!(&active_bg[..3], &[0.48, 0.82, 0.52]);
+        assert_eq!(&disabled_bg[..3], &[0.48, 0.82, 0.52]);
+        assert!(disabled_bg[3] > 0.0 && disabled_bg[3] < active_bg[3]);
+        assert!(disabled_mark[3] > 0.0 && disabled_mark[3] < active_mark[3]);
+
+        let (partial_bg, partial_mark) = git_checkbox_color(false, true, true);
+        assert!(partial_bg[3] > 0.0);
+        assert!(partial_mark[3] > 0.0);
+    }
+
+    #[test]
+    fn git_file_tooltip_uses_tilde_path_and_status_word() {
+        let file = crate::app::git_panel::GitFileEntry {
+            workspace_idx: 0,
+            repo_root: std::path::PathBuf::from("/home/reyan/projects/rriter"),
+            rel_path: "src/main.rs".to_string(),
+            old_rel_path: None,
+            display_path: "src/main.rs".to_string(),
+            depth: 1,
+            staged: false,
+            status: crate::app::git_panel::GitFileStatus::Modified,
+        };
+
+        assert_eq!(
+            git_file_tooltip_text(&file, Some(std::path::Path::new("/home/reyan"))),
+            "~/projects/rriter/src/main.rs • Изменен"
+        );
+        assert_eq!(
+            git_status_word(crate::app::git_panel::GitFileStatus::Deleted),
+            "Удален"
+        );
+        assert_eq!(
+            git_status_word(crate::app::git_panel::GitFileStatus::Untracked),
+            "Не отслеживается"
+        );
+    }
+
+    #[test]
+    fn git_file_tooltip_timer_stays_active_while_mouse_moves_in_same_target() {
+        let target = GitTooltipTarget {
+            kind: GIT_TOOLTIP_FILE,
+            workspace_idx: 1,
+            item_idx: 2,
+        };
+        let other_target = GitTooltipTarget {
+            kind: GIT_TOOLTIP_FILE,
+            workspace_idx: 1,
+            item_idx: 3,
+        };
+        let now = std::time::Instant::now();
+
+        git_tooltip_reset();
+        assert_eq!(git_tooltip_anchor(target, 10.0, 20.0, now), None);
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                30.0,
+                40.0,
+                now + std::time::Duration::from_millis(200)
+            ),
+            None
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                50.0,
+                60.0,
+                now + std::time::Duration::from_millis(450)
+            ),
+            Some((10.0, 20.0))
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                70.0,
+                80.0,
+                now + std::time::Duration::from_millis(500)
+            ),
+            Some((10.0, 20.0))
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                other_target,
+                90.0,
+                100.0,
+                now + std::time::Duration::from_millis(550)
+            ),
+            None
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                other_target,
+                110.0,
+                120.0,
+                now + std::time::Duration::from_millis(1000)
+            ),
+            Some((90.0, 100.0))
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                130.0,
+                140.0,
+                now + std::time::Duration::from_millis(1100)
+            ),
+            None
+        );
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                150.0,
+                160.0,
+                now + std::time::Duration::from_millis(1550)
+            ),
+            Some((130.0, 140.0))
+        );
+        git_tooltip_reset();
+    }
+
+    #[test]
+    fn git_tooltip_reset_requires_new_dwell_after_scroll() {
+        let target = GitTooltipTarget {
+            kind: GIT_TOOLTIP_FILE,
+            workspace_idx: 1,
+            item_idx: 2,
+        };
+        let now = std::time::Instant::now();
+
+        git_tooltip_reset();
+        assert_eq!(git_tooltip_anchor(target, 10.0, 20.0, now), None);
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                10.0,
+                20.0,
+                now + std::time::Duration::from_millis(450)
+            ),
+            Some((10.0, 20.0))
+        );
+
+        git_tooltip_reset();
+        assert_eq!(
+            git_tooltip_anchor(
+                target,
+                10.0,
+                20.0,
+                now + std::time::Duration::from_millis(500)
+            ),
+            None
+        );
+        git_tooltip_reset();
+    }
+
+    #[test]
+    fn git_folder_row_layout_uses_equal_gaps_and_centered_icon() {
+        let layout = git_folder_row_layout(80.0, 40.0, 28.0, 1.0);
+        let arrow_to_check =
+            layout.check_x - (layout.arrow_x + crate::render_view::tree_ui::TREE_DISCLOSURE_SLOT);
+        let check_to_icon = layout.icon_x - (layout.check_x + layout.check_size);
+
+        assert_eq!(arrow_to_check, 6.0);
+        assert_eq!(check_to_icon, 6.0);
+        assert_eq!(layout.check_y, 48.0);
+        assert_eq!(layout.icon_y, 44.0);
+    }
+
+    #[test]
+    fn git_file_row_layout_draws_icon_between_checkbox_and_label() {
+        let layout = git_file_row_layout(98.0, 40.0, 28.0, 1.0);
+        let parent_folder_layout = git_folder_row_layout(80.0, 40.0, 28.0, 1.0);
+
+        assert_eq!(layout.check_x, 100.0);
+        assert_eq!(layout.check_x, parent_folder_layout.check_x);
+        assert_eq!(layout.check_y, 48.0);
+        assert_eq!(layout.icon_x - (layout.check_x + layout.check_size), 6.0);
+        assert_eq!(layout.icon_x, parent_folder_layout.icon_x);
+        assert_eq!(layout.icon_y, 44.0);
+        assert_eq!(layout.text_x - (layout.icon_x + layout.icon_size), 4.0);
     }
 
     #[test]

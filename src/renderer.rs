@@ -20,6 +20,53 @@ fn popup_waiting_for_mouse_move(hide: bool, last_known: (f32, f32), x: f32, y: f
         && (y - last_known.1).abs() <= POPUP_MOUSE_MOVE_EPS
 }
 
+fn alpha_bounds_y(data: &[u8], width: usize, height: usize) -> Option<(usize, usize)> {
+    let row_len = width.checked_mul(4)?;
+    if row_len == 0 || data.len() < row_len.checked_mul(height)? {
+        return None;
+    }
+
+    let mut min_y = height;
+    let mut max_y = 0usize;
+    for y in 0..height {
+        let row = &data[y * row_len..(y + 1) * row_len];
+        if row.chunks_exact(4).any(|px| px[3] != 0) {
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+    }
+
+    if min_y <= max_y {
+        Some((min_y, max_y))
+    } else {
+        None
+    }
+}
+
+fn center_alpha_bbox_y(data: &mut [u8], width: usize, height: usize) {
+    let Some((min_y, max_y)) = alpha_bounds_y(data, width, height) else {
+        return;
+    };
+    let visible_h = max_y - min_y + 1;
+    let target_min_y = (height.saturating_sub(visible_h)) / 2;
+    if target_min_y == min_y {
+        return;
+    }
+
+    let Some(row_len) = width.checked_mul(4) else {
+        return;
+    };
+    if target_min_y < min_y {
+        let shift = min_y - target_min_y;
+        data.copy_within(shift * row_len..height * row_len, 0);
+        data[(height - shift) * row_len..height * row_len].fill(0);
+    } else {
+        let shift = target_min_y - min_y;
+        data.copy_within(0..(height - shift) * row_len, shift * row_len);
+        data[0..shift * row_len].fill(0);
+    }
+}
+
 #[derive(Clone)]
 pub struct Theme {
     pub bg: [f32; 4],
@@ -204,6 +251,9 @@ pub struct Renderer {
     pub last_editor_version_for_typing: u64,
     pub last_cursor_for_popups: usize,
     pub last_draw_instant: Option<std::time::Instant>,
+    pub git_file_tooltip: Option<(usize, usize, String, f32, f32)>,
+    pub git_action_tooltip: Option<(u8, usize, String, f32, f32)>,
+    pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
@@ -537,6 +587,9 @@ impl Renderer {
                 last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
+                git_file_tooltip: None,
+                git_action_tooltip: None,
+                git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,
                 identical_words_cache: Vec::with_capacity(64),
@@ -576,10 +629,10 @@ impl Renderer {
     pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         let svg_str = match c {
             '▶' => {
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"4 2 16 20\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>"
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></svg>"
             }
             '▼' => {
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"2 4 20 16\"><g transform=\"rotate(90 12 12)\"><path fill=\"#ffffff\" d=\"M8 5.14v14l11-7z\"/></g></svg>"
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill=\"#ffffff\" d=\"M5.14 8h14l-7 11z\"/></svg>"
             }
             _ => return None,
         };
@@ -603,6 +656,7 @@ impl Renderer {
         resvg::render(&tree, transform, &mut pixmap.as_mut());
 
         let data = pixmap.data_mut();
+        center_alpha_bbox_y(data, w as usize, h as usize);
         for pixel in data.chunks_exact_mut(4) {
             pixel[0] = 255;
             pixel[1] = 255;
@@ -1096,6 +1150,14 @@ impl Renderer {
                 include_bytes!("icons/plus.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::GitPlus,
+                include_bytes!("icons/plus_git.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::GitMinus,
+                include_bytes!("icons/minus.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Terminal,
                 include_bytes!("icons/atom/icons/ui/terminal.svg").as_slice(),
             ),
@@ -1123,6 +1185,10 @@ impl Renderer {
                 crate::widgets::IconType::Check,
                 include_bytes!("icons/check.svg").as_slice(),
             ),
+            (
+                crate::widgets::IconType::Rollback,
+                include_bytes!("icons/rollback.svg").as_slice(),
+            ),
         ];
         let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
@@ -1133,12 +1199,15 @@ impl Renderer {
             } else if icon_type == crate::widgets::IconType::Problems {
                 svg_data_str.replace("#D81B60", "#ffffff")
             } else if icon_type == crate::widgets::IconType::Plus
+                || icon_type == crate::widgets::IconType::GitPlus
+                || icon_type == crate::widgets::IconType::GitMinus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
                 || icon_type == crate::widgets::IconType::Git
                 || icon_type == crate::widgets::IconType::LspServers
                 || icon_type == crate::widgets::IconType::Copy
                 || icon_type == crate::widgets::IconType::Check
+                || icon_type == crate::widgets::IconType::Rollback
             {
                 svg_data_str
                     .replace("currentColor", "#ffffff")
@@ -1347,6 +1416,34 @@ mod tests {
         assert!(!popup_waiting_for_mouse_move(
             false, last_known, 120.0, 80.0
         ));
+    }
+
+    #[test]
+    fn custom_svg_alpha_bbox_centering_moves_down_glyph_visual_only() {
+        let mut rgba = vec![0u8; 4 * 6 * 4];
+        for y in 3..6 {
+            let px = (y * 4 + 1) * 4;
+            rgba[px + 3] = 255;
+        }
+
+        center_alpha_bbox_y(&mut rgba, 4, 6);
+
+        assert_eq!(alpha_bounds_y(&rgba, 4, 6), Some((1, 3)));
+    }
+
+    #[test]
+    fn custom_svg_alpha_bbox_centering_keeps_centered_glyph_in_place() {
+        let mut rgba = vec![0u8; 4 * 6 * 4];
+        for y in 1..4 {
+            let px = (y * 4 + 1) * 4;
+            rgba[px + 3] = 255;
+        }
+        let before = rgba.clone();
+
+        center_alpha_bbox_y(&mut rgba, 4, 6);
+
+        assert_eq!(rgba, before);
+        assert_eq!(alpha_bounds_y(&rgba, 4, 6), Some((1, 3)));
     }
 
     #[test]

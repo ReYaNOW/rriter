@@ -1569,6 +1569,12 @@ impl Renderer {
             );
         }
 
+        if is_ide_mode {
+            self.draw_git_file_tooltip_overlay(s);
+        } else {
+            self.reset_git_file_tooltip_overlay();
+        }
+
         self.flush();
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы

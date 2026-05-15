@@ -252,6 +252,10 @@ impl App {
                 wh,
             );
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.suppress_popups_until_next_mouse_move();
+                    renderer.reset_git_file_tooltip_overlay();
+                }
                 self.ide_panel.git.scroll.anim_speed = 7.0;
                 self.ide_panel.git.scroll.scroll_by(dy);
                 let controls_h = 92.0 * s;

@@ -12,6 +12,8 @@ pub enum IconType {
     Down,
     Close,
     Plus,
+    GitPlus,
+    GitMinus,
     Terminal,
     Explorer,
     Git,
@@ -19,6 +21,7 @@ pub enum IconType {
     LspServers,
     Copy,
     Check,
+    Rollback,
 }
 
 pub struct Button {
@@ -75,9 +78,13 @@ impl Button {
         let icon_y = y + (h - icon_size) / 2.0;
         let text_y = y + h / 2.0 + 5.0 * scale;
 
-        let mut content_w = renderer.measure_ui_width(&self.text, text_scale);
+        let text_w = renderer.measure_ui_width(&self.text, text_scale);
+        let mut content_w = text_w;
         if self.icon.is_some() {
-            content_w += icon_size + 8.0 * scale;
+            content_w += icon_size;
+            if !self.text.is_empty() {
+                content_w += 8.0 * scale;
+            }
         }
 
         let mut content_x = x + (w - content_w) / 2.0;
@@ -90,10 +97,15 @@ impl Button {
                 icon_size,
                 [1.0, 1.0, 1.0, 1.0],
             );
-            content_x += icon_size + 8.0 * scale;
+            content_x += icon_size;
+            if !self.text.is_empty() {
+                content_x += 8.0 * scale;
+            }
         }
 
-        renderer.draw_string_scaled(&self.text, content_x, text_y, text_color, text_scale);
+        if !self.text.is_empty() {
+            renderer.draw_string_scaled(&self.text, content_x, text_y, text_color, text_scale);
+        }
 
         hovered
     }

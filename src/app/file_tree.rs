@@ -277,6 +277,7 @@ pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState)
         || ide_panel.file_tree_rename_dialog.is_some()
         || ide_panel.file_tree_move_dialog.is_some()
         || ide_panel.file_tree_delete_dialog.is_some()
+        || ide_panel.git.confirm_dialog.is_some()
 }
 
 const FILE_TREE_NAME_INPUT_MAX_BYTES: usize = 255;
@@ -1301,6 +1302,8 @@ impl App {
                 | crate::ui_system::UiId::FileTreeMoveCancel
                 | crate::ui_system::UiId::FileTreeDeleteConfirm
                 | crate::ui_system::UiId::FileTreeDeleteCancel
+                | crate::ui_system::UiId::GitConfirmAction
+                | crate::ui_system::UiId::GitConfirmCancel
         )
     }
 }

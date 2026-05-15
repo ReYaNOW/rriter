@@ -86,6 +86,28 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_file_tree_modal_keyboard(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+        if self.ide_panel.git.confirm_dialog.is_some() {
+            if key_event.state != winit::event::ElementState::Pressed {
+                return true;
+            }
+            match key_event.physical_key {
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                    self.ide_panel.git.confirm_dialog = None;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
+                    self.confirm_git_dialog();
+                }
+                _ => {}
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
+            return true;
+        }
+
         if self.ide_panel.file_tree_context_menu.is_some() {
             if key_event.state == winit::event::ElementState::Pressed
                 && key_event.physical_key

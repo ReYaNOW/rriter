@@ -485,6 +485,13 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitFolderStage(workspace_idx, row_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.toggle_git_folder_stage(workspace_idx, row_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitFolder(workspace_idx, row_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
                 self.toggle_git_tree_folder(workspace_idx, row_idx);
@@ -515,6 +522,36 @@ impl App {
             UiId::GitPush(workspace_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
                 self.push_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitRollbackStaged(workspace_idx) => {
+                self.open_git_rollback_staged_dialog(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitStageAll(workspace_idx) => {
+                self.stage_all_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitUnstageAll(workspace_idx) => {
+                self.open_git_unstage_all_dialog(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitConfirmAction => {
+                self.confirm_git_dialog();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitConfirmCancel => {
+                self.ide_panel.git.confirm_dialog = None;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

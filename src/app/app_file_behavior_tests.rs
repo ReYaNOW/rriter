@@ -1018,6 +1018,7 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
             workspace_idx: 0,
             root: PathBuf::from("/workspace"),
             repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
             files: Vec::new(),
             tree: vec![crate::app::git_panel::GitTreeRow {
                 name: "src".to_string(),
@@ -1060,6 +1061,113 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
     let _ = app.ide_panel.git.message_editor.insert_str("ready");
     app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuItem(1));
     assert_eq!(app.ide_panel.git.notice.as_deref(), Some("No staged files"));
+}
+
+#[test]
+fn git_panel_workspace_confirm_dialogs_use_staged_files_headless() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            files: vec![
+                crate::app::git_panel::GitFileEntry {
+                    workspace_idx: 0,
+                    repo_root: PathBuf::from("/workspace"),
+                    rel_path: "src/lib.rs".to_string(),
+                    old_rel_path: None,
+                    display_path: "src/lib.rs".to_string(),
+                    depth: 1,
+                    staged: true,
+                    status: crate::app::git_panel::GitFileStatus::Modified,
+                },
+                crate::app::git_panel::GitFileEntry {
+                    workspace_idx: 0,
+                    repo_root: PathBuf::from("/workspace"),
+                    rel_path: "src/main.rs".to_string(),
+                    old_rel_path: None,
+                    display_path: "src/main.rs".to_string(),
+                    depth: 1,
+                    staged: false,
+                    status: crate::app::git_panel::GitFileStatus::Modified,
+                },
+            ],
+            tree: Vec::new(),
+            ahead: 0,
+            error: None,
+        }],
+    };
+
+    app.handle_ui_click(crate::ui_system::UiId::GitRollbackStaged(0));
+    let dialog = app.ide_panel.git.confirm_dialog.as_ref().unwrap();
+    assert_eq!(
+        dialog.action,
+        crate::app::git_panel::GitConfirmAction::RollbackStaged
+    );
+    assert_eq!(dialog.files.len(), 1);
+    assert_eq!(dialog.files[0].display_path, "src/lib.rs");
+
+    app.handle_ui_click(crate::ui_system::UiId::GitConfirmCancel);
+    assert!(app.ide_panel.git.confirm_dialog.is_none());
+
+    app.handle_ui_click(crate::ui_system::UiId::GitUnstageAll(0));
+    assert!(app.ide_panel.git.confirm_dialog.is_none());
+    assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+}
+
+#[test]
+fn git_panel_stage_clicks_are_locked_while_pending_headless() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx: 0,
+                repo_root: PathBuf::from("/workspace"),
+                rel_path: "tests/test_api.py".to_string(),
+                old_rel_path: None,
+                display_path: "tests/test_api.py".to_string(),
+                depth: 1,
+                staged: false,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
+            tree: vec![
+                crate::app::git_panel::GitTreeRow {
+                    name: "tests".to_string(),
+                    path: "tests".to_string(),
+                    depth: 0,
+                    file_idx: None,
+                    icon_key: "tests",
+                },
+                crate::app::git_panel::GitTreeRow {
+                    name: "test_api.py".to_string(),
+                    path: "tests/test_api.py".to_string(),
+                    depth: 1,
+                    file_idx: Some(0),
+                    icon_key: "python",
+                },
+            ],
+            ahead: 0,
+            error: None,
+        }],
+    };
+    app.ide_panel.git.pending = true;
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFolderStage(0, 0));
+    assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert_eq!(app.ide_panel.git.stage_pending_workspace_idx, None);
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFile(0, 0));
+    assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
 }
 
 #[test]

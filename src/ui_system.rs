@@ -45,10 +45,16 @@ pub enum UiId {
     // Git panel
     GitFile(usize, usize),
     GitFolder(usize, usize),
+    GitFolderStage(usize, usize),
     GitCommit,
     GitCommitMenuToggle,
     GitCommitMenuItem(usize),
     GitPush(usize),
+    GitRollbackStaged(usize),
+    GitStageAll(usize),
+    GitUnstageAll(usize),
+    GitConfirmAction,
+    GitConfirmCancel,
     GitMessageInput,
 
     // Sidebar

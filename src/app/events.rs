@@ -729,7 +729,11 @@ impl ApplicationHandler for App {
                     let state = state.borrow();
                     state.diag_hover_timer > 0.0 && state.diag_hover_timer < 0.2
                 });
-                if diag_timer_active {
+                let git_tooltip_waiting = self
+                    .renderer
+                    .as_ref()
+                    .is_some_and(|renderer| renderer.git_tooltip_waiting);
+                if diag_timer_active || git_tooltip_waiting {
                     self.window.as_ref().unwrap().request_redraw();
                 }
 
