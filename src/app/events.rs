@@ -1100,13 +1100,19 @@ impl ApplicationHandler for App {
                             ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                         }
                     }
+                    if ide_resize_cursor.is_none()
+                        && self.ui_registry.find_at(mx, my)
+                            == Some(crate::ui_system::UiId::GitGraphResize)
+                    {
+                        ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
+                    }
                 }
 
                 let cursor_icon = if let Some(rc) = ide_resize_cursor {
                     rc
                 } else if self.ide_panel.is_resizing_left {
                     winit::window::CursorIcon::EwResize
-                } else if self.ide_panel.is_resizing_bottom {
+                } else if self.ide_panel.is_resizing_bottom || self.ide_panel.git.graph_resizing {
                     winit::window::CursorIcon::NsResize
                 } else if self.file_tree_overlay_active() {
                     let (mx, my) = {

@@ -1570,7 +1570,7 @@ impl Renderer {
         }
 
         if is_ide_mode {
-            self.draw_git_file_tooltip_overlay(s);
+            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, mx, my);
         } else {
             self.reset_git_file_tooltip_overlay();
         }

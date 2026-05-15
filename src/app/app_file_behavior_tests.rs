@@ -1037,20 +1037,22 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
 
     app.handle_ui_click(crate::ui_system::UiId::GitFolder(0, 0));
     assert!(!app.ide_panel.git.commit_menu_open);
-    assert!(app
-        .ide_panel
-        .git
-        .collapsed_dirs
-        .get(&0)
-        .is_some_and(|dirs| dirs.contains("src")));
+    assert!(
+        app.ide_panel
+            .git
+            .collapsed_dirs
+            .get(&0)
+            .is_some_and(|dirs| dirs.contains("src"))
+    );
 
     app.handle_ui_click(crate::ui_system::UiId::GitFolder(0, 0));
-    assert!(!app
-        .ide_panel
-        .git
-        .collapsed_dirs
-        .get(&0)
-        .is_some_and(|dirs| dirs.contains("src")));
+    assert!(
+        !app.ide_panel
+            .git
+            .collapsed_dirs
+            .get(&0)
+            .is_some_and(|dirs| dirs.contains("src"))
+    );
 
     app.handle_ui_click(crate::ui_system::UiId::GitCommit);
     assert_eq!(

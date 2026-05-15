@@ -247,12 +247,16 @@ pub struct Renderer {
     pub hide_popups_until_mouse_move: bool,
     pub tab_hover_timer: f32,
     pub tab_hover_idx: Option<usize>,
+    pub tooltip_hover_key: Option<u64>,
+    pub tooltip_hover_start: Option<std::time::Instant>,
+    pub tooltip_hover_anchor: (f32, f32),
     pub last_known_mouse: (f32, f32),
     pub last_editor_version_for_typing: u64,
     pub last_cursor_for_popups: usize,
     pub last_draw_instant: Option<std::time::Instant>,
     pub git_file_tooltip: Option<(usize, usize, String, f32, f32)>,
     pub git_action_tooltip: Option<(u8, usize, String, f32, f32)>,
+    pub git_graph_tooltip: Option<(usize, usize, f32, f32)>,
     pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,
@@ -273,6 +277,49 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    #[inline(always)]
+    pub(crate) fn delayed_tooltip_anchor(
+        &mut self,
+        key: Option<u64>,
+        anchor_x: f32,
+        anchor_y: f32,
+        now: std::time::Instant,
+    ) -> Option<(f32, f32)> {
+        let Some(key) = key else {
+            self.reset_delayed_tooltip_anchor();
+            return None;
+        };
+
+        if self.tooltip_hover_key != Some(key) {
+            self.tooltip_hover_key = Some(key);
+            self.tooltip_hover_start = Some(now);
+            self.tooltip_hover_anchor = (anchor_x, anchor_y);
+            return None;
+        }
+
+        self.tooltip_hover_start.and_then(|start| {
+            (now.duration_since(start).as_secs_f32() > 0.4).then_some(self.tooltip_hover_anchor)
+        })
+    }
+
+    #[inline(always)]
+    pub(crate) fn reset_delayed_tooltip_anchor(&mut self) {
+        self.tooltip_hover_key = None;
+        self.tooltip_hover_start = None;
+        self.tooltip_hover_anchor = (0.0, 0.0);
+    }
+
+    #[inline(always)]
+    pub(crate) fn reset_delayed_tooltip_anchor_namespace(&mut self, namespace: u64) {
+        const NAMESPACE_MASK: u64 = 0xf000_0000_0000_0000;
+        if self
+            .tooltip_hover_key
+            .is_some_and(|key| key & NAMESPACE_MASK == namespace)
+        {
+            self.reset_delayed_tooltip_anchor();
+        }
+    }
+
     #[inline(always)]
     pub fn suppress_popups_until_next_mouse_move(&mut self) {
         self.hide_popups_until_mouse_move = true;
@@ -583,12 +630,16 @@ impl Renderer {
                 hide_popups_until_mouse_move: false,
                 tab_hover_timer: 0.0,
                 tab_hover_idx: None,
+                tooltip_hover_key: None,
+                tooltip_hover_start: None,
+                tooltip_hover_anchor: (0.0, 0.0),
                 last_known_mouse: (0.0, 0.0),
                 last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
                 last_draw_instant: None,
                 git_file_tooltip: None,
                 git_action_tooltip: None,
+                git_graph_tooltip: None,
                 git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,

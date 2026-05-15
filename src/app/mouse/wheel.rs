@@ -27,7 +27,10 @@ fn panel_scroll_rect(
             sidebar_w,
             title_h,
             left_width * scale,
-            window_height - title_h - effective_bottom_height,
+            window_height
+                - title_h
+                - effective_bottom_height
+                - crate::render_view::ide_status_bar_height(scale),
         )
     } else {
         let tab_h = 32.0 * scale;
@@ -256,12 +259,80 @@ impl App {
                     renderer.suppress_popups_until_next_mouse_move();
                     renderer.reset_git_file_tooltip_overlay();
                 }
+                let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
+                let list_y = cy + controls_h;
+                let full_list_h = (ch - controls_h).max(40.0 * s);
+                let (changes_h, divider_h, graph_h) = if self.ide_panel.git.graph_open {
+                    crate::app::git_panel::git_graph_split_heights(
+                        full_list_h,
+                        self.ide_panel.git.graph_height_ratio,
+                        s,
+                    )
+                } else {
+                    (full_list_h, 0.0, 0.0)
+                };
+                if self.ide_panel.git.graph_open {
+                    let graph_y = list_y + changes_h + divider_h;
+                    let graph_header_h = 34.0 * s;
+                    if point_in_rect(mx, my, (cx, graph_y, cw, graph_header_h)) {
+                        let mut total_w = 0.0f32;
+                        let renderer = self.renderer.as_mut().unwrap();
+                        for workspace in self
+                            .ide_panel
+                            .git
+                            .snapshot
+                            .workspaces
+                            .iter()
+                            .filter(|workspace| workspace.repo_root.is_some())
+                        {
+                            let name = workspace
+                                .root
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("workspace");
+                            total_w += (renderer.measure_ui_width(name, 0.76) + 18.0 * s)
+                                .max(48.0 * s)
+                                + 6.0 * s;
+                        }
+                        let max_scroll = (total_w - (cw - 20.0 * s).max(0.0)).max(0.0);
+                        self.ide_panel.git.graph_workspace_scroll_x =
+                            (self.ide_panel.git.graph_workspace_scroll_x + dy)
+                                .clamp(0.0, max_scroll);
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    if point_in_rect(mx, my, (cx, graph_y, cw, graph_h)) {
+                        self.ide_panel.git.graph_scroll.anim_speed = 7.0;
+                        self.ide_panel.git.graph_scroll.scroll_by(dy);
+                        let rows_h = (graph_h - graph_header_h).max(0.0);
+                        let max_scroll = crate::app::git_panel::git_graph_max_scroll(
+                            self.ide_panel.git.graph_snapshot.len(),
+                            rows_h,
+                            s,
+                        );
+                        self.ide_panel
+                            .git
+                            .graph_scroll
+                            .clamp_target(0.0, max_scroll);
+                        if self.ide_panel.git.graph_has_more
+                            && self.ide_panel.git.graph_scroll.target
+                                >= (max_scroll - crate::app::git_panel::GIT_GRAPH_ROW_H * s * 3.0)
+                                    .max(0.0)
+                        {
+                            self.load_more_git_graph_commits();
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    if !point_in_rect(mx, my, (cx, list_y, cw, changes_h)) {
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                }
                 self.ide_panel.git.scroll.anim_speed = 7.0;
                 self.ide_panel.git.scroll.scroll_by(dy);
-                let controls_h = 92.0 * s;
-                let list_h = (wh - 32.0 * s - controls_h).max(40.0 * s);
                 let mut total_h = 0.0;
-                let staged_workspace = self.ide_panel.git.snapshot.active_staged_workspace_idx();
+                let staged_workspace = self.ide_panel.git.staged_workspace_lock();
                 for workspace in &self.ide_panel.git.snapshot.workspaces {
                     if staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
                         continue;
@@ -286,7 +357,7 @@ impl App {
                             * s
                     };
                 }
-                let max_scroll = (total_h - list_h).max(0.0);
+                let max_scroll = (total_h - changes_h).max(0.0);
                 self.ide_panel.git.scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;

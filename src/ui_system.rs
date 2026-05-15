@@ -56,6 +56,12 @@ pub enum UiId {
     GitConfirmAction,
     GitConfirmCancel,
     GitMessageInput,
+    GitGraphToggle,
+    GitGraphWorkspace(usize),
+    GitGraphResize,
+    GitGraphCommit(usize, usize),
+    GitGraphCopyCommit(usize, usize),
+    GitGraphOpenCommit(usize, usize),
 
     // Sidebar
     SidebarSlot(crate::app::PanelId),

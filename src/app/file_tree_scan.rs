@@ -325,5 +325,4 @@ mod tests {
             "/workspace/not.git/index"
         )]));
     }
-
 }

@@ -110,10 +110,18 @@ fn git_checkbox_color(
     } else if partial {
         (
             [1.0, 1.0, 1.0, if controls_disabled { 0.10 } else { 0.20 }],
-            [0.72, 0.76, 0.88, if controls_disabled { 0.36 } else { 0.86 }],
+            [
+                0.72,
+                0.76,
+                0.88,
+                if controls_disabled { 0.36 } else { 0.86 },
+            ],
         )
     } else {
-        ([1.0, 1.0, 1.0, if controls_disabled { 0.07 } else { 0.12 }], [0.0; 4])
+        (
+            [1.0, 1.0, 1.0, if controls_disabled { 0.07 } else { 0.12 }],
+            [0.0; 4],
+        )
     }
 }
 
@@ -236,6 +244,7 @@ const GIT_TOOLTIP_FILE: u8 = 0;
 const GIT_TOOLTIP_ROLLBACK: u8 = 1;
 const GIT_TOOLTIP_STAGE_ALL: u8 = 2;
 const GIT_TOOLTIP_UNSTAGE_ALL: u8 = 3;
+const GIT_TOOLTIP_GRAPH_COMMIT: u8 = 4;
 
 thread_local! {
     static GIT_TOOLTIP_TIMER: std::cell::RefCell<Option<GitTooltipTimer>> = const { std::cell::RefCell::new(None) };
@@ -249,9 +258,7 @@ fn git_tooltip_anchor(
 ) -> Option<(f32, f32)> {
     GIT_TOOLTIP_TIMER.with(|timer| {
         let mut timer = timer.borrow_mut();
-        let reset = timer
-            .as_ref()
-            .is_none_or(|state| state.target != target);
+        let reset = timer.as_ref().is_none_or(|state| state.target != target);
         if reset {
             *timer = Some(GitTooltipTimer {
                 target,
@@ -266,6 +273,31 @@ fn git_tooltip_anchor(
             (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
                 .then_some((state.anchor_x, state.anchor_y))
         })
+    })
+}
+
+fn git_graph_tooltip_anchor(
+    target: GitTooltipTarget,
+    anchor_x: f32,
+    anchor_y: f32,
+    now: std::time::Instant,
+) -> Option<(f32, f32)> {
+    GIT_TOOLTIP_TIMER.with(|timer| {
+        let mut timer = timer.borrow_mut();
+        if let Some(state) = timer.as_ref()
+            && state.target != target
+            && now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS
+        {
+            *timer = Some(GitTooltipTimer {
+                target,
+                start: now - std::time::Duration::from_millis(500),
+                anchor_x,
+                anchor_y,
+            });
+            return Some((anchor_x, anchor_y));
+        }
+        drop(timer);
+        git_tooltip_anchor(target, anchor_x, anchor_y, now)
     })
 }
 
@@ -297,18 +329,32 @@ struct GitFileRowLayout {
     text_x: f32,
 }
 
-fn git_folder_row_layout(
-    indent_x: f32,
-    row_y: f32,
-    row_h: f32,
-    scale: f32,
-) -> GitFolderRowLayout {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GitGraphTooltipTarget {
+    workspace_idx: usize,
+    commit_idx: usize,
+}
+
+fn git_graph_lane_color(color_idx: usize, alpha: f32, main: [f32; 4]) -> [f32; 4] {
+    let mut color = match color_idx % 7 {
+        0 => main,
+        1 => [0.48, 0.74, 1.0, 1.0],
+        2 => [0.52, 0.82, 0.58, 1.0],
+        3 => [0.97, 0.76, 0.38, 1.0],
+        4 => [0.95, 0.42, 0.46, 1.0],
+        5 => [0.56, 0.86, 0.88, 1.0],
+        _ => [0.82, 0.68, 1.0, 1.0],
+    };
+    color[3] = alpha;
+    color
+}
+
+fn git_folder_row_layout(indent_x: f32, row_y: f32, row_h: f32, scale: f32) -> GitFolderRowLayout {
     let arrow_x = indent_x - 2.0 * scale;
     let check_size = 12.0 * scale;
     let icon_size = 20.0 * scale;
     let gap = GIT_FOLDER_STAGE_GAP * scale;
-    let check_x =
-        arrow_x + crate::render_view::tree_ui::TREE_DISCLOSURE_SLOT * scale + gap;
+    let check_x = arrow_x + crate::render_view::tree_ui::TREE_DISCLOSURE_SLOT * scale + gap;
     let icon_x = check_x + check_size + gap;
 
     GitFolderRowLayout {
@@ -322,12 +368,7 @@ fn git_folder_row_layout(
     }
 }
 
-fn git_file_row_layout(
-    indent_x: f32,
-    row_y: f32,
-    row_h: f32,
-    scale: f32,
-) -> GitFileRowLayout {
+fn git_file_row_layout(indent_x: f32, row_y: f32, row_h: f32, scale: f32) -> GitFileRowLayout {
     let check_size = 12.0 * scale;
     let icon_size = 20.0 * scale;
     let gap = GIT_FOLDER_STAGE_GAP * scale;
@@ -649,11 +690,17 @@ impl Renderer {
                     s.id == crate::app::PanelId::Git && s.group == crate::app::PanelGroup::Top
                 });
                 if is_top {
+                    let panel_bottom_h = if ide_panel.any_bottom_open() {
+                        ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
                     self.draw_git_panel(
                         panel_x,
                         title_h,
                         panel_left_w,
-                        real_height - title_h,
+                        (content_bottom - title_h).max(0.0),
                         s,
                         ide_panel,
                         ui_registry,
@@ -822,8 +869,7 @@ impl Renderer {
                                 self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                             }
                         } else {
-                            let file_icon_x =
-                                crate::render_view::tree_ui::tree_icon_x(indent_x, s);
+                            let file_icon_x = crate::render_view::tree_ui::tree_icon_x(indent_x, s);
                             self.draw_file_icon(
                                 node.icon_key,
                                 false,
@@ -951,13 +997,7 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_git_file_tooltip(
-        &mut self,
-        text: &str,
-        mouse_x: f32,
-        mouse_y: f32,
-        s: f32,
-    ) {
+    fn draw_git_file_tooltip(&mut self, text: &str, mouse_x: f32, mouse_y: f32, s: f32) {
         let tooltip_scale = 0.88;
         let pad_x = 12.0 * s;
         let tooltip_h = 30.0 * s;
@@ -995,7 +1035,14 @@ impl Renderer {
         );
     }
 
-    pub(crate) fn draw_git_file_tooltip_overlay(&mut self, s: f32) {
+    pub(crate) fn draw_git_file_tooltip_overlay(
+        &mut self,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
         self.git_tooltip_waiting = false;
         let file_tooltip = self.git_file_tooltip.take().map(
             |(workspace_idx, file_idx, tooltip, mouse_x, mouse_y)| {
@@ -1027,9 +1074,46 @@ impl Renderer {
                 )
             },
         );
+        let graph_tooltip = self.git_graph_tooltip.take();
         let Some((is_action_tooltip, target, tooltip, mouse_x, mouse_y)) =
             action_tooltip.or(file_tooltip)
         else {
+            if let Some((workspace_idx, commit_idx, mouse_x, mouse_y)) = graph_tooltip
+                && let Some(commit) = ide_panel.git.graph_snapshot.get(commit_idx)
+            {
+                let target = GitTooltipTarget {
+                    kind: GIT_TOOLTIP_GRAPH_COMMIT,
+                    workspace_idx,
+                    item_idx: commit_idx,
+                };
+                if self.hide_popups_until_mouse_move {
+                    return;
+                }
+                if let Some((anchor_x, anchor_y)) =
+                    git_graph_tooltip_anchor(target, mouse_x, mouse_y, std::time::Instant::now())
+                {
+                    let mut scratch = std::mem::take(&mut self.scratch_buffer);
+                    self.draw_git_graph_tooltip(
+                        commit,
+                        GitGraphTooltipTarget {
+                            workspace_idx,
+                            commit_idx,
+                        },
+                        anchor_x,
+                        anchor_y,
+                        s,
+                        ui_registry,
+                        mx,
+                        my,
+                        &mut scratch,
+                    );
+                    self.scratch_buffer = scratch;
+                } else {
+                    self.git_tooltip_waiting = true;
+                }
+                return;
+            }
+
             git_tooltip_reset();
             return;
         };
@@ -1038,12 +1122,9 @@ impl Renderer {
             return;
         }
 
-        if let Some((anchor_x, anchor_y)) = git_tooltip_anchor(
-            target,
-            mouse_x,
-            mouse_y,
-            std::time::Instant::now(),
-        ) {
+        if let Some((anchor_x, anchor_y)) =
+            git_tooltip_anchor(target, mouse_x, mouse_y, std::time::Instant::now())
+        {
             self.draw_git_file_tooltip(&tooltip, anchor_x, anchor_y, s);
         } else {
             self.git_tooltip_waiting = is_action_tooltip;
@@ -1053,8 +1134,554 @@ impl Renderer {
     pub(crate) fn reset_git_file_tooltip_overlay(&mut self) {
         self.git_file_tooltip = None;
         self.git_action_tooltip = None;
+        self.git_graph_tooltip = None;
         self.git_tooltip_waiting = false;
         git_tooltip_reset();
+        self.reset_delayed_tooltip_anchor();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_git_graph_tooltip(
+        &mut self,
+        commit: &crate::app::git_panel::GitGraphCommit,
+        target: GitGraphTooltipTarget,
+        anchor_x: f32,
+        anchor_y: f32,
+        s: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        scratch: &mut String,
+    ) {
+        let pad = 12.0 * s;
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(
+            scratch,
+            format_args!(
+                "{}, {} ({})",
+                commit.author_name, commit.relative_time, commit.absolute_time
+            ),
+        );
+        let title_w = self.measure_ui_width(scratch, 0.84);
+        let summary_w = self.measure_ui_width(&commit.summary, 0.9);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", commit.files_changed));
+        let files_w = self.measure_ui_width(scratch, 0.82);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", commit.insertions));
+        let insertions_w = self.measure_ui_width(scratch, 0.82);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("-{}", commit.deletions));
+        let deletions_w = self.measure_ui_width(scratch, 0.82);
+        let stats_w = files_w + insertions_w + deletions_w + 22.0 * s;
+        let mut refs_w = 0.0f32;
+        let mut ref_count = 0usize;
+        for git_ref in commit.local_refs.iter().chain(commit.remote_refs.iter()) {
+            let pill_w = self.measure_ui_width(&git_ref.name, 0.72) + 12.0 * s;
+            refs_w += pill_w + if ref_count == 0 { 0.0 } else { 6.0 * s };
+            ref_count += 1;
+        }
+        let oid_actions_w = self.measure_ui_width(&commit.short_oid, 0.86) + 128.0 * s;
+        let content_w = title_w
+            .max(summary_w)
+            .max(stats_w)
+            .max(refs_w)
+            .max(oid_actions_w)
+            + pad * 2.0;
+        let tooltip_w = content_w.max(300.0 * s);
+        let refs_section_h = if ref_count > 0 { 35.0 * s } else { 0.0 };
+        let tooltip_h = 142.0 * s + refs_section_h;
+        let tooltip_x = anchor_x + 6.0 * s;
+        let tooltip_y = anchor_y - 8.0 * s;
+        self.push_rounded_rect(
+            tooltip_x,
+            tooltip_y,
+            tooltip_w,
+            tooltip_h,
+            6.0 * s,
+            self.theme.sel,
+        );
+        self.push_rounded_rect(
+            tooltip_x + 1.0,
+            tooltip_y + 1.0,
+            tooltip_w - 2.0,
+            tooltip_h - 2.0,
+            5.0 * s,
+            [0.11, 0.12, 0.16, 0.98],
+        );
+        self.push_rect(
+            tooltip_x,
+            tooltip_y,
+            1.0,
+            tooltip_h,
+            [0.25, 0.46, 0.78, 1.0],
+        );
+        self.push_rect(tooltip_x, tooltip_y, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+        self.push_rect(
+            tooltip_x,
+            tooltip_y + tooltip_h - 1.0,
+            tooltip_w,
+            1.0,
+            [1.0, 1.0, 1.0, 0.12],
+        );
+
+        let mut line_y = tooltip_y + 19.0 * s;
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(
+            scratch,
+            format_args!(
+                "{}  {} ({})",
+                commit.author_name, commit.relative_time, commit.absolute_time
+            ),
+        );
+        self.draw_string_scaled(
+            scratch,
+            tooltip_x + pad,
+            line_y,
+            [0.38, 0.62, 1.0, 1.0],
+            0.84,
+        );
+
+        line_y += 24.0 * s;
+        self.draw_string_scaled(
+            &commit.summary,
+            tooltip_x + pad,
+            line_y,
+            [0.86, 0.90, 1.0, 1.0],
+            0.9,
+        );
+
+        line_y += 19.0 * s;
+        self.push_rect(tooltip_x, line_y, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+        line_y += 18.0 * s;
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", commit.files_changed));
+        self.draw_string_scaled(
+            scratch,
+            tooltip_x + pad,
+            line_y,
+            [0.78, 0.82, 0.92, 1.0],
+            0.82,
+        );
+        let mut stat_x = tooltip_x + pad + self.measure_ui_width(scratch, 0.82) + 12.0 * s;
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", commit.insertions));
+        self.draw_string_scaled(scratch, stat_x, line_y, [0.52, 0.82, 0.58, 1.0], 0.82);
+        stat_x += self.measure_ui_width(scratch, 0.82) + 10.0 * s;
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("-{}", commit.deletions));
+        self.draw_string_scaled(scratch, stat_x, line_y, [0.95, 0.42, 0.46, 1.0], 0.82);
+
+        if ref_count > 0 {
+            line_y += 16.0 * s;
+            self.push_rect(tooltip_x, line_y, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+            line_y += 17.0 * s;
+            let mut pill_x = tooltip_x + pad;
+            let pill_h = 18.0 * s;
+            for git_ref in commit.local_refs.iter().chain(commit.remote_refs.iter()) {
+                let scale = 0.72;
+                let pill_w = self.measure_ui_width(&git_ref.name, scale) + 12.0 * s;
+                if pill_x + pill_w > tooltip_x + tooltip_w - pad {
+                    break;
+                }
+                let pill_y = (line_y - 12.0 * s).round();
+                self.push_rounded_rect(
+                    pill_x,
+                    pill_y,
+                    pill_w,
+                    pill_h,
+                    4.0 * s,
+                    if git_ref.is_remote {
+                        [0.24, 0.32, 0.42, 1.0]
+                    } else {
+                        [0.28, 0.24, 0.40, 1.0]
+                    },
+                );
+                self.draw_string_scaled(
+                    &git_ref.name,
+                    (pill_x + 6.0 * s).round(),
+                    (pill_y + pill_h / 2.0 + 4.0 * s).round(),
+                    [0.86, 0.90, 1.0, 1.0],
+                    scale,
+                );
+                pill_x += pill_w + 6.0 * s;
+            }
+        }
+
+        line_y += 17.0 * s;
+        self.push_rect(tooltip_x, line_y, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+        line_y += 24.0 * s;
+        self.draw_string_scaled(
+            &commit.short_oid,
+            tooltip_x + pad,
+            line_y,
+            [0.38, 0.62, 1.0, 1.0],
+            0.86,
+        );
+        let hash_w = self.measure_ui_width(&commit.short_oid, 0.86);
+        let copy_size = 16.0 * s;
+        let copy_x = tooltip_x + pad + hash_w + 7.0 * s;
+        let copy_y = line_y - 12.0 * s;
+        let copy_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::GitGraphCopyCommit(target.workspace_idx, target.commit_idx),
+            copy_x - 3.0 * s,
+            copy_y - 3.0 * s,
+            copy_size + 6.0 * s,
+            copy_size + 6.0 * s,
+            mx,
+            my,
+        );
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Copy,
+            copy_x,
+            copy_y,
+            copy_size,
+            if copy_hovered {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.38, 0.62, 1.0, 0.86]
+            },
+        );
+        let sep_x = copy_x + copy_size + 12.0 * s;
+        self.push_rect(
+            sep_x,
+            line_y - 14.0 * s,
+            1.0,
+            18.0 * s,
+            [1.0, 1.0, 1.0, 0.28],
+        );
+        let open_x = sep_x + 14.0 * s;
+        let open_text = "Open on GitHub";
+        let open_w = self.measure_ui_width(open_text, 0.86);
+        ui_registry.register_rect(
+            crate::ui_system::UiId::GitGraphOpenCommit(target.workspace_idx, target.commit_idx),
+            open_x,
+            line_y - 14.0 * s,
+            open_w,
+            20.0 * s,
+            mx,
+            my,
+        );
+        self.draw_string_scaled(open_text, open_x, line_y, [0.38, 0.62, 1.0, 1.0], 0.86);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_git_graph_panel(
+        &mut self,
+        panel_x: f32,
+        panel_w: f32,
+        graph_y: f32,
+        graph_h: f32,
+        pad: f32,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        scratch: &mut String,
+    ) {
+        if graph_h <= 20.0 * s {
+            return;
+        }
+        self.push_rect(
+            panel_x,
+            graph_y,
+            panel_w,
+            graph_h,
+            [
+                self.theme.bg[0] + 0.018,
+                self.theme.bg[1] + 0.020,
+                self.theme.bg[2] + 0.026,
+                1.0,
+            ],
+        );
+
+        let header_h = 34.0 * s;
+        self.push_rect(
+            panel_x,
+            graph_y,
+            panel_w,
+            header_h,
+            [
+                self.theme.bg[0] + 0.005,
+                self.theme.bg[1] + 0.006,
+                self.theme.bg[2] + 0.010,
+                1.0,
+            ],
+        );
+        let tab_clip_x = panel_x + pad;
+        let tab_clip_w = (panel_w - pad * 2.0).max(0.0);
+        let mut tab_x = tab_clip_x - ide_panel.git.graph_workspace_scroll_x.round();
+        let tab_y = graph_y + 6.0 * s;
+        let tab_h = 23.0 * s;
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (graph_y + header_h);
+            self.gl.scissor(
+                tab_clip_x.round() as i32,
+                scissor_y.max(0.0) as i32,
+                tab_clip_w.round() as i32,
+                header_h.round() as i32,
+            );
+        }
+        for workspace in ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.repo_root.is_some())
+        {
+            let name = workspace
+                .root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("workspace");
+            let tab_w = (self.measure_ui_width(name, 0.76) + 18.0 * s).max(48.0 * s);
+            let active = ide_panel.git.graph_workspace_idx == Some(workspace.workspace_idx);
+            let visible = tab_x + tab_w >= tab_clip_x && tab_x <= tab_clip_x + tab_clip_w;
+            if visible {
+                let hit_x = tab_x.max(tab_clip_x);
+                let hit_w = (tab_x + tab_w).min(tab_clip_x + tab_clip_w) - hit_x;
+                let hovered = ui_registry.register_rect(
+                    crate::ui_system::UiId::GitGraphWorkspace(workspace.workspace_idx),
+                    hit_x,
+                    tab_y,
+                    hit_w,
+                    tab_h,
+                    mx,
+                    my,
+                );
+                if active || hovered {
+                    self.push_rounded_rect(
+                        tab_x,
+                        tab_y,
+                        tab_w,
+                        tab_h,
+                        4.0 * s,
+                        if active {
+                            [0.60, 0.35, 0.85, 0.28]
+                        } else {
+                            [1.0, 1.0, 1.0, 0.075]
+                        },
+                    );
+                }
+                self.draw_string_scaled(
+                    name,
+                    tab_x + 9.0 * s,
+                    tab_y + tab_h / 2.0 + 4.5 * s,
+                    if active {
+                        self.theme.fg
+                    } else {
+                        [0.72, 0.76, 0.88, 0.72]
+                    },
+                    0.76,
+                );
+            }
+            tab_x += tab_w + 6.0 * s;
+        }
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        let rows_y = graph_y + header_h;
+        let rows_h = (graph_h - header_h).max(0.0);
+        let commits = &ide_panel.git.graph_snapshot;
+        if rows_h <= 0.0 {
+            return;
+        }
+        if commits.is_empty() {
+            let hint = if ide_panel.git.graph_pending {
+                "Graph scan..."
+            } else {
+                ide_panel
+                    .git
+                    .graph_notice
+                    .as_deref()
+                    .unwrap_or("No commits")
+            };
+            let tw = self.measure_ui_width(hint, 0.82);
+            self.draw_string_scaled(
+                hint,
+                panel_x + (panel_w - tw) / 2.0,
+                rows_y + 28.0 * s,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.48],
+                0.82,
+            );
+            return;
+        }
+
+        let row_h = crate::app::git_panel::GIT_GRAPH_ROW_H * s;
+        let scroll = ide_panel.git.graph_scroll.current.round();
+        let lane_count = ide_panel.git.graph_lane_count.max(1);
+        let max_gutter_w = (panel_w * 0.42).max(54.0 * s);
+        let gutter_w = ((lane_count as f32 - 1.0).max(0.0) * 18.0 * s + 28.0 * s)
+            .clamp(42.0 * s, max_gutter_w);
+        let lane_step = if lane_count > 1 {
+            ((gutter_w - 24.0 * s) / (lane_count - 1) as f32).clamp(8.0 * s, 18.0 * s)
+        } else {
+            18.0 * s
+        };
+        let lane_start_x = panel_x + pad + 12.0 * s;
+        let text_x = panel_x + pad + gutter_w + 8.0 * s;
+        let right_x = panel_x + panel_w - pad;
+        let first = (scroll / row_h).floor().max(0.0) as usize;
+        let last = (((scroll + rows_h) / row_h).ceil() as usize + 1).min(commits.len());
+        let active_workspace = ide_panel.git.graph_workspace_idx.unwrap_or(0);
+        let mut row_hover_target = None;
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (rows_y + rows_h);
+            self.gl.scissor(
+                panel_x as i32,
+                scissor_y.max(0.0) as i32,
+                panel_w as i32,
+                rows_h as i32,
+            );
+        }
+
+        for idx in first..last {
+            let commit = &commits[idx];
+            let row_y = rows_y + idx as f32 * row_h - scroll;
+            let hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::GitGraphCommit(active_workspace, idx),
+                panel_x,
+                row_y,
+                panel_w,
+                row_h,
+                mx,
+                my,
+            );
+            if hovered {
+                row_hover_target = Some((
+                    GitGraphTooltipTarget {
+                        workspace_idx: active_workspace,
+                        commit_idx: idx,
+                    },
+                    panel_x + panel_w,
+                    row_y,
+                ));
+                self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
+            }
+
+            let circle_y = row_y + row_h / 2.0;
+            let commit_x = lane_start_x + commit.column as f32 * lane_step;
+            for lane in &commit.lanes {
+                let lane_x = lane_start_x + lane.column as f32 * lane_step;
+                if lane_x > panel_x + pad + gutter_w {
+                    continue;
+                }
+                let color = git_graph_lane_color(lane.color_idx, 0.62, self.theme.sel);
+                match lane.kind {
+                    crate::app::git_panel::GitGraphLaneKind::Vertical => {
+                        self.push_rect(lane_x - 1.0 * s, row_y, 2.0 * s, row_h, color);
+                    }
+                    crate::app::git_panel::GitGraphLaneKind::Parent => {
+                        let x = lane_x.min(commit_x);
+                        let w = (lane_x - commit_x).abs().max(2.0 * s);
+                        self.push_rect(x, circle_y - 1.0 * s, w, 2.0 * s, color);
+                    }
+                }
+            }
+            let circle_color = git_graph_lane_color(commit.color_idx, 1.0, self.theme.sel);
+            if commit.is_head {
+                self.push_rounded_rect(
+                    commit_x - 6.0 * s,
+                    circle_y - 6.0 * s,
+                    12.0 * s,
+                    12.0 * s,
+                    6.0 * s,
+                    circle_color,
+                );
+                self.push_rounded_rect(
+                    commit_x - 3.0 * s,
+                    circle_y - 3.0 * s,
+                    6.0 * s,
+                    6.0 * s,
+                    3.0 * s,
+                    [
+                        self.theme.bg[0] + 0.018,
+                        self.theme.bg[1] + 0.020,
+                        self.theme.bg[2] + 0.026,
+                        1.0,
+                    ],
+                );
+            } else {
+                self.push_rounded_rect(
+                    commit_x - 5.0 * s,
+                    circle_y - 5.0 * s,
+                    10.0 * s,
+                    10.0 * s,
+                    5.0 * s,
+                    circle_color,
+                );
+            }
+
+            let author_w = 102.0 * s;
+            let oid_w = 54.0 * s;
+            let author_x = (right_x - author_w - oid_w - 12.0 * s).max(text_x);
+            self.draw_tree_label_clipped(
+                &commit.summary,
+                text_x,
+                row_y + row_h / 2.0 + 4.8 * s,
+                (right_x - text_x - author_w - oid_w - 22.0 * s).max(20.0 * s),
+                self.theme.fg,
+                0.82,
+                scratch,
+            );
+            self.draw_tree_label_clipped(
+                &commit.author_name,
+                author_x,
+                row_y + row_h / 2.0 + 4.8 * s,
+                author_w,
+                [0.72, 0.76, 0.88, 0.62],
+                0.72,
+                scratch,
+            );
+            self.draw_tree_label_clipped(
+                &commit.short_oid,
+                right_x - oid_w,
+                row_y + row_h / 2.0 + 4.8 * s,
+                oid_w,
+                [0.72, 0.76, 0.88, 0.46],
+                0.68,
+                scratch,
+            );
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        let max_scroll = crate::app::git_panel::git_graph_max_scroll(commits.len(), rows_h, s);
+        if max_scroll > 0.0 {
+            let total_h = commits.len() as f32 * row_h;
+            let ratio = (scroll / max_scroll).clamp(0.0, 1.0);
+            let thumb_h = (rows_h / total_h * (rows_h - 8.0 * s)).max(20.0 * s);
+            let thumb_y = rows_y + 4.0 * s + ratio * (rows_h - 8.0 * s - thumb_h);
+            self.push_rounded_rect(
+                panel_x + panel_w - 5.0 * s,
+                thumb_y,
+                3.0 * s,
+                thumb_h,
+                1.5 * s,
+                [1.0, 1.0, 1.0, 0.22],
+            );
+        }
+
+        let mouse_in_commit_area =
+            mx >= panel_x && mx <= panel_x + panel_w && my >= rows_y && my <= rows_y + rows_h;
+        if let Some((target, anchor_x, anchor_y)) = row_hover_target {
+            self.git_graph_tooltip =
+                Some((target.workspace_idx, target.commit_idx, anchor_x, anchor_y));
+        } else if !mouse_in_commit_area {
+            git_tooltip_reset();
+            self.git_graph_tooltip = None;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1073,9 +1700,20 @@ impl Renderer {
     ) {
         let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
         let inner_w = (panel_w - pad * 2.0).max(1.0);
-        let controls_h = 92.0 * s;
+        let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
         let list_y = title_h + controls_h;
-        let list_h = (content_h - controls_h).max(40.0 * s);
+        let full_list_h = (content_h - controls_h).max(40.0 * s);
+        let (list_h, graph_divider_h, graph_h) = if ide_panel.git.graph_open {
+            crate::app::git_panel::git_graph_split_heights(
+                full_list_h,
+                ide_panel.git.graph_height_ratio,
+                s,
+            )
+        } else {
+            (full_list_h, 0.0, 0.0)
+        };
+        let graph_divider_y = list_y + list_h;
+        let graph_y = graph_divider_y + graph_divider_h;
         let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
         let workspace_h = 30.0 * s;
         let scroll = ide_panel.git.scroll.current.round();
@@ -1279,12 +1917,48 @@ impl Renderer {
             false,
         );
 
-        if let Some(notice) = &ide_panel.git.notice {
+        let graph_btn_y = title_h + 78.0 * s;
+        let graph_btn_w = (72.0 * s).min(inner_w.max(1.0));
+        let graph_btn = Button {
+            x: panel_x + pad,
+            y: graph_btn_y,
+            w: graph_btn_w,
+            h: 22.0 * s,
+            text: "Graph".to_string(),
+            icon: Some(crate::widgets::IconType::Git),
+            text_scale: 0.78,
+            icon_size: 17.0 * s,
+        };
+        let graph_hovered = ui_registry.register_button(
+            crate::ui_system::UiId::GitGraphToggle,
+            &graph_btn,
+            self,
+            mx,
+            my,
+            s,
+            ide_panel.git.graph_open,
+        );
+        if ide_panel.git.graph_open || graph_hovered {
+            self.push_rect(
+                graph_btn.x,
+                graph_btn.y + graph_btn.h - 2.0,
+                graph_btn.w,
+                2.0,
+                [0.60, 0.35, 0.85, 0.9],
+            );
+        }
+
+        if let Some(notice) = ide_panel
+            .git
+            .graph_notice
+            .as_ref()
+            .or(ide_panel.git.notice.as_ref())
+        {
             self.draw_tree_label_clipped(
                 notice,
-                panel_x + pad,
-                title_h + 84.0 * s,
-                inner_w,
+                panel_x + pad + graph_btn_w + 8.0 * s,
+                graph_btn_y + 16.0 * s,
+                (inner_w - graph_btn_w - 8.0 * s).max(0.0),
                 [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.68],
                 0.78,
                 &mut label_scratch,
@@ -1334,7 +2008,9 @@ impl Renderer {
                         &mut label_scratch,
                         format_args!("{changed_count}"),
                     );
-                    let text_w = self.measure_ui_width(&label_scratch, count_text_scale).round();
+                    let text_w = self
+                        .measure_ui_width(&label_scratch, count_text_scale)
+                        .round();
                     ((text_w + 12.0 * s).max(count_badge_h), text_w)
                 } else {
                     (0.0, 0.0)
@@ -1603,23 +2279,11 @@ impl Renderer {
                         };
                         let hovered = if workspace_disabled {
                             render_git_disabled_button(self, &btn, s);
-                            register_git_locked_button_cursor(
-                                ui_registry,
-                                id,
-                                &btn,
-                                mx,
-                                my,
-                            );
+                            register_git_locked_button_cursor(ui_registry, id, &btn, mx, my);
                             false
                         } else if stage_interaction_disabled {
                             btn.render(self, -1.0, -1.0, s, false);
-                            register_git_locked_button_cursor(
-                                ui_registry,
-                                id,
-                                &btn,
-                                mx,
-                                my,
-                            );
+                            register_git_locked_button_cursor(ui_registry, id, &btn, mx, my);
                             false
                         } else {
                             ui_registry.register_button(id, &btn, self, mx, my, s, false)
@@ -1721,12 +2385,7 @@ impl Renderer {
                         if hovered {
                             self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
                         }
-                        if git_file_tooltip_hovered(
-                            hovered,
-                            mx,
-                            check_x,
-                            file_layout.check_size,
-                        ) {
+                        if git_file_tooltip_hovered(hovered, mx, check_x, file_layout.check_size) {
                             let home = std::env::var_os("HOME")
                                 .or_else(|| std::env::var_os("USERPROFILE"))
                                 .map(std::path::PathBuf::from);
@@ -1873,11 +2532,8 @@ impl Renderer {
                         }
 
                         let text_y = Self::tree_row_text_y(y, row_h, s);
-                        let arrow_color = git_disabled_color(
-                            [0.78, 0.80, 0.88, 0.75],
-                            workspace_disabled,
-                            0.26,
-                        );
+                        let arrow_color =
+                            git_disabled_color([0.78, 0.80, 0.88, 0.75], workspace_disabled, 0.26);
                         self.draw_tree_disclosure_icon(
                             !row_collapsed,
                             folder_layout.arrow_x,
@@ -1942,6 +2598,53 @@ impl Renderer {
                 thumb_h,
                 1.5 * s,
                 [1.0, 1.0, 1.0, 0.22],
+            );
+        }
+
+        if ide_panel.git.graph_open {
+            let divider_hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::GitGraphResize,
+                panel_x,
+                graph_divider_y - 3.0 * s,
+                panel_w,
+                graph_divider_h + 6.0 * s,
+                mx,
+                my,
+            );
+            self.push_rect(
+                panel_x,
+                graph_divider_y,
+                panel_w,
+                1.0,
+                [0.0, 0.0, 0.0, 0.22],
+            );
+            self.push_rect(
+                panel_x,
+                graph_divider_y,
+                panel_w,
+                if divider_hovered {
+                    2.0
+                } else {
+                    graph_divider_h.max(1.0)
+                },
+                if divider_hovered {
+                    [0.60, 0.35, 0.85, 0.4]
+                } else {
+                    [1.0, 1.0, 1.0, 0.10]
+                },
+            );
+            self.draw_git_graph_panel(
+                panel_x,
+                panel_w,
+                graph_y,
+                graph_h,
+                pad,
+                s,
+                ide_panel,
+                ui_registry,
+                mx,
+                my,
+                &mut label_scratch,
             );
         }
 
@@ -3038,7 +3741,11 @@ impl Renderer {
             let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
             let btn_y = y + h - 64.0 * s;
             for (id, label, bx) in [
-                (crate::ui_system::UiId::GitConfirmAction, confirm_label, ok_x),
+                (
+                    crate::ui_system::UiId::GitConfirmAction,
+                    confirm_label,
+                    ok_x,
+                ),
                 (crate::ui_system::UiId::GitConfirmCancel, "Отмена", cancel_x),
             ] {
                 let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);

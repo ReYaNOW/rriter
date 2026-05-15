@@ -720,7 +720,9 @@ impl App {
                     );
                     let is_resize = matches!(
                         clicked_id,
-                        crate::ui_system::UiId::ResizeLeft | crate::ui_system::UiId::ResizeBottom
+                        crate::ui_system::UiId::ResizeLeft
+                            | crate::ui_system::UiId::ResizeBottom
+                            | crate::ui_system::UiId::GitGraphResize
                     );
 
                     if is_term {
@@ -743,6 +745,9 @@ impl App {
                             current_x: mx,
                             threshold_passed: false,
                         });
+                        self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::GitGraphResize {
+                        self.ide_panel.git.graph_resizing = true;
                         self.handle_ui_click(clicked_id);
                     } else {
                         if clicked_id == crate::ui_system::UiId::TerminalBody {
@@ -1129,9 +1134,13 @@ impl App {
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
-                if self.ide_panel.is_resizing_left || self.ide_panel.is_resizing_bottom {
+                if self.ide_panel.is_resizing_left
+                    || self.ide_panel.is_resizing_bottom
+                    || self.ide_panel.git.graph_resizing
+                {
                     self.ide_panel.is_resizing_left = false;
                     self.ide_panel.is_resizing_bottom = false;
+                    self.ide_panel.git.graph_resizing = false;
                     crate::save_panel_state(&self.ide_panel);
                 }
             }

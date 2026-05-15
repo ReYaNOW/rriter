@@ -305,6 +305,24 @@ impl App {
                 return;
             }
 
+            if self.ide_panel.git.graph_resizing {
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let title_h = 32.0 * s;
+                let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
+                let list_y = title_h + controls_h;
+                let full_list_h = (wh - title_h - controls_h).max(40.0 * s);
+                let divider_h = crate::app::git_panel::git_graph_divider_h(s);
+                let usable_h = (full_list_h - divider_h).max(1.0);
+                let min_graph_h = (160.0 * s).min(usable_h);
+                let min_changes_h = (72.0 * s).min(usable_h);
+                let max_graph_h = (usable_h - min_changes_h).max(min_graph_h);
+                let graph_h =
+                    (list_y + full_list_h - py - divider_h / 2.0).clamp(min_graph_h, max_graph_h);
+                self.ide_panel.git.graph_height_ratio = (graph_h / usable_h).clamp(0.25, 0.78);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
             if self.ide_panel.is_resizing_left {
                 let ww = self.window.as_ref().unwrap().inner_size().width as f32;
                 self.ide_panel.left_width = resized_left_width(px, ww, s);

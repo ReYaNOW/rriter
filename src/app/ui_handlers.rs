@@ -556,6 +556,35 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitGraphToggle => {
+                self.toggle_git_graph();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitGraphWorkspace(workspace_idx) => {
+                self.select_git_graph_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitGraphResize | UiId::GitGraphCommit(_, _) => {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitGraphCopyCommit(workspace_idx, commit_idx) => {
+                self.copy_git_graph_commit(workspace_idx, commit_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitGraphOpenCommit(workspace_idx, commit_idx) => {
+                self.open_git_graph_commit(workspace_idx, commit_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitMessageInput => {
                 self.ide_panel.git.commit_menu_open = false;
                 let was_focused = self.ide_panel.git.message_focused;

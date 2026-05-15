@@ -394,6 +394,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.git.scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.ide_panel.git.graph_scroll.update(dt) {
+        needs_redraw = true;
+    }
     if app.ide_panel.problems_scroll.update(dt) {
         needs_redraw = true;
     }

@@ -405,25 +405,23 @@ impl Renderer {
             }
         }
 
-        thread_local! {
-            static TAB_HOVER_START: std::cell::RefCell<Option<std::time::Instant>> = std::cell::RefCell::new(None);
-        }
+        self.tab_hover_idx = current_hovered_idx;
+        const TAB_TOOLTIP_NAMESPACE: u64 = 1u64 << 60;
+        let tooltip_anchor = if let Some(idx) = current_hovered_idx {
+            self.delayed_tooltip_anchor(
+                Some(TAB_TOOLTIP_NAMESPACE | idx as u64),
+                hovered_tab_x,
+                hovered_tab_y,
+                std::time::Instant::now(),
+            )
+        } else {
+            self.reset_delayed_tooltip_anchor_namespace(TAB_TOOLTIP_NAMESPACE);
+            None
+        };
 
-        if self.tab_hover_idx != current_hovered_idx {
-            self.tab_hover_idx = current_hovered_idx;
-            TAB_HOVER_START
-                .with(|s| *s.borrow_mut() = current_hovered_idx.map(|_| std::time::Instant::now()));
-        }
-
-        let show_tooltip = TAB_HOVER_START.with(|s| {
-            s.borrow()
-                .map(|start| start.elapsed().as_secs_f32() > 0.4)
-                .unwrap_or(false)
-        });
-
-        if let Some(path) = hovered_tab_path {
-            if show_tooltip && !self.hide_popups_until_mouse_move {
-                return Some((path.clone(), hovered_tab_x, hovered_tab_y));
+        if let (Some(path), Some((anchor_x, anchor_y))) = (hovered_tab_path, tooltip_anchor) {
+            if !self.hide_popups_until_mouse_move {
+                return Some((path.clone(), anchor_x, anchor_y));
             }
         }
         None
