@@ -138,6 +138,7 @@ pub struct GitGraphCommit {
     pub oid: String,
     pub short_oid: String,
     pub summary: String,
+    pub branch_name: Option<String>,
     pub author_name: String,
     pub author_email: String,
     pub time_secs: i64,
@@ -170,7 +171,7 @@ struct GitGraphEvent {
     reset_scroll: bool,
 }
 
-pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 116.0;
+pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 102.0;
 pub(crate) const GIT_GRAPH_ROW_H: f32 = 34.0;
 
 pub(crate) fn git_graph_divider_h(scale: f32) -> f32 {
@@ -225,6 +226,7 @@ pub struct GitPanelState {
     pub graph_workspace_scroll_x: f32,
     pub graph_commit_limit: usize,
     pub graph_has_more: bool,
+    pub graph_copied_commit: Option<(usize, usize)>,
     graph_rx: Vec<mpsc::Receiver<GitGraphEvent>>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,
@@ -261,6 +263,7 @@ impl Default for GitPanelState {
             graph_workspace_scroll_x: 0.0,
             graph_commit_limit: GIT_GRAPH_LIMIT_STEP,
             graph_has_more: false,
+            graph_copied_commit: None,
             graph_rx: Vec::new(),
             graph_next_request_id: 1,
             graph_latest_request_id: 0,
@@ -497,6 +500,7 @@ impl App {
         self.ide_panel.git.graph_lane_count = 1;
         self.ide_panel.git.graph_commit_limit = GIT_GRAPH_LIMIT_STEP;
         self.ide_panel.git.graph_has_more = false;
+        self.ide_panel.git.graph_copied_commit = None;
         self.ide_panel.git.graph_scroll.current = 0.0;
         self.ide_panel.git.graph_scroll.target = 0.0;
         self.load_git_graph_for_selected_workspace();
@@ -516,7 +520,11 @@ impl App {
             return;
         };
         self.set_clipboard_text(oid);
-        self.ide_panel.git.graph_notice = Some("Hash copied".to_string());
+        self.ide_panel.git.graph_copied_commit = Some((workspace_idx, commit_idx));
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.git_graph_tooltip_seen_copied = Some((workspace_idx, commit_idx));
+            renderer.git_graph_tooltip_visible_copied = Some((workspace_idx, commit_idx));
+        }
     }
 
     pub fn open_git_graph_commit(&mut self, workspace_idx: usize, commit_idx: usize) {
@@ -1253,6 +1261,7 @@ fn collect_git_graph(
 ) -> Result<(Vec<GitGraphCommit>, usize, bool), String> {
     let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
     let refs_by_oid = collect_git_graph_refs(&repo);
+    let trace_labels_by_oid = collect_git_graph_trace_labels(&repo);
     let head_oid = repo.head().ok().and_then(|head| head.target());
     let github_base_url = repo
         .find_remote("origin")
@@ -1299,11 +1308,17 @@ fn collect_git_graph(
         local_refs.sort_by(|a, b| a.name.cmp(&b.name));
         remote_refs.sort_by(|a, b| a.name.cmp(&b.name));
 
+        let summary = commit.summary().unwrap_or("(no message)").to_string();
+        let message = commit.message().unwrap_or(summary.as_str());
         let (files_changed, insertions, deletions) = git_commit_stats(&repo, &commit);
+        let branch_name = git_graph_branch_label(&local_refs, &remote_refs)
+            .or_else(|| git_graph_change_request_label(message))
+            .or_else(|| trace_labels_by_oid.get(oid_text.as_str()).cloned());
         commits.push(GitGraphCommit {
             oid: oid_text.clone(),
             short_oid: oid_text.chars().take(7).collect(),
-            summary: commit.summary().unwrap_or("(no message)").to_string(),
+            summary,
+            branch_name,
             author_name: author.name().unwrap_or("Unknown").to_string(),
             author_email: author.email().unwrap_or("").to_string(),
             time_secs: time.seconds(),
@@ -1328,6 +1343,236 @@ fn collect_git_graph(
 
     let lane_count = apply_git_graph_lanes(&mut commits);
     Ok((commits, lane_count, has_more))
+}
+
+fn git_graph_branch_label(
+    local_refs: &[GitGraphRef],
+    remote_refs: &[GitGraphRef],
+) -> Option<String> {
+    local_refs
+        .first()
+        .map(|git_ref| git_ref.name.clone())
+        .or_else(|| {
+            remote_refs.first().map(|git_ref| {
+                git_ref
+                    .name
+                    .split_once('/')
+                    .map(|(_, branch)| branch)
+                    .unwrap_or(git_ref.name.as_str())
+                    .to_string()
+            })
+        })
+}
+
+fn git_graph_merge_source_label(summary: &str) -> Option<String> {
+    let source = git_graph_merge_source(summary)?;
+    (!source.is_empty()).then(|| format!("merged from {source}"))
+}
+
+fn git_graph_merge_side_parent_label(summary: &str) -> String {
+    git_graph_merge_source_label(summary)
+        .or_else(|| git_graph_change_request_label(summary).map(|label| format!("merged via {label}")))
+        .unwrap_or_else(|| "merged side branch".to_string())
+}
+
+fn git_graph_merge_source(summary: &str) -> Option<String> {
+    let source = if let Some((_, source)) = summary.rsplit_once(" from ") {
+        source
+    } else if let Some(rest) = summary.strip_prefix("Merge branch '") {
+        rest.split_once('\'')?.0
+    } else if let Some(rest) = summary.strip_prefix("Merge remote-tracking branch '") {
+        rest.split_once('\'')?.0
+    } else if let Some(rest) = summary.strip_prefix("Merged in ") {
+        rest.split_once(" (pull request")
+            .map(|(source, _)| source)
+            .unwrap_or(rest)
+    } else if let Some(rest) = summary.strip_prefix("Merge ") {
+        rest.split_once(" into ")?.0
+    } else {
+        return None;
+    };
+    let source = source
+        .trim()
+        .trim_matches(|ch: char| ch == '\'' || ch == '"' || ch == '.' || ch == ':' || ch == ',');
+    (!source.is_empty()).then(|| source.to_string())
+}
+
+fn git_graph_change_request_label(message: &str) -> Option<String> {
+    let lower = message.to_ascii_lowercase();
+    if let Some(idx) = lower.find("pull request #")
+        && let Some(id) = git_graph_digits_after(&message[idx + "pull request ".len()..], '#')
+    {
+        return Some(format!("PR #{id}"));
+    }
+    if let Some(idx) = lower.find("(#")
+        && let Some(id) = git_graph_digits_after(&message[idx + 1..], '#')
+    {
+        return Some(format!("PR #{id}"));
+    }
+    if let Some(idx) = lower.find("merge request !")
+        && let Some(id) = git_graph_digits_after(&message[idx + "merge request ".len()..], '!')
+    {
+        return Some(format!("MR !{id}"));
+    }
+    if let Some(idx) = lower.find("see merge request")
+        && let Some(id) = git_graph_digits_after(&message[idx..], '!')
+    {
+        return Some(format!("MR !{id}"));
+    }
+    if let Some(idx) = lower.find("mr !")
+        && let Some(id) = git_graph_digits_after(&message[idx + "mr ".len()..], '!')
+    {
+        return Some(format!("MR !{id}"));
+    }
+    None
+}
+
+fn git_graph_digits_after(text: &str, marker: char) -> Option<&str> {
+    let start = text.find(marker)? + marker.len_utf8();
+    let digits_len = text[start..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    (digits_len > 0).then_some(&text[start..start + digits_len])
+}
+
+fn git_graph_branch_label_propagates(label: &str) -> bool {
+    label.starts_with("merged ")
+}
+
+fn collect_git_graph_trace_labels(repo: &git2::Repository) -> FxHashMap<String, String> {
+    let mut out: FxHashMap<String, String> = FxHashMap::default();
+    collect_git_graph_tag_labels(repo, &mut out);
+    collect_git_graph_note_labels(repo, &mut out);
+    collect_git_graph_reflog_labels(repo, &mut out);
+    out
+}
+
+fn collect_git_graph_tag_labels(repo: &git2::Repository, out: &mut FxHashMap<String, String>) {
+    let Ok(refs) = repo.references() else {
+        return;
+    };
+    for reference_result in refs {
+        let Ok(reference) = reference_result else {
+            continue;
+        };
+        let Some(name) = reference.name() else {
+            continue;
+        };
+        let Some(tag_name) = name.strip_prefix("refs/tags/") else {
+            continue;
+        };
+        if tag_name.is_empty() {
+            continue;
+        }
+        let Some(target) = reference
+            .peel_to_commit()
+            .ok()
+            .map(|commit| commit.id())
+            .or_else(|| reference.target())
+        else {
+            continue;
+        };
+        out.entry(target.to_string())
+            .or_insert_with(|| format!("tag {tag_name}"));
+    }
+}
+
+fn collect_git_graph_note_labels(repo: &git2::Repository, out: &mut FxHashMap<String, String>) {
+    let Ok(notes) = repo.notes(None) else {
+        return;
+    };
+    for note_result in notes.take(256) {
+        let Ok((_, annotated_id)) = note_result else {
+            continue;
+        };
+        let Ok(note) = repo.find_note(None, annotated_id) else {
+            continue;
+        };
+        let Some(message) = note.message() else {
+            continue;
+        };
+        if let Some(label) = git_graph_note_label(message) {
+            out.entry(annotated_id.to_string()).or_insert(label);
+        }
+    }
+}
+
+fn collect_git_graph_reflog_labels(repo: &git2::Repository, out: &mut FxHashMap<String, String>) {
+    collect_git_graph_reflog(repo, "HEAD", out);
+    let Ok(refs) = repo.references() else {
+        return;
+    };
+    for reference_result in refs.take(64) {
+        let Ok(reference) = reference_result else {
+            continue;
+        };
+        let Some(name) = reference.name() else {
+            continue;
+        };
+        if name.starts_with("refs/heads/") {
+            collect_git_graph_reflog(repo, name, out);
+        }
+    }
+}
+
+fn collect_git_graph_reflog(
+    repo: &git2::Repository,
+    name: &str,
+    out: &mut FxHashMap<String, String>,
+) {
+    let Ok(reflog) = repo.reflog(name) else {
+        return;
+    };
+    for entry in reflog.iter().take(128) {
+        let Some(message) = entry.message() else {
+            continue;
+        };
+        if let Some(label) = git_graph_reflog_label(message) {
+            out.entry(entry.id_new().to_string()).or_insert(label);
+        }
+    }
+}
+
+fn git_graph_note_label(message: &str) -> Option<String> {
+    git_graph_merge_source_label(message)
+        .or_else(|| git_graph_change_request_label(message))
+        .or_else(|| git_graph_first_line_label(message, "note"))
+}
+
+fn git_graph_reflog_label(message: &str) -> Option<String> {
+    git_graph_merge_source_label(message)
+        .or_else(|| git_graph_change_request_label(message))
+        .or_else(|| {
+            message
+                .strip_prefix("merge ")
+                .and_then(|rest| rest.split_once(':').map(|(source, _)| source.trim()))
+                .filter(|source| !source.is_empty())
+                .map(|source| format!("reflog merge {source}"))
+        })
+        .or_else(|| {
+            message
+                .strip_prefix("pull ")
+                .and_then(|rest| rest.split_once(':').map(|(source, _)| source.trim()))
+                .filter(|source| !source.is_empty())
+                .map(|source| format!("reflog pull {source}"))
+        })
+}
+
+fn git_graph_first_line_label(message: &str, prefix: &str) -> Option<String> {
+    let line = message.lines().find(|line| !line.trim().is_empty())?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let end = line
+        .char_indices()
+        .take_while(|(idx, _)| *idx <= 48)
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()
+        .unwrap_or(0)
+        .min(line.len());
+    Some(format!("{prefix}: {}", &line[..end]))
 }
 
 fn collect_git_graph_refs(repo: &git2::Repository) -> FxHashMap<String, Vec<GitGraphRef>> {
@@ -1414,6 +1659,7 @@ struct ActiveGraphLane {
     oid: String,
     column: usize,
     color_idx: usize,
+    branch_name: Option<String>,
 }
 
 fn first_free_graph_column(active: &[ActiveGraphLane]) -> usize {
@@ -1434,6 +1680,20 @@ fn push_unique_graph_lane(lanes: &mut Vec<GitGraphLane>, lane: GitGraphLane) {
 }
 
 fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
+    let mut branch_by_oid: FxHashMap<String, String> = FxHashMap::default();
+    let mut merge_source_by_oid: FxHashMap<String, String> = FxHashMap::default();
+    for commit in commits.iter() {
+        if let Some(branch_name) = &commit.branch_name {
+            branch_by_oid.insert(commit.oid.clone(), branch_name.clone());
+        }
+        if commit.parent_oids.len() > 1 {
+            let source_label = git_graph_merge_side_parent_label(&commit.summary);
+            for parent in commit.parent_oids.iter().skip(1) {
+                merge_source_by_oid.insert(parent.clone(), source_label.clone());
+            }
+        }
+    }
+
     let mut active: Vec<ActiveGraphLane> = Vec::new();
     let mut next_color = 0usize;
     let mut max_column = 0usize;
@@ -1449,12 +1709,27 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 oid: commit.oid.clone(),
                 column,
                 color_idx,
+                branch_name: merge_source_by_oid
+                    .get(&commit.oid)
+                    .cloned()
+                    .or_else(|| commit.branch_name.clone()),
             });
             active.len() - 1
         };
 
         let commit_column = active[lane_idx].column;
         let commit_color = active[lane_idx].color_idx;
+        if commit.branch_name.is_none() {
+            commit.branch_name = merge_source_by_oid
+                .get(&commit.oid)
+                .cloned()
+                .or_else(|| active[lane_idx].branch_name.clone());
+        }
+        let commit_branch_name = commit.branch_name.clone();
+        let propagating_branch_name = commit_branch_name
+            .as_ref()
+            .filter(|label| git_graph_branch_label_propagates(label))
+            .cloned();
         max_column = max_column.max(commit_column);
         let mut lanes = Vec::with_capacity(active.len() + commit.parent_oids.len() + 1);
         for lane in &active {
@@ -1490,12 +1765,29 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 active.remove(lane_idx);
             } else if let Some(lane) = active.get_mut(lane_idx) {
                 lane.oid.clone_from(first_parent);
+                lane.branch_name = propagating_branch_name.clone();
             }
 
             for parent in parents.iter().skip(1) {
+                let merge_parent_label = merge_source_by_oid.get(parent).cloned();
+                let parent_branch_name = if merge_parent_label
+                    .as_deref()
+                    .is_some_and(|label| label != "merged side branch")
+                {
+                    merge_parent_label
+                } else {
+                    branch_by_oid
+                        .get(parent)
+                        .cloned()
+                        .or(merge_parent_label)
+                        .or_else(|| propagating_branch_name.clone())
+                };
                 let parent_lane = if let Some(existing_idx) =
                     active.iter().position(|lane| lane.oid == *parent)
                 {
+                    if active[existing_idx].branch_name.is_none() {
+                        active[existing_idx].branch_name = parent_branch_name.clone();
+                    }
                     active[existing_idx].clone()
                 } else {
                     let column = first_free_graph_column(&active);
@@ -1505,6 +1797,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                         oid: parent.clone(),
                         column,
                         color_idx,
+                        branch_name: parent_branch_name,
                     };
                     active.push(lane.clone());
                     lane
@@ -2206,6 +2499,7 @@ mod tests {
             oid: oid.to_string(),
             short_oid: oid.chars().take(7).collect(),
             summary: oid.to_string(),
+            branch_name: None,
             author_name: "A".to_string(),
             author_email: "a@example.invalid".to_string(),
             time_secs: 0,
@@ -2261,6 +2555,55 @@ mod tests {
         );
         assert_eq!(normalize_git_ref_name("refs/remotes/origin/HEAD"), None);
         assert_eq!(normalize_git_ref_name("refs/tags/v1"), None);
+        assert_eq!(
+            git_graph_merge_source_label("Merge pull request #2 from stormasm/update_api"),
+            Some("merged from stormasm/update_api".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_source_label("Merge branch 'feature/ui'"),
+            Some("merged from feature/ui".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_source_label("Merge branch 'feature/ui' into 'main'"),
+            Some("merged from feature/ui".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_source_label("Merge remote-tracking branch 'origin/feature/ui'"),
+            Some("merged from origin/feature/ui".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_source_label("Merged in feature/ui (pull request #7)"),
+            Some("merged from feature/ui".to_string())
+        );
+        assert_eq!(git_graph_merge_source_label("feat: normal commit"), None);
+        assert_eq!(
+            git_graph_change_request_label("fix calculator (#12)"),
+            Some("PR #12".to_string())
+        );
+        assert_eq!(
+            git_graph_change_request_label("See merge request group/repo!34"),
+            Some("MR !34".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_side_parent_label("Merge something custom"),
+            "merged side branch"
+        );
+        assert_eq!(
+            git_graph_note_label("See merge request group/repo!34"),
+            Some("MR !34".to_string())
+        );
+        assert_eq!(
+            git_graph_note_label("reviewed by ops"),
+            Some("note: reviewed by ops".to_string())
+        );
+        assert_eq!(
+            git_graph_reflog_label("merge feature/api: Merge made by the 'ort' strategy."),
+            Some("reflog merge feature/api".to_string())
+        );
+        assert_eq!(
+            git_graph_reflog_label("pull origin main: Fast-forward"),
+            Some("reflog pull origin main".to_string())
+        );
     }
 
     #[test]

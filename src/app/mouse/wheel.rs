@@ -255,10 +255,6 @@ impl App {
                 wh,
             );
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.suppress_popups_until_next_mouse_move();
-                    renderer.reset_git_file_tooltip_overlay();
-                }
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
                 let full_list_h = (ch - controls_h).max(40.0 * s);

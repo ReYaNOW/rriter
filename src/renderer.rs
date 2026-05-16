@@ -133,6 +133,17 @@ pub struct GitGraphTooltipHover {
     pub h: f32,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct GitGraphTooltipTextRow {
+    pub x: f32,
+    pub top: f32,
+    pub line_h: f32,
+    pub scale: f32,
+    pub mono: bool,
+    pub start: usize,
+    pub end: usize,
+}
+
 impl GitGraphTooltipHover {
     #[inline(always)]
     pub fn contains(self, x: f32, y: f32) -> bool {
@@ -277,6 +288,14 @@ pub struct Renderer {
     pub git_action_tooltip: Option<(u8, usize, String, f32, f32)>,
     pub git_graph_tooltip: Option<(usize, usize, f32, f32)>,
     pub git_graph_tooltip_hover: Option<GitGraphTooltipHover>,
+    pub(crate) git_graph_tooltip_text: String,
+    pub(crate) git_graph_tooltip_text_rows: Vec<GitGraphTooltipTextRow>,
+    pub(crate) git_graph_tooltip_selection_anchor: Option<usize>,
+    pub(crate) git_graph_tooltip_selection_cursor: Option<usize>,
+    pub(crate) git_graph_tooltip_selecting: bool,
+    pub(crate) git_graph_tooltip_stable_w: f32,
+    pub(crate) git_graph_tooltip_seen_copied: Option<(usize, usize)>,
+    pub(crate) git_graph_tooltip_visible_copied: Option<(usize, usize)>,
     pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,
@@ -669,6 +688,14 @@ impl Renderer {
                 git_action_tooltip: None,
                 git_graph_tooltip: None,
                 git_graph_tooltip_hover: None,
+                git_graph_tooltip_text: String::with_capacity(256),
+                git_graph_tooltip_text_rows: Vec::with_capacity(8),
+                git_graph_tooltip_selection_anchor: None,
+                git_graph_tooltip_selection_cursor: None,
+                git_graph_tooltip_selecting: false,
+                git_graph_tooltip_stable_w: 0.0,
+                git_graph_tooltip_seen_copied: None,
+                git_graph_tooltip_visible_copied: None,
                 git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,
@@ -1250,6 +1277,10 @@ impl Renderer {
                 include_bytes!("icons/atom/icons/files/git.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Branch,
+                include_bytes!("icons/branch.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Problems,
                 include_bytes!("icons/problems.svg").as_slice(),
             ),
@@ -1269,6 +1300,18 @@ impl Renderer {
                 crate::widgets::IconType::Rollback,
                 include_bytes!("icons/rollback.svg").as_slice(),
             ),
+            (
+                crate::widgets::IconType::Person,
+                include_bytes!("icons/atom/icons/ui/person.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::Time,
+                include_bytes!("icons/time.svg").as_slice(),
+            ),
+            (
+                crate::widgets::IconType::GithubDark,
+                include_bytes!("icons/atom/icons/files/github_dark.svg").as_slice(),
+            ),
         ];
         let opt = resvg::usvg::Options::default();
         for (icon_type, data) in builtin {
@@ -1284,15 +1327,21 @@ impl Renderer {
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
                 || icon_type == crate::widgets::IconType::Git
-                || icon_type == crate::widgets::IconType::LspServers
+                || icon_type == crate::widgets::IconType::Branch
                 || icon_type == crate::widgets::IconType::Copy
                 || icon_type == crate::widgets::IconType::Check
                 || icon_type == crate::widgets::IconType::Rollback
+                || icon_type == crate::widgets::IconType::Person
+                || icon_type == crate::widgets::IconType::Time
+                || icon_type == crate::widgets::IconType::GithubDark
             {
                 svg_data_str
                     .replace("currentColor", "#ffffff")
                     .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
                     .replace("stroke=\"#000000\"", "stroke=\"#ffffff\"")
+                    .replace("#64B5F6", "#ffffff")
+                    .replace("#F06292", "#ffffff")
+                    .replace("#E4E5E6", "#ffffff")
             } else {
                 svg_data_str.into_owned()
             };

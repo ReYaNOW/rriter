@@ -603,6 +603,21 @@ impl App {
                         }
                     });
                 }
+                if !copied {
+                    let graph_copy = self
+                        .renderer
+                        .as_ref()
+                        .and_then(|renderer| renderer.selected_git_graph_tooltip_text());
+                    if let Some(text) = graph_copy {
+                        self.set_clipboard_text(text);
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            renderer.git_graph_tooltip_selection_anchor = None;
+                            renderer.git_graph_tooltip_selection_cursor = None;
+                            renderer.git_graph_tooltip_selecting = false;
+                        }
+                        copied = true;
+                    }
+                }
                 if let Some(r) = self.renderer.as_ref() {
                     if !copied {
                         let diag_copy = crate::app::mouse::HOVER_STATE.with(|s| {

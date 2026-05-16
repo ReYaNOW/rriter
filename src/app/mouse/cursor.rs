@@ -220,6 +220,19 @@ impl App {
             return;
         }
 
+        if self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.git_graph_tooltip_selecting)
+        {
+            if let Some(renderer) = self.renderer.as_mut() {
+                let byte = renderer.git_graph_tooltip_byte_at(position.x as f32, position.y as f32);
+                renderer.git_graph_tooltip_selection_cursor = Some(byte);
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         let editor_text_selecting =
             self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings;
         if editor_text_selecting {
@@ -310,7 +323,14 @@ impl App {
                 let title_h = 32.0 * s;
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = title_h + controls_h;
-                let full_list_h = (wh - title_h - controls_h).max(40.0 * s);
+                let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+                    self.ide_panel.bottom_height * s
+                } else {
+                    0.0
+                };
+                let content_bottom = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
+                let content_h = (content_bottom - title_h).max(0.0);
+                let full_list_h = (content_h - controls_h).max(40.0 * s);
                 let divider_h = crate::app::git_panel::git_graph_divider_h(s);
                 let usable_h = (full_list_h - divider_h).max(1.0);
                 let min_graph_h = (160.0 * s).min(usable_h);

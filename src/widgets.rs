@@ -17,11 +17,15 @@ pub enum IconType {
     Terminal,
     Explorer,
     Git,
+    Branch,
     Problems,
     LspServers,
     Copy,
     Check,
     Rollback,
+    Person,
+    Time,
+    GithubDark,
 }
 
 pub struct Button {

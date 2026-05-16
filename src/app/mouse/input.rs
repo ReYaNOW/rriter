@@ -139,6 +139,13 @@ impl App {
             if let Some(popup) = &mut self.autocomplete_detail_popup {
                 popup.scroll.is_dragging = false;
             }
+            if let Some(renderer) = self.renderer.as_mut()
+                && renderer.git_graph_tooltip_selecting
+            {
+                renderer.git_graph_tooltip_selecting = false;
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
         }
 
         if state == ElementState::Pressed {
@@ -614,6 +621,29 @@ impl App {
                 }
 
                 let clicked_id = self.ui_registry.find_at(mx, my);
+                let in_graph_tooltip_body = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|renderer| renderer.git_graph_tooltip_hover)
+                    .is_some_and(|hover| hover.contains(mx, my));
+                if in_graph_tooltip_body
+                    && button == winit::event::MouseButton::Left
+                    && state == ElementState::Pressed
+                    && !matches!(
+                        clicked_id,
+                        Some(crate::ui_system::UiId::GitGraphCopyCommit(_, _))
+                            | Some(crate::ui_system::UiId::GitGraphOpenCommit(_, _))
+                    )
+                {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        let byte = renderer.git_graph_tooltip_byte_at(mx, my);
+                        renderer.git_graph_tooltip_selection_anchor = Some(byte);
+                        renderer.git_graph_tooltip_selection_cursor = Some(byte);
+                        renderer.git_graph_tooltip_selecting = true;
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
                 if let Some(clicked_id) = clicked_id {
                     let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
                         && HOVER_STATE.with(|hover_state| {
