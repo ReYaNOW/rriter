@@ -1195,6 +1195,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
+    let git_progress_animating =
+        app.ide_panel.git.pending && app.ide_panel.git.pending_label.is_some();
+    if git_progress_animating {
+        needs_redraw = true;
+    }
+
     if app.is_focused {
         let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
         if blink_state != app.last_blink_state {
@@ -1221,7 +1227,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if let Some(w) = app.window.as_ref() {
                 w.request_redraw();
             }
-            if autocomplete_animating {
+            if autocomplete_animating || git_progress_animating {
                 event_loop.set_control_flow(ControlFlow::Poll);
             } else {
                 event_loop.set_control_flow(ControlFlow::Wait);

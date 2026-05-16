@@ -400,6 +400,7 @@ impl App {
         self.tabs[self.active_tab].completions.clear();
         self.active_tab = new_idx;
         self.sync_active_tab();
+        self.prefetch_active_tab_git_graph();
 
         self.editor.version = self.next_tab_highlight_version();
 

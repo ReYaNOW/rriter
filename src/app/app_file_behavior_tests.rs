@@ -1054,15 +1054,19 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
             .is_some_and(|dirs| dirs.contains("src"))
     );
 
+    app.ide_panel.git.message_focused = true;
     app.handle_ui_click(crate::ui_system::UiId::GitCommit);
     assert_eq!(
         app.ide_panel.git.notice.as_deref(),
         Some("Commit message empty")
     );
+    assert!(!app.ide_panel.git.message_focused);
 
     let _ = app.ide_panel.git.message_editor.insert_str("ready");
+    app.ide_panel.git.message_focused = true;
     app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuItem(1));
     assert_eq!(app.ide_panel.git.notice.as_deref(), Some("No staged files"));
+    assert!(!app.ide_panel.git.message_focused);
 }
 
 #[test]

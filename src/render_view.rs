@@ -467,6 +467,7 @@ impl Renderer {
         ctrl_definition_range: Option<(usize, usize)>,
         ide_workspaces: &[std::path::PathBuf],
     ) -> (bool, Vec<(usize, usize)>) {
+        let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
         let telemetry_was_typing = telemetry_frame_start
             .is_some()
@@ -1483,6 +1484,8 @@ impl Renderer {
                 mx,
                 my,
                 panel_bottom_h,
+                ide_panel.git.pending_label,
+                ide_panel.git.pending_elapsed_secs(frame_now),
             );
         }
 

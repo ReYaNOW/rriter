@@ -28,6 +28,10 @@ fn apply_terminal_alt_q_shortcut(
         !has_terminal
     } else {
         panels.terminal_focused = !panels.terminal_focused;
+        if panels.terminal_focused {
+            panels.git.message_focused = false;
+            panels.term_search_focused = false;
+        }
         false
     }
 }
@@ -299,6 +303,23 @@ impl App {
                 return;
             }
 
+            if ctrl && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
+                let graph_copy = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|renderer| renderer.selected_git_graph_tooltip_text());
+                if let Some(text) = graph_copy {
+                    self.set_clipboard_text(text);
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.git_graph_tooltip_selection_anchor = None;
+                        renderer.git_graph_tooltip_selection_cursor = None;
+                        renderer.git_graph_tooltip_selecting = false;
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+
             if self.ide_panel.git.message_focused
                 && self.ide_panel.is_open(crate::app::PanelId::Git)
             {
@@ -408,9 +429,13 @@ mod tests {
         assert!(terminal_open(&panels));
         assert!(!panels.terminal_focused);
 
+        panels.git.message_focused = true;
+        panels.term_search_focused = true;
         assert!(!apply_terminal_alt_q_shortcut(&mut panels, false, true));
         assert!(terminal_open(&panels));
         assert!(panels.terminal_focused);
+        assert!(!panels.git.message_focused);
+        assert!(!panels.term_search_focused);
     }
 
     #[test]
@@ -423,9 +448,11 @@ mod tests {
         assert!(!terminal_open(&panels));
         assert!(!panels.terminal_focused);
 
+        panels.git.message_focused = true;
         assert!(apply_terminal_alt_q_shortcut(&mut panels, true, false));
         assert!(terminal_open(&panels));
         assert!(panels.terminal_focused);
+        assert!(!panels.git.message_focused);
     }
 
     #[test]

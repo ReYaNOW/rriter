@@ -81,6 +81,10 @@ impl GitWorkspaceStatus {
     pub fn staged_count(&self) -> usize {
         self.files.iter().filter(|file| file.staged).count()
     }
+
+    pub(crate) fn has_collapsible_rows(&self) -> bool {
+        self.error.is_some() || !self.files.is_empty() || !self.tree.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -171,6 +175,15 @@ struct GitGraphEvent {
     reset_scroll: bool,
 }
 
+#[derive(Clone, Debug)]
+struct GitGraphCacheEntry {
+    commits: Vec<GitGraphCommit>,
+    lane_count: usize,
+    notice: Option<String>,
+    limit: usize,
+    has_more: bool,
+}
+
 pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 102.0;
 pub(crate) const GIT_GRAPH_ROW_H: f32 = 34.0;
 
@@ -203,12 +216,16 @@ pub struct GitPanelState {
     pub message_focused: bool,
     pub amend: bool,
     pub commit_menu_open: bool,
+    pub collapsed_workspaces: FxHashSet<usize>,
     pub collapsed_dirs: FxHashMap<usize, FxHashSet<String>>,
     pub scroll: crate::scroll::ScrollState,
     pub pending: bool,
+    pub pending_label: Option<&'static str>,
+    pending_started_at: Option<std::time::Instant>,
+    pending_label_until: Option<std::time::Instant>,
     pub next_request_id: u64,
     pub latest_request_id: u64,
-    pub rx: Vec<mpsc::Receiver<GitPanelEvent>>,
+    rx: Vec<GitPanelReceiver>,
     stage_tx: Option<mpsc::Sender<GitStageCommand>>,
     pub stage_pending_workspace_idx: Option<usize>,
     pub notice: Option<String>,
@@ -230,6 +247,20 @@ pub struct GitPanelState {
     graph_rx: Vec<mpsc::Receiver<GitGraphEvent>>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,
+    graph_latest_request_by_root: FxHashMap<PathBuf, u64>,
+    graph_pending_roots: FxHashSet<PathBuf>,
+    graph_cache: FxHashMap<PathBuf, GitGraphCacheEntry>,
+    graph_refresh_after_status: bool,
+}
+
+struct GitPanelReceiver {
+    rx: mpsc::Receiver<GitPanelEvent>,
+    blocking: bool,
+}
+
+struct GitActionOutcome {
+    notice: Option<String>,
+    clear_message: bool,
 }
 
 impl Default for GitPanelState {
@@ -240,9 +271,13 @@ impl Default for GitPanelState {
             message_focused: false,
             amend: false,
             commit_menu_open: false,
+            collapsed_workspaces: FxHashSet::default(),
             collapsed_dirs: FxHashMap::default(),
             scroll: crate::scroll::ScrollState::new(15.0),
             pending: false,
+            pending_label: None,
+            pending_started_at: None,
+            pending_label_until: None,
             next_request_id: 1,
             latest_request_id: 0,
             rx: Vec::new(),
@@ -267,11 +302,21 @@ impl Default for GitPanelState {
             graph_rx: Vec::new(),
             graph_next_request_id: 1,
             graph_latest_request_id: 0,
+            graph_latest_request_by_root: FxHashMap::default(),
+            graph_pending_roots: FxHashSet::default(),
+            graph_cache: FxHashMap::default(),
+            graph_refresh_after_status: false,
         }
     }
 }
 
 impl GitPanelState {
+    pub(crate) fn pending_elapsed_secs(&self, now: std::time::Instant) -> Option<f32> {
+        self.pending
+            .then_some(self.pending_started_at?)
+            .map(|started_at| now.saturating_duration_since(started_at).as_secs_f32())
+    }
+
     pub fn staged_workspace_lock(&self) -> Option<usize> {
         self.stage_pending_workspace_idx
             .or_else(|| self.snapshot.active_staged_workspace_idx())
@@ -280,6 +325,10 @@ impl GitPanelState {
     fn apply_event(&mut self, event: GitPanelEvent) {
         self.latest_request_id = event.request_id;
         self.notice = event.notice;
+        if event.clear_message {
+            self.message_editor = Editor::new(512);
+            self.message_focused = false;
+        }
         if self.stage_pending_workspace_idx.is_some() && !event.preserve_snapshot_on_empty {
             return;
         }
@@ -301,6 +350,7 @@ pub struct GitPanelEvent {
     snapshot: GitStatusSnapshot,
     notice: Option<String>,
     preserve_snapshot_on_empty: bool,
+    clear_message: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -345,6 +395,7 @@ enum GitAction {
         repo_root: PathBuf,
         limit: usize,
         reset_scroll: bool,
+        activate: bool,
     },
     ToggleStageMany {
         files: Vec<GitStageFileCommand>,
@@ -369,21 +420,45 @@ impl App {
         if self.ide_workspaces.is_empty() {
             self.ide_panel.git.snapshot = GitStatusSnapshot::default();
             self.ide_panel.git.pending = false;
+            self.ide_panel.git.pending_label = None;
+            self.ide_panel.git.pending_started_at = None;
+            self.ide_panel.git.pending_label_until = None;
             return;
         }
+        self.ide_panel.git.graph_refresh_after_status = true;
         self.spawn_git_task(GitAction::Refresh);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn refresh_git_panel_window(&mut self) {
+        self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.graph_cache.clear();
+        self.ide_panel.git.graph_latest_request_by_root.clear();
+        self.ide_panel.git.graph_pending_roots.clear();
+        self.ide_panel.git.graph_pending = false;
+        self.ide_panel.git.graph_snapshot.clear();
+        self.ide_panel.git.graph_lane_count = 1;
+        self.ide_panel.git.graph_commit_limit = GIT_GRAPH_LIMIT_STEP;
+        self.ide_panel.git.graph_has_more = false;
+        self.ide_panel.git.graph_copied_commit = None;
+        self.ide_panel.git.graph_notice = None;
+        self.ide_panel.git.graph_refresh_after_status = !self.ide_workspaces.is_empty();
+        self.refresh_git_panel();
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn poll_git_panel(&mut self) -> bool {
+        let now = std::time::Instant::now();
         let mut updated = false;
         let mut stale_seen = false;
+        let mut reload_graph_cache = false;
+        let mut prefetch_graph_after_status = false;
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
-        for rx in receivers {
+        for receiver in receivers {
             let mut keep = true;
             loop {
-                match rx.try_recv() {
+                match receiver.rx.try_recv() {
                     Ok(event) => {
                         if event.request_id >= self.ide_panel.git.latest_request_id {
                             let reload_graph = event
@@ -392,9 +467,11 @@ impl App {
                                 .is_some_and(|notice| notice.starts_with("Committed "));
                             self.ide_panel.git.apply_event(event);
                             self.ide_panel.git.pending = false;
-                            if reload_graph && self.ide_panel.git.graph_open {
-                                self.ide_panel.git.graph_snapshot.clear();
-                                self.load_git_graph_for_selected_workspace();
+                            if reload_graph {
+                                reload_graph_cache = true;
+                                prefetch_graph_after_status = true;
+                            } else if self.ide_panel.git.graph_refresh_after_status {
+                                prefetch_graph_after_status = true;
                             }
                             updated = true;
                         } else {
@@ -409,16 +486,43 @@ impl App {
                 }
             }
             if keep {
-                next_rx.push(rx);
+                next_rx.push(receiver);
             }
         }
         self.ide_panel.git.rx = next_rx;
-        self.ide_panel.git.pending = !self.ide_panel.git.rx.is_empty();
+        self.ide_panel.git.pending = self.ide_panel.git.rx.iter().any(|rx| rx.blocking);
         if !self.ide_panel.git.pending {
             self.ide_panel.git.stage_pending_workspace_idx = None;
+            self.ide_panel.git.pending_started_at = None;
+            if self
+                .ide_panel
+                .git
+                .pending_label_until
+                .is_none_or(|until| now >= until)
+            {
+                if self.ide_panel.git.pending_label.take().is_some() {
+                    updated = true;
+                }
+                self.ide_panel.git.pending_label_until = None;
+            } else {
+                updated = true;
+            }
         }
         if stale_seen && self.ide_panel.git.rx.is_empty() {
             self.spawn_git_task(GitAction::Refresh);
+        }
+        if reload_graph_cache {
+            self.ide_panel.git.graph_cache.clear();
+            self.ide_panel.git.graph_latest_request_by_root.clear();
+            self.ide_panel.git.graph_pending_roots.clear();
+            self.ide_panel.git.graph_snapshot.clear();
+            self.ide_panel.git.graph_lane_count = 1;
+            self.ide_panel.git.graph_has_more = false;
+            self.ide_panel.git.graph_pending = false;
+        }
+        if prefetch_graph_after_status {
+            self.ide_panel.git.graph_refresh_after_status = false;
+            self.prefetch_git_graph_for_known_workspaces(true);
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
@@ -427,8 +531,37 @@ impl App {
             loop {
                 match rx.try_recv() {
                     Ok(event) => {
-                        if event.request_id >= self.ide_panel.git.graph_latest_request_id {
-                            self.ide_panel.git.graph_latest_request_id = event.request_id;
+                        let latest_for_root = self
+                            .ide_panel
+                            .git
+                            .graph_latest_request_by_root
+                            .get(&event.repo_root)
+                            .copied();
+                        if latest_for_root == Some(event.request_id) {
+                            self.ide_panel.git.graph_latest_request_id = self
+                                .ide_panel
+                                .git
+                                .graph_latest_request_id
+                                .max(event.request_id);
+                            self.ide_panel
+                                .git
+                                .graph_latest_request_by_root
+                                .remove(&event.repo_root);
+                            self.ide_panel
+                                .git
+                                .graph_pending_roots
+                                .remove(&event.repo_root);
+                            let cache_entry = GitGraphCacheEntry {
+                                commits: event.commits,
+                                lane_count: event.lane_count.max(1),
+                                notice: event.notice,
+                                limit: event.limit,
+                                has_more: event.has_more,
+                            };
+                            self.ide_panel
+                                .git
+                                .graph_cache
+                                .insert(event.repo_root.clone(), cache_entry.clone());
                             let same_workspace =
                                 self.ide_panel.git.graph_workspace_idx == Some(event.workspace_idx);
                             let same_root = self
@@ -438,19 +571,9 @@ impl App {
                                 .as_ref()
                                 .is_some_and(|root| root == &event.repo_root);
                             if same_workspace && same_root {
-                                self.ide_panel.git.graph_snapshot = event.commits;
-                                self.ide_panel.git.graph_lane_count = event.lane_count.max(1);
-                                self.ide_panel.git.graph_notice = event.notice;
-                                self.ide_panel.git.graph_commit_limit = event.limit;
-                                self.ide_panel.git.graph_has_more = event.has_more;
-                                self.ide_panel.git.graph_pending = false;
-                                if event.reset_scroll {
-                                    self.ide_panel.git.graph_scroll.set_target(0.0);
-                                    self.ide_panel.git.graph_scroll.current = 0.0;
-                                    self.ide_panel.git.graph_scroll.velocity = 0.0;
-                                }
-                                updated = true;
+                                self.apply_git_graph_cache_entry(cache_entry, event.reset_scroll);
                             }
+                            updated = true;
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
@@ -465,7 +588,12 @@ impl App {
             }
         }
         self.ide_panel.git.graph_rx = next_graph_rx;
-        self.ide_panel.git.graph_pending = !self.ide_panel.git.graph_rx.is_empty();
+        self.ide_panel.git.graph_pending = self
+            .ide_panel
+            .git
+            .graph_repo_root
+            .as_ref()
+            .is_some_and(|root| self.ide_panel.git.graph_pending_roots.contains(root));
         updated
     }
 
@@ -503,7 +631,9 @@ impl App {
         self.ide_panel.git.graph_copied_commit = None;
         self.ide_panel.git.graph_scroll.current = 0.0;
         self.ide_panel.git.graph_scroll.target = 0.0;
-        self.load_git_graph_for_selected_workspace();
+        if !self.apply_cached_git_graph_for_selected(true) {
+            self.load_git_graph_for_selected_workspace();
+        }
     }
 
     pub fn copy_git_graph_commit(&mut self, workspace_idx: usize, commit_idx: usize) {
@@ -551,6 +681,31 @@ impl App {
         }
     }
 
+    fn apply_git_graph_cache_entry(&mut self, cache_entry: GitGraphCacheEntry, reset_scroll: bool) {
+        self.ide_panel.git.graph_snapshot = cache_entry.commits;
+        self.ide_panel.git.graph_lane_count = cache_entry.lane_count.max(1);
+        self.ide_panel.git.graph_notice = cache_entry.notice;
+        self.ide_panel.git.graph_commit_limit = cache_entry.limit;
+        self.ide_panel.git.graph_has_more = cache_entry.has_more;
+        self.ide_panel.git.graph_pending = false;
+        if reset_scroll {
+            self.ide_panel.git.graph_scroll.set_target(0.0);
+            self.ide_panel.git.graph_scroll.current = 0.0;
+            self.ide_panel.git.graph_scroll.velocity = 0.0;
+        }
+    }
+
+    fn apply_cached_git_graph_for_selected(&mut self, reset_scroll: bool) -> bool {
+        let Some(repo_root) = self.ide_panel.git.graph_repo_root.clone() else {
+            return false;
+        };
+        let Some(cache_entry) = self.ide_panel.git.graph_cache.get(&repo_root).cloned() else {
+            return false;
+        };
+        self.apply_git_graph_cache_entry(cache_entry, reset_scroll);
+        true
+    }
+
     fn ensure_git_graph_loaded(&mut self) {
         if self.ide_panel.git.graph_workspace_idx.is_none()
             || self.ide_panel.git.graph_workspace_idx.is_some_and(|idx| {
@@ -586,6 +741,11 @@ impl App {
                 self.ide_panel.git.graph_has_more = false;
             }
         }
+        if self.ide_panel.git.graph_snapshot.is_empty()
+            && self.apply_cached_git_graph_for_selected(true)
+        {
+            return;
+        }
         if self.ide_panel.git.graph_snapshot.is_empty() && !self.ide_panel.git.graph_pending {
             self.load_git_graph_for_selected_workspace();
         }
@@ -600,11 +760,16 @@ impl App {
             self.ide_panel.git.graph_notice = Some("No Git repo".to_string());
             return;
         };
+        if self.ide_panel.git.graph_pending_roots.contains(&repo_root) {
+            self.ide_panel.git.graph_pending = true;
+            return;
+        }
         self.spawn_git_task(GitAction::LoadGraph {
             workspace_idx,
             repo_root,
             limit: self.ide_panel.git.graph_commit_limit,
             reset_scroll: self.ide_panel.git.graph_snapshot.is_empty(),
+            activate: true,
         });
     }
 
@@ -628,7 +793,83 @@ impl App {
             repo_root,
             limit: self.ide_panel.git.graph_commit_limit,
             reset_scroll: false,
+            activate: true,
         });
+    }
+
+    fn prefetch_git_graph_for_repo(
+        &mut self,
+        workspace_idx: usize,
+        repo_root: PathBuf,
+        limit: usize,
+        force_reload: bool,
+    ) {
+        if self
+            .ide_panel
+            .git
+            .graph_latest_request_by_root
+            .contains_key(&repo_root)
+        {
+            return;
+        }
+        if !force_reload
+            && self
+                .ide_panel
+                .git
+                .graph_cache
+                .get(&repo_root)
+                .is_some_and(|cache| cache.limit >= limit)
+        {
+            return;
+        }
+        self.spawn_git_task(GitAction::LoadGraph {
+            workspace_idx,
+            repo_root,
+            limit,
+            reset_scroll: false,
+            activate: false,
+        });
+    }
+
+    fn prefetch_git_graph_for_known_workspaces(&mut self, force_reload: bool) {
+        let mut seen = FxHashSet::default();
+        let workspaces = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .filter_map(|workspace| {
+                let repo_root = workspace.repo_root.clone()?;
+                seen.insert(repo_root.clone())
+                    .then_some((workspace.workspace_idx, repo_root))
+            })
+            .collect::<Vec<_>>();
+        for (workspace_idx, repo_root) in workspaces {
+            let limit = if self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root) {
+                self.ide_panel.git.graph_commit_limit
+            } else {
+                GIT_GRAPH_LIMIT_STEP
+            };
+            self.prefetch_git_graph_for_repo(workspace_idx, repo_root, limit, force_reload);
+        }
+    }
+
+    pub(crate) fn prefetch_active_tab_git_graph(&mut self) {
+        if !self.is_ide_mode || !self.is_ready || !self.ide_panel.is_open(crate::app::PanelId::Git)
+        {
+            return;
+        }
+        let Some(file_path) = self.file_path.as_ref() else {
+            return;
+        };
+        let abs_path = git_abs_path_for_workspaces(file_path, &self.ide_workspaces);
+        let Some((workspace_idx, repo_root)) =
+            git_graph_workspace_for_path(&self.ide_panel.git.snapshot, &abs_path)
+        else {
+            return;
+        };
+        self.prefetch_git_graph_for_repo(workspace_idx, repo_root, GIT_GRAPH_LIMIT_STEP, false);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -768,6 +1009,7 @@ impl App {
             return;
         }
         self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.message_focused = false;
         let message = self.ide_panel.git.message_editor.get_full_text();
         let trimmed = message.trim();
         if trimmed.is_empty() {
@@ -785,6 +1027,7 @@ impl App {
             amend,
             push_after,
         });
+        self.ide_panel.git.message_editor = Editor::new(512);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -963,6 +1206,32 @@ impl App {
         }
     }
 
+    pub fn toggle_git_workspace(&mut self, workspace_idx: usize) {
+        if !self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .any(|workspace| {
+                workspace.workspace_idx == workspace_idx && workspace.has_collapsible_rows()
+            })
+        {
+            return;
+        }
+        if !self
+            .ide_panel
+            .git
+            .collapsed_workspaces
+            .remove(&workspace_idx)
+        {
+            self.ide_panel
+                .git
+                .collapsed_workspaces
+                .insert(workspace_idx);
+        }
+    }
+
     pub fn toggle_git_tree_folder(&mut self, workspace_idx: usize, row_idx: usize) {
         let Some(row) = self
             .ide_panel
@@ -996,6 +1265,7 @@ impl App {
             repo_root,
             limit,
             reset_scroll,
+            activate,
         } = action
         {
             let request_id = self.ide_panel.git.graph_next_request_id;
@@ -1003,11 +1273,23 @@ impl App {
                 self.ide_panel.git.graph_next_request_id.saturating_add(1);
             self.ide_panel.git.graph_latest_request_id =
                 self.ide_panel.git.graph_latest_request_id.max(request_id);
-            self.ide_panel.git.graph_pending = true;
-            self.ide_panel.git.graph_notice = None;
-            self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
-            self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
-            self.ide_panel.git.graph_commit_limit = limit;
+            self.ide_panel
+                .git
+                .graph_latest_request_by_root
+                .insert(repo_root.clone(), request_id);
+            self.ide_panel
+                .git
+                .graph_pending_roots
+                .insert(repo_root.clone());
+            if activate {
+                self.ide_panel.git.graph_pending = true;
+                self.ide_panel.git.graph_notice = None;
+                self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
+                self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
+                self.ide_panel.git.graph_commit_limit = limit;
+            } else if self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root) {
+                self.ide_panel.git.graph_pending = true;
+            }
 
             let (tx, rx) = mpsc::channel();
             self.ide_panel.git.graph_rx.push(rx);
@@ -1037,12 +1319,33 @@ impl App {
         let request_id = self.ide_panel.git.next_request_id;
         self.ide_panel.git.next_request_id = self.ide_panel.git.next_request_id.saturating_add(1);
         self.ide_panel.git.latest_request_id = self.ide_panel.git.latest_request_id.max(request_id);
-        self.ide_panel.git.pending = true;
+        let blocking = !matches!(&action, GitAction::Refresh);
+        if blocking {
+            let now = std::time::Instant::now();
+            self.ide_panel.git.pending = true;
+            self.ide_panel.git.pending_label = match &action {
+                GitAction::Commit {
+                    push_after: true, ..
+                } => Some("Commit & Push"),
+                GitAction::Commit { .. } => Some("Commit"),
+                GitAction::Push { .. } => Some("Push"),
+                _ => None,
+            };
+            self.ide_panel.git.pending_started_at = Some(now);
+            self.ide_panel.git.pending_label_until = self
+                .ide_panel
+                .git
+                .pending_label
+                .map(|_| now + std::time::Duration::from_secs(1));
+        }
         self.ide_panel.git.notice = None;
 
         let workspaces = self.ide_workspaces.clone();
         let (tx, rx) = mpsc::channel();
-        self.ide_panel.git.rx.push(rx);
+        self.ide_panel
+            .git
+            .rx
+            .push(GitPanelReceiver { rx, blocking });
 
         if let GitAction::ToggleStageMany { files } = action {
             let mut command = Some(GitStageCommand {
@@ -1069,6 +1372,7 @@ impl App {
                         snapshot,
                         notice,
                         preserve_snapshot_on_empty: true,
+                        clear_message: false,
                     });
                 }
             });
@@ -1079,13 +1383,14 @@ impl App {
         }
 
         std::thread::spawn(move || {
-            let notice = run_git_action(action);
+            let outcome = run_git_action(action);
             let snapshot = collect_git_status(&workspaces);
             let _ = tx.send(GitPanelEvent {
                 request_id,
                 snapshot,
-                notice,
+                notice: outcome.notice,
                 preserve_snapshot_on_empty: false,
+                clear_message: outcome.clear_message,
             });
         });
     }
@@ -1098,11 +1403,16 @@ fn git_stage_click_locked(state: &GitPanelState, workspace_idx: usize) -> bool {
             .is_some_and(|idx| idx != workspace_idx)
 }
 
-fn run_git_action(action: GitAction) -> Option<String> {
+fn run_git_action(action: GitAction) -> GitActionOutcome {
     match action {
-        GitAction::Refresh => None,
-        GitAction::LoadGraph { .. } => None,
-        GitAction::ToggleStageMany { files } => run_stage_files(&files),
+        GitAction::Refresh | GitAction::LoadGraph { .. } => GitActionOutcome {
+            notice: None,
+            clear_message: false,
+        },
+        GitAction::ToggleStageMany { files } => GitActionOutcome {
+            notice: run_stage_files(&files),
+            clear_message: false,
+        },
         GitAction::Commit {
             repo_roots,
             message,
@@ -1123,15 +1433,32 @@ fn run_git_action(action: GitAction) -> Option<String> {
                 }
             }
             if errors.is_empty() {
-                Some(format!("Committed {ok} repo(s)"))
+                GitActionOutcome {
+                    notice: Some(format!("Committed {ok} repo(s)")),
+                    clear_message: ok > 0,
+                }
+            } else if ok > 0 {
+                GitActionOutcome {
+                    notice: Some(format!("Committed {ok} repo(s); {}", errors.join(" | "))),
+                    clear_message: true,
+                }
             } else {
-                Some(errors.join(" | "))
+                GitActionOutcome {
+                    notice: Some(errors.join(" | ")),
+                    clear_message: false,
+                }
             }
         }
-        GitAction::RollbackStaged { files } => rollback_staged_files(&files),
-        GitAction::Push { repo_root } => match push_repo(&repo_root) {
-            Ok(()) => Some("Push done".to_string()),
-            Err(err) => Some(err),
+        GitAction::RollbackStaged { files } => GitActionOutcome {
+            notice: rollback_staged_files(&files),
+            clear_message: false,
+        },
+        GitAction::Push { repo_root } => GitActionOutcome {
+            notice: match push_repo(&repo_root) {
+                Ok(()) => Some("Push done".to_string()),
+                Err(err) => Some(err),
+            },
+            clear_message: false,
         },
     }
 }
@@ -1152,8 +1479,27 @@ fn open_url_async(url: &str) -> Result<(), String> {
 }
 
 fn git_snapshot_has_visible_rows(snapshot: &GitStatusSnapshot) -> bool {
-    snapshot.workspaces.iter().any(|workspace| {
-        !workspace.files.is_empty() || workspace.error.is_some() || workspace.ahead > 0
+    !snapshot.workspaces.is_empty()
+}
+
+fn git_abs_path_for_workspaces(path: &Path, workspaces: &[PathBuf]) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Some(workspace) = workspaces.first() {
+        workspace.join(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn git_graph_workspace_for_path(
+    snapshot: &GitStatusSnapshot,
+    abs_path: &Path,
+) -> Option<(usize, PathBuf)> {
+    snapshot.workspaces.iter().find_map(|workspace| {
+        let repo_root = workspace.repo_root.as_ref()?;
+        (abs_path.starts_with(&workspace.root) || abs_path.starts_with(repo_root))
+            .then(|| (workspace.workspace_idx, repo_root.clone()))
     })
 }
 
@@ -1308,8 +1654,9 @@ fn collect_git_graph(
         local_refs.sort_by(|a, b| a.name.cmp(&b.name));
         remote_refs.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let summary = commit.summary().unwrap_or("(no message)").to_string();
-        let message = commit.message().unwrap_or(summary.as_str());
+        let raw_summary = commit.summary().unwrap_or("(no message)");
+        let summary = clean_git_summary(raw_summary);
+        let message = commit.message().unwrap_or(raw_summary);
         let (files_changed, insertions, deletions) = git_commit_stats(&repo, &commit);
         let branch_name = git_graph_branch_label(&local_refs, &remote_refs)
             .or_else(|| git_graph_change_request_label(message))
@@ -1364,6 +1711,23 @@ fn git_graph_branch_label(
         })
 }
 
+fn clean_git_summary(summary: &str) -> String {
+    let cleaned = summary
+        .trim_matches(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    '\u{feff}' | '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}'
+                )
+        })
+        .to_string();
+    if cleaned.is_empty() {
+        "(no message)".to_string()
+    } else {
+        cleaned
+    }
+}
+
 fn git_graph_merge_source_label(summary: &str) -> Option<String> {
     let source = git_graph_merge_source(summary)?;
     (!source.is_empty()).then(|| format!("merged from {source}"))
@@ -1371,7 +1735,9 @@ fn git_graph_merge_source_label(summary: &str) -> Option<String> {
 
 fn git_graph_merge_side_parent_label(summary: &str) -> String {
     git_graph_merge_source_label(summary)
-        .or_else(|| git_graph_change_request_label(summary).map(|label| format!("merged via {label}")))
+        .or_else(|| {
+            git_graph_change_request_label(summary).map(|label| format!("merged via {label}"))
+        })
         .unwrap_or_else(|| "merged side branch".to_string())
 }
 
@@ -2429,27 +2795,104 @@ fn push_repo(repo_root: &Path) -> Result<(), String> {
         .name()
         .ok_or_else(|| "No branch ref".to_string())?
         .to_string();
-    let mut remote = repo.find_remote("origin").map_err(short_git_error)?;
-
-    let mut callbacks = git2::RemoteCallbacks::new();
-    callbacks.credentials(|_, username, allowed| {
-        if allowed.contains(git2::CredentialType::SSH_KEY) {
-            if let Some(user) = username {
-                return git2::Cred::ssh_key_from_agent(user);
-            }
-        }
-        git2::Cred::default()
-    });
-    let mut options = git2::PushOptions::new();
-    options.remote_callbacks(callbacks);
-
     let branch = head_name
         .strip_prefix("refs/heads/")
         .ok_or_else(|| "Detached HEAD cannot push".to_string())?;
-    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-    remote
-        .push(&[refspec.as_str()], Some(&mut options))
-        .map_err(short_git_error)
+    let local_branch = repo
+        .find_branch(branch, git2::BranchType::Local)
+        .map_err(short_git_error)?;
+    let (remote_name, remote_ref) = local_branch
+        .upstream()
+        .ok()
+        .and_then(|upstream| {
+            upstream
+                .get()
+                .name()
+                .and_then(|name| name.strip_prefix("refs/remotes/"))
+                .and_then(|name| name.split_once('/'))
+                .map(|(remote, remote_branch)| {
+                    (remote.to_string(), format!("refs/heads/{remote_branch}"))
+                })
+        })
+        .unwrap_or_else(|| ("origin".to_string(), format!("refs/heads/{branch}")));
+    let remote = repo.find_remote(&remote_name).map_err(|err| {
+        format!(
+            "Push remote `{}` not found: {}",
+            remote_name,
+            short_git_error(err)
+        )
+    })?;
+    let remote_url = remote.url().unwrap_or("<no-url>");
+    let refspec = format!("refs/heads/{branch}:{remote_ref}");
+    println!(
+        "[GIT PUSH] repo={} remote={} url={} refspec={} backend=git",
+        repo_root.display(),
+        remote_name,
+        remote_url,
+        refspec
+    );
+    push_repo_with_git_cli(repo_root, &remote_name, branch, &remote_ref)
+}
+
+fn push_repo_with_git_cli(
+    repo_root: &Path,
+    remote_name: &str,
+    branch: &str,
+    remote_ref: &str,
+) -> Result<(), String> {
+    let refspec = format!("refs/heads/{branch}:{remote_ref}");
+    println!(
+        "[GIT PUSH] git -C {} push {} {}",
+        repo_root.display(),
+        remote_name,
+        refspec
+    );
+    let mut command = std::process::Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .arg("push")
+        .arg(remote_name)
+        .arg(refspec)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+        command.env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes");
+    }
+    let output = command.output().map_err(|err| err.to_string())?;
+    if output.status.success() {
+        println!("[GIT PUSH] ok");
+        Ok(())
+    } else {
+        let stderr = short_command_output(&output.stderr);
+        let stdout = short_command_output(&output.stdout);
+        println!(
+            "[GIT PUSH] failed status={:?} stderr={} stdout={}",
+            output.status.code(),
+            stderr,
+            stdout
+        );
+        if stderr.is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+}
+
+fn short_command_output(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes).trim().to_string();
+    if text.len() > 180 {
+        let end = text
+            .char_indices()
+            .take_while(|(idx, _)| *idx <= 180)
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .last()
+            .unwrap_or(0)
+            .min(text.len());
+        format!("{}...", &text[..end])
+    } else {
+        text
+    }
 }
 
 fn short_git_error(err: git2::Error) -> String {
@@ -2491,6 +2934,19 @@ mod tests {
             depth: display_path.matches('/').count(),
             staged,
             status,
+        }
+    }
+
+    fn git_workspace(files: Vec<GitFileEntry>, error: Option<String>) -> GitWorkspaceStatus {
+        GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            tree: build_git_tree(&files),
+            files,
+            ahead: 0,
+            error,
         }
     }
 
@@ -2607,6 +3063,15 @@ mod tests {
     }
 
     #[test]
+    fn git_graph_summary_trims_hidden_prefixes() {
+        assert_eq!(
+            clean_git_summary("\u{feff}\u{200b}  fix check_item in audits;"),
+            "fix check_item in audits;"
+        );
+        assert_eq!(clean_git_summary("\u{200b}"), "(no message)");
+    }
+
+    #[test]
     fn git_graph_time_format_is_cached_friendly() {
         assert_eq!(format_git_relative_time(100, 130), "только что");
         assert_eq!(format_git_relative_time(0, 60), "1 минута назад");
@@ -2680,6 +3145,20 @@ mod tests {
         assert_eq!(GitFileStatus::Renamed.label(), "R");
         assert_eq!(GitFileStatus::TypeChange.label(), "T");
         assert_eq!(GitFileStatus::Untracked.label(), "U");
+    }
+
+    #[test]
+    fn git_workspace_collapse_button_only_when_rows_exist() {
+        assert!(!git_workspace(Vec::new(), None).has_collapsible_rows());
+        assert!(
+            git_workspace(Vec::new(), Some("git status failed".to_string()))
+                .has_collapsible_rows()
+        );
+        assert!(git_workspace(
+            vec![git_file("src/main.rs", false, GitFileStatus::Modified)],
+            None
+        )
+        .has_collapsible_rows());
     }
 
     #[test]
@@ -2768,6 +3247,24 @@ mod tests {
     }
 
     #[test]
+    fn commit_event_clears_message_editor() {
+        let mut state = GitPanelState::default();
+        let _ = state.message_editor.insert_str("ready");
+        state.message_focused = true;
+
+        state.apply_event(GitPanelEvent {
+            request_id: 3,
+            snapshot: GitStatusSnapshot::default(),
+            notice: Some("Committed 1 repo(s)".to_string()),
+            preserve_snapshot_on_empty: false,
+            clear_message: true,
+        });
+
+        assert_eq!(state.message_editor.get_full_text(), "");
+        assert!(!state.message_focused);
+    }
+
+    #[test]
     fn git_stage_click_locked_blocks_pending_and_other_workspace() {
         let mut state = GitPanelState::default();
         state.pending = true;
@@ -2816,6 +3313,7 @@ mod tests {
             },
             notice: None,
             preserve_snapshot_on_empty: true,
+            clear_message: false,
         });
 
         assert_eq!(state.latest_request_id, 7);
@@ -2842,6 +3340,7 @@ mod tests {
             },
             notice: None,
             preserve_snapshot_on_empty: false,
+            clear_message: false,
         });
 
         assert!(state.snapshot.workspaces[0].files.is_empty());
@@ -2884,6 +3383,7 @@ mod tests {
             },
             notice: None,
             preserve_snapshot_on_empty: true,
+            clear_message: false,
         });
 
         assert!(state.snapshot.workspaces[0].files.is_empty());
@@ -2931,6 +3431,7 @@ mod tests {
             },
             notice: None,
             preserve_snapshot_on_empty: false,
+            clear_message: false,
         });
 
         assert_eq!(state.snapshot.workspaces[0].files.len(), 1);

@@ -1301,6 +1301,10 @@ impl Renderer {
                 include_bytes!("icons/rollback.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Reload,
+                include_bytes!("icons/reload.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Person,
                 include_bytes!("icons/atom/icons/ui/person.svg").as_slice(),
             ),
@@ -1331,6 +1335,7 @@ impl Renderer {
                 || icon_type == crate::widgets::IconType::Copy
                 || icon_type == crate::widgets::IconType::Check
                 || icon_type == crate::widgets::IconType::Rollback
+                || icon_type == crate::widgets::IconType::Reload
                 || icon_type == crate::widgets::IconType::Person
                 || icon_type == crate::widgets::IconType::Time
                 || icon_type == crate::widgets::IconType::GithubDark

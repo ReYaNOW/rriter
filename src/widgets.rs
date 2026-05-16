@@ -23,6 +23,7 @@ pub enum IconType {
     Copy,
     Check,
     Rollback,
+    Reload,
     Person,
     Time,
     GithubDark,

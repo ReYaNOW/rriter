@@ -478,6 +478,13 @@ impl App {
             }
 
             // Git panel
+            UiId::GitWorkspaceToggle(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.toggle_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitFile(workspace_idx, file_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
                 self.toggle_git_file_stage(workspace_idx, file_idx);
@@ -507,14 +514,18 @@ impl App {
                 }
             }
             UiId::GitCommitMenuToggle => {
-                self.ide_panel.git.commit_menu_open = !self.ide_panel.git.commit_menu_open;
+                if !self.ide_panel.git.pending {
+                    self.ide_panel.git.commit_menu_open = !self.ide_panel.git.commit_menu_open;
+                }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitCommitMenuItem(idx) => {
                 self.ide_panel.git.commit_menu_open = false;
-                self.commit_git_panel_option(idx);
+                if !self.ide_panel.git.pending {
+                    self.commit_git_panel_option(idx);
+                }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -552,6 +563,12 @@ impl App {
             }
             UiId::GitConfirmCancel => {
                 self.ide_panel.git.confirm_dialog = None;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitRefresh => {
+                self.refresh_git_panel_window();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

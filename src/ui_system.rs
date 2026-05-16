@@ -43,6 +43,7 @@ pub enum UiId {
     LspLogsFilterOther,
 
     // Git panel
+    GitWorkspaceToggle(usize),
     GitFile(usize, usize),
     GitFolder(usize, usize),
     GitFolderStage(usize, usize),
@@ -56,6 +57,7 @@ pub enum UiId {
     GitConfirmAction,
     GitConfirmCancel,
     GitMessageInput,
+    GitRefresh,
     GitGraphToggle,
     GitGraphWorkspace(usize),
     GitGraphResize,

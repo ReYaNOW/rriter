@@ -93,6 +93,28 @@ fn settings_ide_max_scroll(
     (ide_total_h - ide_content_area_h).max(0.0)
 }
 
+fn git_changes_total_height(git: &crate::app::git_panel::GitPanelState, scale: f32) -> f32 {
+    let mut total_h = 0.0;
+    for workspace in &git.snapshot.workspaces {
+        total_h += 30.0 * scale;
+        if git.collapsed_workspaces.contains(&workspace.workspace_idx) {
+            continue;
+        }
+        total_h += if workspace.error.is_some() {
+            crate::render_view::tree_ui::TREE_ROW_H * scale
+        } else {
+            crate::app::git_panel::git_visible_tree_row_count(
+                workspace.workspace_idx,
+                &workspace.tree,
+                &git.collapsed_dirs,
+            ) as f32
+                * crate::render_view::tree_ui::TREE_ROW_H
+                * scale
+        };
+    }
+    total_h
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
@@ -327,32 +349,7 @@ impl App {
                 }
                 self.ide_panel.git.scroll.anim_speed = 7.0;
                 self.ide_panel.git.scroll.scroll_by(dy);
-                let mut total_h = 0.0;
-                let staged_workspace = self.ide_panel.git.staged_workspace_lock();
-                for workspace in &self.ide_panel.git.snapshot.workspaces {
-                    if staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
-                        continue;
-                    }
-                    if staged_workspace.is_none()
-                        && workspace.files.is_empty()
-                        && workspace.error.is_none()
-                        && workspace.ahead == 0
-                    {
-                        continue;
-                    }
-                    total_h += 30.0 * s;
-                    total_h += if workspace.error.is_some() {
-                        crate::render_view::tree_ui::TREE_ROW_H * s
-                    } else {
-                        crate::app::git_panel::git_visible_tree_row_count(
-                            workspace.workspace_idx,
-                            &workspace.tree,
-                            &self.ide_panel.git.collapsed_dirs,
-                        ) as f32
-                            * crate::render_view::tree_ui::TREE_ROW_H
-                            * s
-                    };
-                }
+                let total_h = git_changes_total_height(&self.ide_panel.git, s);
                 let max_scroll = (total_h - changes_h).max(0.0);
                 self.ide_panel.git.scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
@@ -735,11 +732,28 @@ mod tests {
     fn panel_scroll_rect_covers_top_and_bottom_layouts() {
         assert_eq!(
             panel_scroll_rect(true, 2.0, 96.0, 240.0, 360.0, 0.0, 1600.0, 1000.0),
-            (96.0, 64.0, 480.0, 936.0)
+            (96.0, 64.0, 480.0, 876.0)
         );
         assert_eq!(
             panel_scroll_rect(false, 2.0, 96.0, 240.0, 360.0, 360.0, 1600.0, 1000.0),
             (96.0, 645.0, 1504.0, 295.0)
+        );
+    }
+
+    #[test]
+    fn git_changes_total_height_keeps_disabled_workspaces_scrollable_when_staged() {
+        let mut state = crate::app::git_panel::GitPanelState::default();
+        state.snapshot = crate::app::git_panel::GitStatusSnapshot {
+            workspaces: vec![
+                git_workspace_for_wheel_test(0, true),
+                git_workspace_for_wheel_test(1, false),
+            ],
+        };
+
+        assert_eq!(state.staged_workspace_lock(), Some(0));
+        assert_eq!(
+            git_changes_total_height(&state, 1.0),
+            60.0 + crate::render_view::tree_ui::TREE_ROW_H * 2.0
         );
     }
 
@@ -759,6 +773,38 @@ mod tests {
 
         scroll_autocomplete_list(&mut scroll, -500.0, 10, 1.0);
         assert_eq!(scroll.target, 0.0);
+    }
+
+    fn git_workspace_for_wheel_test(
+        workspace_idx: usize,
+        staged: bool,
+    ) -> crate::app::git_panel::GitWorkspaceStatus {
+        let rel_path = format!("src/file_{workspace_idx}.rs");
+        crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx,
+            root: std::path::PathBuf::from(format!("/repo_{workspace_idx}")),
+            repo_root: Some(std::path::PathBuf::from(format!("/repo_{workspace_idx}"))),
+            branch_name: None,
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx,
+                repo_root: std::path::PathBuf::from(format!("/repo_{workspace_idx}")),
+                rel_path: rel_path.clone(),
+                old_rel_path: None,
+                display_path: rel_path.clone(),
+                depth: 0,
+                staged,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
+            tree: vec![crate::app::git_panel::GitTreeRow {
+                name: rel_path,
+                path: format!("src/file_{workspace_idx}.rs"),
+                depth: 0,
+                file_idx: Some(0),
+                icon_key: "default_file",
+            }],
+            ahead: 0,
+            error: None,
+        }
     }
 
     #[test]

@@ -497,6 +497,7 @@ impl IdePanelState {
         }
         self.terminal_focused = true;
         self.term_search_focused = false;
+        self.git.message_focused = false;
     }
     pub fn enforce_single_open_per_group(&mut self) {
         let mut top_seen = false;
@@ -788,6 +789,7 @@ mod tests {
         let mut panels = IdePanelState::default();
         panels.toggle(PanelId::Problems);
         panels.term_search_focused = true;
+        panels.git.message_focused = true;
 
         panels.open_terminal_exclusive();
 
@@ -795,6 +797,7 @@ mod tests {
         assert!(!panels.is_open(PanelId::Problems));
         assert!(panels.terminal_focused);
         assert!(!panels.term_search_focused);
+        assert!(!panels.git.message_focused);
     }
 
     #[test]

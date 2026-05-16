@@ -142,20 +142,33 @@ fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) 
         [0.60, 0.35, 0.85, 0.34],
         [0.18, 0.19, 0.22, 0.74],
     );
+    let text_w = if button.text.is_empty() {
+        0.0
+    } else {
+        renderer.measure_ui_width(&button.text, button.text_scale)
+    };
+    let icon_size = button.icon.map_or(0.0, |_| button.icon_size);
+    let icon_gap = if button.icon.is_some() && !button.text.is_empty() {
+        8.0 * s
+    } else {
+        0.0
+    };
+    let content_w = icon_size + icon_gap + text_w;
+    let mut content_x = x + (w - content_w) / 2.0;
     if let Some(icon) = button.icon {
-        let icon_size = button.icon_size;
         renderer.draw_atlas_icon(
             icon,
-            x + (w - icon_size) / 2.0,
+            content_x,
             y + (h - icon_size) / 2.0,
             icon_size,
             [1.0, 1.0, 1.0, 0.34],
         );
-    } else if !button.text.is_empty() {
-        let text_w = renderer.measure_ui_width(&button.text, button.text_scale);
+        content_x += icon_size + icon_gap;
+    }
+    if !button.text.is_empty() {
         renderer.draw_string_scaled(
             &button.text,
-            x + (w - text_w) / 2.0,
+            content_x,
             y + h / 2.0 + 5.0 * s,
             [1.0, 1.0, 1.0, 0.34],
             button.text_scale,
@@ -163,45 +176,68 @@ fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) 
     }
 }
 
-fn render_git_graph_button(renderer: &mut Renderer, button: &Button, s: f32, hovered: bool) {
+fn render_git_graph_button(
+    renderer: &mut Renderer,
+    button: &Button,
+    s: f32,
+    hovered: bool,
+    active: bool,
+) {
     let x = button.x.round();
     let y = button.y.round();
     let w = button.w.round();
     let h = button.h.round();
+    let radius = 4.0 * s;
+    let border_w = (1.0 * s).round().max(1.0);
+    let border_color = renderer.theme.sel;
     let bg_color = if hovered {
         [0.28, 0.30, 0.33, 1.0]
     } else {
         [0.22, 0.24, 0.26, 1.0]
     };
-    renderer.push_rounded_rect_border(
-        x,
-        y,
-        w,
-        h,
-        4.0 * s,
-        (1.0 * s).round().max(1.0),
-        renderer.theme.sel,
-        bg_color,
-    );
+    renderer.push_rounded_rect_border(x, y, w, h, radius, border_w, border_color, bg_color);
+    if active {
+        let bottom_h = radius.ceil().max(border_w);
+        renderer.push_rect(x, y + h - bottom_h, w, bottom_h, border_color);
+        renderer.push_rect(
+            x + border_w,
+            y + h - bottom_h,
+            (w - border_w * 2.0).max(0.0),
+            bottom_h,
+            bg_color,
+        );
+    }
 
     let icon_size = button.icon_size;
     let text_w = renderer.measure_ui_width(&button.text, button.text_scale);
-    let content_w = icon_size + 8.0 * s + text_w;
+    let has_icon = button.icon.is_some();
+    let icon_gap = if has_icon && !button.text.is_empty() {
+        8.0 * s
+    } else {
+        0.0
+    };
+    let content_w = if has_icon { icon_size } else { 0.0 } + icon_gap + text_w;
     let icon_x = x + (w - content_w) / 2.0;
-    renderer.draw_atlas_icon(
-        crate::widgets::IconType::Branch,
-        icon_x,
-        y + (h - icon_size) / 2.0,
-        icon_size,
-        [1.0, 1.0, 1.0, 1.0],
-    );
-    renderer.draw_string_scaled(
-        &button.text,
-        icon_x + icon_size + 8.0 * s,
-        y + h / 2.0 + 3.7 * s,
-        renderer.theme.fg,
-        button.text_scale,
-    );
+    let mut text_x = icon_x;
+    if let Some(icon) = button.icon {
+        renderer.draw_atlas_icon(
+            icon,
+            icon_x,
+            y + (h - icon_size) / 2.0,
+            icon_size,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        text_x += icon_size + icon_gap;
+    }
+    if !button.text.is_empty() {
+        renderer.draw_string_scaled(
+            &button.text,
+            text_x,
+            y + h / 2.0 + 3.7 * s,
+            renderer.theme.fg,
+            button.text_scale,
+        );
+    }
 }
 
 fn register_git_locked_button_cursor(
@@ -366,6 +402,13 @@ fn git_graph_selection_range(renderer: &Renderer) -> Option<(usize, usize)> {
 }
 
 const GIT_FOLDER_STAGE_GAP: f32 = 6.0;
+const GIT_PROGRESS_CYCLES_PER_SEC: f32 = 0.85;
+
+fn git_progress_thumb_phase(elapsed_secs: f32) -> f32 {
+    let t = (elapsed_secs.max(0.0) * GIT_PROGRESS_CYCLES_PER_SEC).fract();
+    let p = if t < 0.5 { t * 2.0 } else { (1.0 - t) * 2.0 };
+    p * p * (3.0 - 2.0 * p)
+}
 
 #[derive(Clone, Copy)]
 struct GitFolderRowLayout {
@@ -485,14 +528,7 @@ impl Renderer {
         self.measure_ui_width(scratch, scale).min(max_w)
     }
 
-    fn draw_git_graph_row_text(
-        &mut self,
-        text: &str,
-        x: f32,
-        y: f32,
-        color: [f32; 4],
-        scale: f32,
-    ) {
+    fn draw_git_graph_row_text(&mut self, text: &str, x: f32, y: f32, color: [f32; 4], scale: f32) {
         let mut draw_x = x.round();
         let y = y.round();
         for c in text.chars() {
@@ -501,8 +537,7 @@ impl Renderer {
             }
             if let Some(g) = self.get_ui_glyph(c) {
                 let glyph_x = draw_x.round();
-                let (q_x, q_y, q_w, q_h) =
-                    crate::renderer::glyph_quad_rect(glyph_x, y, g, scale);
+                let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(glyph_x, y, g, scale);
                 self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
                 draw_x += g.advance * scale;
             }
@@ -1769,6 +1804,22 @@ impl Renderer {
             w: (tooltip_x + tooltip_w - hover_x).max(tooltip_w),
             h: (tooltip_y + tooltip_h - hover_y).max(tooltip_h),
         });
+        if mx >= tooltip_x
+            && mx <= tooltip_x + tooltip_w
+            && my >= tooltip_y
+            && my <= tooltip_y + tooltip_h
+        {
+            ui_registry.reset_cursor_state();
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::GitGraphCommit(target.workspace_idx, target.commit_idx),
+                tooltip_x,
+                tooltip_y,
+                tooltip_w,
+                tooltip_h,
+                mx,
+                my,
+            );
+        }
         self.push_rounded_rect_border(
             tooltip_x,
             tooltip_y,
@@ -2403,17 +2454,25 @@ impl Renderer {
             let author_draw_w = author_text_w.min(author_reserve_w);
             let author_x = (author_right_x - author_draw_w).max(text_x);
             let row_text_y = Self::tree_row_text_y(row_y, row_h, s);
-            let local_ref_name = commit.local_refs.first().map(|git_ref| git_ref.name.as_str());
-            let remote_ref_name = commit.remote_refs.first().map(|git_ref| git_ref.name.as_str());
+            let local_ref_name = commit
+                .local_refs
+                .first()
+                .map(|git_ref| git_ref.name.as_str());
+            let remote_ref_name = commit
+                .remote_refs
+                .first()
+                .map(|git_ref| git_ref.name.as_str());
             let chip_scale = 0.72;
             let chip_pad_x = 5.0 * s;
             let chip_gap = 5.0 * s;
-            let chip_max_w = 96.0 * s;
+            let chip_max_w = 140.0 * s;
             let local_chip_w = local_ref_name.map(|name| {
-                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0).min(chip_max_w)
+                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0 + 4.0 * s)
+                    .min(chip_max_w)
             });
             let remote_chip_w = remote_ref_name.map(|name| {
-                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0).min(chip_max_w)
+                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0 + 4.0 * s)
+                    .min(chip_max_w)
             });
             let mut chips_w = local_chip_w.unwrap_or(0.0) + remote_chip_w.unwrap_or(0.0);
             if local_chip_w.is_some() && remote_chip_w.is_some() {
@@ -2739,15 +2798,19 @@ impl Renderer {
             text_scale: 0.92,
             icon_size: 20.0 * s,
         };
-        ui_registry.register_button(
-            crate::ui_system::UiId::GitCommit,
-            &commit_btn,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
+        if ide_panel.git.pending {
+            render_git_disabled_button(self, &commit_btn, s);
+        } else {
+            ui_registry.register_button(
+                crate::ui_system::UiId::GitCommit,
+                &commit_btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
         let menu_btn = Button {
             x: panel_x + pad + commit_main_w + commit_gap,
             y: commit_y,
@@ -2758,15 +2821,19 @@ impl Renderer {
             text_scale: 0.0,
             icon_size: 24.0 * s,
         };
-        ui_registry.register_button(
-            crate::ui_system::UiId::GitCommitMenuToggle,
-            &menu_btn,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
+        if ide_panel.git.pending {
+            render_git_disabled_button(self, &menu_btn, s);
+        } else {
+            ui_registry.register_button(
+                crate::ui_system::UiId::GitCommitMenuToggle,
+                &menu_btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
 
         let graph_btn_y = title_h + 75.0 * s;
         let graph_btn_w = (72.0 * s).min(inner_w.max(1.0));
@@ -2775,7 +2842,7 @@ impl Renderer {
             y: graph_btn_y,
             w: graph_btn_w,
             h: 22.0 * s,
-            text: "Graph".to_string(),
+            text: "Граф".to_string(),
             icon: Some(crate::widgets::IconType::Branch),
             text_scale: 0.78,
             icon_size: 21.0 * s,
@@ -2789,7 +2856,7 @@ impl Renderer {
             mx,
             my,
         );
-        render_git_graph_button(self, &graph_btn, s, graph_hovered);
+        render_git_graph_button(self, &graph_btn, s, graph_hovered, ide_panel.git.graph_open);
         if ide_panel.git.graph_open {
             self.push_rect(
                 graph_btn.x,
@@ -2800,6 +2867,45 @@ impl Renderer {
             );
         }
 
+        let refresh_gap = 6.0 * s;
+        let refresh_x = graph_btn.x + graph_btn.w + refresh_gap;
+        let refresh_available_w = (panel_x + pad + inner_w - refresh_x).max(0.0);
+        let refresh_label_w = self.measure_ui_width("Обновить", 0.78);
+        let refresh_full_w = refresh_label_w + 22.0 * s + 18.0 * s;
+        let mut notice_x = graph_btn.x + graph_btn.w + 8.0 * s;
+        if refresh_available_w >= 30.0 * s {
+            let refresh_icon_only = refresh_available_w < refresh_full_w;
+            let refresh_btn = Button {
+                x: refresh_x,
+                y: graph_btn_y,
+                w: if refresh_icon_only {
+                    (34.0 * s).min(refresh_available_w)
+                } else {
+                    refresh_full_w.min(refresh_available_w)
+                },
+                h: 22.0 * s,
+                text: if refresh_icon_only {
+                    String::new()
+                } else {
+                    "Обновить".to_string()
+                },
+                icon: Some(crate::widgets::IconType::Reload),
+                text_scale: 0.78,
+                icon_size: 22.0 * s,
+            };
+            let refresh_hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::GitRefresh,
+                refresh_btn.x,
+                refresh_btn.y,
+                refresh_btn.w,
+                refresh_btn.h,
+                mx,
+                my,
+            );
+            render_git_graph_button(self, &refresh_btn, s, refresh_hovered, false);
+            notice_x = refresh_btn.x + refresh_btn.w + 8.0 * s;
+        }
+
         if let Some(notice) = ide_panel
             .git
             .graph_notice
@@ -2808,9 +2914,9 @@ impl Renderer {
         {
             self.draw_tree_label_clipped(
                 notice,
-                panel_x + pad + graph_btn_w + 8.0 * s,
+                notice_x,
                 graph_btn_y + 16.0 * s,
-                (inner_w - graph_btn_w - 8.0 * s).max(0.0),
+                (panel_x + pad + inner_w - notice_x).max(0.0),
                 [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.68],
                 0.78,
                 &mut label_scratch,
@@ -2835,13 +2941,10 @@ impl Renderer {
         for workspace in &ide_panel.git.snapshot.workspaces {
             let workspace_disabled =
                 staged_workspace.is_some_and(|idx| idx != workspace.workspace_idx);
-            if staged_workspace.is_none()
-                && workspace.files.is_empty()
-                && workspace.error.is_none()
-                && workspace.ahead == 0
-            {
-                continue;
-            }
+            let workspace_is_collapsed = ide_panel
+                .git
+                .collapsed_workspaces
+                .contains(&workspace.workspace_idx);
 
             drew_any = true;
             let row_visible = y + workspace_h >= list_y && y <= list_y + list_h;
@@ -2879,6 +2982,24 @@ impl Renderer {
                 } else {
                     0.0
                 };
+                let (ahead_text_w, push_w) = if workspace.ahead > 0 {
+                    label_scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut label_scratch,
+                        format_args!("↑{}", workspace.ahead),
+                    );
+                    (
+                        self.measure_ui_width(&label_scratch, 0.78).round(),
+                        (46.0 * s).min((panel_w * 0.36).max(18.0 * s)),
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                let push_reserve = if workspace.ahead > 0 {
+                    ahead_text_w + 8.0 * s + push_w + 6.0 * s
+                } else {
+                    0.0
+                };
                 self.push_rect(
                     panel_x,
                     y,
@@ -2896,12 +3017,31 @@ impl Renderer {
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("workspace");
-                let right_reserve = if workspace.ahead > 0 {
-                    92.0 * s + stage_actions_w + count_reserve
+                let workspace_has_rows = workspace.has_collapsible_rows();
+                let workspace_arrow_x = panel_x + pad;
+                let workspace_label_x = if workspace_has_rows {
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::GitWorkspaceToggle(workspace.workspace_idx),
+                        workspace_arrow_x - 4.0 * s,
+                        y + 4.0 * s,
+                        18.0 * s,
+                        workspace_h - 8.0 * s,
+                        mx,
+                        my,
+                    );
+                    self.draw_tree_disclosure_icon(
+                        !workspace_is_collapsed,
+                        workspace_arrow_x,
+                        y + 2.0 * s,
+                        workspace_h,
+                        git_disabled_color([0.78, 0.80, 0.88, 0.75], workspace_disabled, 0.26),
+                    );
+                    workspace_arrow_x + 18.0 * s
                 } else {
-                    12.0 * s + stage_actions_w + count_reserve
+                    workspace_arrow_x
                 };
-                let label_w = (panel_w - pad - right_reserve).max(0.0);
+                let right_reserve = 12.0 * s + count_reserve + push_reserve + stage_actions_w;
+                let label_w = (panel_x + panel_w - workspace_label_x - right_reserve).max(0.0);
                 let workspace_text_y = y + workspace_h / 2.0 + 4.5 * s;
                 if let Some(branch_name) = &workspace.branch_name {
                     let branch_scale = 0.78;
@@ -2914,14 +3054,14 @@ impl Renderer {
                         let name_w = self.measure_ui_width(name, 0.9).min(label_w - chip_w - gap);
                         self.draw_tree_label_clipped(
                             name,
-                            panel_x + pad,
+                            workspace_label_x,
                             workspace_text_y,
                             name_w,
                             workspace_name_color,
                             0.9,
                             &mut label_scratch,
                         );
-                        let chip_x = (panel_x + pad + name_w + gap).round();
+                        let chip_x = (workspace_label_x + name_w + gap).round();
                         let chip_y = (y + (workspace_h - chip_h) / 2.0).round();
                         let branch_text_y = (chip_y + chip_h / 2.0 + 4.0 * s).round();
                         let chip_w = chip_w.round();
@@ -2943,7 +3083,7 @@ impl Renderer {
                     } else {
                         self.draw_tree_label_clipped(
                             name,
-                            panel_x + pad,
+                            workspace_label_x,
                             workspace_text_y,
                             label_w,
                             workspace_name_color,
@@ -2954,7 +3094,7 @@ impl Renderer {
                 } else {
                     self.draw_tree_label_clipped(
                         name,
-                        panel_x + pad,
+                        workspace_label_x,
                         workspace_text_y,
                         label_w,
                         workspace_name_color,
@@ -2963,70 +3103,17 @@ impl Renderer {
                     );
                 }
 
-                let mut right_x = panel_x + panel_w - pad;
-                if workspace.ahead > 0 {
-                    let mut ahead_text = String::new();
-                    let _ = std::fmt::Write::write_fmt(
-                        &mut ahead_text,
-                        format_args!("↑{}", workspace.ahead),
-                    );
-                    let push_w = (46.0 * s).min((panel_w * 0.36).max(18.0 * s));
-                    let push_x = right_x - push_w;
-                    let aw = self.measure_ui_width(&ahead_text, 0.78);
-                    self.draw_string_scaled(
-                        &ahead_text,
-                        (push_x - 8.0 * s - aw).max(panel_x + pad),
-                        y + workspace_h / 2.0 + 5.0 * s,
-                        git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
-                        0.78,
-                    );
-                    let push_btn = Button {
-                        x: push_x,
-                        y: y + 5.0 * s,
-                        w: push_w,
-                        h: 20.0 * s,
-                        text: if push_w < 38.0 * s { "↑" } else { "Push" }.to_string(),
-                        icon: None,
-                        text_scale: 0.76,
-                        icon_size: 0.0,
-                    };
-                    if workspace_disabled {
-                        render_git_disabled_button(self, &push_btn, s);
-                        register_git_locked_button_cursor(
-                            ui_registry,
-                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
-                            &push_btn,
-                            mx,
-                            my,
-                        );
-                    } else if ide_panel.git.pending {
-                        push_btn.render(self, -1.0, -1.0, s, false);
-                        register_git_locked_button_cursor(
-                            ui_registry,
-                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
-                            &push_btn,
-                            mx,
-                            my,
-                        );
-                    } else {
-                        ui_registry.register_button(
-                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
-                            &push_btn,
-                            self,
-                            mx,
-                            my,
-                            s,
-                            false,
-                        );
-                    }
-                    right_x = push_x - 6.0 * s;
-                }
-
+                let right_x = panel_x + panel_w - pad;
                 if show_stage_actions {
                     let stage_btn_h = 22.0 * s;
                     let unstage_x = right_x - stage_btn_w;
                     let stage_x = unstage_x - stage_btn_gap - stage_btn_w;
                     let rollback_x = stage_x - stage_btn_gap - stage_btn_w;
+                    let push_x = if workspace.ahead > 0 {
+                        rollback_x - 6.0 * s - push_w
+                    } else {
+                        rollback_x
+                    };
                     let btn_y = y + ((workspace_h - stage_btn_h) / 2.0).round();
                     if changed_count > 0 {
                         label_scratch.clear();
@@ -3034,7 +3121,11 @@ impl Renderer {
                             &mut label_scratch,
                             format_args!("{changed_count}"),
                         );
-                        let badge_x = rollback_x - stage_btn_gap - count_badge_w;
+                        let badge_x = if workspace.ahead > 0 {
+                            push_x - 8.0 * s - ahead_text_w - 6.0 * s - count_badge_w
+                        } else {
+                            rollback_x - stage_btn_gap - count_badge_w
+                        };
                         let badge_y = y + ((workspace_h - count_badge_h) / 2.0).round();
                         self.push_rounded_rect(
                             badge_x,
@@ -3051,6 +3142,59 @@ impl Renderer {
                             git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
                             count_text_scale,
                         );
+                    }
+                    if workspace.ahead > 0 {
+                        label_scratch.clear();
+                        let _ = std::fmt::Write::write_fmt(
+                            &mut label_scratch,
+                            format_args!("↑{}", workspace.ahead),
+                        );
+                        self.draw_string_scaled(
+                            &label_scratch,
+                            (push_x - 8.0 * s - ahead_text_w).max(panel_x + pad),
+                            y + workspace_h / 2.0 + 5.0 * s,
+                            git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
+                            0.78,
+                        );
+                        let push_btn = Button {
+                            x: push_x,
+                            y: y + 5.0 * s,
+                            w: push_w,
+                            h: 20.0 * s,
+                            text: if push_w < 38.0 * s { "↑" } else { "Push" }.to_string(),
+                            icon: None,
+                            text_scale: 0.76,
+                            icon_size: 0.0,
+                        };
+                        if workspace_disabled {
+                            render_git_disabled_button(self, &push_btn, s);
+                            register_git_locked_button_cursor(
+                                ui_registry,
+                                crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                                &push_btn,
+                                mx,
+                                my,
+                            );
+                        } else if ide_panel.git.pending {
+                            push_btn.render(self, -1.0, -1.0, s, false);
+                            register_git_locked_button_cursor(
+                                ui_registry,
+                                crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                                &push_btn,
+                                mx,
+                                my,
+                            );
+                        } else {
+                            ui_registry.register_button(
+                                crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                                &push_btn,
+                                self,
+                                mx,
+                                my,
+                                s,
+                                false,
+                            );
+                        }
                     }
                     let rollback_btn = Button {
                         x: rollback_x,
@@ -3145,6 +3289,59 @@ impl Renderer {
                                 Some((kind, workspace.workspace_idx, tooltip.to_string(), mx, my));
                         }
                     }
+                } else if workspace.ahead > 0 {
+                    let push_x = right_x - push_w;
+                    label_scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut label_scratch,
+                        format_args!("↑{}", workspace.ahead),
+                    );
+                    self.draw_string_scaled(
+                        &label_scratch,
+                        (push_x - 8.0 * s - ahead_text_w).max(panel_x + pad),
+                        y + workspace_h / 2.0 + 5.0 * s,
+                        git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
+                        0.78,
+                    );
+                    let push_btn = Button {
+                        x: push_x,
+                        y: y + 5.0 * s,
+                        w: push_w,
+                        h: 20.0 * s,
+                        text: if push_w < 38.0 * s { "↑" } else { "Push" }.to_string(),
+                        icon: None,
+                        text_scale: 0.76,
+                        icon_size: 0.0,
+                    };
+                    if workspace_disabled {
+                        render_git_disabled_button(self, &push_btn, s);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            mx,
+                            my,
+                        );
+                    } else if ide_panel.git.pending {
+                        push_btn.render(self, -1.0, -1.0, s, false);
+                        register_git_locked_button_cursor(
+                            ui_registry,
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            mx,
+                            my,
+                        );
+                    } else {
+                        ui_registry.register_button(
+                            crate::ui_system::UiId::GitPush(workspace.workspace_idx),
+                            &push_btn,
+                            self,
+                            mx,
+                            my,
+                            s,
+                            false,
+                        );
+                    }
                 } else if changed_count > 0 {
                     label_scratch.clear();
                     let _ = std::fmt::Write::write_fmt(
@@ -3171,6 +3368,10 @@ impl Renderer {
                 }
             }
             y += workspace_h;
+
+            if workspace_is_collapsed {
+                continue;
+            }
 
             if let Some(err) = &workspace.error {
                 if y + row_h >= list_y && y <= list_y + list_h {
@@ -3500,7 +3701,7 @@ impl Renderer {
             );
         }
 
-        if ide_panel.git.commit_menu_open {
+        if ide_panel.git.commit_menu_open && !ide_panel.git.pending {
             let menu_w = inner_w.min(230.0 * s).max(120.0 * s).min(panel_w);
             let menu_x = (panel_x + pad + inner_w - menu_w).max(panel_x + 2.0 * s);
             let item_h = 32.0 * s;
@@ -3725,6 +3926,8 @@ impl Renderer {
         mx: f32,
         my: f32,
         panel_bottom_h: f32,
+        git_progress_label: Option<&str>,
+        git_progress_elapsed_secs: Option<f32>,
     ) {
         let bar_h = ide_status_bar_height(s).round();
         let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
@@ -3878,6 +4081,45 @@ impl Renderer {
             group_w += item_gap + selected_block_w;
         }
         let line_x = lang_x - 22.0 * s - group_w;
+        if let Some(label) = git_progress_label {
+            let label_w = self.measure_ui_width(label, 0.82).round();
+            let progress_gap = 8.0 * s;
+            let track_w = 74.0 * s;
+            let track_h = 5.0 * s;
+            let progress_w = label_w + progress_gap + track_w;
+            let progress_x = line_x - 18.0 * s - progress_w;
+            if progress_x > diag_x + diagnostics_w + 8.0 * s {
+                let track_x = progress_x + label_w + progress_gap;
+                let track_y = bar_y + (bar_h - track_h) / 2.0;
+                self.draw_string_scaled(
+                    label,
+                    progress_x,
+                    text_y,
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72],
+                    0.82,
+                );
+                self.push_rounded_rect(
+                    track_x,
+                    track_y,
+                    track_w,
+                    track_h,
+                    track_h / 2.0,
+                    [1.0, 1.0, 1.0, 0.10],
+                );
+                let thumb_w = (28.0 * s).min(track_w);
+                let phase = git_progress_elapsed_secs
+                    .map(git_progress_thumb_phase)
+                    .unwrap_or(1.0);
+                self.push_rounded_rect(
+                    track_x + (track_w - thumb_w) * phase,
+                    track_y,
+                    thumb_w,
+                    track_h,
+                    track_h / 2.0,
+                    [0.60, 0.35, 0.85, 0.88],
+                );
+            }
+        }
         if line_x > diag_x + diagnostics_w + 8.0 * s {
             self.draw_string_scaled("Стр", line_x, text_y, pos_color, text_scale);
             self.draw_string_mono_scaled(
@@ -4686,6 +4928,16 @@ mod tests {
             git_disabled_color([0.2, 0.3, 0.4, 1.0], false, 0.38),
             [0.2, 0.3, 0.4, 1.0]
         );
+    }
+
+    #[test]
+    fn git_progress_thumb_phase_ping_pongs_without_jump() {
+        let cycle = 1.0 / GIT_PROGRESS_CYCLES_PER_SEC;
+        assert!(git_progress_thumb_phase(0.0).abs() < 0.001);
+        assert!((git_progress_thumb_phase(cycle * 0.25) - 0.5).abs() < 0.001);
+        assert!((git_progress_thumb_phase(cycle * 0.5) - 1.0).abs() < 0.001);
+        assert!((git_progress_thumb_phase(cycle * 0.75) - 0.5).abs() < 0.001);
+        assert!(git_progress_thumb_phase(cycle).abs() < 0.001);
     }
 
     #[test]
