@@ -1135,9 +1135,169 @@ impl Renderer {
         self.git_file_tooltip = None;
         self.git_action_tooltip = None;
         self.git_graph_tooltip = None;
+        self.git_graph_tooltip_hover = None;
         self.git_tooltip_waiting = false;
         git_tooltip_reset();
         self.reset_delayed_tooltip_anchor();
+    }
+
+    fn push_git_graph_vertical_segment(
+        &mut self,
+        x: f32,
+        top: f32,
+        bottom: f32,
+        s: f32,
+        color: [f32; 4],
+    ) {
+        let h = bottom - top;
+        if h > 0.5 * s {
+            self.push_rect(x - 1.0 * s, top, 2.0 * s, h, color);
+        }
+    }
+
+    fn push_git_graph_soft_vertical_segment(
+        &mut self,
+        x: f32,
+        top: f32,
+        bottom: f32,
+        width: f32,
+        color: [f32; 4],
+    ) {
+        self.push_git_graph_sdf_segment(x, top, x, bottom, width, color);
+    }
+
+    fn push_git_graph_parent_segment(
+        &mut self,
+        from_x: f32,
+        to_x: f32,
+        row_y: f32,
+        row_h: f32,
+        s: f32,
+        color: [f32; 4],
+    ) {
+        let w = (to_x - from_x).abs();
+        if w <= 0.5 * s {
+            return;
+        }
+        let line_w = 2.0 * s;
+        let start_y = row_y + row_h / 2.0;
+        let end_y = row_y + row_h * 1.5;
+        let dot_r = 5.0 * s;
+        let r = (row_h * 0.46).min(w * 0.86).max(4.0 * s);
+
+        if to_x > from_x {
+            let turn_y = (start_y + r).min(end_y);
+            self.push_git_graph_quadratic_curve(
+                from_x,
+                start_y,
+                to_x,
+                start_y,
+                to_x,
+                turn_y,
+                line_w,
+                color,
+            );
+            self.push_git_graph_soft_vertical_segment(to_x, turn_y, end_y - dot_r, line_w, color);
+        } else {
+            let turn_y = (end_y - r).max(start_y);
+            self.push_git_graph_soft_vertical_segment(from_x, start_y + dot_r, turn_y, line_w, color);
+            self.push_git_graph_quadratic_curve(
+                from_x,
+                turn_y,
+                from_x,
+                end_y,
+                to_x,
+                end_y,
+                line_w,
+                color,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_git_graph_quadratic_curve(
+        &mut self,
+        x0: f32,
+        y0: f32,
+        cx: f32,
+        cy: f32,
+        x1: f32,
+        y1: f32,
+        width: f32,
+        color: [f32; 4],
+    ) {
+        let approx_len = ((x1 - x0).abs() + (y1 - y0).abs()).max(width);
+        let steps = (approx_len / (width * 0.75)).ceil().clamp(18.0, 64.0) as usize;
+        let mut prev_x = x0;
+        let mut prev_y = y0;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let inv = 1.0 - t;
+            let x = inv * inv * x0 + 2.0 * inv * t * cx + t * t * x1;
+            let y = inv * inv * y0 + 2.0 * inv * t * cy + t * t * y1;
+            if step > 0 {
+                self.push_git_graph_sdf_segment(prev_x, prev_y, x, y, width, color);
+            }
+            prev_x = x;
+            prev_y = y;
+        }
+    }
+
+    fn push_git_graph_sdf_segment(
+        &mut self,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        width: f32,
+        color: [f32; 4],
+    ) {
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= 0.01 {
+            return;
+        }
+        let ux = dx / len;
+        let uy = dy / len;
+        let radius = width * 0.5;
+        let extent = radius + 1.25;
+        let nx = -uy * extent;
+        let ny = ux * extent;
+        let sx = x0 - ux * extent;
+        let sy = y0 - uy * extent;
+        let ex = x1 + ux * extent;
+        let ey = y1 + uy * extent;
+        let sdf_params = [len, radius, 0.0];
+        let v0 = crate::renderer::Vertex {
+            pos: [sx + nx, sy + ny],
+            uv: [-extent, extent],
+            color,
+            mode: 8.0,
+            sdf_params,
+        };
+        let v1 = crate::renderer::Vertex {
+            pos: [ex + nx, ey + ny],
+            uv: [len + extent, extent],
+            color,
+            mode: 8.0,
+            sdf_params,
+        };
+        let v2 = crate::renderer::Vertex {
+            pos: [ex - nx, ey - ny],
+            uv: [len + extent, -extent],
+            color,
+            mode: 8.0,
+            sdf_params,
+        };
+        let v3 = crate::renderer::Vertex {
+            pos: [sx - nx, sy - ny],
+            uv: [-extent, -extent],
+            color,
+            mode: 8.0,
+            sdf_params,
+        };
+        self.vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1193,6 +1353,18 @@ impl Renderer {
         let tooltip_h = 142.0 * s + refs_section_h;
         let tooltip_x = anchor_x + 6.0 * s;
         let tooltip_y = anchor_y - 8.0 * s;
+        let hover_x = anchor_x.min(tooltip_x);
+        let hover_y = anchor_y.min(tooltip_y);
+        self.git_graph_tooltip_hover = Some(crate::renderer::GitGraphTooltipHover {
+            workspace_idx: target.workspace_idx,
+            commit_idx: target.commit_idx,
+            anchor_x,
+            anchor_y,
+            x: hover_x,
+            y: hover_y,
+            w: (tooltip_x + tooltip_w - hover_x).max(tooltip_w),
+            h: (tooltip_y + tooltip_h - hover_y).max(tooltip_h),
+        });
         self.push_rounded_rect(
             tooltip_x,
             tooltip_y,
@@ -1284,7 +1456,7 @@ impl Renderer {
                 if pill_x + pill_w > tooltip_x + tooltip_w - pad {
                     break;
                 }
-                let pill_y = (line_y - 12.0 * s).round();
+                let pill_y = (line_y - pill_h * 0.5 - 4.0 * s).round();
                 self.push_rounded_rect(
                     pill_x,
                     pill_y,
@@ -1569,6 +1741,14 @@ impl Renderer {
 
             let circle_y = row_y + row_h / 2.0;
             let commit_x = lane_start_x + commit.column as f32 * lane_step;
+            let parent_to_left = commit.lanes.iter().any(|lane| {
+                lane.kind == crate::app::git_panel::GitGraphLaneKind::Parent
+                    && lane.column < commit.column
+            });
+            let parent_to_right = commit.lanes.iter().any(|lane| {
+                lane.kind == crate::app::git_panel::GitGraphLaneKind::Parent
+                    && lane.column > commit.column
+            });
             for lane in &commit.lanes {
                 let lane_x = lane_start_x + lane.column as f32 * lane_step;
                 if lane_x > panel_x + pad + gutter_w {
@@ -1577,12 +1757,29 @@ impl Renderer {
                 let color = git_graph_lane_color(lane.color_idx, 0.62, self.theme.sel);
                 match lane.kind {
                     crate::app::git_panel::GitGraphLaneKind::Vertical => {
-                        self.push_rect(lane_x - 1.0 * s, row_y, 2.0 * s, row_h, color);
+                        let has_parent = commit.lanes.iter().any(|candidate| {
+                            candidate.kind == crate::app::git_panel::GitGraphLaneKind::Parent
+                                && candidate.column == lane.column
+                        });
+                        if (parent_to_left && lane.column == commit.column)
+                            || (parent_to_right && has_parent && lane.column > commit.column)
+                        {
+                            continue;
+                        }
+                        let mut top = row_y;
+                        let mut bottom = row_y + row_h;
+                        if lane.column == commit.column {
+                            if idx == 0 {
+                                top = circle_y;
+                            }
+                            if idx + 1 == commits.len() {
+                                bottom = circle_y;
+                            }
+                        }
+                        self.push_git_graph_vertical_segment(lane_x, top, bottom, s, color);
                     }
                     crate::app::git_panel::GitGraphLaneKind::Parent => {
-                        let x = lane_x.min(commit_x);
-                        let w = (lane_x - commit_x).abs().max(2.0 * s);
-                        self.push_rect(x, circle_y - 1.0 * s, w, 2.0 * s, color);
+                        self.push_git_graph_parent_segment(commit_x, lane_x, row_y, row_h, s, color);
                     }
                 }
             }
@@ -1621,13 +1818,12 @@ impl Renderer {
             }
 
             let author_w = 102.0 * s;
-            let oid_w = 54.0 * s;
-            let author_x = (right_x - author_w - oid_w - 12.0 * s).max(text_x);
+            let author_x = (right_x - author_w).max(text_x);
             self.draw_tree_label_clipped(
                 &commit.summary,
                 text_x,
                 row_y + row_h / 2.0 + 4.8 * s,
-                (right_x - text_x - author_w - oid_w - 22.0 * s).max(20.0 * s),
+                (right_x - text_x - author_w - 12.0 * s).max(20.0 * s),
                 self.theme.fg,
                 0.82,
                 scratch,
@@ -1639,15 +1835,6 @@ impl Renderer {
                 author_w,
                 [0.72, 0.76, 0.88, 0.62],
                 0.72,
-                scratch,
-            );
-            self.draw_tree_label_clipped(
-                &commit.short_oid,
-                right_x - oid_w,
-                row_y + row_h / 2.0 + 4.8 * s,
-                oid_w,
-                [0.72, 0.76, 0.88, 0.46],
-                0.68,
                 scratch,
             );
         }
@@ -1678,9 +1865,16 @@ impl Renderer {
         if let Some((target, anchor_x, anchor_y)) = row_hover_target {
             self.git_graph_tooltip =
                 Some((target.workspace_idx, target.commit_idx, anchor_x, anchor_y));
+        } else if let Some(hover) = self.git_graph_tooltip_hover
+            && hover.workspace_idx == active_workspace
+            && hover.contains(mx, my)
+        {
+            self.git_graph_tooltip =
+                Some((hover.workspace_idx, hover.commit_idx, hover.anchor_x, hover.anchor_y));
         } else if !mouse_in_commit_area {
             git_tooltip_reset();
             self.git_graph_tooltip = None;
+            self.git_graph_tooltip_hover = None;
         }
     }
 

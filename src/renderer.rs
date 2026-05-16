@@ -121,6 +121,25 @@ pub enum FontSource {
     ),
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct GitGraphTooltipHover {
+    pub workspace_idx: usize,
+    pub commit_idx: usize,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl GitGraphTooltipHover {
+    #[inline(always)]
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
+    }
+}
+
 #[derive(Clone)]
 pub struct FontData {
     pub source: FontSource,
@@ -257,6 +276,7 @@ pub struct Renderer {
     pub git_file_tooltip: Option<(usize, usize, String, f32, f32)>,
     pub git_action_tooltip: Option<(u8, usize, String, f32, f32)>,
     pub git_graph_tooltip: Option<(usize, usize, f32, f32)>,
+    pub git_graph_tooltip_hover: Option<GitGraphTooltipHover>,
     pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,
@@ -399,6 +419,14 @@ impl Renderer {
                         if (((mask >> shift) & 1u) == 0u) discard;
                         float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
                         out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a);
+                    } else if (v_mode == 8.0) {
+                        float segment_len = v_sdf_params.x;
+                        float radius = v_sdf_params.y;
+                        float dx = max(max(-v_uv.x, v_uv.x - segment_len), 0.0);
+                        float d = length(vec2(dx, v_uv.y)) - radius;
+                        float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
+                        if (alpha <= 0.0) discard;
+                        out_color = vec4(v_col.rgb, v_col.a * alpha);
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
@@ -640,6 +668,7 @@ impl Renderer {
                 git_file_tooltip: None,
                 git_action_tooltip: None,
                 git_graph_tooltip: None,
+                git_graph_tooltip_hover: None,
                 git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,

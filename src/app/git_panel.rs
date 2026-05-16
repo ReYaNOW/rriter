@@ -1483,7 +1483,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                     &mut lanes,
                     GitGraphLane {
                         column: parent_lane.column,
-                        color_idx: parent_lane.color_idx,
+                        color_idx: commit_color,
                         kind: GitGraphLaneKind::Parent,
                     },
                 );
@@ -2293,6 +2293,11 @@ mod tests {
         }));
         assert!(commits[2].lanes.iter().any(|lane| {
             lane.kind == GitGraphLaneKind::Parent && lane.column == commits[1].column
+        }));
+        assert!(commits[2].lanes.iter().any(|lane| {
+            lane.kind == GitGraphLaneKind::Parent
+                && lane.column == commits[1].column
+                && lane.color_idx == commits[2].color_idx
         }));
     }
 
