@@ -1161,8 +1161,9 @@ impl Renderer {
         top: f32,
         bottom: f32,
         width: f32,
-        color: [f32; 4],
+        mut color: [f32; 4],
     ) {
+        color[3] = (color[3] * 1.52).min(1.0);
         self.push_git_graph_sdf_segment(x, top, x, bottom, width, color);
     }
 
@@ -1184,6 +1185,7 @@ impl Renderer {
         let end_y = row_y + row_h * 1.5;
         let dot_r = 5.0 * s;
         let r = (row_h * 0.46).min(w * 0.86).max(4.0 * s);
+        let join_gap = line_w * 0.18;
 
         if to_x > from_x {
             let turn_y = (start_y + r).min(end_y);
@@ -1197,10 +1199,22 @@ impl Renderer {
                 line_w,
                 color,
             );
-            self.push_git_graph_soft_vertical_segment(to_x, turn_y, end_y - dot_r, line_w, color);
+            self.push_git_graph_soft_vertical_segment(
+                to_x,
+                turn_y + join_gap,
+                end_y - dot_r,
+                line_w,
+                color,
+            );
         } else {
             let turn_y = (end_y - r).max(start_y);
-            self.push_git_graph_soft_vertical_segment(from_x, start_y + dot_r, turn_y, line_w, color);
+            self.push_git_graph_soft_vertical_segment(
+                from_x,
+                start_y + dot_r,
+                turn_y - join_gap,
+                line_w,
+                color,
+            );
             self.push_git_graph_quadratic_curve(
                 from_x,
                 turn_y,
