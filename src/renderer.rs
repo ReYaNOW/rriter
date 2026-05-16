@@ -441,8 +441,8 @@ impl Renderer {
                     } else if (v_mode == 8.0) {
                         float segment_len = v_sdf_params.x;
                         float radius = v_sdf_params.y;
-                        float dx = max(max(-v_uv.x, v_uv.x - segment_len), 0.0);
-                        float d = length(vec2(dx, v_uv.y)) - radius;
+                        if (v_uv.x < 0.0 || v_uv.x > segment_len) discard;
+                        float d = abs(v_uv.y) - radius;
                         float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
                         if (alpha <= 0.0) discard;
                         out_color = vec4(v_col.rgb, v_col.a * alpha);

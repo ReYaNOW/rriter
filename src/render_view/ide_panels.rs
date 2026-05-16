@@ -438,6 +438,39 @@ struct GitGraphTooltipTarget {
     commit_idx: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct GitGraphRowLayout {
+    gutter_w: f32,
+    lane_step: f32,
+    lane_start_x: f32,
+    text_x: f32,
+}
+
+fn git_graph_row_layout(
+    panel_x: f32,
+    pad: f32,
+    scale: f32,
+    commit_column: usize,
+    lanes: &[crate::app::git_panel::GitGraphLane],
+) -> GitGraphRowLayout {
+    let max_column = lanes
+        .iter()
+        .flat_map(|lane| [lane.column, lane.target_column])
+        .chain(std::iter::once(commit_column))
+        .max()
+        .unwrap_or(0);
+    let lane_step = 18.0 * scale;
+    let gutter_w = (max_column as f32 * lane_step + 28.0 * scale).max(42.0 * scale);
+    let lane_start_x = panel_x + pad + 12.0 * scale;
+    let text_x = panel_x + pad + gutter_w + 8.0 * scale;
+    GitGraphRowLayout {
+        gutter_w,
+        lane_step,
+        lane_start_x,
+        text_x,
+    }
+}
+
 fn git_graph_lane_color(color_idx: usize, alpha: f32, main: [f32; 4]) -> [f32; 4] {
     let mut color = match color_idx % 7 {
         0 => main,
@@ -1314,9 +1347,8 @@ impl Renderer {
         s: f32,
         color: [f32; 4],
     ) {
-        let h = bottom - top;
-        if h > 0.5 * s {
-            self.push_rect(x - 1.0 * s, top, 2.0 * s, h, color);
+        if bottom - top > 0.5 * s {
+            self.push_git_graph_sdf_segment(x, top, x, bottom, 2.0 * s, color);
         }
     }
 
@@ -1326,9 +1358,8 @@ impl Renderer {
         top: f32,
         bottom: f32,
         width: f32,
-        mut color: [f32; 4],
+        color: [f32; 4],
     ) {
-        color[3] = (color[3] * 1.52).min(1.0);
         self.push_git_graph_sdf_segment(x, top, x, bottom, width, color);
     }
 
@@ -1347,36 +1378,97 @@ impl Renderer {
         }
         let line_w = 2.0 * s;
         let start_y = row_y + row_h / 2.0;
-        let end_y = row_y + row_h * 1.5;
-        let dot_r = 5.0 * s;
+        let end_y = row_y + row_h;
         let r = (row_h * 0.46).min(w * 0.86).max(4.0 * s);
-        let join_gap = line_w * 0.18;
 
         if to_x > from_x {
             let turn_y = (start_y + r).min(end_y);
             self.push_git_graph_quadratic_curve(
                 from_x, start_y, to_x, start_y, to_x, turn_y, line_w, color,
             );
-            self.push_git_graph_soft_vertical_segment(
-                to_x,
-                turn_y + join_gap,
-                end_y - dot_r,
-                line_w,
-                color,
-            );
+            self.push_git_graph_soft_vertical_segment(to_x, turn_y, end_y, line_w, color);
         } else {
             let turn_y = (end_y - r).max(start_y);
-            self.push_git_graph_soft_vertical_segment(
-                from_x,
-                start_y + dot_r,
-                turn_y - join_gap,
-                line_w,
-                color,
-            );
+            self.push_git_graph_soft_vertical_segment(from_x, start_y, turn_y, line_w, color);
             self.push_git_graph_quadratic_curve(
                 from_x, turn_y, from_x, end_y, to_x, end_y, line_w, color,
             );
         }
+    }
+
+    fn push_git_graph_shift_segment(
+        &mut self,
+        from_x: f32,
+        to_x: f32,
+        row_y: f32,
+        row_h: f32,
+        s: f32,
+        color: [f32; 4],
+    ) {
+        let w = (to_x - from_x).abs();
+        if w <= 0.5 * s {
+            self.push_git_graph_vertical_segment(from_x, row_y, row_y + row_h, s, color);
+            return;
+        }
+        let line_w = 2.0 * s;
+        let mid_y = row_y + row_h / 2.0;
+        let radius = (5.0 * s).min(w * 0.5).max(2.0 * s);
+        let turn_in_y = (mid_y - radius).max(row_y);
+        let turn_out_y = (mid_y + radius).min(row_y + row_h);
+        self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
+        self.push_git_graph_quadratic_curve(
+            from_x,
+            turn_in_y,
+            from_x,
+            mid_y,
+            if to_x > from_x {
+                to_x - radius
+            } else {
+                to_x + radius
+            },
+            mid_y,
+            line_w,
+            color,
+        );
+        self.push_git_graph_quadratic_curve(
+            if to_x > from_x {
+                to_x - radius
+            } else {
+                to_x + radius
+            },
+            mid_y,
+            to_x,
+            mid_y,
+            to_x,
+            turn_out_y,
+            line_w,
+            color,
+        );
+        self.push_git_graph_soft_vertical_segment(to_x, turn_out_y, row_y + row_h, line_w, color);
+    }
+
+    fn push_git_graph_shift_to_commit_segment(
+        &mut self,
+        from_x: f32,
+        to_x: f32,
+        row_y: f32,
+        row_h: f32,
+        s: f32,
+        color: [f32; 4],
+    ) {
+        let w = (to_x - from_x).abs();
+        let line_w = 2.0 * s;
+        let mid_y = row_y + row_h / 2.0;
+        if w <= 0.5 * s {
+            self.push_git_graph_vertical_segment(from_x, row_y, mid_y, s, color);
+            return;
+        }
+        let radius = (5.0 * s).min(w * 0.5).max(2.0 * s);
+        let turn_in_y = (mid_y - radius).max(row_y);
+        self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
+        self.push_git_graph_quadratic_curve(
+            from_x, turn_in_y, from_x, mid_y, to_x, mid_y, line_w, color,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1393,18 +1485,68 @@ impl Renderer {
     ) {
         let approx_len = ((x1 - x0).abs() + (y1 - y0).abs()).max(width);
         let steps = (approx_len / (width * 0.75)).ceil().clamp(18.0, 64.0) as usize;
+        let radius = width * 0.5;
+        let extent = radius + 1.25;
+        let sdf_params = [approx_len + width * 4.0, radius, 0.0];
         let mut prev_x = x0;
         let mut prev_y = y0;
+        let mut prev_left = [x0, y0];
+        let mut prev_right = [x0, y0];
+        let mut prev_u = 0.0f32;
         for step in 0..=steps {
             let t = step as f32 / steps as f32;
             let inv = 1.0 - t;
             let x = inv * inv * x0 + 2.0 * inv * t * cx + t * t * x1;
             let y = inv * inv * y0 + 2.0 * inv * t * cy + t * t * y1;
+            let tx = 2.0 * inv * (cx - x0) + 2.0 * t * (x1 - cx);
+            let ty = 2.0 * inv * (cy - y0) + 2.0 * t * (y1 - cy);
+            let tangent_len = (tx * tx + ty * ty).sqrt();
+            if tangent_len <= 0.01 {
+                continue;
+            }
+            let nx = -ty / tangent_len * extent;
+            let ny = tx / tangent_len * extent;
+            let left = [x + nx, y + ny];
+            let right = [x - nx, y - ny];
             if step > 0 {
-                self.push_git_graph_sdf_segment(prev_x, prev_y, x, y, width, color);
+                let dx = x - prev_x;
+                let dy = y - prev_y;
+                let u = prev_u + (dx * dx + dy * dy).sqrt();
+                let v0 = crate::renderer::Vertex {
+                    pos: prev_left,
+                    uv: [prev_u, extent],
+                    color,
+                    mode: 8.0,
+                    sdf_params,
+                };
+                let v1 = crate::renderer::Vertex {
+                    pos: left,
+                    uv: [u, extent],
+                    color,
+                    mode: 8.0,
+                    sdf_params,
+                };
+                let v2 = crate::renderer::Vertex {
+                    pos: right,
+                    uv: [u, -extent],
+                    color,
+                    mode: 8.0,
+                    sdf_params,
+                };
+                let v3 = crate::renderer::Vertex {
+                    pos: prev_right,
+                    uv: [prev_u, -extent],
+                    color,
+                    mode: 8.0,
+                    sdf_params,
+                };
+                self.vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
+                prev_u = u;
             }
             prev_x = x;
             prev_y = y;
+            prev_left = left;
+            prev_right = right;
         }
     }
 
@@ -1429,35 +1571,32 @@ impl Renderer {
         let extent = radius + 1.25;
         let nx = -uy * extent;
         let ny = ux * extent;
-        let sx = x0 - ux * extent;
-        let sy = y0 - uy * extent;
-        let ex = x1 + ux * extent;
-        let ey = y1 + uy * extent;
-        let sdf_params = [len, radius, 0.0];
+        let segment_len = len;
+        let sdf_params = [segment_len, radius, 0.0];
         let v0 = crate::renderer::Vertex {
-            pos: [sx + nx, sy + ny],
-            uv: [-extent, extent],
+            pos: [x0 + nx, y0 + ny],
+            uv: [0.0, extent],
             color,
             mode: 8.0,
             sdf_params,
         };
         let v1 = crate::renderer::Vertex {
-            pos: [ex + nx, ey + ny],
-            uv: [len + extent, extent],
+            pos: [x1 + nx, y1 + ny],
+            uv: [segment_len, extent],
             color,
             mode: 8.0,
             sdf_params,
         };
         let v2 = crate::renderer::Vertex {
-            pos: [ex - nx, ey - ny],
-            uv: [len + extent, -extent],
+            pos: [x1 - nx, y1 - ny],
+            uv: [segment_len, -extent],
             color,
             mode: 8.0,
             sdf_params,
         };
         let v3 = crate::renderer::Vertex {
-            pos: [sx - nx, sy - ny],
-            uv: [-extent, -extent],
+            pos: [x0 - nx, y0 - ny],
+            uv: [0.0, -extent],
             color,
             mode: 8.0,
             sdf_params,
@@ -2311,17 +2450,6 @@ impl Renderer {
 
         let row_h = crate::app::git_panel::GIT_GRAPH_ROW_H * s;
         let scroll = ide_panel.git.graph_scroll.current.round();
-        let lane_count = ide_panel.git.graph_lane_count.max(1);
-        let max_gutter_w = (panel_w * 0.42).max(54.0 * s);
-        let gutter_w = ((lane_count as f32 - 1.0).max(0.0) * 18.0 * s + 28.0 * s)
-            .clamp(42.0 * s, max_gutter_w);
-        let lane_step = if lane_count > 1 {
-            ((gutter_w - 24.0 * s) / (lane_count - 1) as f32).clamp(8.0 * s, 18.0 * s)
-        } else {
-            18.0 * s
-        };
-        let lane_start_x = panel_x + pad + 12.0 * s;
-        let text_x = panel_x + pad + gutter_w + 8.0 * s;
         let first = (scroll / row_h).floor().max(0.0) as usize;
         let last = (((scroll + rows_h) / row_h).ceil() as usize + 1).min(commits.len());
         let active_workspace = ide_panel.git.graph_workspace_idx.unwrap_or(0);
@@ -2364,48 +2492,80 @@ impl Renderer {
             }
 
             let circle_y = row_y + row_h / 2.0;
+            let graph_layout = git_graph_row_layout(panel_x, pad, s, commit.column, &commit.lanes);
+            let gutter_w = graph_layout.gutter_w;
+            let lane_step = graph_layout.lane_step;
+            let lane_start_x = graph_layout.lane_start_x;
+            let text_x = graph_layout.text_x;
             let commit_x = lane_start_x + commit.column as f32 * lane_step;
-            let parent_to_left = commit.lanes.iter().any(|lane| {
-                lane.kind == crate::app::git_panel::GitGraphLaneKind::Parent
-                    && lane.column < commit.column
-            });
-            let parent_to_right = commit.lanes.iter().any(|lane| {
-                lane.kind == crate::app::git_panel::GitGraphLaneKind::Parent
-                    && lane.column > commit.column
-            });
-            for lane in &commit.lanes {
-                let lane_x = lane_start_x + lane.column as f32 * lane_step;
-                if lane_x > panel_x + pad + gutter_w {
-                    continue;
-                }
-                let color = git_graph_lane_color(lane.color_idx, 0.62, self.theme.sel);
-                match lane.kind {
-                    crate::app::git_panel::GitGraphLaneKind::Vertical => {
-                        let has_parent = commit.lanes.iter().any(|candidate| {
-                            candidate.kind == crate::app::git_panel::GitGraphLaneKind::Parent
-                                && candidate.column == lane.column
-                        });
-                        if (parent_to_left && lane.column == commit.column)
-                            || (parent_to_right && has_parent && lane.column > commit.column)
-                        {
-                            continue;
-                        }
-                        let mut top = row_y;
-                        let mut bottom = row_y + row_h;
-                        if lane.column == commit.column {
-                            if idx == 0 {
-                                top = circle_y;
-                            }
-                            if idx + 1 == commits.len() {
-                                bottom = circle_y;
-                            }
-                        }
-                        self.push_git_graph_vertical_segment(lane_x, top, bottom, s, color);
+            for vertical_pass in [false, true] {
+                for lane in &commit.lanes {
+                    let is_vertical = matches!(
+                        lane.kind,
+                        crate::app::git_panel::GitGraphLaneKind::Vertical
+                            | crate::app::git_panel::GitGraphLaneKind::VerticalTop
+                            | crate::app::git_panel::GitGraphLaneKind::VerticalBottom
+                    );
+                    if is_vertical != vertical_pass {
+                        continue;
                     }
-                    crate::app::git_panel::GitGraphLaneKind::Parent => {
-                        self.push_git_graph_parent_segment(
-                            commit_x, lane_x, row_y, row_h, s, color,
-                        );
+                    let lane_x = lane_start_x + lane.column as f32 * lane_step;
+                    let target_x = lane_start_x + lane.target_column as f32 * lane_step;
+                    if lane_x > panel_x + pad + gutter_w {
+                        continue;
+                    }
+                    let color = git_graph_lane_color(lane.color_idx, 0.62, self.theme.sel);
+                    match lane.kind {
+                        crate::app::git_panel::GitGraphLaneKind::Vertical => {
+                            let mut top = row_y;
+                            let mut bottom = row_y + row_h;
+                            if lane.column == commit.column {
+                                if idx == 0 {
+                                    top = circle_y;
+                                }
+                                if idx + 1 == commits.len() {
+                                    bottom = circle_y;
+                                }
+                            }
+                            self.push_git_graph_vertical_segment(lane_x, top, bottom, s, color);
+                        }
+                        crate::app::git_panel::GitGraphLaneKind::VerticalTop => {
+                            let bottom = if lane.column == commit.column {
+                                circle_y - 5.0 * s
+                            } else {
+                                circle_y
+                            };
+                            self.push_git_graph_vertical_segment(lane_x, row_y, bottom, s, color);
+                        }
+                        crate::app::git_panel::GitGraphLaneKind::VerticalBottom => {
+                            let top = if lane.column == commit.column {
+                                circle_y + 5.0 * s
+                            } else {
+                                circle_y
+                            };
+                            self.push_git_graph_vertical_segment(
+                                lane_x,
+                                top,
+                                row_y + row_h,
+                                s,
+                                color,
+                            );
+                        }
+                        crate::app::git_panel::GitGraphLaneKind::Shift => {
+                            self.push_git_graph_shift_segment(
+                                lane_x, target_x, row_y, row_h, s, color,
+                            );
+                        }
+                        crate::app::git_panel::GitGraphLaneKind::ShiftToCommit => {
+                            self.push_git_graph_shift_to_commit_segment(
+                                lane_x, target_x, row_y, row_h, s, color,
+                            );
+                        }
+                        crate::app::git_panel::GitGraphLaneKind::Parent => {
+                            self.push_git_graph_parent_segment(
+                                commit_x, target_x, row_y, row_h, s, color,
+                            );
+                        }
                     }
                 }
             }
@@ -4871,6 +5031,13 @@ impl Renderer {
 mod tests {
     use super::*;
 
+    fn source_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+        let start_idx = source.find(start).expect("start marker exists");
+        let tail = &source[start_idx..];
+        let end_idx = tail.find(end).expect("end marker exists");
+        &tail[..end_idx]
+    }
+
     #[test]
     fn clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary() {
         assert_eq!(clipped_label_prefix_len("abcdef", 38.0, 8.0, |_| 10.0), 3);
@@ -4879,6 +5046,71 @@ mod tests {
             "аб".len()
         );
         assert_eq!(clipped_label_prefix_len("abc", 4.0, 8.0, |_| 3.0), 0);
+    }
+
+    #[test]
+    fn git_graph_row_layout_shifts_text_for_many_lanes() {
+        let one_lane = [crate::app::git_panel::GitGraphLane {
+            column: 0,
+            target_column: 0,
+            color_idx: 0,
+            kind: crate::app::git_panel::GitGraphLaneKind::VerticalTop,
+        }];
+        let six_lane = [
+            crate::app::git_panel::GitGraphLane {
+                column: 0,
+                target_column: 0,
+                color_idx: 0,
+                kind: crate::app::git_panel::GitGraphLaneKind::VerticalTop,
+            },
+            crate::app::git_panel::GitGraphLane {
+                column: 0,
+                target_column: 5,
+                color_idx: 5,
+                kind: crate::app::git_panel::GitGraphLaneKind::Parent,
+            },
+        ];
+
+        let one = git_graph_row_layout(10.0, 8.0, 1.0, 0, &one_lane);
+        let six = git_graph_row_layout(10.0, 8.0, 1.0, 0, &six_lane);
+        let last_lane_x = six.lane_start_x + six.lane_step * 5.0;
+
+        let one_commit_far_right = git_graph_row_layout(10.0, 8.0, 1.0, 5, &one_lane);
+
+        assert!((one.lane_step - 18.0).abs() < 0.001);
+        assert!((six.lane_step - 18.0).abs() < 0.001);
+        assert!(six.text_x > one.text_x);
+        assert!(six.text_x > last_lane_x + 6.0);
+        assert_eq!(six.text_x, one_commit_far_right.text_x);
+    }
+
+    #[test]
+    fn git_graph_render_shift_to_commit_has_no_bottom_tail() {
+        let source = include_str!("ide_panels.rs");
+        let body = source_between(
+            source,
+            "fn push_git_graph_shift_to_commit_segment",
+            "#[allow(clippy::too_many_arguments)]",
+        );
+
+        assert!(body.contains(
+            "self.push_git_graph_quadratic_curve(\n            from_x, turn_in_y, from_x, mid_y, to_x, mid_y, line_w, color,"
+        ));
+        assert!(!body.contains("turn_out_y"));
+        assert!(!body.contains("row_y + row_h,"));
+    }
+
+    #[test]
+    fn git_graph_render_soft_vertical_preserves_lane_alpha() {
+        let source = include_str!("ide_panels.rs");
+        let body = source_between(
+            source,
+            "fn push_git_graph_soft_vertical_segment",
+            "fn push_git_graph_parent_segment",
+        );
+
+        assert!(body.contains("self.push_git_graph_sdf_segment(x, top, x, bottom, width, color);"));
+        assert!(!body.contains("color[3]"));
     }
 
     #[test]

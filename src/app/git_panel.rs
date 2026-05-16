@@ -121,12 +121,17 @@ impl GitStatusSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitGraphLaneKind {
     Vertical,
+    VerticalTop,
+    VerticalBottom,
+    Shift,
+    ShiftToCommit,
     Parent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitGraphLane {
     pub column: usize,
+    pub target_column: usize,
     pub color_idx: usize,
     pub kind: GitGraphLaneKind,
 }
@@ -2028,21 +2033,32 @@ struct ActiveGraphLane {
     branch_name: Option<String>,
 }
 
-fn first_free_graph_column(active: &[ActiveGraphLane]) -> usize {
-    let mut column = 0usize;
-    while active.iter().any(|lane| lane.column == column) {
-        column += 1;
+fn git_graph_lane(
+    column: usize,
+    target_column: usize,
+    color_idx: usize,
+    kind: GitGraphLaneKind,
+) -> GitGraphLane {
+    GitGraphLane {
+        column,
+        target_column,
+        color_idx,
+        kind,
     }
-    column
 }
 
 fn push_unique_graph_lane(lanes: &mut Vec<GitGraphLane>, lane: GitGraphLane) {
-    if !lanes
-        .iter()
-        .any(|existing| existing.column == lane.column && existing.kind == lane.kind)
-    {
+    if !lanes.iter().any(|existing| {
+        existing.column == lane.column
+            && existing.target_column == lane.target_column
+            && existing.kind == lane.kind
+    }) {
         lanes.push(lane);
     }
+}
+
+fn last_graph_lane_index(active: &[ActiveGraphLane], oid: &str) -> Option<usize> {
+    active.iter().rposition(|lane| lane.oid == oid)
 }
 
 fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
@@ -2061,154 +2077,208 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
     }
 
     let mut active: Vec<ActiveGraphLane> = Vec::new();
-    let mut next_color = 0usize;
+    let mut next_color = 1usize;
     let mut max_column = 0usize;
 
     for commit in commits {
-        let lane_idx = if let Some(idx) = active.iter().position(|lane| lane.oid == commit.oid) {
-            idx
-        } else {
-            let column = first_free_graph_column(&active);
-            let color_idx = next_color;
-            next_color = next_color.saturating_add(1);
-            active.push(ActiveGraphLane {
-                oid: commit.oid.clone(),
-                column,
-                color_idx,
-                branch_name: merge_source_by_oid
-                    .get(&commit.oid)
-                    .cloned()
-                    .or_else(|| commit.branch_name.clone()),
-            });
-            active.len() - 1
-        };
-
-        let commit_column = active[lane_idx].column;
-        let commit_color = active[lane_idx].color_idx;
+        let input_lanes = active.clone();
+        let input_idx = input_lanes.iter().position(|lane| lane.oid == commit.oid);
+        let circle_idx = input_idx.unwrap_or(input_lanes.len());
         if commit.branch_name.is_none() {
             commit.branch_name = merge_source_by_oid
                 .get(&commit.oid)
                 .cloned()
-                .or_else(|| active[lane_idx].branch_name.clone());
+                .or_else(|| input_idx.and_then(|idx| input_lanes[idx].branch_name.clone()));
         }
         let commit_branch_name = commit.branch_name.clone();
         let propagating_branch_name = commit_branch_name
             .as_ref()
             .filter(|label| git_graph_branch_label_propagates(label))
             .cloned();
-        max_column = max_column.max(commit_column);
-        let mut lanes = Vec::with_capacity(active.len() + commit.parent_oids.len() + 1);
-        for lane in &active {
-            max_column = max_column.max(lane.column);
+
+        let parents = commit.parent_oids.clone();
+        let mut output_lanes: Vec<ActiveGraphLane> =
+            Vec::with_capacity(input_lanes.len() + parents.len());
+        let mut first_parent_added = false;
+        if !parents.is_empty() {
+            for lane in &input_lanes {
+                if lane.oid == commit.oid {
+                    if !first_parent_added {
+                        output_lanes.push(ActiveGraphLane {
+                            oid: parents[0].clone(),
+                            column: output_lanes.len(),
+                            color_idx: lane.color_idx,
+                            branch_name: propagating_branch_name.clone(),
+                        });
+                        first_parent_added = true;
+                    }
+                } else {
+                    let mut lane = lane.clone();
+                    lane.column = output_lanes.len();
+                    output_lanes.push(lane);
+                }
+            }
+        }
+
+        let first_unprocessed_parent = if first_parent_added { 1 } else { 0 };
+        for (parent_idx, parent) in parents.iter().enumerate().skip(first_unprocessed_parent) {
+            let merge_parent_label = merge_source_by_oid.get(parent).cloned();
+            let parent_branch_name = if merge_parent_label
+                .as_deref()
+                .is_some_and(|label| label != "merged side branch")
+            {
+                merge_parent_label
+            } else {
+                branch_by_oid
+                    .get(parent)
+                    .cloned()
+                    .or(merge_parent_label)
+                    .or_else(|| propagating_branch_name.clone())
+            };
+            let color_idx = if parent_idx == 0 {
+                input_idx
+                    .map(|idx| input_lanes[idx].color_idx)
+                    .unwrap_or_else(|| {
+                        let color_idx = next_color;
+                        next_color = next_color.saturating_add(1);
+                        color_idx
+                    })
+            } else {
+                let color_idx = next_color;
+                next_color = next_color.saturating_add(1);
+                color_idx
+            };
+            output_lanes.push(ActiveGraphLane {
+                oid: parent.clone(),
+                column: output_lanes.len(),
+                color_idx,
+                branch_name: parent_branch_name,
+            });
+        }
+
+        let commit_color = output_lanes
+            .get(circle_idx)
+            .map(|lane| lane.color_idx)
+            .or_else(|| input_lanes.get(circle_idx).map(|lane| lane.color_idx))
+            .unwrap_or_else(|| {
+                let color_idx = next_color;
+                next_color = next_color.saturating_add(1);
+                color_idx
+            });
+
+        let mut lanes = Vec::with_capacity(input_lanes.len() + output_lanes.len() + parents.len());
+        let mut output_idx = 0usize;
+        for (index, lane) in input_lanes.iter().enumerate() {
+            if lane.oid == commit.oid {
+                if index != circle_idx {
+                    push_unique_graph_lane(
+                        &mut lanes,
+                        git_graph_lane(
+                            index,
+                            circle_idx,
+                            lane.color_idx,
+                            GitGraphLaneKind::ShiftToCommit,
+                        ),
+                    );
+                } else {
+                    output_idx = output_idx.saturating_add(1);
+                }
+                continue;
+            }
+
+            if output_idx < output_lanes.len() && lane.oid == output_lanes[output_idx].oid {
+                if index == output_idx {
+                    push_unique_graph_lane(
+                        &mut lanes,
+                        git_graph_lane(
+                            index,
+                            index,
+                            lane.color_idx,
+                            GitGraphLaneKind::VerticalTop,
+                        ),
+                    );
+                    push_unique_graph_lane(
+                        &mut lanes,
+                        git_graph_lane(
+                            index,
+                            index,
+                            lane.color_idx,
+                            GitGraphLaneKind::VerticalBottom,
+                        ),
+                    );
+                } else {
+                    push_unique_graph_lane(
+                        &mut lanes,
+                        git_graph_lane(
+                            index,
+                            output_idx,
+                            lane.color_idx,
+                            GitGraphLaneKind::Shift,
+                        ),
+                    );
+                }
+                output_idx = output_idx.saturating_add(1);
+            }
+        }
+
+        for parent in parents.iter().skip(1) {
+            if let Some(parent_output_idx) = last_graph_lane_index(&output_lanes, parent) {
+                push_unique_graph_lane(
+                    &mut lanes,
+                    git_graph_lane(
+                        circle_idx,
+                        parent_output_idx,
+                        output_lanes[parent_output_idx].color_idx,
+                        GitGraphLaneKind::Parent,
+                    ),
+                );
+            }
+        }
+
+        if let Some(idx) = input_idx {
             push_unique_graph_lane(
                 &mut lanes,
-                GitGraphLane {
-                    column: lane.column,
-                    color_idx: lane.color_idx,
-                    kind: GitGraphLaneKind::Vertical,
-                },
+                git_graph_lane(
+                    circle_idx,
+                    circle_idx,
+                    input_lanes[idx].color_idx,
+                    GitGraphLaneKind::VerticalTop,
+                ),
+            );
+        }
+        if !parents.is_empty() {
+            push_unique_graph_lane(
+                &mut lanes,
+                git_graph_lane(
+                    circle_idx,
+                    circle_idx,
+                    commit_color,
+                    GitGraphLaneKind::VerticalBottom,
+                ),
             );
         }
 
-        let parents = commit.parent_oids.clone();
-        if parents.is_empty() {
-            active.remove(lane_idx);
-        } else {
-            let first_parent = &parents[0];
-            if let Some(existing_idx) = active
-                .iter()
-                .position(|lane| lane.oid == *first_parent && lane.column != commit_column)
-            {
-                let parent_lane = active[existing_idx].clone();
-                push_unique_graph_lane(
-                    &mut lanes,
-                    GitGraphLane {
-                        column: parent_lane.column,
-                        color_idx: commit_color,
-                        kind: GitGraphLaneKind::Parent,
-                    },
-                );
-                active.remove(lane_idx);
-            } else if let Some(lane) = active.get_mut(lane_idx) {
-                lane.oid.clone_from(first_parent);
-                lane.branch_name = propagating_branch_name.clone();
-            }
-
-            for parent in parents.iter().skip(1) {
-                let merge_parent_label = merge_source_by_oid.get(parent).cloned();
-                let parent_branch_name = if merge_parent_label
-                    .as_deref()
-                    .is_some_and(|label| label != "merged side branch")
-                {
-                    merge_parent_label
-                } else {
-                    branch_by_oid
-                        .get(parent)
-                        .cloned()
-                        .or(merge_parent_label)
-                        .or_else(|| propagating_branch_name.clone())
-                };
-                let parent_lane = if let Some(existing_idx) =
-                    active.iter().position(|lane| lane.oid == *parent)
-                {
-                    if active[existing_idx].branch_name.is_none() {
-                        active[existing_idx].branch_name = parent_branch_name.clone();
-                    }
-                    active[existing_idx].clone()
-                } else {
-                    let column = first_free_graph_column(&active);
-                    let color_idx = next_color;
-                    next_color = next_color.saturating_add(1);
-                    let lane = ActiveGraphLane {
-                        oid: parent.clone(),
-                        column,
-                        color_idx,
-                        branch_name: parent_branch_name,
-                    };
-                    active.push(lane.clone());
-                    lane
-                };
-                max_column = max_column.max(parent_lane.column);
-                push_unique_graph_lane(
-                    &mut lanes,
-                    GitGraphLane {
-                        column: parent_lane.column,
-                        color_idx: parent_lane.color_idx,
-                        kind: GitGraphLaneKind::Vertical,
-                    },
-                );
-                push_unique_graph_lane(
-                    &mut lanes,
-                    GitGraphLane {
-                        column: parent_lane.column,
-                        color_idx: parent_lane.color_idx,
-                        kind: GitGraphLaneKind::Parent,
-                    },
-                );
-            }
-        }
-
-        push_unique_graph_lane(
-            &mut lanes,
-            GitGraphLane {
-                column: commit_column,
-                color_idx: commit_color,
-                kind: GitGraphLaneKind::Vertical,
-            },
-        );
         lanes.sort_by_key(|lane| {
             (
                 lane.column,
+                lane.target_column,
                 match lane.kind {
                     GitGraphLaneKind::Vertical => 0u8,
-                    GitGraphLaneKind::Parent => 1u8,
+                    GitGraphLaneKind::VerticalTop => 0u8,
+                    GitGraphLaneKind::VerticalBottom => 0u8,
+                    GitGraphLaneKind::Shift => 1u8,
+                    GitGraphLaneKind::ShiftToCommit => 1u8,
+                    GitGraphLaneKind::Parent => 2u8,
                 },
             )
         });
-        commit.column = commit_column;
+        commit.column = circle_idx;
         commit.color_idx = commit_color;
         commit.lanes = lanes;
-        active.sort_by_key(|lane| lane.column);
+        max_column = max_column.max(circle_idx);
+        max_column = max_column.max(input_lanes.len().saturating_sub(1));
+        max_column = max_column.max(output_lanes.len().saturating_sub(1));
+        active = output_lanes;
     }
 
     max_column.saturating_add(1).max(1)
@@ -2976,6 +3046,20 @@ mod tests {
         }
     }
 
+    fn has_graph_lane(commit: &GitGraphCommit, kind: GitGraphLaneKind, column: usize) -> bool {
+        commit.lanes.iter().any(|lane| {
+            lane.kind == kind
+                && match kind {
+                    GitGraphLaneKind::Parent
+                    | GitGraphLaneKind::Shift
+                    | GitGraphLaneKind::ShiftToCommit => {
+                        lane.target_column == column
+                    }
+                    _ => lane.column == column,
+                }
+        })
+    }
+
     #[test]
     fn git_graph_remote_url_parse_and_ref_normalize() {
         assert_eq!(
@@ -3097,16 +3181,138 @@ mod tests {
         assert_eq!(commits[0].column, 0);
         assert_eq!(commits[2].column, 1);
         assert!(commits[0].lanes.iter().any(|lane| {
-            lane.kind == GitGraphLaneKind::Parent && lane.column == commits[2].column
+            lane.kind == GitGraphLaneKind::Parent && lane.target_column == commits[2].column
         }));
-        assert!(commits[2].lanes.iter().any(|lane| {
-            lane.kind == GitGraphLaneKind::Parent && lane.column == commits[1].column
+        assert!(has_graph_lane(
+            &commits[2],
+            GitGraphLaneKind::VerticalTop,
+            commits[2].column
+        ));
+        assert!(has_graph_lane(
+            &commits[2],
+            GitGraphLaneKind::VerticalBottom,
+            commits[2].column
+        ));
+        assert!(has_graph_lane(
+            &commits[3],
+            GitGraphLaneKind::ShiftToCommit,
+            0
+        ));
+    }
+
+    #[test]
+    fn git_graph_lane_layout_collapses_side_branch_into_commit_without_shift_tail() {
+        let mut commits = vec![
+            graph_commit("merge", &["main", "side"]),
+            graph_commit("main", &["base"]),
+            graph_commit("side", &["base"]),
+            graph_commit("base", &[]),
+        ];
+
+        apply_git_graph_lanes(&mut commits);
+
+        let side_column = commits[2].column;
+        let base_column = commits[3].column;
+        assert_eq!(side_column, 1);
+        assert_eq!(base_column, 0);
+        assert!(commits[3].lanes.iter().any(|lane| {
+            lane.kind == GitGraphLaneKind::ShiftToCommit
+                && lane.column == side_column
+                && lane.target_column == base_column
         }));
-        assert!(commits[2].lanes.iter().any(|lane| {
-            lane.kind == GitGraphLaneKind::Parent
-                && lane.column == commits[1].column
-                && lane.color_idx == commits[2].color_idx
+        assert!(!commits[3].lanes.iter().any(|lane| {
+            lane.kind == GitGraphLaneKind::Shift
+                && lane.column == side_column
+                && lane.target_column == base_column
         }));
+        assert!(!has_graph_lane(
+            &commits[3],
+            GitGraphLaneKind::VerticalBottom,
+            side_column
+        ));
+    }
+
+    #[test]
+    fn git_graph_lane_layout_keeps_long_side_chains_connected() {
+        let mut commits = vec![
+            graph_commit("merge", &["main", "branch1", "branch2", "branch3"]),
+            graph_commit("main", &["root"]),
+            graph_commit("branch1", &["branch1_mid"]),
+            graph_commit("branch2", &["branch2_mid"]),
+            graph_commit("branch3", &["branch3_mid"]),
+            graph_commit("branch1_mid", &["root"]),
+            graph_commit("branch2_mid", &["root"]),
+            graph_commit("branch3_mid", &["root"]),
+            graph_commit("root", &[]),
+        ];
+
+        let lane_count = apply_git_graph_lanes(&mut commits);
+
+        assert_eq!(lane_count, 4);
+        assert_eq!(commits[0].column, 0);
+        assert_eq!(commits[1].column, 0);
+        assert_eq!(commits[2].column, 1);
+        assert_eq!(commits[3].column, 2);
+        assert_eq!(commits[4].column, 3);
+        assert_eq!(commits[5].column, 1);
+        assert_eq!(commits[6].column, 2);
+        assert_eq!(commits[7].column, 3);
+        assert_eq!(commits[8].column, 0);
+
+        assert!(!has_graph_lane(
+            &commits[0],
+            GitGraphLaneKind::VerticalTop,
+            commits[0].column
+        ));
+        for column in 1..=3 {
+            assert!(has_graph_lane(
+                &commits[0],
+                GitGraphLaneKind::Parent,
+                column
+            ));
+        }
+
+        for idx in 2..=4 {
+            assert!(has_graph_lane(
+                &commits[idx],
+                GitGraphLaneKind::VerticalTop,
+                commits[idx].column
+            ));
+            assert!(has_graph_lane(
+                &commits[idx],
+                GitGraphLaneKind::VerticalBottom,
+                commits[idx].column
+            ));
+        }
+        for idx in 5..=7 {
+            assert!(has_graph_lane(
+                &commits[idx],
+                GitGraphLaneKind::VerticalTop,
+                commits[idx].column
+            ));
+            assert!(has_graph_lane(
+                &commits[idx],
+                GitGraphLaneKind::VerticalBottom,
+                commits[idx].column
+            ));
+        }
+        assert!(has_graph_lane(
+            &commits[8],
+            GitGraphLaneKind::VerticalTop,
+            commits[8].column
+        ));
+        for idx in 1..=3 {
+            assert!(commits[8].lanes.iter().any(|lane| {
+                lane.kind == GitGraphLaneKind::ShiftToCommit
+                    && lane.column == idx
+                    && lane.target_column == commits[8].column
+            }));
+        }
+        assert!(!has_graph_lane(
+            &commits[8],
+            GitGraphLaneKind::VerticalBottom,
+            commits[8].column
+        ));
     }
 
     #[test]
