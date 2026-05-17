@@ -779,6 +779,40 @@ impl App {
                     } else if clicked_id == crate::ui_system::UiId::GitGraphResize {
                         self.ide_panel.git.graph_resizing = true;
                         self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::GitGraphScroll {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                        if let Some((rows_y, rows_h)) =
+                            super::git_graph_rows_bounds(&self.ide_panel, wh, s)
+                            && let Some((drag_offset, target)) =
+                                crate::app::git_panel::git_graph_scroll_drag_target(
+                                    my,
+                                    rows_y,
+                                    rows_h,
+                                    self.ide_panel.git.graph_snapshot.len(),
+                                    self.ide_panel.git.graph_scroll.current,
+                                    None,
+                                    s,
+                                )
+                        {
+                            self.ide_panel.git.graph_scroll.drag_offset = drag_offset;
+                            self.ide_panel.git.graph_scroll.target = target;
+                            self.ide_panel.git.graph_scroll.velocity = 0.0;
+                            self.ide_panel.git.graph_scroll.is_dragging = true;
+                            let max_scroll = crate::app::git_panel::git_graph_max_scroll(
+                                self.ide_panel.git.graph_snapshot.len(),
+                                rows_h,
+                                s,
+                            );
+                            if self.ide_panel.git.graph_has_more
+                                && crate::app::git_panel::git_graph_near_load_more(
+                                    target, max_scroll, s,
+                                )
+                            {
+                                self.load_more_git_graph_commits();
+                            }
+                        }
+                        self.handle_ui_click(clicked_id);
                     } else {
                         if clicked_id == crate::ui_system::UiId::TerminalBody {
                             self.ide_panel.is_dragging_terminal = true;
@@ -1192,6 +1226,7 @@ impl App {
             self.ide_panel.lsp_scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_y.is_dragging = false;
             self.ide_panel.problems_scroll.is_dragging = false;
+            self.ide_panel.git.graph_scroll.is_dragging = false;
             for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
                 scroll.is_dragging = false;
             }

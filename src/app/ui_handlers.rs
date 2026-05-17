@@ -585,7 +585,7 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::GitGraphResize | UiId::GitGraphCommit(_, _) => {
+            UiId::GitGraphResize | UiId::GitGraphScroll | UiId::GitGraphCommit(_, _) => {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

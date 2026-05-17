@@ -166,6 +166,7 @@ pub struct GitGraphCommit {
     pub lanes: Vec<GitGraphLane>,
     pub column: usize,
     pub color_idx: usize,
+    pub branch_total_count: Option<usize>,
     pub is_head: bool,
     pub github_url: Option<String>,
     pub stats: Option<GitGraphStats>,
@@ -219,6 +220,47 @@ pub(crate) fn git_graph_split_heights(list_h: f32, ratio: f32, scale: f32) -> (f
 pub(crate) fn git_graph_max_scroll(commit_count: usize, view_h: f32, scale: f32) -> f32 {
     let total_h = commit_count as f32 * GIT_GRAPH_ROW_H * scale;
     (total_h - view_h).max(0.0)
+}
+
+pub(crate) fn git_graph_scroll_thumb_h(commit_count: usize, rows_h: f32, scale: f32) -> f32 {
+    if commit_count == 0 || rows_h <= 0.0 {
+        return 0.0;
+    }
+    let total_h = commit_count as f32 * GIT_GRAPH_ROW_H * scale;
+    let track_h = (rows_h - 8.0 * scale).max(1.0);
+    (rows_h / total_h * track_h).clamp(10.0 * scale, track_h)
+}
+
+pub(crate) fn git_graph_near_load_more(scroll_target: f32, max_scroll: f32, scale: f32) -> bool {
+    scroll_target >= (max_scroll - GIT_GRAPH_ROW_H * scale * 14.0).max(0.0)
+}
+
+pub(crate) fn git_graph_scroll_drag_target(
+    pointer_y: f32,
+    rows_y: f32,
+    rows_h: f32,
+    commit_count: usize,
+    current_scroll: f32,
+    drag_offset: Option<f32>,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    let max_scroll = git_graph_max_scroll(commit_count, rows_h, scale);
+    if max_scroll <= 0.0 || rows_h <= 1.0 {
+        return None;
+    }
+    let track_h = (rows_h - 8.0 * scale).max(1.0);
+    let thumb_h = git_graph_scroll_thumb_h(commit_count, rows_h, scale);
+    let thumb_y =
+        rows_y + 4.0 * scale + (current_scroll / max_scroll).clamp(0.0, 1.0) * (track_h - thumb_h);
+    let offset = drag_offset.unwrap_or_else(|| {
+        if pointer_y >= thumb_y && pointer_y <= thumb_y + thumb_h {
+            pointer_y - thumb_y
+        } else {
+            thumb_h / 2.0
+        }
+    });
+    let ratio = (pointer_y - rows_y - 4.0 * scale - offset) / (track_h - thumb_h).max(1.0);
+    Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
 }
 
 pub struct GitPanelState {
@@ -1726,6 +1768,7 @@ fn collect_git_graph(
 
     let page_len = limit.saturating_sub(offset).max(1);
     let mut commits = Vec::with_capacity(page_len.min(GIT_GRAPH_LIMIT_STEP));
+    let total_commit_count = git_graph_total_commit_count(repo_root);
     let records = git_graph_log_records(repo_root, offset, page_len.saturating_add(1))?;
     let has_more = records.len() > page_len;
     for record in records.into_iter().take(page_len) {
@@ -1766,6 +1809,7 @@ fn collect_git_graph(
             lanes: Vec::new(),
             column: 0,
             color_idx: 0,
+            branch_total_count: total_commit_count,
             is_head: head_oid.as_deref() == Some(record.oid.as_str()),
             github_url: github_base_url
                 .as_ref()
@@ -1781,6 +1825,23 @@ fn collect_git_graph(
         1
     };
     Ok((commits, lane_count, has_more))
+}
+
+fn git_graph_total_commit_count(repo_root: &Path) -> Option<usize> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("rev-list")
+        .arg("--count")
+        .arg("HEAD")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim().parse::<usize>().ok()
 }
 
 struct GitGraphLogRecord {
@@ -2022,9 +2083,16 @@ fn git_graph_merge_source(summary: &str) -> Option<String> {
         return None;
     };
     let source = source
+        .split_once(" to ")
+        .map(|(source, _)| source)
+        .unwrap_or(source)
         .trim()
         .trim_matches(|ch: char| ch == '\'' || ch == '"' || ch == '.' || ch == ':' || ch == ',');
-    (!source.is_empty()).then(|| source.to_string())
+    (!source.is_empty() && !git_graph_source_is_oid(source)).then(|| source.to_string())
+}
+
+fn git_graph_source_is_oid(source: &str) -> bool {
+    (7..=64).contains(&source.len()) && source.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn git_graph_change_request_label(message: &str) -> Option<String> {
@@ -3297,6 +3365,15 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn git_graph_scroll_thumb_shrinks_as_loaded_commits_grow() {
+        let initial = git_graph_scroll_thumb_h(100, 500.0, 1.0);
+        let loaded_more = git_graph_scroll_thumb_h(300, 500.0, 1.0);
+
+        assert!(loaded_more < initial);
+        assert!(loaded_more >= 10.0);
+    }
+
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {
         GitGraphCommit {
             oid: oid.to_string(),
@@ -3314,6 +3391,7 @@ mod tests {
             lanes: Vec::new(),
             column: 0,
             color_idx: 0,
+            branch_total_count: None,
             is_head: false,
             github_url: None,
             stats: None,
@@ -3388,6 +3466,16 @@ mod tests {
         );
         assert_eq!(
             git_graph_merge_source_label("Merged in feature/ui (pull request #7)"),
+            Some("merged from feature/ui".to_string())
+        );
+        assert_eq!(
+            git_graph_merge_source_label(
+                "Merge branch from ac6feca32d5424753f2664167f6b07f89e70cf11 to master"
+            ),
+            None
+        );
+        assert_eq!(
+            git_graph_merge_source_label("Merge branch from feature/ui to master"),
             Some("merged from feature/ui".to_string())
         );
         assert_eq!(git_graph_merge_source_label("feat: normal commit"), None);

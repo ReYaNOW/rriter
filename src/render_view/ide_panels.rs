@@ -391,6 +391,20 @@ fn git_graph_tooltip_anchor(
     })
 }
 
+fn git_graph_tooltip_branch_counts(
+    commits: &[crate::app::git_panel::GitGraphCommit],
+    commit_idx: usize,
+) -> (usize, usize) {
+    let Some(commit) = commits.get(commit_idx) else {
+        return (1, 1);
+    };
+    let total = commit.branch_total_count.unwrap_or(commits.len());
+    (
+        commit_idx.saturating_add(1),
+        total.saturating_sub(commit_idx).max(1),
+    )
+}
+
 fn git_tooltip_reset() {
     GIT_TOOLTIP_TIMER.with(|timer| *timer.borrow_mut() = None);
 }
@@ -469,6 +483,14 @@ fn git_graph_row_layout(
         lane_start_x,
         text_x,
     }
+}
+
+fn branch_chip_y_from_text_center(text_center_y: f32, chip_h: f32) -> f32 {
+    (text_center_y - chip_h * 0.5).round()
+}
+
+fn branch_chip_width(text_w: f32, pad_x: f32, max_w: f32) -> f32 {
+    (text_w + pad_x * 2.0).min(max_w)
 }
 
 fn git_graph_lane_color(color_idx: usize, alpha: f32, main: [f32; 4]) -> [f32; 4] {
@@ -574,6 +596,98 @@ impl Renderer {
                 self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
                 draw_x += g.advance * scale;
             }
+        }
+    }
+
+    fn ui_text_visual_mid_y(&mut self, text: &str, scale: f32) -> f32 {
+        let mut top = 0.0f32;
+        let mut bottom = 0.0f32;
+        let mut seen = false;
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(g) = self.get_ui_glyph(c) {
+                let glyph_top = -g.offset_y * scale;
+                let glyph_bottom = (g.height - g.offset_y) * scale;
+                if seen {
+                    top = top.min(glyph_top);
+                    bottom = bottom.max(glyph_bottom);
+                } else {
+                    top = glyph_top;
+                    bottom = glyph_bottom;
+                    seen = true;
+                }
+            }
+        }
+        if seen { (top + bottom) * 0.5 } else { 0.0 }
+    }
+
+    fn ui_text_center_y(&mut self, text: &str, baseline_y: f32, scale: f32) -> f32 {
+        baseline_y.round() + self.ui_text_visual_mid_y(text, scale)
+    }
+
+    fn ui_text_baseline_for_center_y(&mut self, text: &str, center_y: f32, scale: f32) -> f32 {
+        (center_y - self.ui_text_visual_mid_y(text, scale)).round()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_git_graph_branch_chip(
+        &mut self,
+        text: &str,
+        chip_x: f32,
+        text_center_y: f32,
+        chip_w: f32,
+        chip_h: f32,
+        radius: f32,
+        bg_color: [f32; 4],
+        text_color: [f32; 4],
+        scale: f32,
+        pad_x: f32,
+        register_tooltip_row: bool,
+        scratch: &mut String,
+    ) {
+        let text_y = self.ui_text_baseline_for_center_y(text, text_center_y, scale);
+        let actual_center_y = self.ui_text_center_y(text, text_y, scale);
+        let chip_y = branch_chip_y_from_text_center(actual_center_y, chip_h);
+        self.push_rounded_rect(chip_x, chip_y, chip_w, chip_h, radius, bg_color);
+
+        let max_text_w = (chip_w - pad_x * 2.0).max(1.0);
+        let full_w = self.measure_ui_width(text, scale);
+        let (draw_text, draw_w) = if full_w <= max_text_w {
+            (text, full_w)
+        } else {
+            let ellipsis = "…";
+            let ellipsis_w = self.measure_ui_width(ellipsis, scale);
+            if ellipsis_w > max_text_w {
+                ("", 0.0)
+            } else {
+                let prefix_len = clipped_label_prefix_len(text, max_text_w, ellipsis_w, |ch| {
+                    self.get_ui_glyph(ch)
+                        .map(|g| g.advance * scale)
+                        .unwrap_or(0.0)
+                });
+                scratch.clear();
+                scratch.push_str(&text[..prefix_len]);
+                scratch.push_str(ellipsis);
+                let draw_w = self.measure_ui_width(scratch, scale).min(max_text_w);
+                (scratch.as_str(), draw_w)
+            }
+        };
+        if draw_text.is_empty() {
+            return;
+        }
+
+        let text_x = (chip_x + (chip_w - draw_w) * 0.5).round();
+        if register_tooltip_row {
+            let row_start = self.push_git_graph_tooltip_text_row(
+                draw_text, text_x, chip_y, chip_h, scale, false,
+            );
+            self.draw_git_graph_selectable_text(
+                draw_text, text_x, text_y, text_color, scale, row_start, chip_y, chip_h, false,
+            );
+        } else {
+            self.draw_git_graph_row_text(draw_text, text_x, text_y, text_color, scale);
         }
     }
 
@@ -1231,6 +1345,13 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
+        if ide_panel.is_resizing_left
+            || ide_panel.is_resizing_bottom
+            || ide_panel.git.graph_resizing
+        {
+            self.reset_git_file_tooltip_overlay();
+            return;
+        }
         self.git_tooltip_waiting = false;
         let file_tooltip = self.git_file_tooltip.take().map(
             |(workspace_idx, file_idx, tooltip, mouse_x, mouse_y)| {
@@ -1287,6 +1408,7 @@ impl Renderer {
                             workspace_idx,
                             commit_idx,
                         },
+                        &ide_panel.git.graph_snapshot,
                         anchor_x,
                         anchor_y,
                         s,
@@ -1363,6 +1485,17 @@ impl Renderer {
         self.push_git_graph_sdf_segment(x, top, x, bottom, width, color);
     }
 
+    fn push_git_graph_horizontal_segment(
+        &mut self,
+        x0: f32,
+        x1: f32,
+        y: f32,
+        width: f32,
+        color: [f32; 4],
+    ) {
+        self.push_git_graph_sdf_segment(x0, y, x1, y, width, color);
+    }
+
     fn push_git_graph_parent_segment(
         &mut self,
         from_x: f32,
@@ -1379,20 +1512,28 @@ impl Renderer {
         let line_w = 2.0 * s;
         let start_y = row_y + row_h / 2.0;
         let end_y = row_y + row_h;
-        let r = (row_h * 0.46).min(w * 0.86).max(4.0 * s);
+        let r = (8.0 * s).min(w * 0.5).max(2.0 * s);
 
         if to_x > from_x {
+            let turn_x = (to_x - r).max(from_x);
+            if turn_x - from_x > 0.5 * s {
+                self.push_git_graph_horizontal_segment(from_x, turn_x, start_y, line_w, color);
+            }
             let turn_y = (start_y + r).min(end_y);
             self.push_git_graph_quadratic_curve(
-                from_x, start_y, to_x, start_y, to_x, turn_y, line_w, color,
+                turn_x, start_y, to_x, start_y, to_x, turn_y, line_w, color,
             );
             self.push_git_graph_soft_vertical_segment(to_x, turn_y, end_y, line_w, color);
         } else {
             let turn_y = (end_y - r).max(start_y);
             self.push_git_graph_soft_vertical_segment(from_x, start_y, turn_y, line_w, color);
+            let turn_x = (from_x - r).max(to_x);
             self.push_git_graph_quadratic_curve(
-                from_x, turn_y, from_x, end_y, to_x, end_y, line_w, color,
+                from_x, turn_y, from_x, end_y, turn_x, end_y, line_w, color,
             );
+            if turn_x - to_x > 0.5 * s {
+                self.push_git_graph_horizontal_segment(turn_x, to_x, end_y, line_w, color);
+            }
         }
     }
 
@@ -1412,30 +1553,28 @@ impl Renderer {
         }
         let line_w = 2.0 * s;
         let mid_y = row_y + row_h / 2.0;
-        let radius = (5.0 * s).min(w * 0.5).max(2.0 * s);
+        let radius = (8.0 * s).min(w * 0.5).max(2.0 * s);
         let turn_in_y = (mid_y - radius).max(row_y);
         let turn_out_y = (mid_y + radius).min(row_y + row_h);
+        let dir = if to_x > from_x { 1.0 } else { -1.0 };
+        let from_mid_x = from_x + dir * radius;
+        let to_mid_x = to_x - dir * radius;
         self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
         self.push_git_graph_quadratic_curve(
             from_x,
             turn_in_y,
             from_x,
             mid_y,
-            if to_x > from_x {
-                to_x - radius
-            } else {
-                to_x + radius
-            },
+            from_mid_x,
             mid_y,
             line_w,
             color,
         );
+        if (to_mid_x - from_mid_x).abs() > 0.5 * s {
+            self.push_git_graph_horizontal_segment(from_mid_x, to_mid_x, mid_y, line_w, color);
+        }
         self.push_git_graph_quadratic_curve(
-            if to_x > from_x {
-                to_x - radius
-            } else {
-                to_x + radius
-            },
+            to_mid_x,
             mid_y,
             to_x,
             mid_y,
@@ -1463,12 +1602,24 @@ impl Renderer {
             self.push_git_graph_vertical_segment(from_x, row_y, mid_y, s, color);
             return;
         }
-        let radius = (5.0 * s).min(w * 0.5).max(2.0 * s);
+        let radius = (8.0 * s).min(w * 0.5).max(2.0 * s);
         let turn_in_y = (mid_y - radius).max(row_y);
+        let dir = if to_x > from_x { 1.0 } else { -1.0 };
+        let mid_x = to_x - dir * radius;
         self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
         self.push_git_graph_quadratic_curve(
-            from_x, turn_in_y, from_x, mid_y, to_x, mid_y, line_w, color,
+            from_x, turn_in_y, from_x, mid_y, from_x + dir * radius, mid_y, line_w, color,
         );
+        if (mid_x - (from_x + dir * radius)).abs() > 0.5 * s {
+            self.push_git_graph_horizontal_segment(
+                from_x + dir * radius,
+                mid_x,
+                mid_y,
+                line_w,
+                color,
+            );
+        }
+        self.push_git_graph_horizontal_segment(mid_x, to_x, mid_y, line_w, color);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1848,6 +1999,7 @@ impl Renderer {
         &mut self,
         commit: &crate::app::git_panel::GitGraphCommit,
         target: GitGraphTooltipTarget,
+        commits: &[crate::app::git_panel::GitGraphCommit],
         anchor_x: f32,
         anchor_y: f32,
         s: f32,
@@ -1880,21 +2032,15 @@ impl Renderer {
         let tooltip_w = (440.0 * s).min((self.width - margin * 2.0).max(260.0 * s));
         let inner_w = (tooltip_w - pad_x * 2.0).max(1.0);
         let title_scale = 0.84;
-        let title_line_h = 20.0 * s;
-        let title_icon_size = 16.0 * s;
+        let title_line_h = 22.0 * s;
+        let title_icon_size = 18.0 * s;
         let title_icon_gap = 5.0 * s;
-        let title_group_gap = 12.0 * s;
-        let author_w = self.measure_git_graph_tooltip_text_width(&commit.author_name, title_scale);
+        let title_lines = 2;
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(
             scratch,
             format_args!("{} ({})", commit.relative_time, commit.absolute_time),
         );
-        let date_w = self.measure_git_graph_tooltip_text_width(scratch, title_scale);
-        let title_author_w = title_icon_size + title_icon_gap + author_w;
-        let title_date_w = title_icon_size + title_icon_gap + date_w;
-        let title_one_line = title_author_w + title_group_gap + title_date_w <= inner_w;
-        let title_lines = if title_one_line { 1 } else { 2 };
         let summary_lines =
             self.git_graph_tooltip_wrapped_line_count(&commit.summary, inner_w, 0.9);
         scratch.clear();
@@ -1912,7 +2058,7 @@ impl Renderer {
         }
         let insertions_w = self.measure_git_graph_tooltip_text_width(scratch, 0.82);
         let branch_chip_w = commit.branch_name.as_ref().map(|branch_name| {
-            self.measure_git_graph_tooltip_text_width(branch_name, 0.72) + 12.0 * s
+            branch_chip_width(self.measure_ui_width(branch_name, 0.82), 6.0 * s, f32::MAX)
         });
         let title_h = title_lines as f32 * title_line_h;
         let summary_h = summary_lines as f32 * 20.0 * s;
@@ -1979,124 +2125,125 @@ impl Renderer {
         );
 
         let mut line_top = tooltip_y + pad_y;
-        scratch.clear();
-        let _ = std::fmt::Write::write_fmt(
-            scratch,
-            format_args!(
-                "{}  {} ({})",
-                commit.author_name, commit.relative_time, commit.absolute_time
-            ),
-        );
-        let title_text_y = (line_top + title_line_h * 0.62).round();
-        let title_icon_y = (line_top + (title_line_h - title_icon_size) * 0.5).round();
+        let author_row_top = line_top;
+        let date_row_top = line_top + title_line_h;
+        let author_text_y = (author_row_top + title_line_h * 0.62).round();
+        let date_text_y = (date_row_top + title_line_h * 0.62).round();
+        let title_icon_raise = 2.0 * s;
+        let author_icon_y =
+            (author_row_top + (title_line_h - title_icon_size) * 0.38 - title_icon_raise).round();
+        let date_icon_extra_drop = 1.0 * s;
+        let date_icon_y =
+            (date_row_top + (title_line_h - title_icon_size) * 0.38 - title_icon_raise
+                + date_icon_extra_drop)
+                .round();
         let author_x = (content_x + title_icon_size + title_icon_gap).round();
+        let title_count_color = self.theme.sel;
+        let title_count_text_color = [1.0, 1.0, 1.0, 1.0];
+        let (newest_count, oldest_count) =
+            git_graph_tooltip_branch_counts(commits, target.commit_idx);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{newest_count}"));
+        let newest_w = self.measure_git_graph_tooltip_mono_width(scratch, title_scale);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{oldest_count}"));
+        let oldest_w = self.measure_git_graph_tooltip_mono_width(scratch, title_scale);
+        let count_text_w = newest_w.max(oldest_w);
+        let count_x = (content_x + inner_w - count_text_w).round();
+        let count_icon_size = title_icon_size;
+        let count_icon_x = (count_x - title_icon_gap - count_icon_size).round();
         self.draw_atlas_icon(
             crate::widgets::IconType::Person,
             content_x.round(),
-            title_icon_y,
+            author_icon_y,
             title_icon_size,
             self.theme.sel,
         );
-        if title_one_line {
-            let row_start = self.push_git_graph_tooltip_text_row(
-                scratch,
-                author_x,
-                line_top,
-                title_line_h,
-                title_scale,
-                false,
-            );
-            self.draw_git_graph_selectable_text(
-                &commit.author_name,
-                author_x,
-                title_text_y,
-                [1.0, 1.0, 1.0, 1.0],
-                title_scale,
-                row_start,
-                line_top,
-                title_line_h,
-                false,
-            );
-            let date_x =
-                (author_x + author_w + title_group_gap + title_icon_size + title_icon_gap).round();
-            self.draw_atlas_icon(
-                crate::widgets::IconType::Time,
-                (date_x - title_icon_gap - title_icon_size).round(),
-                title_icon_y,
-                title_icon_size,
-                self.theme.sel,
-            );
-            let date_start = row_start + commit.author_name.len() + 2;
-            if let Some(date_text) = scratch.get(commit.author_name.len() + 2..) {
-                self.draw_git_graph_selectable_text(
-                    date_text,
-                    date_x,
-                    title_text_y,
-                    [1.0, 1.0, 1.0, 1.0],
-                    title_scale,
-                    date_start,
-                    line_top,
-                    title_line_h,
-                    false,
-                );
-            }
-            line_top += title_line_h;
-        } else {
-            let row_start = self.push_git_graph_tooltip_text_row(
-                &commit.author_name,
-                author_x,
-                line_top,
-                title_line_h,
-                title_scale,
-                false,
-            );
-            self.draw_git_graph_selectable_text(
-                &commit.author_name,
-                author_x,
-                title_text_y,
-                [1.0, 1.0, 1.0, 1.0],
-                title_scale,
-                row_start,
-                line_top,
-                title_line_h,
-                false,
-            );
-            line_top += title_line_h;
-            scratch.clear();
-            let _ = std::fmt::Write::write_fmt(
-                scratch,
-                format_args!("{} ({})", commit.relative_time, commit.absolute_time),
-            );
-            let date_icon_y = (line_top + (title_line_h - title_icon_size) * 0.5).round();
-            let date_x = (content_x + title_icon_size + title_icon_gap).round();
-            self.draw_atlas_icon(
-                crate::widgets::IconType::Time,
-                content_x.round(),
-                date_icon_y,
-                title_icon_size,
-                self.theme.sel,
-            );
-            let row_start = self.push_git_graph_tooltip_text_row(
-                scratch,
-                date_x,
-                line_top,
-                title_line_h,
-                title_scale,
-                false,
-            );
-            self.draw_git_graph_selectable_text(
-                scratch,
-                date_x,
-                (line_top + title_line_h * 0.62).round(),
-                [1.0, 1.0, 1.0, 1.0],
-                title_scale,
-                row_start,
-                line_top,
-                title_line_h,
-                false,
-            );
-            line_top += title_line_h;
-        }
+        let row_start = self.push_git_graph_tooltip_text_row(
+            &commit.author_name,
+            author_x,
+            author_row_top,
+            title_line_h,
+            title_scale,
+            false,
+        );
+        self.draw_git_graph_selectable_text(
+            &commit.author_name,
+            author_x,
+            author_text_y,
+            [1.0, 1.0, 1.0, 1.0],
+            title_scale,
+            row_start,
+            author_row_top,
+            title_line_h,
+            false,
+        );
+        self.draw_atlas_icon(
+            crate::widgets::IconType::NumberCount,
+            count_icon_x,
+            author_icon_y,
+            count_icon_size,
+            title_count_color,
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{newest_count}"));
+        self.draw_string_mono_scaled(
+            scratch,
+            count_x,
+            author_text_y,
+            title_count_text_color,
+            title_scale,
+        );
+
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Time,
+            content_x.round(),
+            date_icon_y,
+            title_icon_size,
+            self.theme.sel,
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(
+            scratch,
+            format_args!("{} ({})", commit.relative_time, commit.absolute_time),
+        );
+        let date_x = (content_x + title_icon_size + title_icon_gap).round();
+        let row_start = self.push_git_graph_tooltip_text_row(
+            scratch,
+            date_x,
+            date_row_top,
+            title_line_h,
+            title_scale,
+            false,
+        );
+        self.draw_git_graph_selectable_text(
+            scratch,
+            date_x,
+            date_text_y,
+            [1.0, 1.0, 1.0, 1.0],
+            title_scale,
+            row_start,
+            date_row_top,
+            title_line_h,
+            false,
+        );
+        self.draw_atlas_icon(
+            crate::widgets::IconType::NumberCount,
+            count_icon_x,
+            date_icon_y,
+            count_icon_size,
+            title_count_color,
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{oldest_count}"));
+        self.draw_string_mono_scaled(
+            scratch,
+            count_x,
+            date_text_y,
+            title_count_text_color,
+            title_scale,
+        );
+        line_top += title_line_h * 2.0;
 
         line_top += 6.0 * s;
         line_top = self.draw_git_graph_wrapped_selectable_text(
@@ -2194,37 +2341,24 @@ impl Renderer {
             self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
             line_top += 5.0 * s;
             let pill_h = 18.0 * s;
-            let scale = 0.72;
+            let scale = 0.82;
             let pill_w = branch_chip_w.unwrap_or_else(|| {
-                self.measure_git_graph_tooltip_text_width(branch_name, scale) + 12.0 * s
+                branch_chip_width(self.measure_ui_width(branch_name, scale), 6.0 * s, f32::MAX)
             });
-            let pill_y = line_top.round();
-            self.push_rounded_rect(
+            let desired_center_y = line_top + pill_h * 0.5;
+            self.draw_git_graph_branch_chip(
+                branch_name,
                 content_x,
-                pill_y,
+                desired_center_y,
                 pill_w,
                 pill_h,
                 4.0 * s,
                 [0.28, 0.24, 0.40, 1.0],
-            );
-            let row_start = self.push_git_graph_tooltip_text_row(
-                branch_name,
-                (content_x + 6.0 * s).round(),
-                pill_y,
-                pill_h,
-                scale,
-                false,
-            );
-            self.draw_git_graph_selectable_text(
-                branch_name,
-                (content_x + 6.0 * s).round(),
-                (pill_y + pill_h / 2.0 + 4.0 * s).round(),
                 [0.86, 0.90, 1.0, 1.0],
                 scale,
-                row_start,
-                pill_y,
-                pill_h,
-                false,
+                6.0 * s,
+                true,
+                scratch,
             );
             line_top += pill_h + 4.0 * s;
         }
@@ -2292,7 +2426,7 @@ impl Renderer {
         );
         let open_icon_size = 14.0 * s;
         let open_icon_x = sep_x + 14.0 * s;
-        let open_icon_y = line_top + (18.0 * s - open_icon_size) * 0.5 - 1.0 * s;
+        let open_icon_y = line_top + (18.0 * s - open_icon_size) * 0.5 - 3.0 * s;
         let open_x = open_icon_x + open_icon_size + 5.0 * s;
         let open_text = "Open on GitHub";
         let open_w = self.measure_ui_width(open_text, 0.86);
@@ -2635,7 +2769,7 @@ impl Renderer {
             } else {
                 (author_text_w + 6.0 * s).clamp(48.0 * s, 92.0 * s)
             };
-            let author_right_x = panel_x + panel_w - 8.0 * s;
+            let author_right_x = panel_x + panel_w - 30.0 * s;
             let author_draw_w = author_text_w.min(author_reserve_w);
             let author_x = (author_right_x - author_draw_w).max(text_x);
             let row_text_y = Self::tree_row_text_y(row_y, row_h, s);
@@ -2647,17 +2781,15 @@ impl Renderer {
                 .remote_refs
                 .first()
                 .map(|git_ref| git_ref.name.as_str());
-            let chip_scale = 0.72;
+            let chip_scale = 0.82;
             let chip_pad_x = 5.0 * s;
             let chip_gap = 5.0 * s;
             let chip_max_w = 140.0 * s;
             let local_chip_w = local_ref_name.map(|name| {
-                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0 + 4.0 * s)
-                    .min(chip_max_w)
+                branch_chip_width(self.measure_ui_width(name, chip_scale), chip_pad_x, chip_max_w)
             });
             let remote_chip_w = remote_ref_name.map(|name| {
-                (self.measure_ui_width(name, chip_scale) + chip_pad_x * 2.0 + 4.0 * s)
-                    .min(chip_max_w)
+                branch_chip_width(self.measure_ui_width(name, chip_scale), chip_pad_x, chip_max_w)
             });
             let mut chips_w = local_chip_w.unwrap_or(0.0) + remote_chip_w.unwrap_or(0.0);
             if local_chip_w.is_some() && remote_chip_w.is_some() {
@@ -2679,47 +2811,40 @@ impl Renderer {
                 0.82,
                 scratch,
             );
+            let row_text_center_y = self.ui_text_center_y(&commit.summary, row_text_y, 0.82);
             if chips_visible {
                 let chip_h = 18.0 * s;
-                let chip_y = (row_y + (row_h - chip_h) / 2.0).round();
-                let chip_text_y = (chip_y + chip_h / 2.0 + 3.5 * s).round();
                 let mut chip_x = (text_x + summary_w + 8.0 * s).round();
                 if let (Some(name), Some(chip_w)) = (local_ref_name, local_chip_w) {
-                    self.push_rounded_rect(
+                    self.draw_git_graph_branch_chip(
+                        name,
                         chip_x,
-                        chip_y,
+                        row_text_center_y,
                         chip_w,
                         chip_h,
                         4.0 * s,
                         [0.28, 0.24, 0.40, 1.0],
-                    );
-                    self.draw_git_graph_label_clipped(
-                        name,
-                        chip_x + chip_pad_x,
-                        chip_text_y,
-                        (chip_w - chip_pad_x * 2.0).max(1.0),
                         [0.86, 0.90, 1.0, 1.0],
                         chip_scale,
+                        chip_pad_x,
+                        false,
                         scratch,
                     );
                     chip_x += chip_w + chip_gap;
                 }
                 if let (Some(name), Some(chip_w)) = (remote_ref_name, remote_chip_w) {
-                    self.push_rounded_rect(
+                    self.draw_git_graph_branch_chip(
+                        name,
                         chip_x,
-                        chip_y,
+                        row_text_center_y,
                         chip_w,
                         chip_h,
                         4.0 * s,
                         [0.24, 0.32, 0.42, 1.0],
-                    );
-                    self.draw_git_graph_label_clipped(
-                        name,
-                        chip_x + chip_pad_x,
-                        chip_text_y,
-                        (chip_w - chip_pad_x * 2.0).max(1.0),
                         [0.86, 0.90, 1.0, 1.0],
                         chip_scale,
+                        chip_pad_x,
+                        false,
                         scratch,
                     );
                 }
@@ -2742,16 +2867,27 @@ impl Renderer {
 
         let max_scroll = crate::app::git_panel::git_graph_max_scroll(commits.len(), rows_h, s);
         if max_scroll > 0.0 {
-            let total_h = commits.len() as f32 * row_h;
             let ratio = (scroll / max_scroll).clamp(0.0, 1.0);
-            let thumb_h = (rows_h / total_h * (rows_h - 8.0 * s)).max(20.0 * s);
+            let thumb_h =
+                crate::app::git_panel::git_graph_scroll_thumb_h(commits.len(), rows_h, s);
             let thumb_y = rows_y + 4.0 * s + ratio * (rows_h - 8.0 * s - thumb_h);
+            let track_w = 10.0 * s;
+            let track_x = panel_x + panel_w - track_w - 9.0 * s;
+            ui_registry.register_rect(
+                crate::ui_system::UiId::GitGraphScroll,
+                track_x,
+                rows_y,
+                track_w,
+                rows_h,
+                mx,
+                my,
+            );
             self.push_rounded_rect(
-                panel_x + panel_w - 5.0 * s,
+                track_x + 2.0 * s,
                 thumb_y,
-                3.0 * s,
+                6.0 * s,
                 thumb_h,
-                1.5 * s,
+                3.0 * s,
                 [1.0, 1.0, 1.0, 0.22],
             );
         }
@@ -2772,7 +2908,6 @@ impl Renderer {
                 hover.anchor_y,
             ));
         } else if !mouse_in_commit_area {
-            git_tooltip_reset();
             self.git_graph_tooltip = None;
             self.git_graph_tooltip_hover = None;
             self.git_graph_tooltip_stable_w = 0.0;
@@ -3229,7 +3364,7 @@ impl Renderer {
                 let label_w = (panel_x + panel_w - workspace_label_x - right_reserve).max(0.0);
                 let workspace_text_y = y + workspace_h / 2.0 + 4.5 * s;
                 if let Some(branch_name) = &workspace.branch_name {
-                    let branch_scale = 0.78;
+                    let branch_scale = 0.82;
                     let chip_pad_x = 6.0 * s;
                     let chip_h = 19.0 * s;
                     let chip_w =
@@ -3247,8 +3382,16 @@ impl Renderer {
                             &mut label_scratch,
                         );
                         let chip_x = (workspace_label_x + name_w + gap).round();
-                        let chip_y = (y + (workspace_h - chip_h) / 2.0).round();
-                        let branch_text_y = (chip_y + chip_h / 2.0 + 4.0 * s).round();
+                        let workspace_text_center_y =
+                            self.ui_text_center_y(name, workspace_text_y, 0.9);
+                        let branch_text_y = self.ui_text_baseline_for_center_y(
+                            branch_name,
+                            workspace_text_center_y,
+                            branch_scale,
+                        );
+                        let branch_center_y =
+                            self.ui_text_center_y(branch_name, branch_text_y, branch_scale);
+                        let chip_y = branch_chip_y_from_text_center(branch_center_y, chip_h);
                         let chip_w = chip_w.round();
                         self.push_rounded_rect(
                             chip_x,
@@ -5110,6 +5253,14 @@ mod tests {
     }
 
     #[test]
+    fn branch_chip_y_uses_text_visual_center() {
+        assert_eq!(branch_chip_y_from_text_center(34.0, 18.0), 25.0);
+        assert_eq!(branch_chip_y_from_text_center(34.5, 19.0), 25.0);
+        assert_eq!(branch_chip_width(50.0, 5.0, 140.0), 60.0);
+        assert_eq!(branch_chip_width(160.0, 5.0, 140.0), 140.0);
+    }
+
+    #[test]
     fn git_graph_render_shift_to_commit_has_no_bottom_tail() {
         let source = include_str!("ide_panels.rs");
         let body = source_between(
@@ -5118,9 +5269,8 @@ mod tests {
             "#[allow(clippy::too_many_arguments)]",
         );
 
-        assert!(body.contains(
-            "self.push_git_graph_quadratic_curve(\n            from_x, turn_in_y, from_x, mid_y, to_x, mid_y, line_w, color,"
-        ));
+        assert!(body.contains("let mid_x = to_x - dir * radius;"));
+        assert!(body.contains("self.push_git_graph_horizontal_segment("));
         assert!(!body.contains("turn_out_y"));
         assert!(!body.contains("row_y + row_h,"));
     }

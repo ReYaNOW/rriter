@@ -356,6 +356,37 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
+
+            if self.ide_panel.git.graph_scroll.is_dragging {
+                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                if let Some((rows_y, rows_h)) = super::git_graph_rows_bounds(&self.ide_panel, wh, s)
+                    && let Some((_, target)) =
+                        crate::app::git_panel::git_graph_scroll_drag_target(
+                            py,
+                            rows_y,
+                            rows_h,
+                            self.ide_panel.git.graph_snapshot.len(),
+                            self.ide_panel.git.graph_scroll.current,
+                            Some(self.ide_panel.git.graph_scroll.drag_offset),
+                            s,
+                        )
+                {
+                    self.ide_panel.git.graph_scroll.target = target;
+                    self.ide_panel.git.graph_scroll.velocity = 0.0;
+                    let max_scroll = crate::app::git_panel::git_graph_max_scroll(
+                        self.ide_panel.git.graph_snapshot.len(),
+                        rows_h,
+                        s,
+                    );
+                    if self.ide_panel.git.graph_has_more
+                        && crate::app::git_panel::git_graph_near_load_more(target, max_scroll, s)
+                    {
+                        self.load_more_git_graph_commits();
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
         }
 
         let suppress_editor_hover = should_suppress_editor_hover_for_scroll_drag(

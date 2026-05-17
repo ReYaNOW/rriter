@@ -1313,6 +1313,10 @@ impl Renderer {
                 include_bytes!("icons/time.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::NumberCount,
+                include_bytes!("icons/number_count.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::GithubDark,
                 include_bytes!("icons/atom/icons/files/github_dark.svg").as_slice(),
             ),
@@ -1338,6 +1342,7 @@ impl Renderer {
                 || icon_type == crate::widgets::IconType::Reload
                 || icon_type == crate::widgets::IconType::Person
                 || icon_type == crate::widgets::IconType::Time
+                || icon_type == crate::widgets::IconType::NumberCount
                 || icon_type == crate::widgets::IconType::GithubDark
             {
                 svg_data_str

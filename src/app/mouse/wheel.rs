@@ -333,10 +333,11 @@ impl App {
                             .graph_scroll
                             .clamp_target(0.0, max_scroll);
                         if self.ide_panel.git.graph_has_more
-                            && self.ide_panel.git.graph_scroll.target
-                                >= (max_scroll
-                                    - crate::app::git_panel::GIT_GRAPH_ROW_H * s * 14.0)
-                                    .max(0.0)
+                            && crate::app::git_panel::git_graph_near_load_more(
+                                self.ide_panel.git.graph_scroll.target,
+                                max_scroll,
+                                s,
+                            )
                         {
                             self.load_more_git_graph_commits();
                         }

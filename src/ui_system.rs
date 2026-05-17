@@ -61,6 +61,7 @@ pub enum UiId {
     GitGraphToggle,
     GitGraphWorkspace(usize),
     GitGraphResize,
+    GitGraphScroll,
     GitGraphCommit(usize, usize),
     GitGraphCopyCommit(usize, usize),
     GitGraphOpenCommit(usize, usize),

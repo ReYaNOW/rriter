@@ -26,6 +26,7 @@ pub enum IconType {
     Reload,
     Person,
     Time,
+    NumberCount,
     GithubDark,
 }
 

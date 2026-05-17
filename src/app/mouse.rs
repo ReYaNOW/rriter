@@ -4,6 +4,33 @@ use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 
+fn git_graph_rows_bounds(
+    ide_panel: &crate::app::IdePanelState,
+    window_h: f32,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    if !ide_panel.git.graph_open {
+        return None;
+    }
+    let title_h = 32.0 * scale;
+    let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * scale;
+    let panel_bottom_h = if ide_panel.any_bottom_open() {
+        ide_panel.bottom_height * scale
+    } else {
+        0.0
+    };
+    let content_bottom = crate::render_view::ide_bottom_panel_y(window_h, panel_bottom_h, scale);
+    let content_h = (content_bottom - title_h).max(0.0);
+    let full_list_h = (content_h - controls_h).max(40.0 * scale);
+    let (list_h, divider_h, graph_h) = crate::app::git_panel::git_graph_split_heights(
+        full_list_h,
+        ide_panel.git.graph_height_ratio,
+        scale,
+    );
+    let rows_y = title_h + controls_h + list_h + divider_h + 34.0 * scale;
+    Some((rows_y, (graph_h - 34.0 * scale).max(0.0)))
+}
+
 mod cursor;
 mod hover_mouse_logic;
 #[cfg(test)]
