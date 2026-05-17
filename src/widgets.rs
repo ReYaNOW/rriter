@@ -17,6 +17,7 @@ pub enum IconType {
     Terminal,
     Explorer,
     Git,
+    GitCompare,
     Branch,
     Problems,
     LspServers,

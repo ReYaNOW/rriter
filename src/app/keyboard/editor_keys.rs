@@ -270,6 +270,39 @@ impl App {
         let mut should_trigger_autocomplete = false;
         let mut should_notify_lsp = true;
         let mut ty_completion_trigger: Option<&'static str> = None;
+        let is_git_diff_tab = self.active_tab_is_git_diff();
+
+        if is_git_diff_tab {
+            let text_insert = !ctrl
+                && !self.modifiers.alt_key()
+                && !self.modifiers.super_key()
+                && key_text_for_editor_insert(
+                    physical_key,
+                    key_event.text.as_deref(),
+                    key_event.logical_key.to_text(),
+                    shift,
+                )
+                .is_some();
+            let edit_key = matches!(
+                physical_key,
+                PhysicalKey::Code(
+                    KeyCode::Enter
+                        | KeyCode::NumpadEnter
+                        | KeyCode::Tab
+                        | KeyCode::Space
+                        | KeyCode::Backspace
+                        | KeyCode::Delete
+                )
+            ) || (ctrl
+                && matches!(
+                    physical_key,
+                    PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV)
+                ));
+            if text_insert || edit_key {
+                self.show_readonly_diff_notice();
+                return;
+            }
+        }
 
         let old_cursor_y = self
             .renderer
@@ -377,22 +410,27 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
                 if let Some(delta) = self.editor.undo() {
-                    match delta {
-                        crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
-                            self.highlighter.shift_insert(offset, len, Some(&text));
-                        }
-                        crate::editor::UndoRedoDelta::Delete(offset, len) => {
-                            self.highlighter.shift_delete(offset, len);
-                        }
-                        crate::editor::UndoRedoDelta::Replace(
-                            offset,
-                            del_len,
-                            old_text,
-                            _new_text,
-                        ) => {
-                            self.highlighter.shift_delete(offset, del_len);
-                            self.highlighter
-                                .shift_insert(offset, old_text.len(), Some(&old_text));
+                    if !is_git_diff_tab {
+                        match delta {
+                            crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
+                                self.highlighter.shift_insert(offset, len, Some(&text));
+                            }
+                            crate::editor::UndoRedoDelta::Delete(offset, len) => {
+                                self.highlighter.shift_delete(offset, len);
+                            }
+                            crate::editor::UndoRedoDelta::Replace(
+                                offset,
+                                del_len,
+                                old_text,
+                                _new_text,
+                            ) => {
+                                self.highlighter.shift_delete(offset, del_len);
+                                self.highlighter.shift_insert(
+                                    offset,
+                                    old_text.len(),
+                                    Some(&old_text),
+                                );
+                            }
                         }
                     }
                     cursor_moved = true;
@@ -401,22 +439,27 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyY) if ctrl => {
                 if let Some(delta) = self.editor.redo() {
-                    match delta {
-                        crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
-                            self.highlighter.shift_insert(offset, len, Some(&text));
-                        }
-                        crate::editor::UndoRedoDelta::Delete(offset, len) => {
-                            self.highlighter.shift_delete(offset, len);
-                        }
-                        crate::editor::UndoRedoDelta::Replace(
-                            offset,
-                            del_len,
-                            new_text,
-                            _old_text,
-                        ) => {
-                            self.highlighter.shift_delete(offset, del_len);
-                            self.highlighter
-                                .shift_insert(offset, new_text.len(), Some(&new_text));
+                    if !is_git_diff_tab {
+                        match delta {
+                            crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
+                                self.highlighter.shift_insert(offset, len, Some(&text));
+                            }
+                            crate::editor::UndoRedoDelta::Delete(offset, len) => {
+                                self.highlighter.shift_delete(offset, len);
+                            }
+                            crate::editor::UndoRedoDelta::Replace(
+                                offset,
+                                del_len,
+                                new_text,
+                                _old_text,
+                            ) => {
+                                self.highlighter.shift_delete(offset, del_len);
+                                self.highlighter.shift_insert(
+                                    offset,
+                                    new_text.len(),
+                                    Some(&new_text),
+                                );
+                            }
                         }
                     }
                     cursor_moved = true;
@@ -751,6 +794,23 @@ impl App {
         }
 
         if is_edit {
+            if is_git_diff_tab {
+                let is_undo = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
+                self.rebuild_active_git_diff_from_editor_after_history(is_undo);
+                self.editor.sync_edits.clear();
+                if self.show_search && !self.search_editor.get_full_text().is_empty() {
+                    self.update_search();
+                } else {
+                    self.search_results.clear();
+                }
+                App::update_window_title(
+                    self.window.as_ref().unwrap(),
+                    &self.base_title,
+                    self.editor.is_dirty(),
+                );
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
             self.lsp_actions_menu = None;
             self.is_highlighted_once = true;
             if should_trigger_autocomplete {

@@ -26,6 +26,19 @@ pub struct EditorTab {
     pub search_current_idx: Option<usize>,
     pub is_highlighted_once: bool,
     pub icon_key: &'static str,
+    pub kind: EditorTabKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditorTabKind {
+    Normal,
+    GitDiff(crate::app::git_diff::GitDiffTabMeta, crate::app::git_diff::GitDiffState),
+}
+
+impl EditorTabKind {
+    pub fn is_git_diff(&self) -> bool {
+        matches!(self, Self::GitDiff(_, _))
+    }
 }
 
 #[derive(Debug)]
@@ -708,6 +721,8 @@ pub struct App {
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
+    pub git_diff_rx: Vec<std::sync::mpsc::Receiver<crate::app::git_diff::GitDiffEvent>>,
+    pub readonly_notice_until: Option<Instant>,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
     /// Меню быстрых действий LSP (Alt+Enter)

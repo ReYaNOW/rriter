@@ -135,6 +135,7 @@ impl Renderer {
         end_visual_line: usize,
         ui_registry: &mut crate::ui_system::UiRegistry,
         ctrl_definition_range: Option<(usize, usize)>,
+        diff_line_kinds: Option<&[crate::app::git_diff::DiffLineKind]>,
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -241,9 +242,9 @@ impl Renderer {
         for i in skip_visual_lines..end_visual_line {
             let v_line_info = self.visual_lines[i];
             let start_byte = v_line_info.byte_idx;
+            let phys_idx = v_line_info.physical_line - 1;
 
             let mut end_byte = if v_line_info.is_folded {
-                let phys_idx = v_line_info.physical_line - 1;
                 if phys_idx + 1 < editor.line_offsets.len() {
                     editor.line_offsets[phys_idx + 1].saturating_sub(1)
                 } else {
@@ -265,6 +266,31 @@ impl Renderer {
 
             let y = self.baseline_offset + v_line_info.y_offset - render_scroll_y;
             let mut x = self.left_padding;
+
+            if !v_line_info.is_soft_wrap
+                && let Some(kind) = diff_line_kinds.and_then(|kinds| kinds.get(phys_idx)).copied()
+            {
+                let color = match kind {
+                    crate::app::git_diff::DiffLineKind::Added
+                    | crate::app::git_diff::DiffLineKind::ModifiedNew => {
+                        Some([0.18, 0.82, 0.34, 0.26])
+                    }
+                    crate::app::git_diff::DiffLineKind::Deleted
+                    | crate::app::git_diff::DiffLineKind::ModifiedOld => {
+                        Some([0.76, 0.78, 0.84, 0.24])
+                    }
+                    crate::app::git_diff::DiffLineKind::Context => None,
+                };
+                if let Some(color) = color {
+                    self.push_rect(
+                        self.left_padding,
+                        y - self.baseline_offset,
+                        (scrollbar_x - self.left_padding).max(0.0),
+                        self.line_height,
+                        color,
+                    );
+                }
+            }
 
             let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {
                 Ok(idx) => idx,

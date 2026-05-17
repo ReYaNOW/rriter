@@ -134,8 +134,17 @@ fn parse_open_tabs_content(content: &str) -> (Vec<Option<PathBuf>>, usize) {
 
 fn format_open_tabs_content(tabs: &[crate::app::EditorTab], active_tab: usize) -> String {
     let mut lines = Vec::new();
-    lines.push(active_tab.to_string());
-    for tab in tabs {
+    let active_persist_idx = tabs
+        .iter()
+        .take(active_tab.saturating_add(1))
+        .filter(|tab| matches!(&tab.kind, crate::app::EditorTabKind::Normal))
+        .count()
+        .saturating_sub(1);
+    lines.push(active_persist_idx.to_string());
+    for tab in tabs
+        .iter()
+        .filter(|tab| matches!(&tab.kind, crate::app::EditorTabKind::Normal))
+    {
         if let Some(p) = &tab.file_path {
             lines.push(p.to_string_lossy().into_owned());
         } else {
@@ -454,6 +463,7 @@ mod tests {
             is_highlighted_once: false,
             icon_key: "default_file",
             syntax_errors: Vec::new(),
+            kind: crate::app::EditorTabKind::Normal,
         }
     }
 
@@ -908,6 +918,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         file_tree_rx: None,
         file_tree_notify_rx: None,
         external_changes_rx: None,
+        git_diff_rx: Vec::new(),
+        readonly_notice_until: None,
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,

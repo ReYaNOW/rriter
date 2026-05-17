@@ -48,6 +48,7 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
         is_highlighted_once: false,
         icon_key: "default_file",
         syntax_errors: Vec::new(),
+        kind: EditorTabKind::Normal,
     }
 }
 
@@ -159,6 +160,8 @@ fn test_app() -> Option<App> {
         file_tree_rx: None,
         file_tree_notify_rx: None,
         external_changes_rx: None,
+        git_diff_rx: Vec::new(),
+        readonly_notice_until: None,
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,

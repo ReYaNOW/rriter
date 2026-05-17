@@ -53,7 +53,10 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
-            UiId::HoverPopupScroll | UiId::StatusBar => {}
+            UiId::HoverPopupScroll
+            | UiId::StatusBar
+            | UiId::SearchPanelBody
+            | UiId::GitDiffPanelBody => {}
             UiId::StatusDiagnostics => {
                 self.ide_panel.toggle(crate::app::PanelId::Problems);
                 crate::save_panel_state(&self.ide_panel);
@@ -492,6 +495,31 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitFileDiff(workspace_idx, file_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                let (mx, my) = self
+                    .renderer
+                    .as_ref()
+                    .map(|r| (r.last_mouse_x, r.last_mouse_y))
+                    .unwrap_or((0.0, 0.0));
+                let now = std::time::Instant::now();
+                let same_target =
+                    self.ide_panel.git.selected_file == Some((workspace_idx, file_idx));
+                let dx = mx - self.last_click_pos.0;
+                let dy = my - self.last_click_pos.1;
+                let double_click = same_target
+                    && dx * dx + dy * dy < 25.0
+                    && now.duration_since(self.last_click_time).as_millis() < 400;
+                self.ide_panel.git.selected_file = Some((workspace_idx, file_idx));
+                self.last_click_time = now;
+                self.last_click_pos = (mx, my);
+                if double_click {
+                    self.open_git_diff_tab(workspace_idx, file_idx);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitFolderStage(workspace_idx, row_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
                 self.toggle_git_folder_stage(workspace_idx, row_idx);
@@ -801,6 +829,17 @@ impl App {
                         .insert(self.editor.line_offsets[phys_idx]);
                 }
                 self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::GitDiffRollbackHunk(tab_idx, hunk_idx) => {
+                if tab_idx == self.active_tab {
+                    self.rollback_active_git_diff_hunk(hunk_idx);
+                }
+            }
+            UiId::GitDiffPrevHunk => {
+                self.jump_active_git_diff_hunk(-1);
+            }
+            UiId::GitDiffNextHunk => {
+                self.jump_active_git_diff_hunk(1);
             }
             UiId::EditorFoldDots(phys_idx) => {
                 self.editor.folded_lines.remove(&phys_idx);

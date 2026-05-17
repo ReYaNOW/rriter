@@ -23,6 +23,21 @@ pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
 pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 30.0;
 
+fn decimal_usize_buf(buf: &mut [u8; 20], mut n: usize) -> &str {
+    let mut idx = buf.len();
+    if n == 0 {
+        idx -= 1;
+        buf[idx] = b'0';
+    } else {
+        while n > 0 {
+            idx -= 1;
+            buf[idx] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+    }
+    std::str::from_utf8(&buf[idx..]).unwrap_or("0")
+}
+
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
     false && TELEMETRY_ENABLED.load(Ordering::Relaxed)
@@ -466,6 +481,7 @@ impl Renderer {
         _syntax_errors: &[(usize, usize)],
         ctrl_definition_range: Option<(usize, usize)>,
         ide_workspaces: &[std::path::PathBuf],
+        show_readonly_notice: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
@@ -712,8 +728,20 @@ impl Renderer {
 
         let sidebar_w = if is_ide_mode { 48.0 * s } else { 0.0 };
         let digits = editor.line_offsets.len().to_string().len().max(3);
-        let target_padding =
-            (30.0 * s + digits as f32 * 10.0 * s + sidebar_w + panel_left_w).round();
+        let active_tab_is_git_diff_for_layout = tabs
+            .get(active_tab)
+            .is_some_and(|tab| tab.kind.is_git_diff());
+        let gutter_extra = if active_tab_is_git_diff_for_layout {
+            12.0 * s
+        } else {
+            8.0 * s
+        };
+        let target_padding = (30.0 * s
+            + digits as f32 * 10.0 * s
+            + gutter_extra
+            + sidebar_w
+            + panel_left_w)
+            .round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -1068,6 +1096,10 @@ impl Renderer {
 
         let skip_visual_lines = 0;
         let end_visual_line = self.visual_lines.len();
+        let active_git_diff_state = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::GitDiff(_, state) => Some(state),
+            crate::app::EditorTabKind::Normal => None,
+        });
 
         let editor_clip_x = self.left_padding.round().max(0.0);
         let editor_clip_y = tab_bar_h.round().max(0.0);
@@ -1109,6 +1141,7 @@ impl Renderer {
                 end_visual_line,
                 ui_registry,
                 ctrl_definition_range,
+                active_git_diff_state.map(|state| state.line_kinds.as_slice()),
             );
             self.flush();
             unsafe {
@@ -1174,7 +1207,41 @@ impl Renderer {
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
             let phys_idx = v_line.physical_line - 1;
 
-            if editor.foldable_lines.contains_key(&phys_idx) {
+            if let Some(hunk_idx) = active_git_diff_state
+                .and_then(|state| state.rollback_hunk_index_at_line(phys_idx))
+            {
+                let line_top = v_line.y_offset - render_scroll_y;
+                let icon_size = 22.0 * s;
+                let icon_x = self.left_padding - 22.0 * s;
+                let icon_y = line_top + (self.line_height - icon_size) * 0.5;
+                let hit_x = icon_x - 5.0 * s;
+                let hit_w = icon_size + 10.0 * s;
+                let hovered = self.last_mouse_x >= hit_x
+                    && self.last_mouse_x <= hit_x + hit_w
+                    && self.last_mouse_y >= line_top
+                    && self.last_mouse_y <= line_top + self.line_height;
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::Rollback,
+                    icon_x,
+                    icon_y,
+                    icon_size,
+                    if hovered {
+                        [0.92, 0.96, 1.0, 1.0]
+                    } else {
+                        [1.0, 1.0, 1.0, 1.0]
+                    },
+                );
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::GitDiffRollbackHunk(active_tab, hunk_idx),
+                    hit_x,
+                    line_top,
+                    hit_w,
+                    self.line_height,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
+            } else if active_git_diff_state.is_none() && editor.foldable_lines.contains_key(&phys_idx)
+            {
                 let arrow_x = self.left_padding - 20.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
@@ -1205,7 +1272,12 @@ impl Renderer {
             }
             if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
                 let num_w = self.measure_mono_width(num_str, 1.0);
-                let draw_x = self.left_padding - 24.0 * s - num_w;
+                let num_right_pad = if active_git_diff_state.is_some() {
+                    28.0 * s
+                } else {
+                    24.0 * s
+                };
+                let draw_x = self.left_padding - num_right_pad - num_w;
                 self.draw_string_mono_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
             }
         }
@@ -1411,6 +1483,55 @@ impl Renderer {
                 * editor_scroll_height)
                 .max(20.0 * s);
             let thumb_y = tab_bar_h + scroll_ratio_y * (editor_scroll_height - thumb_h);
+            if let Some(state) = active_git_diff_state {
+                let total = total_lines.max(1) as f32;
+                for hunk in &state.hunks {
+                    let start_ratio = hunk.display_start_line as f32 / total;
+                    let display_end_line = editor
+                        .line_offsets
+                        .partition_point(|&offset| offset < hunk.display_end)
+                        .max(hunk.display_start_line + 1);
+                    let line_count =
+                        display_end_line.saturating_sub(hunk.display_start_line).max(1);
+                    let mark_y = tab_bar_h + start_ratio * editor_scroll_height;
+                    let mark_h = ((line_count as f32 / total) * editor_scroll_height)
+                        .max(2.0 * s)
+                        .min(18.0 * s);
+                    let mut has_old = false;
+                    let mut has_new = false;
+                    let start = hunk.display_start_line.min(state.line_kinds.len());
+                    let end = (start + line_count).min(state.line_kinds.len());
+                    for kind in &state.line_kinds[start..end] {
+                        match kind {
+                            crate::app::git_diff::DiffLineKind::Deleted
+                            | crate::app::git_diff::DiffLineKind::ModifiedOld => has_old = true,
+                            crate::app::git_diff::DiffLineKind::Added
+                            | crate::app::git_diff::DiffLineKind::ModifiedNew => has_new = true,
+                            crate::app::git_diff::DiffLineKind::Context => {}
+                        }
+                    }
+                    if has_old {
+                        self.push_rounded_rect(
+                            scrollbar_x + 1.0 * s,
+                            mark_y,
+                            3.0 * s,
+                            mark_h,
+                            1.5 * s,
+                            [0.76, 0.78, 0.84, 0.90],
+                        );
+                    }
+                    if has_new {
+                        self.push_rounded_rect(
+                            scrollbar_x + scrollbar_width - 4.0 * s,
+                            mark_y,
+                            3.0 * s,
+                            mark_h,
+                            1.5 * s,
+                            [0.18, 0.82, 0.34, 0.95],
+                        );
+                    }
+                }
+            }
             self.push_rounded_rect(
                 scrollbar_x + 1.0 * s,
                 thumb_y,
@@ -1455,6 +1576,149 @@ impl Renderer {
             let fps_text = std::mem::take(&mut self.fps_string);
             self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
             self.fps_string = fps_text;
+        }
+
+        if let Some(state) = active_git_diff_state
+            && !state.hunks.is_empty()
+            && !show_welcome
+        {
+            let s = self.scale_factor;
+            let search_w = 480.0 * s;
+            let search_h = 52.0 * s;
+            let scrollbar_x = self.width - minimap_w - scrollbar_width;
+            let search_x = scrollbar_x - search_w - 20.0 * s;
+            let panel_w = 220.0 * s;
+            let panel_h = search_h;
+            let panel_x = (search_x + search_w - panel_w).max(gutter_x + 8.0 * s);
+            let panel_y = tab_bar_h + 10.0 * s + search_h + 8.0 * s;
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::GitDiffPanelBody,
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                mx,
+                my,
+            );
+            self.push_rounded_rect(
+                panel_x - 1.0,
+                panel_y - 1.0,
+                panel_w + 2.0,
+                panel_h + 2.0,
+                6.0 * s,
+                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55],
+            );
+            self.push_rounded_rect(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                6.0 * s,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            );
+
+            let current_line = ((render_scroll_y.max(0.0)
+                + editor_scroll_height * crate::app::git_diff::GIT_DIFF_FOCUS_RATIO)
+                / self.line_height.max(1.0))
+            .floor()
+            .max(0.0) as usize;
+            let current_idx = state
+                .current_hunk_idx
+                .or_else(|| {
+                    state
+                        .hunks
+                        .iter()
+                        .rposition(|hunk| hunk.display_start_line <= current_line)
+                })
+                .unwrap_or(0)
+                + 1;
+            let mut current_buf = [0u8; 20];
+            let mut total_buf = [0u8; 20];
+            let current_s = decimal_usize_buf(&mut current_buf, current_idx.min(state.hunks.len()));
+            let total_s = decimal_usize_buf(&mut total_buf, state.hunks.len());
+            self.draw_string_scaled(
+                "Diff",
+                panel_x + 12.0 * s,
+                panel_y + panel_h * 0.5 + 5.0 * s,
+                self.theme.fg,
+                0.9,
+            );
+            let nums_x = panel_x + 54.0 * s;
+            self.draw_string_scaled(
+                current_s,
+                nums_x,
+                panel_y + panel_h * 0.5 + 5.0 * s,
+                self.theme.fg,
+                0.9,
+            );
+            let slash_x = nums_x + self.measure_ui_width(current_s, 0.9);
+            self.draw_string_scaled(
+                "/",
+                slash_x,
+                panel_y + panel_h * 0.5 + 5.0 * s,
+                self.theme.line_num,
+                0.9,
+            );
+            self.draw_string_scaled(
+                total_s,
+                slash_x + 7.0 * s,
+                panel_y + panel_h * 0.5 + 5.0 * s,
+                self.theme.fg,
+                0.9,
+            );
+
+            let btn_y = panel_y + 8.0 * s;
+            let btn_size = 36.0 * s;
+            let mut current_x = panel_x + panel_w - 10.0 * s;
+
+            current_x -= btn_size;
+            let btn_down = crate::widgets::IconButton {
+                x: current_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::Down),
+                is_active: false,
+                icon_size: Some(37.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+            current_x -= 10.0 * s;
+
+            current_x -= btn_size;
+            let btn_up = crate::widgets::IconButton {
+                x: current_x,
+                y: btn_y,
+                size: btn_size,
+                icon: Some(crate::widgets::IconType::Up),
+                is_active: false,
+                icon_size: Some(37.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::GitDiffPrevHunk,
+                &btn_up,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::GitDiffNextHunk,
+                &btn_down,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
         }
 
         if search_anim_y > -100.0 * self.scale_factor {
@@ -1576,6 +1840,41 @@ impl Renderer {
             self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, mx, my);
         } else {
             self.reset_git_file_tooltip_overlay();
+        }
+
+        if show_readonly_notice {
+            let text = "Файл открыт в режиме только чтение";
+            let text_w = self.measure_ui_width(text, 1.0);
+            let pad_x = 16.0 * s;
+            let w = text_w + pad_x * 2.0;
+            let h = 32.0 * s;
+            let x = ((self.width - w) * 0.5).max(8.0 * s).round();
+            let y = (tab_bar_h + 10.0 * s).round();
+            self.push_rounded_rect(
+                x,
+                y,
+                w,
+                h,
+                6.0 * s,
+                [0.10, 0.11, 0.14, 0.94],
+            );
+            self.push_rounded_rect_border(
+                x,
+                y,
+                w,
+                h,
+                6.0 * s,
+                (1.0 * s).max(1.0),
+                [1.0, 1.0, 1.0, 0.16],
+                [0.10, 0.11, 0.14, 0.94],
+            );
+            self.draw_string_scaled(
+                text,
+                x + pad_x,
+                y + h * 0.5 + 5.0 * s,
+                self.theme.fg,
+                1.0,
+            );
         }
 
         self.flush();

@@ -228,7 +228,12 @@ pub(crate) fn git_graph_scroll_thumb_h(commit_count: usize, rows_h: f32, scale: 
     }
     let total_h = commit_count as f32 * GIT_GRAPH_ROW_H * scale;
     let track_h = (rows_h - 8.0 * scale).max(1.0);
-    (rows_h / total_h * track_h).clamp(10.0 * scale, track_h)
+    let min_thumb_h = 10.0 * scale;
+    if track_h <= min_thumb_h {
+        track_h
+    } else {
+        (rows_h / total_h * track_h).clamp(min_thumb_h, track_h)
+    }
 }
 
 pub(crate) fn git_graph_near_load_more(scroll_target: f32, max_scroll: f32, scale: f32) -> bool {
@@ -274,6 +279,7 @@ pub struct GitPanelState {
     pub scroll: crate::scroll::ScrollState,
     pub pending: bool,
     pub pending_label: Option<&'static str>,
+    pub selected_file: Option<(usize, usize)>,
     pending_started_at: Option<std::time::Instant>,
     pending_label_until: Option<std::time::Instant>,
     pub next_request_id: u64,
@@ -329,6 +335,7 @@ impl Default for GitPanelState {
             scroll: crate::scroll::ScrollState::new(15.0),
             pending: false,
             pending_label: None,
+            selected_file: None,
             pending_started_at: None,
             pending_label_until: None,
             next_request_id: 1,
@@ -3372,6 +3379,13 @@ mod tests {
 
         assert!(loaded_more < initial);
         assert!(loaded_more >= 10.0);
+    }
+
+    #[test]
+    fn git_graph_scroll_thumb_handles_tiny_track() {
+        let thumb = git_graph_scroll_thumb_h(100, 23.921906, 1.3333334);
+        assert!(thumb > 0.0);
+        assert!(thumb <= 23.921906);
     }
 
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {

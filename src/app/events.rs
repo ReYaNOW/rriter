@@ -720,6 +720,8 @@ impl ApplicationHandler for App {
                     &self.highlighter.syntax_errors,
                     ctrl_definition_range,
                     &self.ide_workspaces,
+                    self.readonly_notice_until
+                        .is_some_and(|until| std::time::Instant::now() < until),
                 );
 
                 self.target_sticky_lines = target_sticky;

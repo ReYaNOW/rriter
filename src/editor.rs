@@ -764,6 +764,40 @@ impl Editor {
         s
     }
 
+    pub fn set_text_preserve_history(&mut self, text: &str) {
+        let history = std::mem::take(&mut self.history);
+        let redo_stack = std::mem::take(&mut self.redo_stack);
+        let history_size = self.history_size;
+        let original_hashes = self.original_hashes.clone();
+        let saved_hashes = self.saved_hashes.clone();
+        let version = self.version.saturating_add(1);
+        let cursor = self.cursor.min(text.len());
+
+        let capacity = text.len() + 8192;
+        self.data = vec![0; capacity];
+        self.data[..text.len()].copy_from_slice(text.as_bytes());
+        self.gap_start = text.len();
+        self.gap_end = capacity;
+        self.cursor = cursor;
+        self.selection_anchor = None;
+        self.version = version;
+        self.history = history;
+        self.redo_stack = redo_stack;
+        self.history_size = history_size;
+        self.is_working_history = false;
+        self.original_hashes = original_hashes;
+        self.saved_hashes = saved_hashes;
+        self.sync_edits.clear();
+        self.foldable_lines.clear();
+        self.folded_lines.clear();
+        self.folded_start_bytes.clear();
+        self.foldable_ranges_bytes.clear();
+        self.indent_cache.clear();
+        self.last_indent_version = u64::MAX;
+        self.rebuild_line_offsets();
+        self.update_modifications();
+    }
+
     fn move_gap(&mut self, target: usize) {
         if target == self.gap_start {
             return;

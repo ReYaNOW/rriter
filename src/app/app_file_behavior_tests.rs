@@ -30,6 +30,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         is_highlighted_once: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
+        kind: EditorTabKind::Normal,
     });
     app.tabs[0].scroll_y.current = 300.0;
     app.tabs.push(EditorTab {
@@ -52,6 +53,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         is_highlighted_once: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
+        kind: EditorTabKind::Normal,
     });
     app.active_tab = 1;
     app.sync_active_tab();
@@ -1174,6 +1176,165 @@ fn git_panel_stage_clicks_are_locked_while_pending_headless() {
 
     app.handle_ui_click(crate::ui_system::UiId::GitFile(0, 0));
     assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+}
+
+#[test]
+fn git_file_row_checkbox_only_toggles_stage() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx: 0,
+                repo_root: PathBuf::from("/workspace"),
+                rel_path: "src/main.rs".to_string(),
+                old_rel_path: None,
+                display_path: "src/main.rs".to_string(),
+                depth: 1,
+                staged: false,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
+            tree: Vec::new(),
+            ahead: 0,
+            error: None,
+        }],
+    };
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFile(0, 0));
+    assert!(app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert!(app.tabs.is_empty());
+}
+
+#[test]
+fn git_file_label_double_click_opens_diff_not_stage() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx: 0,
+                repo_root: PathBuf::from("/workspace"),
+                rel_path: "src/main.rs".to_string(),
+                old_rel_path: None,
+                display_path: "src/main.rs".to_string(),
+                depth: 1,
+                staged: false,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
+            tree: Vec::new(),
+            ahead: 0,
+            error: None,
+        }],
+    };
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFileDiff(0, 0));
+    assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert_eq!(app.ide_panel.git.selected_file, Some((0, 0)));
+    assert!(app.tabs.is_empty());
+
+    app.handle_ui_click(crate::ui_system::UiId::GitFileDiff(0, 0));
+    assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.base_title, "Diff: main.rs");
+    assert!(matches!(
+        &app.tabs[0].kind,
+        crate::app::EditorTabKind::GitDiff(_, _)
+    ));
+}
+
+#[test]
+fn diff_tab_dedup_by_repo_path() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.ide_panel.git.snapshot = crate::app::git_panel::GitStatusSnapshot {
+        workspaces: vec![crate::app::git_panel::GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: PathBuf::from("/workspace"),
+            repo_root: Some(PathBuf::from("/workspace")),
+            branch_name: None,
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx: 0,
+                repo_root: PathBuf::from("/workspace"),
+                rel_path: "src/main.rs".to_string(),
+                old_rel_path: None,
+                display_path: "src/main.rs".to_string(),
+                depth: 1,
+                staged: false,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
+            tree: Vec::new(),
+            ahead: 0,
+            error: None,
+        }],
+    };
+
+    app.open_git_diff_tab(0, 0);
+    app.open_git_diff_tab(0, 0);
+    assert_eq!(app.tabs.len(), 1);
+}
+
+#[test]
+fn undo_redo_rebuilds_diff_decorations() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    let mut state =
+        crate::app::git_diff::build_diff_view("a\nold\n".to_string(), "a\nnew\n".to_string());
+    state.version = 1;
+    let text = state.displayed_text.clone();
+    app.editor = editor_with(&text);
+    app.editor.set_original_text();
+    app.base_title = "Diff: main.rs".to_string();
+    app.tabs.push(EditorTab {
+        editor: editor_with(&text),
+        file_path: None,
+        base_title: "Diff: main.rs".to_string(),
+        file_extension: "rs".to_string(),
+        scroll_y: crate::scroll::ScrollState::new(15.0),
+        scroll_x: crate::scroll::ScrollState::new(15.0),
+        spans: Vec::new(),
+        completions: Vec::new(),
+        foldable_ranges: Vec::new(),
+        last_sent_version: 0,
+        search_results: Vec::new(),
+        search_current_idx: None,
+        is_highlighted_once: true,
+        icon_key: "default_file",
+        syntax_errors: Vec::new(),
+        kind: crate::app::EditorTabKind::GitDiff(
+            crate::app::git_diff::GitDiffTabMeta {
+                repo_root: PathBuf::from("/workspace"),
+                rel_path: "src/main.rs".to_string(),
+                old_rel_path: None,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+                workspace_idx: 0,
+            },
+            state,
+        ),
+    });
+
+    app.rollback_active_git_diff_hunk(0);
+    assert!(app.active_git_diff_state().unwrap().hunks.is_empty());
+    app.editor.undo();
+    app.rebuild_active_git_diff_from_editor_after_history(true);
+    assert_eq!(app.active_git_diff_state().unwrap().hunks.len(), 1);
+    app.editor.redo();
+    app.rebuild_active_git_diff_from_editor_after_history(false);
+    assert!(app.active_git_diff_state().unwrap().hunks.is_empty());
 }
 
 #[test]

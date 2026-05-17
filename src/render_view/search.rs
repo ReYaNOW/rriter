@@ -26,6 +26,16 @@ impl Renderer {
         let search_h = 52.0 * s;
         let search_x = scrollbar_x - search_w - 20.0 * s;
 
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::SearchPanelBody,
+            search_x,
+            search_anim_y,
+            search_w,
+            search_h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+
         self.push_rounded_rect(
             search_x,
             search_anim_y,

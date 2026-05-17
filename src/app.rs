@@ -3,6 +3,7 @@ mod autocomplete;
 pub mod events;
 pub mod file_icons;
 pub mod file_tree;
+pub mod git_diff;
 pub mod git_panel;
 pub mod keyboard;
 pub mod lsp_actions;
@@ -132,6 +133,7 @@ impl App {
                 is_highlighted_once: false,
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
+                kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
         }
@@ -402,15 +404,22 @@ impl App {
         self.sync_active_tab();
         self.prefetch_active_tab_git_graph();
 
-        self.editor.version = self.next_tab_highlight_version();
-
-        while let Ok(_) = self.highlighter.rx.try_recv() {}
-        self.highlighter.reset(
-            self.editor.version,
-            self.editor.get_full_text(),
-            self.file_extension.clone(),
-        );
-        self.wait_for_current_highlight();
+        if self.active_tab_is_git_diff() {
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            if !self.is_highlighted_once {
+                self.editor.version = self.next_tab_highlight_version();
+                self.prepare_active_git_diff_highlight_after_switch();
+            }
+        } else {
+            self.editor.version = self.next_tab_highlight_version();
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.highlighter.reset(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+            );
+            self.wait_for_current_highlight();
+        }
 
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
@@ -469,6 +478,7 @@ impl App {
                 is_highlighted_once: false,
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
+                kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
             self.show_welcome = false;
@@ -503,6 +513,7 @@ impl App {
             is_highlighted_once: false,
             icon_key: "default_file",
             syntax_errors: Vec::new(),
+            kind: EditorTabKind::Normal,
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
@@ -1148,6 +1159,9 @@ impl App {
     }
 
     pub fn save_current_file(&mut self) -> bool {
+        if self.active_tab_is_git_diff() {
+            return self.save_active_git_diff();
+        }
         if let Some(path) = self.file_path.clone() {
             let content = self.editor.get_full_text();
             match std::fs::write(&path, &content) {
@@ -1329,10 +1343,22 @@ impl App {
         let mut needs_redraw = false;
         let mut active_reloaded = false;
         let active_idx = self.active_tab;
+        let mut diff_reloads = Vec::new();
         for (idx, tab) in self.tabs.iter_mut().enumerate() {
             if !tab.editor.is_dirty() {
-                if let Some(path) = &tab.file_path {
+                let diff_path = match &tab.kind {
+                    EditorTabKind::GitDiff(meta, _) => Some(meta.repo_root.join(&meta.rel_path)),
+                    EditorTabKind::Normal => None,
+                };
+                if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref()) {
                     if let Ok(disk_text) = std::fs::read_to_string(path) {
+                        if let EditorTabKind::GitDiff(_, state) = &tab.kind {
+                            if disk_text != state.worktree_text {
+                                diff_reloads.push(idx);
+                                needs_redraw = true;
+                            }
+                            continue;
+                        }
                         if disk_text != tab.editor.get_full_text() {
                             let old_version = tab.editor.version;
                             tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
@@ -1365,6 +1391,9 @@ impl App {
                 }
             }
         }
+        for idx in diff_reloads {
+            self.reload_git_diff_tab(idx);
+        }
         self.sync_active_tab();
         if active_reloaded {
             while let Ok(_) = self.highlighter.rx.try_recv() {}
@@ -1395,9 +1424,13 @@ impl App {
             .iter()
             .enumerate()
             .filter_map(|(idx, tab)| {
-                (!tab.editor.is_dirty())
-                    .then(|| tab.file_path.clone().map(|path| (idx, path)))
-                    .flatten()
+                if tab.editor.is_dirty() {
+                    return None;
+                }
+                match &tab.kind {
+                    EditorTabKind::GitDiff(meta, _) => Some((idx, meta.repo_root.join(&meta.rel_path))),
+                    EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path)),
+                }
             })
             .collect::<Vec<_>>();
         self.sync_active_tab();
@@ -1442,10 +1475,21 @@ impl App {
         let mut needs_redraw = false;
         let mut active_reloaded = false;
         let active_idx = self.active_tab;
+        let mut diff_reloads = Vec::new();
         for change in changes {
             let Some(tab) = self.tabs.get_mut(change.tab_idx) else {
                 continue;
             };
+            if let EditorTabKind::GitDiff(meta, state) = &tab.kind {
+                if tab.editor.is_dirty() || meta.repo_root.join(&meta.rel_path) != change.path {
+                    continue;
+                }
+                if change.disk_text != state.worktree_text {
+                    diff_reloads.push(change.tab_idx);
+                    needs_redraw = true;
+                }
+                continue;
+            }
             if tab.file_path.as_ref() != Some(&change.path) || tab.editor.is_dirty() {
                 continue;
             }
@@ -1478,6 +1522,9 @@ impl App {
                 active_reloaded = true;
             }
             needs_redraw = true;
+        }
+        for idx in diff_reloads {
+            self.reload_git_diff_tab(idx);
         }
         self.sync_active_tab();
         if active_reloaded {

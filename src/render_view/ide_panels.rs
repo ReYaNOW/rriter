@@ -3752,19 +3752,29 @@ impl Renderer {
                             row_h,
                             workspace_disabled,
                         );
+                        let selected = ide_panel.git.selected_file
+                            == Some((workspace.workspace_idx, file_idx));
                         if git_file_row_hitbox_enabled(stage_interaction_disabled) {
                             ui_registry.register_rect(
                                 crate::ui_system::UiId::GitFile(workspace.workspace_idx, file_idx),
-                                panel_x,
-                                y,
-                                panel_w,
-                                row_h,
+                                check_x - 3.0 * s,
+                                y + 4.0 * s,
+                                file_layout.check_size + 6.0 * s,
+                                row_h - 8.0 * s,
                                 mx,
                                 my,
                             );
                         }
                         if hovered {
                             self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
+                        } else if selected {
+                            self.push_rect(
+                                panel_x,
+                                y,
+                                panel_w,
+                                row_h,
+                                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.16],
+                            );
                         }
                         if git_file_tooltip_hovered(hovered, mx, check_x, file_layout.check_size) {
                             let home = std::env::var_os("HOME")
@@ -3801,6 +3811,20 @@ impl Renderer {
 
                         let status_w = 18.0 * s;
                         let status_x = panel_x + panel_w - pad - status_w;
+                        if !workspace_disabled {
+                            ui_registry.register_rect(
+                                crate::ui_system::UiId::GitFileDiff(
+                                    workspace.workspace_idx,
+                                    file_idx,
+                                ),
+                                file_layout.icon_x - 3.0 * s,
+                                y,
+                                (status_x - file_layout.icon_x - 8.0 * s).max(0.0),
+                                row_h,
+                                mx,
+                                my,
+                            );
+                        }
                         self.draw_string_scaled(
                             file.status.label(),
                             status_x,

@@ -35,7 +35,7 @@ impl Renderer {
         tab_scroll_x: f32,
         tab_drag: Option<&crate::app::TabDragState>,
         ide_workspaces: &[std::path::PathBuf],
-    ) -> Option<(std::path::PathBuf, f32, f32)> {
+    ) -> Option<(String, f32, f32)> {
         let tab_bar_bg = self.theme.minimap_bg;
         self.push_rect(x, y, w, h, tab_bar_bg);
 
@@ -128,7 +128,7 @@ impl Renderer {
             tab_widths.push(tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s);
         }
 
-        let mut hovered_tab_path = None;
+        let mut hovered_tab_tooltip = None;
         let mut hovered_tab_x = 0.0;
         let mut hovered_tab_y = 0.0;
         let mut current_hovered_idx = None;
@@ -224,7 +224,15 @@ impl Renderer {
 
             if is_hovered {
                 if let Some(p) = paths[i] {
-                    hovered_tab_path = Some(p.clone());
+                    hovered_tab_tooltip = Some(p.to_string_lossy().into_owned());
+                    hovered_tab_x = current_x.max(x);
+                    hovered_tab_y = y + h;
+                    current_hovered_idx = Some(i);
+                } else if let crate::app::EditorTabKind::GitDiff(meta, _) = &tab.kind {
+                    hovered_tab_tooltip = Some(format!(
+                        "{} · режим чтения",
+                        meta.repo_root.join(&meta.rel_path).to_string_lossy()
+                    ));
                     hovered_tab_x = current_x.max(x);
                     hovered_tab_y = y + h;
                     current_hovered_idx = Some(i);
@@ -271,14 +279,23 @@ impl Renderer {
                 tab.editor.is_dirty()
             };
 
-            let icon_key = if is_active {
-                crate::app::file_icons::file_icon_key(&title.to_lowercase())
-            } else {
-                tab.icon_key
-            };
-
             let icon_y = (y + (h - icon_size_tab) / 2.0 - 1.5 * s).round();
-            self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
+            if tab.kind.is_git_diff() {
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::GitCompare,
+                    current_x + tab_pad,
+                    icon_y,
+                    icon_size_tab,
+                    self.theme.line_num,
+                );
+            } else {
+                let icon_key = if is_active {
+                    crate::app::file_icons::file_icon_key(&title.to_lowercase())
+                } else {
+                    tab.icon_key
+                };
+                self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
+            }
 
             let text_color =
                 if paths[i].is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
@@ -419,9 +436,9 @@ impl Renderer {
             None
         };
 
-        if let (Some(path), Some((anchor_x, anchor_y))) = (hovered_tab_path, tooltip_anchor) {
+        if let (Some(text), Some((anchor_x, anchor_y))) = (hovered_tab_tooltip, tooltip_anchor) {
             if !self.hide_popups_until_mouse_move {
-                return Some((path.clone(), anchor_x, anchor_y));
+                return Some((text, anchor_x, anchor_y));
             }
         }
         None
@@ -429,12 +446,12 @@ impl Renderer {
 
     pub fn draw_tab_tooltip(
         &mut self,
-        path: &std::path::PathBuf,
+        text: &str,
         hovered_tab_x: f32,
         hovered_tab_y: f32,
         s: f32,
     ) {
-        let mut path_str = path.to_string_lossy().into_owned();
+        let mut path_str = text.to_string();
         if let Some(home) = std::env::var("HOME")
             .ok()
             .or_else(|| std::env::var("USERPROFILE").ok())

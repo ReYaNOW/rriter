@@ -45,6 +45,7 @@ pub enum UiId {
     // Git panel
     GitWorkspaceToggle(usize),
     GitFile(usize, usize),
+    GitFileDiff(usize, usize),
     GitFolder(usize, usize),
     GitFolderStage(usize, usize),
     GitCommit,
@@ -90,6 +91,7 @@ pub enum UiId {
     SearchPrev,
     SearchCaseToggle,
     SearchInput,
+    SearchPanelBody,
 
     // Tabs
     EditorTab(usize),
@@ -98,6 +100,10 @@ pub enum UiId {
     // Editor
     EditorFoldArrow(usize),
     EditorFoldDots(usize),
+    GitDiffRollbackHunk(usize, usize),
+    GitDiffPrevHunk,
+    GitDiffNextHunk,
+    GitDiffPanelBody,
     StickyLine(usize, usize),
     EditorScrollbarY,
     EditorScrollbarX,
@@ -354,7 +360,11 @@ impl UiRegistry {
     ) -> bool {
         let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
         self.elements.push(UiElement::Rect { id, x, y, w, h });
-        // Намеренно НЕ устанавливаем wants_pointer/wants_text
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = false;
+            self.wants_text = false;
+        }
         hovered
     }
 

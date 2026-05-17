@@ -260,13 +260,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 if state.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
                     state.timer = 0.0;
                     if app.is_ide_mode {
-                        if let Some(lsp) = &mut app.lsp {
-                            if let Some(path) = app.file_path.clone() {
+                        let target = if app.active_tab_is_git_diff() {
+                            app.active_git_diff_lsp_hover_target(byte_offset)
+                        } else {
+                            app.file_path.clone().map(|path| {
                                 let (line, col) = crate::lsp::offset_to_lsp_pos(
                                     &app.editor.get_full_text(),
                                     byte_offset,
                                     &app.editor.line_offsets,
                                 );
+                                (path, line, col)
+                            })
+                        };
+                        if let Some(lsp) = &mut app.lsp {
+                            if let Some((path, line, col)) = target {
                                 state.request_id =
                                     lsp.request_hover(&path, &app.file_extension, line, col);
                                 if crate::render_view::hover_trace_enabled() {
@@ -366,6 +373,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
     if app.poll_git_panel() {
         needs_redraw = true;
+    }
+    if app.poll_git_diff_tabs() {
+        needs_redraw = true;
+    }
+    if let Some(until) = app.readonly_notice_until {
+        if now < until {
+            needs_redraw = true;
+        } else {
+            app.readonly_notice_until = None;
+            needs_redraw = true;
+        }
     }
 
     // Watcher сигнализирует об изменениях на диске — обновляем дерево
