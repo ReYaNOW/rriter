@@ -668,6 +668,21 @@ fn main() {
     }
 
     let args: Vec<String> = env::args().collect();
+    if let Some(idx) = args.iter().position(|arg| arg == "--probe-git-graph") {
+        let Some(repo) = args.get(idx + 1) else {
+            eprintln!("usage: rriter --probe-git-graph <repo-path> [iterations]");
+            return;
+        };
+        let iterations = args
+            .get(idx + 2)
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(3);
+        match crate::app::git_panel::run_git_graph_probe(std::path::Path::new(repo), iterations) {
+            Ok(report) => print!("{report}"),
+            Err(err) => eprintln!("{err}"),
+        }
+        return;
+    }
     let run_ide_on_startup = args.iter().any(|a| a == "--ide" || a == "ide");
     let has_file_arg = args.iter().skip(1).any(|a| *a != "--ide" && *a != "ide");
     let mut initial_text = String::new();

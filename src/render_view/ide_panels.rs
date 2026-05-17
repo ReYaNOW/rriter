@@ -455,7 +455,7 @@ fn git_graph_row_layout(
 ) -> GitGraphRowLayout {
     let max_column = lanes
         .iter()
-        .flat_map(|lane| [lane.column, lane.target_column])
+        .flat_map(|lane| [usize::from(lane.column), usize::from(lane.target_column)])
         .chain(std::iter::once(commit_column))
         .max()
         .unwrap_or(0);
@@ -1898,10 +1898,18 @@ impl Renderer {
         let summary_lines =
             self.git_graph_tooltip_wrapped_line_count(&commit.summary, inner_w, 0.9);
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", commit.files_changed));
+        if let Some(stats) = commit.stats {
+            let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
+        } else {
+            scratch.push_str("stats deferred");
+        }
         let files_w = self.measure_git_graph_tooltip_mono_width(scratch, 0.82);
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", commit.insertions));
+        if let Some(stats) = commit.stats {
+            let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", stats.insertions));
+        } else {
+            scratch.push_str("+?");
+        }
         let insertions_w = self.measure_git_graph_tooltip_text_width(scratch, 0.82);
         let branch_chip_w = commit.branch_name.as_ref().map(|branch_name| {
             self.measure_git_graph_tooltip_text_width(branch_name, 0.72) + 12.0 * s
@@ -2105,7 +2113,11 @@ impl Renderer {
         self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
         line_top += 5.0 * s;
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", commit.files_changed));
+        if let Some(stats) = commit.stats {
+            let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
+        } else {
+            scratch.push_str("stats deferred");
+        }
         let stats_start = self.push_git_graph_tooltip_text_row(
             scratch,
             content_x,
@@ -2130,7 +2142,11 @@ impl Renderer {
         self.git_graph_tooltip_text.push(' ');
         stats_end += 1;
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", commit.insertions));
+        if let Some(stats) = commit.stats {
+            let _ = std::fmt::Write::write_fmt(scratch, format_args!("+{}", stats.insertions));
+        } else {
+            scratch.push_str("+?");
+        }
         self.git_graph_tooltip_text.push_str(scratch);
         if let Some(row) = self.git_graph_tooltip_text_rows.last_mut() {
             row.end = self.git_graph_tooltip_text.len();
@@ -2151,7 +2167,11 @@ impl Renderer {
         self.git_graph_tooltip_text.push(' ');
         stats_end += 1;
         scratch.clear();
-        let _ = std::fmt::Write::write_fmt(scratch, format_args!("-{}", commit.deletions));
+        if let Some(stats) = commit.stats {
+            let _ = std::fmt::Write::write_fmt(scratch, format_args!("-{}", stats.deletions));
+        } else {
+            scratch.push_str("-?");
+        }
         self.git_graph_tooltip_text.push_str(scratch);
         if let Some(row) = self.git_graph_tooltip_text_rows.last_mut() {
             row.end = self.git_graph_tooltip_text.len();
@@ -2498,6 +2518,7 @@ impl Renderer {
             let lane_start_x = graph_layout.lane_start_x;
             let text_x = graph_layout.text_x;
             let commit_x = lane_start_x + commit.column as f32 * lane_step;
+            let graph_clip_right = panel_x + panel_w - 8.0 * s;
             for vertical_pass in [false, true] {
                 for lane in &commit.lanes {
                     let is_vertical = matches!(
@@ -2514,12 +2535,16 @@ impl Renderer {
                     if lane_x > panel_x + pad + gutter_w {
                         continue;
                     }
-                    let color = git_graph_lane_color(lane.color_idx, 0.62, self.theme.sel);
+                    if lane_x > graph_clip_right && target_x > graph_clip_right {
+                        continue;
+                    }
+                    let color =
+                        git_graph_lane_color(usize::from(lane.color_idx), 0.62, self.theme.sel);
                     match lane.kind {
                         crate::app::git_panel::GitGraphLaneKind::Vertical => {
                             let mut top = row_y;
                             let mut bottom = row_y + row_h;
-                            if lane.column == commit.column {
+                            if usize::from(lane.column) == commit.column {
                                 if idx == 0 {
                                     top = circle_y;
                                 }
@@ -2530,7 +2555,7 @@ impl Renderer {
                             self.push_git_graph_vertical_segment(lane_x, top, bottom, s, color);
                         }
                         crate::app::git_panel::GitGraphLaneKind::VerticalTop => {
-                            let bottom = if lane.column == commit.column {
+                            let bottom = if usize::from(lane.column) == commit.column {
                                 circle_y - 5.0 * s
                             } else {
                                 circle_y
@@ -2538,7 +2563,7 @@ impl Renderer {
                             self.push_git_graph_vertical_segment(lane_x, row_y, bottom, s, color);
                         }
                         crate::app::git_panel::GitGraphLaneKind::VerticalBottom => {
-                            let top = if lane.column == commit.column {
+                            let top = if usize::from(lane.column) == commit.column {
                                 circle_y + 5.0 * s
                             } else {
                                 circle_y

@@ -130,10 +130,17 @@ pub enum GitGraphLaneKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitGraphLane {
-    pub column: usize,
-    pub target_column: usize,
-    pub color_idx: usize,
+    pub column: u16,
+    pub target_column: u16,
+    pub color_idx: u16,
     pub kind: GitGraphLaneKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GitGraphStats {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,9 +161,6 @@ pub struct GitGraphCommit {
     pub time_offset: i32,
     pub relative_time: String,
     pub absolute_time: String,
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
     pub local_refs: Vec<GitGraphRef>,
     pub remote_refs: Vec<GitGraphRef>,
     pub lanes: Vec<GitGraphLane>,
@@ -164,6 +168,7 @@ pub struct GitGraphCommit {
     pub color_idx: usize,
     pub is_head: bool,
     pub github_url: Option<String>,
+    pub stats: Option<GitGraphStats>,
     parent_oids: Vec<String>,
 }
 
@@ -176,6 +181,7 @@ struct GitGraphEvent {
     lane_count: usize,
     notice: Option<String>,
     limit: usize,
+    offset: usize,
     has_more: bool,
     reset_scroll: bool,
 }
@@ -398,6 +404,7 @@ enum GitAction {
     LoadGraph {
         workspace_idx: usize,
         repo_root: PathBuf,
+        offset: usize,
         limit: usize,
         reset_scroll: bool,
         activate: bool,
@@ -458,6 +465,7 @@ impl App {
         let mut stale_seen = false;
         let mut reload_graph_cache = false;
         let mut prefetch_graph_after_status = false;
+        let mut force_prefetch_graph_after_status = false;
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
         for receiver in receivers {
@@ -474,8 +482,11 @@ impl App {
                             self.ide_panel.git.pending = false;
                             if reload_graph {
                                 reload_graph_cache = true;
-                                prefetch_graph_after_status = true;
-                            } else if self.ide_panel.git.graph_refresh_after_status {
+                                prefetch_graph_after_status = self.ide_panel.git.graph_open;
+                                force_prefetch_graph_after_status = prefetch_graph_after_status;
+                            } else if self.ide_panel.git.graph_refresh_after_status
+                                && self.ide_panel.git.graph_open
+                            {
                                 prefetch_graph_after_status = true;
                             }
                             updated = true;
@@ -527,7 +538,9 @@ impl App {
         }
         if prefetch_graph_after_status {
             self.ide_panel.git.graph_refresh_after_status = false;
-            self.prefetch_git_graph_for_known_workspaces(true);
+            self.prefetch_git_graph_for_known_workspaces(force_prefetch_graph_after_status);
+        } else if self.ide_panel.git.graph_refresh_after_status && !self.ide_panel.git.graph_open {
+            self.ide_panel.git.graph_refresh_after_status = false;
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
@@ -556,17 +569,6 @@ impl App {
                                 .git
                                 .graph_pending_roots
                                 .remove(&event.repo_root);
-                            let cache_entry = GitGraphCacheEntry {
-                                commits: event.commits,
-                                lane_count: event.lane_count.max(1),
-                                notice: event.notice,
-                                limit: event.limit,
-                                has_more: event.has_more,
-                            };
-                            self.ide_panel
-                                .git
-                                .graph_cache
-                                .insert(event.repo_root.clone(), cache_entry.clone());
                             let same_workspace =
                                 self.ide_panel.git.graph_workspace_idx == Some(event.workspace_idx);
                             let same_root = self
@@ -576,7 +578,34 @@ impl App {
                                 .as_ref()
                                 .is_some_and(|root| root == &event.repo_root);
                             if same_workspace && same_root {
-                                self.apply_git_graph_cache_entry(cache_entry, event.reset_scroll);
+                                if event.offset == 0 {
+                                    self.apply_git_graph_result(
+                                        event.commits,
+                                        event.lane_count,
+                                        event.notice,
+                                        event.limit,
+                                        event.has_more,
+                                        event.reset_scroll,
+                                    );
+                                } else if event.offset == self.ide_panel.git.graph_snapshot.len() {
+                                    self.append_git_graph_result(
+                                        event.commits,
+                                        event.limit,
+                                        event.has_more,
+                                    );
+                                }
+                            } else if event.offset == 0 {
+                                let cache_entry = GitGraphCacheEntry {
+                                    commits: event.commits,
+                                    lane_count: event.lane_count.max(1),
+                                    notice: event.notice,
+                                    limit: event.limit,
+                                    has_more: event.has_more,
+                                };
+                                self.ide_panel
+                                    .git
+                                    .graph_cache
+                                    .insert(event.repo_root.clone(), cache_entry);
                             }
                             updated = true;
                         }
@@ -687,17 +716,51 @@ impl App {
     }
 
     fn apply_git_graph_cache_entry(&mut self, cache_entry: GitGraphCacheEntry, reset_scroll: bool) {
-        self.ide_panel.git.graph_snapshot = cache_entry.commits;
-        self.ide_panel.git.graph_lane_count = cache_entry.lane_count.max(1);
-        self.ide_panel.git.graph_notice = cache_entry.notice;
-        self.ide_panel.git.graph_commit_limit = cache_entry.limit;
-        self.ide_panel.git.graph_has_more = cache_entry.has_more;
+        self.apply_git_graph_result(
+            cache_entry.commits,
+            cache_entry.lane_count,
+            cache_entry.notice,
+            cache_entry.limit,
+            cache_entry.has_more,
+            reset_scroll,
+        );
+    }
+
+    fn apply_git_graph_result(
+        &mut self,
+        commits: Vec<GitGraphCommit>,
+        lane_count: usize,
+        notice: Option<String>,
+        limit: usize,
+        has_more: bool,
+        reset_scroll: bool,
+    ) {
+        self.ide_panel.git.graph_snapshot = commits;
+        self.ide_panel.git.graph_lane_count = lane_count.max(1);
+        self.ide_panel.git.graph_notice = notice;
+        self.ide_panel.git.graph_commit_limit = limit;
+        self.ide_panel.git.graph_has_more = has_more;
         self.ide_panel.git.graph_pending = false;
         if reset_scroll {
             self.ide_panel.git.graph_scroll.set_target(0.0);
             self.ide_panel.git.graph_scroll.current = 0.0;
             self.ide_panel.git.graph_scroll.velocity = 0.0;
         }
+    }
+
+    fn append_git_graph_result(
+        &mut self,
+        mut commits: Vec<GitGraphCommit>,
+        limit: usize,
+        has_more: bool,
+    ) {
+        self.ide_panel.git.graph_snapshot.append(&mut commits);
+        self.ide_panel.git.graph_lane_count =
+            apply_git_graph_lanes(&mut self.ide_panel.git.graph_snapshot);
+        self.ide_panel.git.graph_notice = None;
+        self.ide_panel.git.graph_commit_limit = limit;
+        self.ide_panel.git.graph_has_more = has_more;
+        self.ide_panel.git.graph_pending = false;
     }
 
     fn apply_cached_git_graph_for_selected(&mut self, reset_scroll: bool) -> bool {
@@ -772,6 +835,7 @@ impl App {
         self.spawn_git_task(GitAction::LoadGraph {
             workspace_idx,
             repo_root,
+            offset: 0,
             limit: self.ide_panel.git.graph_commit_limit,
             reset_scroll: self.ide_panel.git.graph_snapshot.is_empty(),
             activate: true,
@@ -788,15 +852,18 @@ impl App {
         let Some(repo_root) = self.ide_panel.git.graph_repo_root.clone() else {
             return;
         };
-        self.ide_panel.git.graph_commit_limit = self
+        let offset = self.ide_panel.git.graph_snapshot.len();
+        let next_limit = self
             .ide_panel
             .git
             .graph_commit_limit
             .saturating_add(GIT_GRAPH_LIMIT_STEP);
+        self.ide_panel.git.graph_commit_limit = next_limit;
         self.spawn_git_task(GitAction::LoadGraph {
             workspace_idx,
             repo_root,
-            limit: self.ide_panel.git.graph_commit_limit,
+            offset,
+            limit: next_limit,
             reset_scroll: false,
             activate: true,
         });
@@ -817,19 +884,31 @@ impl App {
         {
             return;
         }
-        if !force_reload
-            && self
-                .ide_panel
-                .git
-                .graph_cache
-                .get(&repo_root)
-                .is_some_and(|cache| cache.limit >= limit)
-        {
+        let is_active_graph = self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root);
+        let active_loaded_len = if is_active_graph {
+            self.ide_panel.git.graph_snapshot.len()
+        } else {
+            0
+        };
+        let cached_limit = self
+            .ide_panel
+            .git
+            .graph_cache
+            .get(&repo_root)
+            .map(|cache| cache.limit);
+        if !git_graph_prefetch_needed(
+            force_reload,
+            is_active_graph,
+            active_loaded_len,
+            cached_limit,
+            limit,
+        ) {
             return;
         }
         self.spawn_git_task(GitAction::LoadGraph {
             workspace_idx,
             repo_root,
+            offset: 0,
             limit,
             reset_scroll: false,
             activate: false,
@@ -1268,6 +1347,7 @@ impl App {
         if let GitAction::LoadGraph {
             workspace_idx,
             repo_root,
+            offset,
             limit,
             reset_scroll,
             activate,
@@ -1300,7 +1380,7 @@ impl App {
             self.ide_panel.git.graph_rx.push(rx);
             std::thread::spawn(move || {
                 let (commits, lane_count, has_more, notice) =
-                    match collect_git_graph(workspace_idx, &repo_root, limit) {
+                    match collect_git_graph(workspace_idx, &repo_root, offset, limit) {
                         Ok((commits, lane_count, has_more)) => {
                             (commits, lane_count, has_more, None)
                         }
@@ -1314,6 +1394,7 @@ impl App {
                     lane_count,
                     notice,
                     limit,
+                    offset,
                     has_more,
                     reset_scroll,
                 });
@@ -1605,15 +1686,35 @@ fn rollback_staged_files(files: &[GitStageFileCommand]) -> Option<String> {
 
 const GIT_GRAPH_LIMIT_STEP: usize = 200;
 
+fn git_graph_prefetch_needed(
+    force_reload: bool,
+    is_active_graph: bool,
+    active_loaded_len: usize,
+    cached_limit: Option<usize>,
+    requested_limit: usize,
+) -> bool {
+    force_reload
+        || !(is_active_graph && active_loaded_len >= requested_limit
+            || cached_limit.is_some_and(|limit| limit >= requested_limit))
+}
+
 fn collect_git_graph(
     _workspace_idx: usize,
     repo_root: &Path,
+    offset: usize,
     limit: usize,
 ) -> Result<(Vec<GitGraphCommit>, usize, bool), String> {
+    if offset >= limit {
+        return Ok((Vec::new(), 1, false));
+    }
     let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
     let refs_by_oid = collect_git_graph_refs(&repo);
     let trace_labels_by_oid = collect_git_graph_trace_labels(&repo);
-    let head_oid = repo.head().ok().and_then(|head| head.target());
+    let head_oid = repo
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .map(|oid| oid.to_string());
     let github_base_url = repo
         .find_remote("origin")
         .ok()
@@ -1623,31 +1724,14 @@ fn collect_git_graph(
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0);
 
-    let mut revwalk = repo.revwalk().map_err(short_git_error)?;
-    revwalk
-        .set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
-        .map_err(short_git_error)?;
-    revwalk.push_head().map_err(short_git_error)?;
-
-    let mut commits = Vec::with_capacity(limit.min(GIT_GRAPH_LIMIT_STEP));
-    let mut has_more = false;
-    for (idx, oid_result) in revwalk.take(limit.saturating_add(1)).enumerate() {
-        if idx >= limit {
-            has_more = true;
-            break;
-        }
-        let oid = oid_result.map_err(short_git_error)?;
-        let commit = repo.find_commit(oid).map_err(short_git_error)?;
-        let author = commit.author();
-        let time = commit.time();
-        let oid_text = oid.to_string();
-        let parent_oids = commit
-            .parents()
-            .map(|parent| parent.id().to_string())
-            .collect::<Vec<_>>();
+    let page_len = limit.saturating_sub(offset).max(1);
+    let mut commits = Vec::with_capacity(page_len.min(GIT_GRAPH_LIMIT_STEP));
+    let records = git_graph_log_records(repo_root, offset, page_len.saturating_add(1))?;
+    let has_more = records.len() > page_len;
+    for record in records.into_iter().take(page_len) {
         let mut local_refs = Vec::new();
         let mut remote_refs = Vec::new();
-        if let Some(refs) = refs_by_oid.get(oid_text.as_str()) {
+        if let Some(refs) = refs_by_oid.get(record.oid.as_str()) {
             for git_ref in refs {
                 if git_ref.is_remote {
                     remote_refs.push(git_ref.clone());
@@ -1659,42 +1743,217 @@ fn collect_git_graph(
         local_refs.sort_by(|a, b| a.name.cmp(&b.name));
         remote_refs.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let raw_summary = commit.summary().unwrap_or("(no message)");
-        let summary = clean_git_summary(raw_summary);
-        let message = commit.message().unwrap_or(raw_summary);
-        let (files_changed, insertions, deletions) = git_commit_stats(&repo, &commit);
         let branch_name = git_graph_branch_label(&local_refs, &remote_refs)
-            .or_else(|| git_graph_change_request_label(message))
-            .or_else(|| trace_labels_by_oid.get(oid_text.as_str()).cloned());
+            .or_else(|| git_graph_change_request_label(&record.summary))
+            .or_else(|| trace_labels_by_oid.get(record.oid.as_str()).cloned());
         commits.push(GitGraphCommit {
-            oid: oid_text.clone(),
-            short_oid: oid_text.chars().take(7).collect(),
-            summary,
+            oid: record.oid.clone(),
+            short_oid: record.oid.chars().take(7).collect(),
+            summary: clean_git_summary(&record.summary),
             branch_name,
-            author_name: author.name().unwrap_or("Unknown").to_string(),
-            author_email: author.email().unwrap_or("").to_string(),
-            time_secs: time.seconds(),
-            time_offset: time.offset_minutes(),
-            relative_time: format_git_relative_time(time.seconds(), now_secs),
-            absolute_time: format_git_absolute_time(time.seconds(), time.offset_minutes()),
-            files_changed,
-            insertions,
-            deletions,
+            author_name: if record.author_name.is_empty() {
+                "Unknown".to_string()
+            } else {
+                record.author_name
+            },
+            author_email: record.author_email,
+            time_secs: record.time_secs,
+            time_offset: record.time_offset,
+            relative_time: format_git_relative_time(record.time_secs, now_secs),
+            absolute_time: format_git_absolute_time(record.time_secs, record.time_offset),
             local_refs,
             remote_refs,
             lanes: Vec::new(),
             column: 0,
             color_idx: 0,
-            is_head: head_oid == Some(oid),
+            is_head: head_oid.as_deref() == Some(record.oid.as_str()),
             github_url: github_base_url
                 .as_ref()
-                .map(|base_url| format!("{base_url}/commit/{oid_text}")),
-            parent_oids,
+                .map(|base_url| format!("{base_url}/commit/{}", record.oid)),
+            stats: Some(record.stats),
+            parent_oids: record.parent_oids,
         });
     }
 
-    let lane_count = apply_git_graph_lanes(&mut commits);
+    let lane_count = if offset == 0 {
+        apply_git_graph_lanes(&mut commits)
+    } else {
+        1
+    };
     Ok((commits, lane_count, has_more))
+}
+
+struct GitGraphLogRecord {
+    oid: String,
+    parent_oids: Vec<String>,
+    author_name: String,
+    author_email: String,
+    time_secs: i64,
+    time_offset: i32,
+    summary: String,
+    stats: GitGraphStats,
+}
+
+fn git_graph_log_records(
+    repo_root: &Path,
+    offset: usize,
+    count: usize,
+) -> Result<Vec<GitGraphLogRecord>, String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("log")
+        .arg("--topo-order")
+        .arg("--decorate=no")
+        .arg("--numstat")
+        .arg(format!("--skip={offset}"))
+        .arg(format!("--max-count={count}"))
+        .arg("--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ct%x1f%ai%x1f%s")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        let stderr = short_command_output(&output.stderr);
+        let stdout = short_command_output(&output.stdout);
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut records = Vec::new();
+    for raw_record in text.split('\x1e') {
+        let raw_record = raw_record.trim_matches('\n');
+        if raw_record.is_empty() {
+            continue;
+        }
+        let mut lines = raw_record.lines();
+        let Some(header) = lines.next() else {
+            continue;
+        };
+        let mut fields = header.split('\x1f');
+        let Some(oid) = fields.next() else { continue };
+        let Some(parents) = fields.next() else {
+            continue;
+        };
+        let Some(author_name) = fields.next() else {
+            continue;
+        };
+        let Some(author_email) = fields.next() else {
+            continue;
+        };
+        let Some(time_secs) = fields.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        let Some(author_date) = fields.next() else {
+            continue;
+        };
+        let summary = fields.next().unwrap_or("(no message)");
+        let stats = git_graph_numstat(lines);
+        records.push(GitGraphLogRecord {
+            oid: oid.to_string(),
+            parent_oids: parents
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            author_name: author_name.to_string(),
+            author_email: author_email.to_string(),
+            time_secs,
+            time_offset: git_log_time_offset_minutes(author_date),
+            summary: summary.to_string(),
+            stats,
+        });
+    }
+    Ok(records)
+}
+
+fn git_graph_numstat<'a>(lines: impl Iterator<Item = &'a str>) -> GitGraphStats {
+    let mut stats = GitGraphStats {
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+    };
+    for line in lines {
+        let mut parts = line.split('\t');
+        let (Some(insertions), Some(deletions), Some(_path)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        stats.files_changed = stats.files_changed.saturating_add(1);
+        if insertions != "-" {
+            stats.insertions = stats
+                .insertions
+                .saturating_add(insertions.parse::<usize>().unwrap_or(0));
+        }
+        if deletions != "-" {
+            stats.deletions = stats
+                .deletions
+                .saturating_add(deletions.parse::<usize>().unwrap_or(0));
+        }
+    }
+    stats
+}
+
+fn git_log_time_offset_minutes(author_date: &str) -> i32 {
+    let Some(offset) = author_date.split_whitespace().last() else {
+        return 0;
+    };
+    let bytes = offset.as_bytes();
+    if bytes.len() != 5 || !matches!(bytes[0], b'+' | b'-') {
+        return 0;
+    }
+    let Ok(hours) = offset[1..3].parse::<i32>() else {
+        return 0;
+    };
+    let Ok(minutes) = offset[3..5].parse::<i32>() else {
+        return 0;
+    };
+    let total = hours.saturating_mul(60).saturating_add(minutes);
+    if bytes[0] == b'-' { -total } else { total }
+}
+
+pub(crate) fn run_git_graph_probe(repo_root: &Path, iterations: usize) -> Result<String, String> {
+    let iterations = iterations.max(1);
+    let mut out = String::new();
+    let status = collect_workspace_status(0, repo_root);
+    let graph_repo_root = status.repo_root.clone().unwrap_or_else(|| repo_root.to_path_buf());
+    let base_rss = current_rss_kb();
+    out.push_str(&format!(
+        "probe repo={} iterations={} files={} tree={} base_rss_kb={}\n",
+        repo_root.display(),
+        iterations,
+        status.files.len(),
+        status.tree.len(),
+        base_rss.unwrap_or(0)
+    ));
+    let mut max_delta = 0usize;
+    for iteration in 0..iterations {
+        let (commits, lane_count, has_more) = collect_git_graph(0, &graph_repo_root, 0, 200)?;
+        let rss = current_rss_kb();
+        let delta = rss
+            .zip(base_rss)
+            .map(|(rss, base)| rss.saturating_sub(base))
+            .unwrap_or(0);
+        max_delta = max_delta.max(delta);
+        out.push_str(&format!(
+            "iter={} commits={} lanes={} has_more={} rss_kb={} graph_delta_kb={}\n",
+            iteration + 1,
+            commits.len(),
+            lane_count,
+            has_more,
+            rss.unwrap_or(0),
+            delta
+        ));
+        drop(commits);
+    }
+    out.push_str(&format!("max_graph_delta_kb={max_delta}\n"));
+    Ok(out)
+}
+
+fn current_rss_kb() -> Option<usize> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        let rest = line.strip_prefix("VmRSS:")?;
+        rest.split_whitespace().next()?.parse::<usize>().ok()
+    })
 }
 
 fn git_graph_branch_label(
@@ -2011,20 +2270,6 @@ pub(crate) fn github_base_url_from_remote_url(url: &str) -> Option<String> {
     Some(format!("https://github.com/{owner}/{repo}"))
 }
 
-fn git_commit_stats(repo: &git2::Repository, commit: &git2::Commit<'_>) -> (usize, usize, usize) {
-    let Ok(tree) = commit.tree() else {
-        return (0, 0, 0);
-    };
-    let parent_tree = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
-    let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
-        return (0, 0, 0);
-    };
-    let Ok(stats) = diff.stats() else {
-        return (0, 0, 0);
-    };
-    (stats.files_changed(), stats.insertions(), stats.deletions())
-}
-
 #[derive(Clone, Debug)]
 struct ActiveGraphLane {
     oid: String,
@@ -2040,9 +2285,9 @@ fn git_graph_lane(
     kind: GitGraphLaneKind,
 ) -> GitGraphLane {
     GitGraphLane {
-        column,
-        target_column,
-        color_idx,
+        column: column.min(u16::MAX as usize) as u16,
+        target_column: target_column.min(u16::MAX as usize) as u16,
+        color_idx: color_idx.min(u16::MAX as usize) as u16,
         kind,
     }
 }
@@ -3020,6 +3265,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn git_graph_prefetch_skips_loaded_active_and_cached_repos() {
+        assert!(!git_graph_prefetch_needed(
+            false,
+            true,
+            GIT_GRAPH_LIMIT_STEP,
+            None,
+            GIT_GRAPH_LIMIT_STEP
+        ));
+        assert!(!git_graph_prefetch_needed(
+            false,
+            false,
+            0,
+            Some(GIT_GRAPH_LIMIT_STEP),
+            GIT_GRAPH_LIMIT_STEP
+        ));
+        assert!(git_graph_prefetch_needed(
+            false,
+            true,
+            GIT_GRAPH_LIMIT_STEP - 1,
+            None,
+            GIT_GRAPH_LIMIT_STEP
+        ));
+        assert!(git_graph_prefetch_needed(
+            true,
+            true,
+            GIT_GRAPH_LIMIT_STEP,
+            Some(GIT_GRAPH_LIMIT_STEP),
+            GIT_GRAPH_LIMIT_STEP
+        ));
+    }
+
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {
         GitGraphCommit {
             oid: oid.to_string(),
@@ -3032,9 +3309,6 @@ mod tests {
             time_offset: 0,
             relative_time: String::new(),
             absolute_time: String::new(),
-            files_changed: 0,
-            insertions: 0,
-            deletions: 0,
             local_refs: Vec::new(),
             remote_refs: Vec::new(),
             lanes: Vec::new(),
@@ -3042,6 +3316,7 @@ mod tests {
             color_idx: 0,
             is_head: false,
             github_url: None,
+            stats: None,
             parent_oids: parents.iter().map(|parent| (*parent).to_string()).collect(),
         }
     }
@@ -3053,9 +3328,9 @@ mod tests {
                     GitGraphLaneKind::Parent
                     | GitGraphLaneKind::Shift
                     | GitGraphLaneKind::ShiftToCommit => {
-                        lane.target_column == column
+                        usize::from(lane.target_column) == column
                     }
-                    _ => lane.column == column,
+                    _ => usize::from(lane.column) == column,
                 }
         })
     }
@@ -3181,7 +3456,8 @@ mod tests {
         assert_eq!(commits[0].column, 0);
         assert_eq!(commits[2].column, 1);
         assert!(commits[0].lanes.iter().any(|lane| {
-            lane.kind == GitGraphLaneKind::Parent && lane.target_column == commits[2].column
+            lane.kind == GitGraphLaneKind::Parent
+                && usize::from(lane.target_column) == commits[2].column
         }));
         assert!(has_graph_lane(
             &commits[2],
@@ -3216,14 +3492,14 @@ mod tests {
         assert_eq!(side_column, 1);
         assert_eq!(base_column, 0);
         assert!(commits[3].lanes.iter().any(|lane| {
-            lane.kind == GitGraphLaneKind::ShiftToCommit
-                && lane.column == side_column
-                && lane.target_column == base_column
+                lane.kind == GitGraphLaneKind::ShiftToCommit
+                && usize::from(lane.column) == side_column
+                && usize::from(lane.target_column) == base_column
         }));
         assert!(!commits[3].lanes.iter().any(|lane| {
             lane.kind == GitGraphLaneKind::Shift
-                && lane.column == side_column
-                && lane.target_column == base_column
+                && usize::from(lane.column) == side_column
+                && usize::from(lane.target_column) == base_column
         }));
         assert!(!has_graph_lane(
             &commits[3],
@@ -3304,8 +3580,8 @@ mod tests {
         for idx in 1..=3 {
             assert!(commits[8].lanes.iter().any(|lane| {
                 lane.kind == GitGraphLaneKind::ShiftToCommit
-                    && lane.column == idx
-                    && lane.target_column == commits[8].column
+                    && usize::from(lane.column) == idx
+                    && usize::from(lane.target_column) == commits[8].column
             }));
         }
         assert!(!has_graph_lane(
