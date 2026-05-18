@@ -128,7 +128,7 @@ impl Renderer {
         scrollbar_x: f32,
         blink_alpha: f32,
         dialog_window_open: bool,
-        search_focused: bool,
+        editor_cursor_blocked: bool,
         show_settings: bool,
         s: f32,
         skip_visual_lines: usize,
@@ -655,7 +655,7 @@ impl Renderer {
             if sel_start == sel_end
                 && blink_alpha > 0.5
                 && !dialog_window_open
-                && !search_focused
+                && !editor_cursor_blocked
                 && !show_settings
             {
                 if cy > -self.line_height

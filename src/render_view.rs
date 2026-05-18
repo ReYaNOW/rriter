@@ -1116,6 +1116,7 @@ impl Renderer {
                     editor_clip_h as i32,
                 );
             }
+            let editor_cursor_blocked = search_focused || ide_panel.git.message_focused;
             self.draw_editor_visible_text(
                 editor,
                 spans,
@@ -1134,7 +1135,7 @@ impl Renderer {
                 scrollbar_x,
                 blink_alpha,
                 dialog_window_open,
-                search_focused,
+                editor_cursor_blocked,
                 show_settings,
                 s,
                 skip_visual_lines,

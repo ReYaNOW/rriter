@@ -645,6 +645,16 @@ impl App {
                     return;
                 }
                 if let Some(clicked_id) = clicked_id {
+                    if matches!(
+                        clicked_id,
+                        crate::ui_system::UiId::EditorTab(_)
+                            | crate::ui_system::UiId::EditorTabClose(_)
+                    ) && let Some(renderer) = self.renderer.as_mut()
+                    {
+                        renderer.suppress_popups_until_next_mouse_move();
+                        renderer.reset_delayed_tooltip_anchor();
+                    }
+
                     let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
                         && HOVER_STATE.with(|hover_state| {
                             if let Some((x, y, w, h)) = hover_state.borrow().rect {

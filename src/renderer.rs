@@ -280,6 +280,7 @@ pub struct Renderer {
     pub tooltip_hover_key: Option<u64>,
     pub tooltip_hover_start: Option<std::time::Instant>,
     pub tooltip_hover_anchor: (f32, f32),
+    pub tooltip_hover_mouse: (f32, f32),
     pub last_known_mouse: (f32, f32),
     pub last_editor_version_for_typing: u64,
     pub last_cursor_for_popups: usize,
@@ -333,6 +334,25 @@ impl Renderer {
             self.tooltip_hover_key = Some(key);
             self.tooltip_hover_start = Some(now);
             self.tooltip_hover_anchor = (anchor_x, anchor_y);
+            self.tooltip_hover_mouse = (self.last_mouse_x, self.last_mouse_y);
+            return None;
+        }
+
+        let tooltip_ready = self
+            .tooltip_hover_start
+            .is_some_and(|start| now.duration_since(start).as_secs_f32() > 0.4);
+        if tooltip_ready {
+            self.tooltip_hover_anchor = (anchor_x, anchor_y);
+            self.tooltip_hover_mouse = (self.last_mouse_x, self.last_mouse_y);
+            return Some(self.tooltip_hover_anchor);
+        }
+
+        let dx = self.last_mouse_x - self.tooltip_hover_mouse.0;
+        let dy = self.last_mouse_y - self.tooltip_hover_mouse.1;
+        if dx * dx + dy * dy > POPUP_MOUSE_MOVE_EPS * POPUP_MOUSE_MOVE_EPS {
+            self.tooltip_hover_start = Some(now);
+            self.tooltip_hover_anchor = (anchor_x, anchor_y);
+            self.tooltip_hover_mouse = (self.last_mouse_x, self.last_mouse_y);
             return None;
         }
 
@@ -346,6 +366,7 @@ impl Renderer {
         self.tooltip_hover_key = None;
         self.tooltip_hover_start = None;
         self.tooltip_hover_anchor = (0.0, 0.0);
+        self.tooltip_hover_mouse = (0.0, 0.0);
     }
 
     #[inline(always)]
@@ -680,6 +701,7 @@ impl Renderer {
                 tooltip_hover_key: None,
                 tooltip_hover_start: None,
                 tooltip_hover_anchor: (0.0, 0.0),
+                tooltip_hover_mouse: (0.0, 0.0),
                 last_known_mouse: (0.0, 0.0),
                 last_editor_version_for_typing: 0,
                 last_cursor_for_popups: usize::MAX,
