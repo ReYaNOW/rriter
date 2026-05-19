@@ -26,7 +26,7 @@ use winit::window::Window;
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
 const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(700);
+    std::time::Duration::from_millis(1200);
 const FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
 
 fn apply_initial_import_folds(editor: &mut Editor, ext: &str, text: &str) {
@@ -626,7 +626,7 @@ impl App {
             self.open_new_tab();
         }
 
-        self.load_file_internal(path, add_to_history, wait_highlight);
+        self.load_file_internal(path, false, wait_highlight);
         self.reveal_active_tab_now();
     }
     pub fn ensure_cursor_visible(
@@ -1272,6 +1272,9 @@ impl App {
         self.highlighter.foldable_ranges.clear();
         self.highlighter.syntax_errors.clear();
         let version = self.editor.version;
+        if self.highlighter.current_version >= version {
+            self.highlighter.current_version = version.saturating_sub(1);
+        }
         let ext = self.file_extension.clone();
         let priority_anchor = self.editor.cursor.min(text.len());
         self.highlighter.reset(version, text, ext, priority_anchor);

@@ -322,6 +322,46 @@ fn large_rust_file_open_waits_for_priority_highlight_before_return() {
 }
 
 #[test]
+fn same_version_problem_jump_reprioritize_waits_for_target_highlight() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-problem-repriority-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("large.rs");
+    let prefix = "fn filler() {\n    let value = 1;\n}\n".repeat(900);
+    let target = "fn target_problem() {\n    let value = 2;\n}\n";
+    let suffix = "fn after() {\n    let value = 3;\n}\n".repeat(1800);
+    let target_offset = prefix.len() + "fn ".len();
+    let text = format!("{prefix}{target}{suffix}");
+    assert!(text.len() > crate::highlighter::TREE_SITTER_HIGHLIGHT_MAX_BYTES);
+    std::fs::write(&path, text).unwrap();
+
+    app.load_file_internal(path.clone(), false, true);
+    assert!(app.is_highlighted_once);
+    assert_eq!(app.highlighter.current_version, app.editor.version);
+
+    app.editor.cursor = target_offset;
+    app.reprioritize_highlighter_around_cursor();
+    assert!(app.highlighter.current_version < app.editor.version);
+    app.wait_for_current_highlight();
+
+    assert!(app.is_highlighted_once);
+    assert_eq!(app.highlighter.current_version, app.editor.version);
+    assert!(app.highlighter.spans.iter().any(|span| {
+        span.start <= target_offset && span.end >= target_offset + "target_problem".len()
+    }));
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
 fn file_open_prefolds_imports_without_waiting_for_highlighter() {
     let Some(mut app) = test_app() else {
         return;
@@ -680,6 +720,36 @@ fn open_file_in_tab_reuses_existing_tabs_and_loads_into_empty_slot() {
 
     std::fs::remove_file(first).ok();
     std::fs::remove_file(second).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn ide_file_opens_do_not_update_recent_files_but_non_ide_opens_do() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-recent-ide-open-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let ide_path = dir.join("ide.py");
+    let plain_path = dir.join("plain.py");
+    std::fs::write(&ide_path, "print('ide')\n").unwrap();
+    std::fs::write(&plain_path, "print('plain')\n").unwrap();
+
+    app.is_ide_mode = true;
+    app.open_file_in_tab(ide_path.clone(), true);
+    assert!(app.recent_files.is_empty());
+
+    app.is_ide_mode = false;
+    app.open_file_in_tab(plain_path.clone(), true);
+    assert_eq!(app.recent_files, vec![plain_path.clone()]);
+
+    std::fs::remove_file(ide_path).ok();
+    std::fs::remove_file(plain_path).ok();
     std::fs::remove_dir(dir).ok();
 }
 

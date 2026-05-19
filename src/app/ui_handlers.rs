@@ -1290,6 +1290,11 @@ impl App {
                     if diag_idx == usize::MAX {
                         return;
                     }
+                    let file_already_open = self.file_path.as_ref() == Some(&path)
+                        || self
+                            .tabs
+                            .iter()
+                            .any(|tab| tab.file_path.as_ref() == Some(&path));
                     if self.file_path.as_ref() != Some(&path) {
                         self.open_file_in_tab(path.clone(), true);
                     }
@@ -1312,6 +1317,7 @@ impl App {
                                 self.editor.cursor = end_byte.min(self.editor.len());
                                 self.editor.selection_anchor = None;
                                 self.reprioritize_highlighter_around_cursor();
+                                self.wait_for_current_highlight();
 
                                 let tab_h = if self.is_ide_mode {
                                     32.0 * self.renderer.as_ref().unwrap().scale_factor
@@ -1339,6 +1345,13 @@ impl App {
                                         .max(0.0)
                                         .min(max_scroll)
                                         .round();
+
+                                if !file_already_open {
+                                    self.scroll_y.current = self.scroll_y.target;
+                                    self.scroll_y.velocity = 0.0;
+                                    self.scroll_x.current = self.scroll_x.target;
+                                    self.scroll_x.velocity = 0.0;
+                                }
 
                                 self.scroll_y.anim_speed = 7.0;
                                 self.scroll_x.anim_speed = 7.0;
