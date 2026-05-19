@@ -1982,7 +1982,10 @@ pub(crate) fn run_git_graph_probe(repo_root: &Path, iterations: usize) -> Result
     let iterations = iterations.max(1);
     let mut out = String::new();
     let status = collect_workspace_status(0, repo_root);
-    let graph_repo_root = status.repo_root.clone().unwrap_or_else(|| repo_root.to_path_buf());
+    let graph_repo_root = status
+        .repo_root
+        .clone()
+        .unwrap_or_else(|| repo_root.to_path_buf());
     let base_rss = current_rss_kb();
     out.push_str(&format!(
         "probe repo={} iterations={} files={} tree={} base_rss_kb={}\n",
@@ -2510,12 +2513,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 if index == output_idx {
                     push_unique_graph_lane(
                         &mut lanes,
-                        git_graph_lane(
-                            index,
-                            index,
-                            lane.color_idx,
-                            GitGraphLaneKind::VerticalTop,
-                        ),
+                        git_graph_lane(index, index, lane.color_idx, GitGraphLaneKind::VerticalTop),
                     );
                     push_unique_graph_lane(
                         &mut lanes,
@@ -2529,12 +2527,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 } else {
                     push_unique_graph_lane(
                         &mut lanes,
-                        git_graph_lane(
-                            index,
-                            output_idx,
-                            lane.color_idx,
-                            GitGraphLaneKind::Shift,
-                        ),
+                        git_graph_lane(index, output_idx, lane.color_idx, GitGraphLaneKind::Shift),
                     );
                 }
                 output_idx = output_idx.saturating_add(1);
@@ -3419,9 +3412,7 @@ mod tests {
                 && match kind {
                     GitGraphLaneKind::Parent
                     | GitGraphLaneKind::Shift
-                    | GitGraphLaneKind::ShiftToCommit => {
-                        usize::from(lane.target_column) == column
-                    }
+                    | GitGraphLaneKind::ShiftToCommit => usize::from(lane.target_column) == column,
                     _ => usize::from(lane.column) == column,
                 }
         })
@@ -3594,7 +3585,7 @@ mod tests {
         assert_eq!(side_column, 1);
         assert_eq!(base_column, 0);
         assert!(commits[3].lanes.iter().any(|lane| {
-                lane.kind == GitGraphLaneKind::ShiftToCommit
+            lane.kind == GitGraphLaneKind::ShiftToCommit
                 && usize::from(lane.column) == side_column
                 && usize::from(lane.target_column) == base_column
         }));
@@ -3735,14 +3726,15 @@ mod tests {
     fn git_workspace_collapse_button_only_when_rows_exist() {
         assert!(!git_workspace(Vec::new(), None).has_collapsible_rows());
         assert!(
-            git_workspace(Vec::new(), Some("git status failed".to_string()))
-                .has_collapsible_rows()
+            git_workspace(Vec::new(), Some("git status failed".to_string())).has_collapsible_rows()
         );
-        assert!(git_workspace(
-            vec![git_file("src/main.rs", false, GitFileStatus::Modified)],
-            None
-        )
-        .has_collapsible_rows());
+        assert!(
+            git_workspace(
+                vec![git_file("src/main.rs", false, GitFileStatus::Modified)],
+                None
+            )
+            .has_collapsible_rows()
+        );
     }
 
     #[test]

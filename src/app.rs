@@ -12,7 +12,7 @@ mod python_completion;
 pub mod terminal;
 pub mod ui_handlers;
 use crate::editor::Editor;
-use crate::highlighter::{CompletionItem, SymbolKind};
+use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_BYTES};
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
@@ -25,6 +25,9 @@ use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
+const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(700);
+const FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
 
 fn apply_initial_import_folds(editor: &mut Editor, ext: &str, text: &str) {
     let mut add_fold = |start_b: usize, end_b: usize| {
@@ -413,11 +416,7 @@ impl App {
         } else {
             self.editor.version = self.next_tab_highlight_version();
             while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-            );
+            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
             self.wait_for_current_highlight();
         }
 
@@ -484,7 +483,7 @@ impl App {
             self.show_welcome = false;
             while let Ok(_) = self.highlighter.rx.try_recv() {}
             self.highlighter
-                .reset(self.editor.version, String::new(), String::new());
+                .reset(self.editor.version, String::new(), String::new(), 0);
             self.autocomplete_active = false;
             if let Some(w) = self.window.as_ref() {
                 App::update_window_title(w, &self.base_title, false);
@@ -520,7 +519,7 @@ impl App {
         self.sync_active_tab();
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter
-            .reset(self.editor.version, String::new(), String::new());
+            .reset(self.editor.version, String::new(), String::new(), 0);
 
         self.autocomplete_active = false;
         self.show_welcome = false;
@@ -551,11 +550,7 @@ impl App {
             self.sync_active_tab();
             self.editor.version = self.next_tab_highlight_version();
             while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-            );
+            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
             self.wait_for_current_highlight();
             self.clear_ctrl_definition();
             crate::app::mouse::HOVER_STATE.with(|state| {
@@ -790,6 +785,7 @@ impl App {
         let offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
         self.editor.cursor = offset;
         self.editor.selection_anchor = None;
+        self.reprioritize_highlighter_around_cursor();
         self.clear_ctrl_definition();
 
         if let Some(r) = self.renderer.as_mut() {
@@ -976,6 +972,7 @@ impl App {
             if let Some(&(start, end)) = self.search_results.get(idx) {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
+                self.reprioritize_highlighter_around_cursor();
                 if let Some(r) = self.renderer.as_mut() {
                     let phys_line = self
                         .editor
@@ -1092,7 +1089,7 @@ impl App {
         self.editor.sync_edits.clear();
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter
-            .reset(self.editor.version, "".to_string(), "".to_string());
+            .reset(self.editor.version, "".to_string(), "".to_string(), 0);
         self.search_results.clear();
         self.search_current_idx = None;
         self.show_search = false;
@@ -1248,12 +1245,42 @@ impl App {
     }
 
     fn wait_for_current_highlight(&mut self) {
+        if self.highlighter.current_version == self.editor.version {
+            return;
+        }
+        let is_large = self.editor.len() > FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES;
+        let is_priority_lang = matches!(self.file_extension.as_str(), "py" | "pyi" | "rs");
+        if is_large && !is_priority_lang {
+            return;
+        }
+        let timeout = if is_large {
+            FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT
+        } else {
+            FILE_OPEN_HIGHLIGHT_TIMEOUT
+        };
         if self
             .highlighter
-            .wait_for_first_result(self.editor.version, FILE_OPEN_HIGHLIGHT_TIMEOUT)
+            .wait_for_first_result(self.editor.version, timeout)
         {
             self.apply_highlight_results();
         }
+    }
+
+    fn reset_highlighter_with_text(&mut self, text: String, _seed_immediately: bool) {
+        self.highlighter.spans.clear();
+        self.highlighter.completions.clear();
+        self.highlighter.foldable_ranges.clear();
+        self.highlighter.syntax_errors.clear();
+        let version = self.editor.version;
+        let ext = self.file_extension.clone();
+        let priority_anchor = self.editor.cursor.min(text.len());
+        self.highlighter.reset(version, text, ext, priority_anchor);
+    }
+
+    pub(crate) fn reprioritize_highlighter_around_cursor(&mut self) {
+        while let Ok(_) = self.highlighter.rx.try_recv() {}
+        self.reset_highlighter_with_text(self.editor.get_full_text(), false);
+        self.is_highlighted_once = false;
     }
 
     pub fn load_file_internal(
@@ -1272,14 +1299,7 @@ impl App {
                 let old_version = self.editor.version;
                 self.editor = Editor::new(content.len() + 8192);
                 self.editor.version = old_version + 1;
-
-                if !content.is_empty() {
-                    let _ = self.editor.insert_str(&content);
-                    self.editor.cursor = 0;
-                    self.editor.clear_history();
-                }
-                self.editor.set_original_text();
-                self.editor.sync_edits.clear();
+                self.editor.set_clean_text(&content);
                 self.file_path = Some(path.clone());
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.base_title = file_name.into_owned();
@@ -1287,17 +1307,12 @@ impl App {
                     .extension()
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
-                self.highlighter.spans.clear();
                 self.is_highlighted_once = false;
                 while let Ok(_) = self.highlighter.rx.try_recv() {}
-                self.highlighter.reset(
-                    self.editor.version,
-                    self.editor.get_full_text(),
-                    self.file_extension.clone(),
-                );
+                self.reset_highlighter_with_text(content.clone(), !wait_highlight);
                 apply_initial_import_folds(&mut self.editor, &self.file_extension, &content);
 
-                // Ждём до 150мс первого результата подсветки и fold-данных перед первым кадром.
+                // Ждём до 150мс: малые файлы полностью, большие py/rs до первого priority chunk.
                 if wait_highlight {
                     self.wait_for_current_highlight();
                 }
@@ -1397,11 +1412,7 @@ impl App {
         self.sync_active_tab();
         if active_reloaded {
             while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-            );
+            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
             self.wait_for_current_highlight();
             crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
             self.lsp_actions_menu = None;
@@ -1428,7 +1439,9 @@ impl App {
                     return None;
                 }
                 match &tab.kind {
-                    EditorTabKind::GitDiff(meta, _) => Some((idx, meta.repo_root.join(&meta.rel_path))),
+                    EditorTabKind::GitDiff(meta, _) => {
+                        Some((idx, meta.repo_root.join(&meta.rel_path)))
+                    }
                     EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path)),
                 }
             })
@@ -1529,11 +1542,7 @@ impl App {
         self.sync_active_tab();
         if active_reloaded {
             while self.highlighter.rx.try_recv().is_ok() {}
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-            );
+            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
             crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
             self.lsp_actions_menu = None;
             self.last_sent_version = self.editor.version;

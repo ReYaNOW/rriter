@@ -1,13 +1,19 @@
 use super::*;
 
 impl Highlighter {
-    pub fn reset(&mut self, version: u64, text: String, ext: String) {
+    pub fn reset(&mut self, version: u64, text: String, ext: String, priority_anchor: usize) {
+        self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
+        let request_id = self.current_request_id;
         self.sync_text = text.clone();
         self.sync_ext = ext.clone();
         self.sync_tree = None;
-        let _ = self
-            .tx
-            .send(HighlighterMessage::Reset { version, text, ext });
+        let _ = self.tx.send(HighlighterMessage::Reset {
+            request_id,
+            version,
+            text,
+            ext,
+            priority_anchor,
+        });
     }
 
     pub fn apply_edits(
@@ -21,6 +27,7 @@ impl Highlighter {
             let (invalidate_start_byte, invalidate_end_byte) =
                 sync_edit_invalidation_byte_range(&edits);
             let _ = self.tx.send(HighlighterMessage::Edits {
+                request_id: self.current_request_id,
                 version,
                 edits,
                 edit_start_byte,
@@ -33,10 +40,11 @@ impl Highlighter {
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((ver, spans, completions, foldable_ranges, syntax_errors, tree)) =
+        while let Ok((request_id, ver, spans, completions, foldable_ranges, syntax_errors, tree)) =
             self.rx.try_recv()
         {
             updated |= self.apply_poll_result(
+                request_id,
                 current_editor_version,
                 ver,
                 spans,
@@ -51,6 +59,7 @@ impl Highlighter {
 
     fn apply_poll_result(
         &mut self,
+        request_id: u64,
         current_editor_version: u64,
         ver: u64,
         spans: Vec<ColorSpan>,
@@ -59,7 +68,10 @@ impl Highlighter {
         syntax_errors: Vec<(usize, usize)>,
         tree: Option<tree_sitter::Tree>,
     ) -> bool {
-        if ver != current_editor_version || ver < self.current_version {
+        if request_id != self.current_request_id
+            || ver != current_editor_version
+            || ver < self.current_version
+        {
             return false;
         }
 
@@ -84,8 +96,9 @@ impl Highlighter {
             }
             let remaining = deadline - now;
             match self.rx.recv_timeout(remaining) {
-                Ok((ver, spans, completions, foldable_ranges, syntax_errors, tree)) => {
+                Ok((request_id, ver, spans, completions, foldable_ranges, syntax_errors, tree)) => {
                     if self.apply_poll_result(
+                        request_id,
                         version,
                         ver,
                         spans,
@@ -279,7 +292,7 @@ impl Highlighter {
         timeout: std::time::Duration,
     ) -> bool {
         let text = self.sync_text.as_str();
-        if text.is_empty() || text.len() > 500_000 || self.sync_ext == "log" {
+        if text.is_empty() || should_prioritize_front_highlight(&self.sync_ext, text) {
             return false;
         }
 
@@ -536,8 +549,10 @@ mod tests {
             end: 6,
             color: DRACULA_PINK,
         };
+        highlighter.current_request_id = 1;
 
         let future_applied = highlighter.apply_poll_result(
+            1,
             2,
             3,
             vec![future_span],
@@ -551,6 +566,7 @@ mod tests {
         assert!(highlighter.spans.is_empty());
 
         let current_applied = highlighter.apply_poll_result(
+            1,
             2,
             2,
             vec![current_span],
@@ -567,7 +583,7 @@ mod tests {
     #[test]
     fn highlighter_sync_parse_after_seed_colors_python_constant_immediately() {
         let mut highlighter = Highlighter::new();
-        highlighter.reset(1, "S\n".to_string(), "py".to_string());
+        highlighter.reset(1, "S\n".to_string(), "py".to_string(), 0);
         assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
         assert!(highlighter.sync_tree.is_some());
 
@@ -592,7 +608,7 @@ mod tests {
     fn highlighter_sync_parse_keeps_python_parameters_colored() {
         let mut highlighter = Highlighter::new();
         let source = "def f(session):\n    BoxRepository(session)\n";
-        highlighter.reset(1, source.to_string(), "py".to_string());
+        highlighter.reset(1, source.to_string(), "py".to_string(), 0);
         assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
 
         let insert_at = source.find("    BoxRepository").unwrap();
@@ -617,7 +633,7 @@ mod tests {
     #[test]
     fn highlighter_sync_parse_clears_stale_python_self_color_after_delete() {
         let mut highlighter = Highlighter::new();
-        highlighter.reset(1, "self\n".to_string(), "py".to_string());
+        highlighter.reset(1, "self\n".to_string(), "py".to_string(), 0);
         assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
 
         highlighter.shift_delete(3, 1);
@@ -761,5 +777,77 @@ mod tests {
         assert_eq!(byte_colors[1], DRACULA_FG);
         assert_eq!(byte_colors[2], DRACULA_ORANGE);
         assert_eq!(flat.len(), 3);
+    }
+
+    #[test]
+    fn highlighter_sync_parse_skips_files_above_tree_sitter_budget() {
+        let mut highlighter = Highlighter::new();
+        highlighter.sync_ext = "py".to_string();
+        highlighter.sync_text = "value = 1\n".repeat(TREE_SITTER_HIGHLIGHT_MAX_BYTES / 10 + 2);
+
+        assert!(!highlighter.sync_highlight_after_edit(
+            1,
+            None,
+            None,
+            None,
+            None,
+            std::time::Duration::from_millis(10),
+        ));
+    }
+
+    #[test]
+    fn highlighter_priority_result_uses_anchor_not_file_start() {
+        let mut highlighter = Highlighter::new();
+        let imports = "import os\nimport sys\n\n";
+        let prefix = "# pad\n".repeat(TREE_SITTER_HIGHLIGHT_MAX_LINES + 20);
+        let text = format!("{imports}{prefix}def target():\n    return 'x'\n");
+        let anchor = text.find("target").unwrap();
+
+        highlighter.reset(11, text.clone(), "py".to_string(), anchor);
+        assert!(highlighter.wait_for_first_result(11, std::time::Duration::from_secs(2)));
+
+        assert!(highlighter.spans.iter().any(|span| {
+            span.start <= anchor
+                && span.end >= anchor + "target".len()
+                && span.color == DRACULA_GREEN
+        }));
+        assert!(
+            highlighter
+                .foldable_ranges
+                .iter()
+                .any(|&(start, end, is_autofold, _)| start == 0 && end <= anchor && is_autofold)
+        );
+    }
+
+    #[test]
+    fn highlighter_full_result_follows_priority_result() {
+        let mut highlighter = Highlighter::new();
+        let text = "def f():\n    return 'x'\n".repeat(TREE_SITTER_HIGHLIGHT_MAX_LINES + 2);
+        assert!(text.len() < TREE_SITTER_HIGHLIGHT_MAX_BYTES);
+        assert!(should_prioritize_front_highlight("py", &text));
+
+        highlighter.reset(12, text.clone(), "py".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(12, std::time::Duration::from_secs(2)));
+        let first_span_end = highlighter
+            .spans
+            .iter()
+            .map(|span| span.end)
+            .max()
+            .unwrap_or(0);
+        assert!(first_span_end < text.len());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while highlighter
+            .spans
+            .iter()
+            .map(|span| span.end)
+            .max()
+            .unwrap_or(0)
+            < text.len()
+            && std::time::Instant::now() < deadline
+        {
+            highlighter.poll(12);
+        }
+        assert!(highlighter.spans.iter().any(|span| span.end == text.len()));
     }
 }

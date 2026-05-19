@@ -202,7 +202,7 @@ impl App {
                     self.editor.sync_edits.clear();
                     while let Ok(_) = self.highlighter.rx.try_recv() {}
                     self.highlighter
-                        .reset(self.editor.version, "".to_string(), "".to_string());
+                        .reset(self.editor.version, "".to_string(), "".to_string(), 0);
                 }
                 App::update_window_title(self.window.as_ref().unwrap(), &self.base_title, false);
                 self.window.as_ref().unwrap().request_redraw();
@@ -1311,6 +1311,7 @@ impl App {
 
                                 self.editor.cursor = end_byte.min(self.editor.len());
                                 self.editor.selection_anchor = None;
+                                self.reprioritize_highlighter_around_cursor();
 
                                 let tab_h = if self.is_ide_mode {
                                     32.0 * self.renderer.as_ref().unwrap().scale_factor

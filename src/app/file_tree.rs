@@ -1009,6 +1009,7 @@ impl App {
                     self.editor.version,
                     self.editor.get_full_text(),
                     self.file_extension.clone(),
+                    self.editor.cursor,
                 );
             }
         }

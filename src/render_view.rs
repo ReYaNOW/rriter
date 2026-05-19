@@ -736,12 +736,8 @@ impl Renderer {
         } else {
             8.0 * s
         };
-        let target_padding = (30.0 * s
-            + digits as f32 * 10.0 * s
-            + gutter_extra
-            + sidebar_w
-            + panel_left_w)
-            .round();
+        let target_padding =
+            (30.0 * s + digits as f32 * 10.0 * s + gutter_extra + sidebar_w + panel_left_w).round();
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -1208,8 +1204,8 @@ impl Renderer {
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
             let phys_idx = v_line.physical_line - 1;
 
-            if let Some(hunk_idx) = active_git_diff_state
-                .and_then(|state| state.rollback_hunk_index_at_line(phys_idx))
+            if let Some(hunk_idx) =
+                active_git_diff_state.and_then(|state| state.rollback_hunk_index_at_line(phys_idx))
             {
                 let line_top = v_line.y_offset - render_scroll_y;
                 let icon_size = 22.0 * s;
@@ -1241,7 +1237,8 @@ impl Renderer {
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
-            } else if active_git_diff_state.is_none() && editor.foldable_lines.contains_key(&phys_idx)
+            } else if active_git_diff_state.is_none()
+                && editor.foldable_lines.contains_key(&phys_idx)
             {
                 let arrow_x = self.left_padding - 20.0 * s;
                 let is_folded = editor.folded_lines.contains(&phys_idx);
@@ -1492,8 +1489,9 @@ impl Renderer {
                         .line_offsets
                         .partition_point(|&offset| offset < hunk.display_end)
                         .max(hunk.display_start_line + 1);
-                    let line_count =
-                        display_end_line.saturating_sub(hunk.display_start_line).max(1);
+                    let line_count = display_end_line
+                        .saturating_sub(hunk.display_start_line)
+                        .max(1);
                     let mark_y = tab_bar_h + start_ratio * editor_scroll_height;
                     let mark_h = ((line_count as f32 / total) * editor_scroll_height)
                         .max(2.0 * s)
@@ -1607,7 +1605,12 @@ impl Renderer {
                 panel_w + 2.0,
                 panel_h + 2.0,
                 6.0 * s,
-                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55],
+                [
+                    self.theme.sel[0],
+                    self.theme.sel[1],
+                    self.theme.sel[2],
+                    0.55,
+                ],
             );
             self.push_rounded_rect(
                 panel_x,
@@ -1851,14 +1854,7 @@ impl Renderer {
             let h = 32.0 * s;
             let x = ((self.width - w) * 0.5).max(8.0 * s).round();
             let y = (tab_bar_h + 10.0 * s).round();
-            self.push_rounded_rect(
-                x,
-                y,
-                w,
-                h,
-                6.0 * s,
-                [0.10, 0.11, 0.14, 0.94],
-            );
+            self.push_rounded_rect(x, y, w, h, 6.0 * s, [0.10, 0.11, 0.14, 0.94]);
             self.push_rounded_rect_border(
                 x,
                 y,
@@ -1869,13 +1865,7 @@ impl Renderer {
                 [1.0, 1.0, 1.0, 0.16],
                 [0.10, 0.11, 0.14, 0.94],
             );
-            self.draw_string_scaled(
-                text,
-                x + pad_x,
-                y + h * 0.5 + 5.0 * s,
-                self.theme.fg,
-                1.0,
-            );
+            self.draw_string_scaled(text, x + pad_x, y + h * 0.5 + 5.0 * s, self.theme.fg, 1.0);
         }
 
         self.flush();

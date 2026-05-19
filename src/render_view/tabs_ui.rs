@@ -444,13 +444,7 @@ impl Renderer {
         None
     }
 
-    pub fn draw_tab_tooltip(
-        &mut self,
-        text: &str,
-        hovered_tab_x: f32,
-        hovered_tab_y: f32,
-        s: f32,
-    ) {
+    pub fn draw_tab_tooltip(&mut self, text: &str, hovered_tab_x: f32, hovered_tab_y: f32, s: f32) {
         let mut path_str = text.to_string();
         if let Some(home) = std::env::var("HOME")
             .ok()

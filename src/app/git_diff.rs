@@ -169,12 +169,7 @@ fn hash_line(line: &str) -> u64 {
     hasher.finish()
 }
 
-fn push_line(
-    out: &mut String,
-    kinds: &mut Vec<DiffLineKind>,
-    line: &LineSpan,
-    kind: DiffLineKind,
-) {
+fn push_line(out: &mut String, kinds: &mut Vec<DiffLineKind>, line: &LineSpan, kind: DiffLineKind) {
     out.push_str(&line.text);
     kinds.push(kind);
 }
@@ -362,7 +357,11 @@ fn read_index_blob(repo: &git2::Repository, rel_path: &str) -> Result<Option<Str
     Ok(Some(String::from_utf8_lossy(blob.content()).into_owned()))
 }
 
-fn read_worktree_or_index(repo: &git2::Repository, repo_root: &Path, rel_path: &str) -> Result<String, String> {
+fn read_worktree_or_index(
+    repo: &git2::Repository,
+    repo_root: &Path,
+    rel_path: &str,
+) -> Result<String, String> {
     let path = repo_root.join(rel_path);
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
@@ -518,7 +517,7 @@ impl App {
         self.sync_active_tab();
         self.show_welcome = false;
         self.highlighter
-            .reset(self.editor.version, String::new(), String::new());
+            .reset(self.editor.version, String::new(), String::new(), 0);
         self.spawn_git_diff_load(meta, version, file.staged);
         self.reveal_active_tab_now();
         if let Some(window) = self.window.as_ref() {
@@ -669,6 +668,7 @@ impl App {
             self.editor.version,
             self.editor.get_full_text(),
             self.file_extension.clone(),
+            self.editor.cursor,
         );
         let _ = self
             .highlighter
@@ -910,7 +910,11 @@ impl App {
             .get(line_start..line_end)
             .map(|slice| slice.chars().map(|ch| ch.len_utf16() as u32).sum())
             .unwrap_or(0);
-        Some((meta.repo_root.join(&meta.rel_path), worktree_line as u32, col))
+        Some((
+            meta.repo_root.join(&meta.rel_path),
+            worktree_line as u32,
+            col,
+        ))
     }
 
     pub fn rollback_active_git_diff_hunk(&mut self, hunk_idx: usize) {
@@ -974,14 +978,17 @@ impl App {
     }
 
     pub fn save_active_git_diff(&mut self) -> bool {
-        let Some((repo_root, rel_path, line_kinds)) = self.active_git_diff_state().map(|state| {
-            match &self.tabs[self.active_tab].kind {
-                EditorTabKind::GitDiff(meta, _) => {
-                    (meta.repo_root.clone(), meta.rel_path.clone(), state.line_kinds.clone())
-                }
-                EditorTabKind::Normal => unreachable!(),
-            }
-        }) else {
+        let Some((repo_root, rel_path, line_kinds)) =
+            self.active_git_diff_state()
+                .map(|state| match &self.tabs[self.active_tab].kind {
+                    EditorTabKind::GitDiff(meta, _) => (
+                        meta.repo_root.clone(),
+                        meta.rel_path.clone(),
+                        state.line_kinds.clone(),
+                    ),
+                    EditorTabKind::Normal => unreachable!(),
+                })
+        else {
             return false;
         };
         let text = extract_worktree_text(&self.editor.get_full_text(), &line_kinds);

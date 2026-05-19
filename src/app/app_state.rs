@@ -32,7 +32,10 @@ pub struct EditorTab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditorTabKind {
     Normal,
-    GitDiff(crate::app::git_diff::GitDiffTabMeta, crate::app::git_diff::GitDiffState),
+    GitDiff(
+        crate::app::git_diff::GitDiffTabMeta,
+        crate::app::git_diff::GitDiffState,
+    ),
 }
 
 impl EditorTabKind {

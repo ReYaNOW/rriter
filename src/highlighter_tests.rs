@@ -28,6 +28,7 @@ fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
         1,
         "def greet(name):\n    return f'hi {name}'\n".to_string(),
         "py".to_string(),
+        0,
     );
     wait(&mut highlighter, 1);
     assert!(
@@ -96,7 +97,7 @@ fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
 
     for (idx, (ext, text, builtin)) in cases.iter().enumerate() {
         let version = 10 + idx as u64;
-        highlighter.reset(version, (*text).to_string(), (*ext).to_string());
+        highlighter.reset(version, (*text).to_string(), (*ext).to_string(), 0);
         wait(&mut highlighter, version);
         assert!(
             highlighter
@@ -113,7 +114,7 @@ fn highlighter_keeps_python_class_fields_plain_fg() {
     let mut highlighter = Highlighter::new();
     let source = "class BoxReadPublic(BasedStruct, kw_only=True):\n    id: int\n    active: bool = True\n    created_at: dt.datetime\n";
 
-    highlighter.reset(1, source.to_string(), "py".to_string());
+    highlighter.reset(1, source.to_string(), "py".to_string(), 0);
     wait(&mut highlighter, 1);
 
     for name in ["id", "active", "created_at"] {
@@ -167,7 +168,7 @@ fn highlighter_keeps_fold_map_after_far_incremental_edit() {
     let filler = "# pad\n".repeat(260);
     let source = format!("items = [\n    1,\n    2,\n]\n{filler}tail = 1\n");
 
-    highlighter.reset(1, source.clone(), "py".to_string());
+    highlighter.reset(1, source.clone(), "py".to_string(), 0);
     wait(&mut highlighter, 1);
 
     let list_start = source.find('[').unwrap();
@@ -209,7 +210,7 @@ fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
     let mut highlighter = Highlighter::new();
     let source = "class KnownDBError(DefaultHttpException):\n    def __init__(self, msg: str | None = None):\n        self.msg = msg\n";
 
-    highlighter.reset(1, source.to_string(), "py".to_string());
+    highlighter.reset(1, source.to_string(), "py".to_string(), 0);
     wait(&mut highlighter, 1);
 
     let attr_start = source.find("self.msg").unwrap() + "self.".len();
@@ -248,7 +249,7 @@ fn highlighter_keeps_typed_python_parameters_as_parameters() {
     let mut highlighter = Highlighter::new();
     let source = "class BookingService:\n    def __init__(\n        self,\n        session: AnnDBSession,\n    ):\n        super().__init__(session)\n        self.session = session\n";
 
-    highlighter.reset(1, source.to_string(), "py".to_string());
+    highlighter.reset(1, source.to_string(), "py".to_string(), 0);
     wait(&mut highlighter, 1);
 
     assert!(
@@ -275,6 +276,7 @@ fn highlighter_thread_handles_shebang_log_and_invalid_incremental_edit() {
         1,
         "#!/usr/bin/env python\nprint(None)\n".to_string(),
         String::new(),
+        0,
     );
     wait(&mut highlighter, 1);
     assert!(
@@ -284,7 +286,7 @@ fn highlighter_thread_handles_shebang_log_and_invalid_incremental_edit() {
             .any(|item| item.word == "print")
     );
 
-    highlighter.reset(2, "plain log text\n".to_string(), "log".to_string());
+    highlighter.reset(2, "plain log text\n".to_string(), "log".to_string(), 0);
     wait(&mut highlighter, 2);
     assert_eq!(highlighter.spans.len(), 1);
     assert_eq!(highlighter.spans[0].color, DRACULA_FG);

@@ -277,7 +277,7 @@ fn file_open_waits_for_tree_sitter_and_applies_folds_before_return() {
     let path = dir.join("folds.py");
     std::fs::write(&path, "import os\nimport sys\n\nprint('ready')\n").unwrap();
     app.highlighter
-        .reset(1, "warmup = 1\n".to_string(), "py".to_string());
+        .reset(1, "warmup = 1\n".to_string(), "py".to_string(), 0);
     assert!(
         app.highlighter
             .wait_for_first_result(1, std::time::Duration::from_secs(2))
@@ -290,6 +290,32 @@ fn file_open_waits_for_tree_sitter_and_applies_folds_before_return() {
     assert!(!app.highlighter.spans.is_empty());
     assert!(!app.editor.foldable_ranges_bytes.is_empty());
     assert!(!app.editor.folded_lines.is_empty());
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn large_rust_file_open_waits_for_priority_highlight_before_return() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-large-rust-open-highlight-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("large.rs");
+    let text = "fn panel_row() {\n    let value = 1;\n}\n".repeat(2400);
+    assert!(text.len() > crate::highlighter::TREE_SITTER_HIGHLIGHT_MAX_BYTES);
+    std::fs::write(&path, text).unwrap();
+
+    app.load_file_internal(path.clone(), false, true);
+
+    assert!(app.is_highlighted_once);
+    assert!(app.highlighter.spans.iter().any(|span| span.start == 0));
 
     std::fs::remove_file(path).ok();
     std::fs::remove_dir(dir).ok();

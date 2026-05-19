@@ -680,9 +680,8 @@ impl Renderer {
 
         let text_x = (chip_x + (chip_w - draw_w) * 0.5).round();
         if register_tooltip_row {
-            let row_start = self.push_git_graph_tooltip_text_row(
-                draw_text, text_x, chip_y, chip_h, scale, false,
-            );
+            let row_start = self
+                .push_git_graph_tooltip_text_row(draw_text, text_x, chip_y, chip_h, scale, false);
             self.draw_git_graph_selectable_text(
                 draw_text, text_x, text_y, text_color, scale, row_start, chip_y, chip_h, false,
             );
@@ -1561,27 +1560,13 @@ impl Renderer {
         let to_mid_x = to_x - dir * radius;
         self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
         self.push_git_graph_quadratic_curve(
-            from_x,
-            turn_in_y,
-            from_x,
-            mid_y,
-            from_mid_x,
-            mid_y,
-            line_w,
-            color,
+            from_x, turn_in_y, from_x, mid_y, from_mid_x, mid_y, line_w, color,
         );
         if (to_mid_x - from_mid_x).abs() > 0.5 * s {
             self.push_git_graph_horizontal_segment(from_mid_x, to_mid_x, mid_y, line_w, color);
         }
         self.push_git_graph_quadratic_curve(
-            to_mid_x,
-            mid_y,
-            to_x,
-            mid_y,
-            to_x,
-            turn_out_y,
-            line_w,
-            color,
+            to_mid_x, mid_y, to_x, mid_y, to_x, turn_out_y, line_w, color,
         );
         self.push_git_graph_soft_vertical_segment(to_x, turn_out_y, row_y + row_h, line_w, color);
     }
@@ -1608,7 +1593,14 @@ impl Renderer {
         let mid_x = to_x - dir * radius;
         self.push_git_graph_soft_vertical_segment(from_x, row_y, turn_in_y, line_w, color);
         self.push_git_graph_quadratic_curve(
-            from_x, turn_in_y, from_x, mid_y, from_x + dir * radius, mid_y, line_w, color,
+            from_x,
+            turn_in_y,
+            from_x,
+            mid_y,
+            from_x + dir * radius,
+            mid_y,
+            line_w,
+            color,
         );
         if (mid_x - (from_x + dir * radius)).abs() > 0.5 * s {
             self.push_git_graph_horizontal_segment(
@@ -2045,7 +2037,8 @@ impl Renderer {
             self.git_graph_tooltip_wrapped_line_count(&commit.summary, inner_w, 0.9);
         scratch.clear();
         if let Some(stats) = commit.stats {
-            let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
+            let _ =
+                std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
         } else {
             scratch.push_str("stats deferred");
         }
@@ -2133,10 +2126,10 @@ impl Renderer {
         let author_icon_y =
             (author_row_top + (title_line_h - title_icon_size) * 0.38 - title_icon_raise).round();
         let date_icon_extra_drop = 1.0 * s;
-        let date_icon_y =
-            (date_row_top + (title_line_h - title_icon_size) * 0.38 - title_icon_raise
-                + date_icon_extra_drop)
-                .round();
+        let date_icon_y = (date_row_top + (title_line_h - title_icon_size) * 0.38
+            - title_icon_raise
+            + date_icon_extra_drop)
+            .round();
         let author_x = (content_x + title_icon_size + title_icon_gap).round();
         let title_count_color = self.theme.sel;
         let title_count_text_color = [1.0, 1.0, 1.0, 1.0];
@@ -2261,7 +2254,8 @@ impl Renderer {
         line_top += 5.0 * s;
         scratch.clear();
         if let Some(stats) = commit.stats {
-            let _ = std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
+            let _ =
+                std::fmt::Write::write_fmt(scratch, format_args!("{} files", stats.files_changed));
         } else {
             scratch.push_str("stats deferred");
         }
@@ -2786,10 +2780,18 @@ impl Renderer {
             let chip_gap = 5.0 * s;
             let chip_max_w = 140.0 * s;
             let local_chip_w = local_ref_name.map(|name| {
-                branch_chip_width(self.measure_ui_width(name, chip_scale), chip_pad_x, chip_max_w)
+                branch_chip_width(
+                    self.measure_ui_width(name, chip_scale),
+                    chip_pad_x,
+                    chip_max_w,
+                )
             });
             let remote_chip_w = remote_ref_name.map(|name| {
-                branch_chip_width(self.measure_ui_width(name, chip_scale), chip_pad_x, chip_max_w)
+                branch_chip_width(
+                    self.measure_ui_width(name, chip_scale),
+                    chip_pad_x,
+                    chip_max_w,
+                )
             });
             let mut chips_w = local_chip_w.unwrap_or(0.0) + remote_chip_w.unwrap_or(0.0);
             if local_chip_w.is_some() && remote_chip_w.is_some() {
@@ -2868,8 +2870,7 @@ impl Renderer {
         let max_scroll = crate::app::git_panel::git_graph_max_scroll(commits.len(), rows_h, s);
         if max_scroll > 0.0 {
             let ratio = (scroll / max_scroll).clamp(0.0, 1.0);
-            let thumb_h =
-                crate::app::git_panel::git_graph_scroll_thumb_h(commits.len(), rows_h, s);
+            let thumb_h = crate::app::git_panel::git_graph_scroll_thumb_h(commits.len(), rows_h, s);
             let thumb_y = rows_y + 4.0 * s + ratio * (rows_h - 8.0 * s - thumb_h);
             let track_w = 10.0 * s;
             let track_x = panel_x + panel_w - track_w - 9.0 * s;
@@ -3773,7 +3774,12 @@ impl Renderer {
                                 y,
                                 panel_w,
                                 row_h,
-                                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.16],
+                                [
+                                    self.theme.sel[0],
+                                    self.theme.sel[1],
+                                    self.theme.sel[2],
+                                    0.16,
+                                ],
                             );
                         }
                         if git_file_tooltip_hovered(hovered, mx, check_x, file_layout.check_size) {

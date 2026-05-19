@@ -738,6 +738,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         app.editor.version,
                         app.editor.get_full_text(),
                         app.file_extension.clone(),
+                        app.editor.cursor,
                     );
                 }
             }

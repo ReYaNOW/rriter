@@ -268,7 +268,9 @@ impl Renderer {
             let mut x = self.left_padding;
 
             if !v_line_info.is_soft_wrap
-                && let Some(kind) = diff_line_kinds.and_then(|kinds| kinds.get(phys_idx)).copied()
+                && let Some(kind) = diff_line_kinds
+                    .and_then(|kinds| kinds.get(phys_idx))
+                    .copied()
             {
                 let color = match kind {
                     crate::app::git_diff::DiffLineKind::Added

@@ -934,6 +934,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         app.editor.version,
         app.editor.get_full_text(),
         app.file_extension.clone(),
+        app.editor.cursor,
     );
     app.last_sent_version = app.editor.version;
 

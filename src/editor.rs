@@ -798,6 +798,34 @@ impl Editor {
         self.update_modifications();
     }
 
+    pub fn set_clean_text(&mut self, text: &str) {
+        let capacity = text.len() + 8192;
+        self.data = vec![0; capacity];
+        self.data[..text.len()].copy_from_slice(text.as_bytes());
+        self.gap_start = text.len();
+        self.gap_end = capacity;
+        self.cursor = 0;
+        self.selection_anchor = None;
+        self.history.clear();
+        self.redo_stack.clear();
+        self.history_size = 0;
+        self.is_working_history = false;
+        self.sync_edits.clear();
+        self.foldable_lines.clear();
+        self.folded_lines.clear();
+        self.folded_start_bytes.clear();
+        self.foldable_ranges_bytes.clear();
+        self.indent_cache.clear();
+        self.last_indent_version = u64::MAX;
+        self.rebuild_line_offsets();
+        self.original_hashes = self.get_line_hashes();
+        self.saved_hashes = self.original_hashes.clone();
+        let line_count = self.original_hashes.len();
+        self.line_states = vec![None; line_count];
+        self.deleted_gaps = vec![None; line_count + 1];
+        self.is_dirty = false;
+    }
+
     fn move_gap(&mut self, target: usize) {
         if target == self.gap_start {
             return;
@@ -1343,6 +1371,26 @@ mod tests {
         assert_eq!(editor.cursor, "alpha".len());
         editor.move_right(false);
         assert_eq!(editor.cursor, "alpha ".len());
+    }
+
+    #[test]
+    fn editor_set_clean_text_loads_without_dirty_history_or_sync_edits() {
+        let mut editor = Editor::new(8);
+        editor.insert_str("dirty");
+        editor.set_clean_text("alpha\nbeta\n");
+
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+        assert_eq!(editor.cursor, 0);
+        assert!(!editor.is_dirty());
+        assert!(editor.history.is_empty());
+        assert!(editor.redo_stack.is_empty());
+        assert_eq!(editor.history_size, 0);
+        assert!(editor.sync_edits.is_empty());
+        assert_eq!(editor.line_offsets, vec![0, 6, 11]);
+        assert_eq!(editor.line_states.len(), 3);
+        assert!(editor.line_states.iter().all(Option::is_none));
+        assert_eq!(editor.deleted_gaps.len(), 4);
+        assert!(editor.deleted_gaps.iter().all(Option::is_none));
     }
 
     #[test]

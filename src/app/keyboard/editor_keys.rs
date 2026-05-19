@@ -335,7 +335,7 @@ impl App {
                     self.editor = Editor::new(8192);
                     self.editor.set_original_text();
                     self.highlighter
-                        .reset(self.editor.version, "".to_string(), "".to_string());
+                        .reset(self.editor.version, "".to_string(), "".to_string(), 0);
                     self.show_welcome = true;
                     self.autocomplete_active = false;
                     self.scroll_y.stop_anim();

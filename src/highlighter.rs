@@ -95,11 +95,14 @@ pub enum SyncEdit {
 
 pub enum HighlighterMessage {
     Reset {
+        request_id: u64,
         version: u64,
         text: String,
         ext: String,
+        priority_anchor: usize,
     },
     Edits {
+        request_id: u64,
         version: u64,
         edits: Vec<SyncEdit>,
         edit_start_byte: Option<usize>,
@@ -113,6 +116,7 @@ pub struct Highlighter {
     tx: Sender<HighlighterMessage>,
     pub rx: Receiver<(
         u64,
+        u64,
         Vec<ColorSpan>,
         Vec<CompletionItem>,
         Vec<(usize, usize, bool, bool)>, // (start, end, is_autofold, is_sticky)
@@ -124,6 +128,7 @@ pub struct Highlighter {
     pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
     pub syntax_errors: Vec<(usize, usize)>,
     pub current_version: u64,
+    current_request_id: u64,
     sync_text: String,
     sync_ext: String,
     sync_parser: tree_sitter::Parser,
@@ -143,6 +148,10 @@ pub(crate) const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
 pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
 
 const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
+pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_LINES: usize = 800;
+const PRIORITY_HIGHLIGHT_TAIL_LINES: usize = 240;
+const PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES: usize = 32 * 1024;
 
 #[derive(Debug)]
 struct Scope {
@@ -459,6 +468,56 @@ fn is_highlight_ident_byte(b: u8) -> bool {
     b == b'_' || b.is_ascii_alphanumeric()
 }
 
+pub(crate) fn should_prioritize_front_highlight(ext: &str, text: &str) -> bool {
+    let lang_name = lang_name_for_ext_and_text(ext, text);
+    if !matches!(lang_name, "py" | "rs") {
+        return false;
+    }
+    if text.len() > TREE_SITTER_HIGHLIGHT_MAX_BYTES {
+        return true;
+    }
+
+    let mut lines = 1usize;
+    for &b in text.as_bytes() {
+        if b == b'\n' {
+            lines += 1;
+            if lines > TREE_SITTER_HIGHLIGHT_MAX_LINES {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn priority_highlight_range(text: &str, anchor: usize) -> Range<usize> {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return 0..0;
+    }
+
+    let mut anchor = anchor.min(bytes.len());
+    while anchor > 0 && !text.is_char_boundary(anchor) {
+        anchor -= 1;
+    }
+
+    let mut end = (anchor + PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES).min(bytes.len());
+    let mut seen = 0usize;
+    let mut i = anchor;
+    while i < bytes.len() && seen < PRIORITY_HIGHLIGHT_TAIL_LINES {
+        if bytes[i] == b'\n' {
+            seen += 1;
+            end = i + 1;
+        }
+        i += 1;
+    }
+    end = end.max(anchor).min(bytes.len());
+    while end < bytes.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+
+    0..end
+}
+
 fn expand_highlight_invalidation_range(
     text: &str,
     start: Option<usize>,
@@ -523,6 +582,126 @@ fn merge_highlight_spans(
     }
 
     base
+}
+
+fn flatten_spans_for_range(
+    mut spans: Vec<ColorSpan>,
+    range: Range<usize>,
+    text: &str,
+    byte_colors: &mut Vec<[f32; 4]>,
+    apply_rainbow_brackets: bool,
+) -> Vec<ColorSpan> {
+    if range.start >= range.end {
+        return Vec::new();
+    }
+
+    let len = range.end - range.start;
+    spans.sort_by_key(|s| std::cmp::Reverse(s.end.saturating_sub(s.start)));
+
+    byte_colors.clear();
+    byte_colors.resize(len, DRACULA_FG);
+
+    for span in spans {
+        let start = span.start.max(range.start);
+        let end = span.end.min(range.end);
+        if start >= end {
+            continue;
+        }
+        for color in &mut byte_colors[start - range.start..end - range.start] {
+            *color = span.color;
+        }
+    }
+
+    let text_bytes = text.as_bytes();
+    for (local_idx, byte_idx) in (range.start..range.end).enumerate() {
+        let b = text_bytes[byte_idx];
+        if byte_colors[local_idx] == MARKER_INTERPOLATION {
+            if b == b'{' || b == b'}' {
+                byte_colors[local_idx] = DRACULA_ORANGE;
+            } else {
+                byte_colors[local_idx] = DRACULA_FG;
+            }
+        }
+    }
+
+    if apply_rainbow_brackets {
+        let mut depth_round = 0usize;
+        let mut depth_square = 0usize;
+        let mut depth_curly = 0usize;
+
+        for byte_idx in 0..range.start {
+            match text_bytes[byte_idx] {
+                b'(' => depth_round += 1,
+                b')' => depth_round = depth_round.saturating_sub(1),
+                b'[' => depth_square += 1,
+                b']' => depth_square = depth_square.saturating_sub(1),
+                b'{' => depth_curly += 1,
+                b'}' => depth_curly = depth_curly.saturating_sub(1),
+                _ => {}
+            }
+        }
+
+        for (local_idx, byte_idx) in (range.start..range.end).enumerate() {
+            if byte_colors[local_idx] != DRACULA_COMMENT
+                && (byte_colors[local_idx] == DRACULA_FG
+                    || byte_colors[local_idx] == DRACULA_GREEN
+                    || byte_colors[local_idx] == DRACULA_CYAN
+                    || byte_colors[local_idx] == DRACULA_ORANGE
+                    || byte_colors[local_idx] == DRACULA_YELLOW
+                    || byte_colors[local_idx] == DRACULA_PURPLE)
+            {
+                match text_bytes[byte_idx] {
+                    b'(' => {
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_round);
+                        depth_round += 1;
+                    }
+                    b')' => {
+                        depth_round = depth_round.saturating_sub(1);
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_round);
+                    }
+                    b'[' => {
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_square);
+                        depth_square += 1;
+                    }
+                    b']' => {
+                        depth_square = depth_square.saturating_sub(1);
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_square);
+                    }
+                    b'{' => {
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_curly);
+                        depth_curly += 1;
+                    }
+                    b'}' => {
+                        depth_curly = depth_curly.saturating_sub(1);
+                        byte_colors[local_idx] = runtime::get_bracket_color(depth_curly);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let mut flat = Vec::new();
+    let mut current_color = byte_colors[0];
+    let mut start = range.start;
+    for (local_idx, byte_idx) in (range.start + 1..range.end).enumerate() {
+        let color = byte_colors[local_idx + 1];
+        if color != current_color {
+            flat.push(ColorSpan {
+                start,
+                end: byte_idx,
+                color: current_color,
+            });
+            start = byte_idx;
+            current_color = color;
+        }
+    }
+    flat.push(ColorSpan {
+        start,
+        end: range.end,
+        color: current_color,
+    });
+    flat
 }
 
 pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
@@ -712,6 +891,7 @@ impl Highlighter {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
         let (tx_out, rx_out) = mpsc::channel::<(
             u64,
+            u64,
             Vec<ColorSpan>,
             Vec<CompletionItem>,
             Vec<(usize, usize, bool, bool)>,
@@ -737,16 +917,26 @@ impl Highlighter {
                 }
 
                 let mut final_version = 0;
+                let mut final_request_id = 0;
                 let mut do_highlight = false;
                 let mut final_edit_start_byte: Option<usize> = None;
                 let mut final_edit_end_byte: Option<usize> = None;
                 let mut final_invalidate_start_byte: Option<usize> = None;
                 let mut final_invalidate_end_byte: Option<usize> = None;
+                let mut final_priority_anchor = 0usize;
 
                 for m in msgs {
                     match m {
-                        HighlighterMessage::Reset { version, text, ext } => {
+                        HighlighterMessage::Reset {
+                            request_id,
+                            version,
+                            text,
+                            ext,
+                            priority_anchor,
+                        } => {
+                            final_request_id = request_id;
                             final_version = version;
+                            final_priority_anchor = priority_anchor;
                             replica_text = text;
                             current_ext = ext;
                             current_tree = None;
@@ -754,6 +944,7 @@ impl Highlighter {
                             last_full_spans.clear();
                         }
                         HighlighterMessage::Edits {
+                            request_id,
                             version,
                             edits,
                             edit_start_byte,
@@ -761,6 +952,7 @@ impl Highlighter {
                             invalidate_start_byte,
                             invalidate_end_byte,
                         } => {
+                            final_request_id = request_id;
                             final_version = version;
                             final_edit_start_byte = edit_start_byte;
                             final_edit_end_byte = edit_end_byte;
@@ -869,9 +1061,12 @@ impl Highlighter {
                 let text = &replica_text;
                 let ext = &current_ext;
 
-                let is_log_or_huge = ext == "log" || text.len() > 500_000;
+                let is_log = ext == "log";
 
                 let lang_name = lang_name_for_ext_and_text(ext, text);
+                let should_prioritize_front = !is_log
+                    && final_edit_start_byte.is_none()
+                    && should_prioritize_front_highlight(ext, text);
 
                 let mut spans = Vec::new();
                 let mut completions_map: HashMap<(String, usize, usize), SymbolKind> =
@@ -879,7 +1074,7 @@ impl Highlighter {
                 let mut foldable_ranges = Vec::new();
                 let mut error_ranges = Vec::new();
 
-                if !is_log_or_huge {
+                if !is_log {
                     let ts_config = get_ts_config(lang_name);
 
                     if let Some((_, queries)) = &ts_config {
@@ -962,6 +1157,91 @@ impl Highlighter {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+
+                                match lang_name {
+                                    "py" => {
+                                        for block in crate::languages::python::import_blocks(text) {
+                                            foldable_ranges.push((
+                                                block.start,
+                                                block.end,
+                                                true,
+                                                false,
+                                            ));
+                                        }
+                                    }
+                                    "rs" => {
+                                        for block in crate::languages::rust::import_blocks(text) {
+                                            foldable_ranges.push((
+                                                block.start,
+                                                block.end,
+                                                true,
+                                                false,
+                                            ));
+                                        }
+                                    }
+                                    "dart" => {
+                                        for block in crate::languages::dart::import_blocks(text) {
+                                            foldable_ranges.push((
+                                                block.start,
+                                                block.end,
+                                                true,
+                                                false,
+                                            ));
+                                        }
+                                    }
+                                    _ => {}
+                                }
+
+                                if should_prioritize_front {
+                                    let priority_range =
+                                        priority_highlight_range(text, final_priority_anchor);
+                                    if priority_range.start < priority_range.end {
+                                        let mut priority_spans = Vec::new();
+                                        collect_query_highlight_spans(
+                                            &lang,
+                                            lang_name,
+                                            &queries,
+                                            &tree,
+                                            &text,
+                                            &mut query_cache,
+                                            Some(priority_range.clone()),
+                                            &mut priority_spans,
+                                        );
+                                        let priority_spans = merge_highlight_spans(
+                                            Vec::new(),
+                                            priority_spans,
+                                            lang_name,
+                                            &text,
+                                            true,
+                                            None,
+                                        );
+                                        let priority_spans = flatten_spans_for_range(
+                                            priority_spans,
+                                            priority_range.clone(),
+                                            text,
+                                            &mut byte_colors_buf,
+                                            !lang_name.is_empty() && lang_name != "bash",
+                                        );
+                                        last_full_spans = priority_spans.clone();
+                                        let priority_foldable_ranges = foldable_ranges
+                                            .iter()
+                                            .copied()
+                                            .filter(|&(start, end, _, _)| {
+                                                start < priority_range.end
+                                                    && end <= priority_range.end
+                                            })
+                                            .collect::<Vec<_>>();
+                                        let _ = tx_out.send((
+                                            final_request_id,
+                                            final_version,
+                                            priority_spans,
+                                            Vec::new(),
+                                            priority_foldable_ranges,
+                                            Vec::new(),
+                                            current_tree.clone(),
+                                        ));
                                     }
                                 }
 
@@ -1369,49 +1649,38 @@ impl Highlighter {
                     }
                 }
 
-                match lang_name {
-                    "py" => {
-                        for block in crate::languages::python::import_blocks(text) {
-                            foldable_ranges.push((block.start, block.end, true, false));
-                        }
-                    }
-                    "rs" => {
-                        for block in crate::languages::rust::import_blocks(text) {
-                            foldable_ranges.push((block.start, block.end, true, false));
-                        }
-                    }
-                    "dart" => {
-                        for block in crate::languages::dart::import_blocks(text) {
-                            foldable_ranges.push((block.start, block.end, true, false));
-                        }
-                    }
-                    _ => {}
-                }
+                let flat_spans = if is_log {
+                    vec![ColorSpan {
+                        start: 0,
+                        end: text.len(),
+                        color: DRACULA_FG,
+                    }]
+                } else {
+                    let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
 
-                let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
-
-                let merged_spans = merge_highlight_spans(
-                    last_full_spans.clone(),
-                    spans,
-                    lang_name,
-                    &text,
-                    final_edit_start_byte.is_none() || final_edit_end_byte.is_none(),
-                    expand_highlight_invalidation_range(
+                    let merged_spans = merge_highlight_spans(
+                        last_full_spans.clone(),
+                        spans,
+                        lang_name,
                         &text,
-                        final_invalidate_start_byte,
-                        final_invalidate_end_byte,
-                    ),
-                );
+                        final_edit_start_byte.is_none() || final_edit_end_byte.is_none(),
+                        expand_highlight_invalidation_range(
+                            &text,
+                            final_invalidate_start_byte,
+                            final_invalidate_end_byte,
+                        ),
+                    );
 
-                let flat_spans = flatten_spans(
-                    merged_spans,
-                    text.len(),
-                    text,
-                    &mut byte_colors_buf,
-                    &error_ranges,
-                    apply_rainbow_brackets,
-                    is_log_or_huge,
-                );
+                    flatten_spans(
+                        merged_spans,
+                        text.len(),
+                        text,
+                        &mut byte_colors_buf,
+                        &error_ranges,
+                        apply_rainbow_brackets,
+                        false,
+                    )
+                };
 
                 last_full_spans = flat_spans.clone();
 
@@ -1618,6 +1887,7 @@ impl Highlighter {
                 completions.sort_by(|a, b| a.word.cmp(&b.word));
 
                 let _ = tx_out.send((
+                    final_request_id,
                     final_version,
                     flat_spans,
                     completions,
@@ -1635,6 +1905,7 @@ impl Highlighter {
             foldable_ranges: vec![],
             syntax_errors: vec![],
             current_version: 0,
+            current_request_id: 0,
             sync_text: String::new(),
             sync_ext: String::new(),
             sync_parser: tree_sitter::Parser::new(),
