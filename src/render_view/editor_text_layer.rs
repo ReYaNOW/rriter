@@ -108,6 +108,30 @@ mod tests {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn inlay_text_bounds_y(&mut self, text: &str, scale: f32) -> Option<(f32, f32)> {
+        let mut top = 0.0f32;
+        let mut bottom = 0.0f32;
+        let mut seen = false;
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(g) = self.get_ui_glyph(c) {
+                let glyph_top = -g.offset_y * scale;
+                let glyph_bottom = (g.height - g.offset_y) * scale;
+                if seen {
+                    top = top.min(glyph_top);
+                    bottom = bottom.max(glyph_bottom);
+                } else {
+                    top = glyph_top;
+                    bottom = glyph_bottom;
+                    seen = true;
+                }
+            }
+        }
+        seen.then_some((top, bottom))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_editor_visible_text(
         &mut self,
@@ -136,6 +160,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         ctrl_definition_range: Option<(usize, usize)>,
         diff_line_kinds: Option<&[crate::app::git_diff::DiffLineKind]>,
+        python_inlay_hints: &[crate::app::PythonInlayHint],
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -238,6 +263,12 @@ impl Renderer {
         }
 
         let mut cursor_pos = None;
+        let hint_bg = [
+            (self.theme.bg[0] + 0.055).min(1.0),
+            (self.theme.bg[1] + 0.055).min(1.0),
+            (self.theme.bg[2] + 0.070).min(1.0),
+            1.0,
+        ];
 
         for i in skip_visual_lines..end_visual_line {
             let v_line_info = self.visual_lines[i];
@@ -306,6 +337,9 @@ impl Renderer {
             let mut unused_idx = self
                 .unused_spans_cache
                 .partition_point(|&(_, e)| e <= start_byte);
+            let mut inlay_idx = python_inlay_hints.partition_point(|hint| {
+                hint.byte_offset < start_byte
+            });
 
             let mut current_offset = start_byte;
             let mut current_chunk_offset = start_byte;
@@ -338,6 +372,50 @@ impl Renderer {
                     }
 
                     let char_len = c.len_utf8();
+                    if cursor_pos.is_none() && editor.cursor == current_offset {
+                        cursor_pos = Some((x - render_scroll_x, y));
+                    }
+                    while inlay_idx < python_inlay_hints.len()
+                        && python_inlay_hints[inlay_idx].byte_offset < current_offset
+                    {
+                        inlay_idx += 1;
+                    }
+                    while inlay_idx < python_inlay_hints.len()
+                        && python_inlay_hints[inlay_idx].byte_offset == current_offset
+                    {
+                        let hint = &python_inlay_hints[inlay_idx];
+                        let hint_label = hint.label.trim_end();
+                        let hint_scale = 0.92;
+                        let pad = 4.0 * s;
+                        let hint_w = self.measure_ui_width(hint_label, hint_scale);
+                        let pill_w = hint_w + pad * 2.0;
+                        let value_gap_w = self.char_advance(' ');
+                        if x - render_scroll_x < self.width + 150.0 {
+                            let (text_top, text_bottom) = self
+                                .inlay_text_bounds_y(hint_label, hint_scale)
+                                .unwrap_or((-self.baseline_offset * hint_scale, 0.0));
+                            let text_center_y = y.round() + (text_top + text_bottom) * 0.5;
+                            let pill_h = (text_bottom - text_top) + pad * 2.0;
+                            let pill_y = (text_center_y - pill_h * 0.5).round();
+                            self.push_rounded_rect(
+                                (x - render_scroll_x).round(),
+                                pill_y,
+                                pill_w,
+                                pill_h,
+                                4.0 * s,
+                                hint_bg,
+                            );
+                            self.draw_string_scaled(
+                                hint_label,
+                                (x - render_scroll_x + pad).round(),
+                                y.round(),
+                                self.theme.fg,
+                                hint_scale,
+                            );
+                        }
+                        x += pill_w + value_gap_w;
+                        inlay_idx += 1;
+                    }
 
                     if cursor_pos.is_none()
                         && editor.cursor >= current_offset
@@ -645,10 +723,13 @@ impl Renderer {
 
         if cursor_pos.is_none() && editor.cursor == len {
             if let Some(last_line) = self.visual_lines.last() {
-                let y = self.baseline_offset + last_line.y_offset - render_scroll_y;
+                let last_byte_idx = last_line.byte_idx;
+                let last_y_offset = last_line.y_offset;
+                let y = self.baseline_offset + last_y_offset - render_scroll_y;
                 let (first, second) = editor.text_parts();
                 let x = self.left_padding
-                    + self.measure_width(first, second, last_line.byte_idx, editor.cursor);
+                    + self.measure_width(first, second, last_byte_idx, editor.cursor)
+                    + self.current_inlay_width_before(last_byte_idx, editor.cursor);
                 cursor_pos = Some((x - render_scroll_x, y));
             }
         }

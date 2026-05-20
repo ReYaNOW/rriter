@@ -687,6 +687,13 @@ impl ApplicationHandler for App {
                 }
 
                 let ctrl_definition_range = self.ctrl_definition_highlight_range();
+                let python_inlay_hints = if self.python_inlay_hint_path.as_ref()
+                    == self.file_path.as_ref()
+                {
+                    self.python_inlay_hints.as_slice()
+                } else {
+                    &[]
+                };
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -720,6 +727,7 @@ impl ApplicationHandler for App {
                     self.tab_scroll.current.round(),
                     &self.highlighter.syntax_errors,
                     ctrl_definition_range,
+                    python_inlay_hints,
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),

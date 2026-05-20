@@ -412,6 +412,7 @@ impl Renderer {
                 bracket_pair_cache_cursor: usize::MAX,
                 lsp_diagnostic_indices: Vec::with_capacity(32),
                 unused_spans_cache: Vec::with_capacity(32),
+                current_python_inlay_hints: Vec::with_capacity(64),
                 terminal_row_search_results: Vec::new(),
                 mod_intervals_cache: Vec::with_capacity(64),
                 merged_intervals_cache: Vec::with_capacity(64),

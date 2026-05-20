@@ -27,7 +27,7 @@ use hover::PendingRequestKind;
 pub use hover::{HoverLineKindPublic, highlight_hover_text};
 use protocol::*;
 pub use protocol::{
-    CodeAction, LspCompletionItem, LspEvent, TextChange, WorkspaceEdit,
+    CodeAction, LspCompletionItem, LspEvent, LspInlayHint, TextChange, WorkspaceEdit,
     highlight_diagnostic_message, offset_to_lsp_pos,
 };
 use std::thread;
@@ -528,6 +528,23 @@ fn run_supervisor(
                             break 'inner;
                         }
                     }
+                    Ok(Cmd::InlayHint {
+                        id,
+                        uri,
+                        start_line,
+                        start_col,
+                        end_line,
+                        end_col,
+                    }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::InlayHint);
+                        }
+                        let msg =
+                            make_inlay_hint(id, &uri, start_line, start_col, end_line, end_col);
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
                     Ok(Cmd::WorkspaceDiagnostic {
                         id,
                         previous_result_ids_json,
@@ -687,6 +704,27 @@ impl LspProcess {
         id
     }
 
+    pub fn request_inlay_hints(
+        &mut self,
+        path: &PathBuf,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> i32 {
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = self.cmd_tx.send(Cmd::InlayHint {
+            id,
+            uri,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        });
+        id
+    }
+
     pub fn request_workspace_diagnostics(&mut self, previous_result_ids_json: String) -> i32 {
         let id = next_id();
         let _ = self.cmd_tx.send(Cmd::WorkspaceDiagnostic {
@@ -822,4 +860,3 @@ fn merged_diagnostics_for_all_paths(
 }
 
 // ── LspManager: главный фасад для App ─────────────────────────────────────────
-

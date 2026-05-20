@@ -298,6 +298,31 @@ impl LspManager {
             .map(|proc| proc.request_completion(&abs_path, line, col, trigger))
     }
 
+    pub fn request_ty_inlay_hints(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> Option<i32> {
+        if !Self::is_python_ext(ext) {
+            return None;
+        }
+        let abs_path = if path.is_absolute() {
+            path.clone()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        self.ensure_python();
+        self.ty_process.as_mut().map(|proc| {
+            proc.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
+        })
+    }
+
     /// Уведомляет LSP о закрытии файла
     pub fn notify_close(&mut self, path: &PathBuf, ext: &str) {
         let abs_path = if path.is_absolute() {

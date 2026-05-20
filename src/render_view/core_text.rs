@@ -322,6 +322,7 @@ impl Renderer {
                     }
                 } else {
                     x += self.measure_width(first, second, line_start, editor.cursor);
+                    x += self.current_inlay_width_before(line_start, editor.cursor);
                 }
 
                 return (x - self.last_scroll_x, current_y);
@@ -332,6 +333,135 @@ impl Renderer {
         }
 
         (self.left_padding - self.last_scroll_x, current_y)
+    }
+
+    pub(crate) fn current_inlay_width_before(
+        &mut self,
+        line_start: usize,
+        byte_offset: usize,
+    ) -> f32 {
+        let mut width = 0.0;
+        let pad_w = 8.0 * self.scale_factor;
+        let value_gap_w = self.char_advance(' ');
+        for idx in 0..self.current_python_inlay_hints.len() {
+            let (hint_offset, hint_label) = {
+                let hint = &self.current_python_inlay_hints[idx];
+                (hint.byte_offset, hint.label.clone())
+            };
+            if hint_offset >= byte_offset {
+                break;
+            }
+            if hint_offset >= line_start {
+                width += self.measure_ui_width(hint_label.trim_end(), 0.92) + pad_w + value_gap_w;
+            }
+        }
+        width
+    }
+
+    pub(crate) fn is_inlay_hint_at_xy(
+        &mut self,
+        editor: &Editor,
+        target_x: f32,
+        target_y: f32,
+    ) -> bool {
+        let target_y = target_y.max(0.0);
+        let mut current_y = 0.0;
+        let mut phys_line = 0;
+        let mut target_phys_line = 0;
+
+        while phys_line < editor.line_offsets.len() {
+            if target_y >= current_y && target_y < current_y + self.line_height {
+                target_phys_line = phys_line;
+                break;
+            }
+            current_y += self.line_height;
+            if editor.folded_lines.contains(&phys_line)
+                && editor.foldable_lines.contains_key(&phys_line)
+            {
+                if let Some(&end_l) = editor.foldable_lines.get(&phys_line) {
+                    phys_line = end_l;
+                }
+            }
+            phys_line += 1;
+        }
+
+        if target_phys_line == 0 && phys_line >= editor.line_offsets.len() {
+            target_phys_line = editor.line_offsets.len().saturating_sub(1);
+        }
+
+        let start_byte = editor.line_offsets[target_phys_line];
+        let mut end_byte = if target_phys_line + 1 < editor.line_offsets.len() {
+            editor.line_offsets[target_phys_line + 1]
+        } else {
+            editor.len()
+        };
+
+        let is_folded = editor.folded_lines.contains(&target_phys_line)
+            && editor.foldable_lines.contains_key(&target_phys_line);
+        if is_folded && end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\n' {
+            end_byte -= 1;
+            if end_byte > start_byte && editor.byte_at(end_byte - 1) == b'\r' {
+                end_byte -= 1;
+            }
+        }
+        if is_folded {
+            end_byte = folded_import_display_end(editor, start_byte, end_byte);
+        }
+
+        let mut current_x = self.left_padding - self.last_scroll_x;
+        let mut last_valid_byte = start_byte;
+        let mut inlay_idx = self
+            .current_python_inlay_hints
+            .partition_point(|hint| hint.byte_offset < start_byte);
+        let mut current = start_byte;
+        let (first, second) = editor.text_parts();
+        let first_len = first.len();
+
+        while current < end_byte {
+            let s = if current < first_len {
+                let end_chunk = end_byte.min(first_len);
+                let chunk = &first[current..end_chunk];
+                current = end_chunk;
+                chunk
+            } else {
+                let c_start = current - first_len;
+                let c_end = end_byte - first_len;
+                let chunk = &second[c_start..c_end];
+                current = end_byte;
+                chunk
+            };
+
+            for c in s.chars() {
+                while inlay_idx < self.current_python_inlay_hints.len()
+                    && self.current_python_inlay_hints[inlay_idx].byte_offset < last_valid_byte
+                {
+                    inlay_idx += 1;
+                }
+                while inlay_idx < self.current_python_inlay_hints.len()
+                    && self.current_python_inlay_hints[inlay_idx].byte_offset == last_valid_byte
+                {
+                    let hint_label = self.current_python_inlay_hints[inlay_idx].label.clone();
+                    let hint_w = self.measure_ui_width(hint_label.trim_end(), 0.92)
+                        + 8.0 * self.scale_factor
+                        + self.char_advance(' ');
+                    if target_x >= current_x && target_x <= current_x + hint_w {
+                        return true;
+                    }
+                    current_x += hint_w;
+                    inlay_idx += 1;
+                }
+
+                if c == '\n' {
+                    return false;
+                }
+                if c != '\u{FE0F}' && c != '\u{200D}' {
+                    current_x += self.char_advance(c);
+                }
+                last_valid_byte += c.len_utf8();
+            }
+        }
+
+        false
     }
 
     pub fn get_byte_at_xy(&mut self, editor: &Editor, target_x: f32, target_y: f32) -> usize {
@@ -381,6 +511,9 @@ impl Renderer {
 
         let mut current_x = self.left_padding - self.last_scroll_x;
         let mut last_valid_byte = start_byte;
+        let mut inlay_idx = self
+            .current_python_inlay_hints
+            .partition_point(|hint| hint.byte_offset < start_byte);
         let mut current = start_byte;
         let (first, second) = editor.text_parts();
         let first_len = first.len();
@@ -400,6 +533,25 @@ impl Renderer {
             };
 
             for c in s.chars() {
+                while inlay_idx < self.current_python_inlay_hints.len()
+                    && self.current_python_inlay_hints[inlay_idx].byte_offset < last_valid_byte
+                {
+                    inlay_idx += 1;
+                }
+                while inlay_idx < self.current_python_inlay_hints.len()
+                    && self.current_python_inlay_hints[inlay_idx].byte_offset == last_valid_byte
+                {
+                    let hint_label = self.current_python_inlay_hints[inlay_idx].label.clone();
+                    let value_gap_w = self.char_advance(' ');
+                    let hint_w = self.measure_ui_width(hint_label.trim_end(), 0.92)
+                        + 8.0 * self.scale_factor
+                        + value_gap_w;
+                    if target_x <= current_x + hint_w {
+                        return last_valid_byte;
+                    }
+                    current_x += hint_w;
+                    inlay_idx += 1;
+                }
                 let is_hidden = c == '\u{FE0F}' || c == '\u{200D}';
                 let is_newline = c == '\n';
                 let adv = if is_newline || is_hidden {

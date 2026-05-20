@@ -717,6 +717,22 @@ impl App {
                     self.editor.len()
                 }
             };
+            let hover_on_inlay_hint = if diag_hover_byte.is_none() {
+                let line_top_y = (hover_content_y / line_h).floor() * line_h;
+                hover_content_y_in_line_hitbox(hover_content_y, line_top_y, line_h)
+                    && self.renderer.as_mut().unwrap().is_inlay_hint_at_xy(
+                        &self.editor,
+                        px,
+                        hover_content_y,
+                    )
+            } else {
+                false
+            };
+            let cleared_inlay_hover = if hover_on_inlay_hint {
+                clear_hover_popup(self.renderer.as_mut())
+            } else {
+                false
+            };
             let in_diag_popup = HOVER_STATE
                 .with(|s| s.borrow().diag_rect)
                 .map(|(rx, ry, rw, rh, _, _, _)| {
@@ -727,6 +743,7 @@ impl App {
                 })
                 .unwrap_or(false);
             let is_text_area = (!in_diag_popup || in_hover_popup)
+                && !hover_on_inlay_hint
                 && position.x as f32 > padding
                 && (position.x as f32) < (window_size.width as f32 - minimap_w);
             let ctrl_definition_byte = if is_text_area {
@@ -826,6 +843,9 @@ impl App {
                 HOVER_STATE.with(|s| s.borrow_mut().reset_diagnostic_popup());
             }
             self.update_ctrl_definition_hover(ctrl_definition_byte);
+            if cleared_inlay_hover {
+                self.window.as_ref().unwrap().request_redraw();
+            }
         }
         let wh = window_size.height as f32;
         let tab_bar_h = if self.show_welcome || !self.is_ide_mode {

@@ -272,6 +272,36 @@ fn completion_kind_uses_ty_detail_for_property_parameter_and_type() {
 }
 
 #[test]
+fn parses_inlay_hint_string_and_label_parts() {
+    let hints = parse_inlay_hints(&serde_json::json!([
+        {
+            "position": {"line": 2, "character": 8},
+            "label": "id:"
+        },
+        {
+            "position": {"line": 2, "character": 12},
+            "label": [{"value": "name"}, ":"]
+        }
+    ]));
+
+    assert_eq!(
+        hints,
+        vec![
+            LspInlayHint {
+                line: 2,
+                col: 8,
+                label: "id:".to_string(),
+            },
+            LspInlayHint {
+                line: 2,
+                col: 12,
+                label: "name:".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn lsp_dispatch_routes_pending_responses_end_to_end() {
     let (event_tx, event_rx) = mpsc::channel();
     let (out_tx, _out_rx) = mpsc::channel();

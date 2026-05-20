@@ -34,10 +34,15 @@ impl Renderer {
         tab_scroll_x: f32,
         _syntax_errors: &[(usize, usize)],
         ctrl_definition_range: Option<(usize, usize)>,
+        python_inlay_hints: &[crate::app::PythonInlayHint],
         ide_workspaces: &[std::path::PathBuf],
         show_readonly_notice: bool,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
+        self.current_python_inlay_hints.clear();
+        self.current_python_inlay_hints
+            .extend_from_slice(python_inlay_hints);
+
         let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
         let telemetry_was_typing = telemetry_frame_start
@@ -694,6 +699,7 @@ impl Renderer {
                 ui_registry,
                 ctrl_definition_range,
                 active_git_diff_state.map(|state| state.line_kinds.as_slice()),
+                python_inlay_hints,
             );
             self.flush();
             unsafe {

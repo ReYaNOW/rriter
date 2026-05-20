@@ -310,9 +310,9 @@ pub struct Renderer {
     pub bracket_pair_cache_cursor: usize,
     pub lsp_diagnostic_indices: Vec<usize>,
     pub unused_spans_cache: Vec<(usize, usize)>,
+    pub current_python_inlay_hints: Vec<crate::app::PythonInlayHint>,
     pub terminal_row_search_results: Vec<(usize, (usize, usize, usize, usize))>,
     pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub tab_x_anim: Vec<f32>,
 }
-

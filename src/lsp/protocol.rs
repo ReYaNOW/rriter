@@ -153,6 +153,10 @@ pub enum LspEvent {
         request_id: i32,
         items: Vec<LspCompletionItem>,
     },
+    InlayHintsResponse {
+        request_id: i32,
+        hints: Vec<LspInlayHint>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +183,13 @@ pub struct LspCompletionItem {
     pub insert_text: Option<String>,
     pub text_edit: Option<TextChange>,
     pub additional_text_edits: Vec<TextChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LspInlayHint {
+    pub line: u32,
+    pub col: u32,
+    pub label: String,
 }
 
 // ── Конфигурация LSP-серверов ─────────────────────────────────────────────────
@@ -259,6 +270,14 @@ pub(super) enum Cmd {
         line: u32,
         col: u32,
         trigger: Option<String>,
+    },
+    InlayHint {
+        id: i32,
+        uri: String,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
     },
     WorkspaceDiagnostic {
         id: i32,
@@ -361,7 +380,7 @@ pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
     };
 
     let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"completion":{{"completionItem":{{"snippetSupport":false,"labelDetailsSupport":true,"resolveSupport":{{"properties":["additionalTextEdits","textEdit","detail"]}}}}}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"completion":{{"completionItem":{{"snippetSupport":false,"labelDetailsSupport":true,"resolveSupport":{{"properties":["additionalTextEdits","textEdit","detail"]}}}}}},"inlayHint":{{"dynamicRegistration":false}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
         std::process::id(),
         root_uri_json
     );
@@ -464,6 +483,26 @@ pub(super) fn make_completion(
         line,
         col,
         context
+    )
+    .into_bytes()
+}
+
+pub(super) fn make_inlay_hint(
+    id: i32,
+    uri: &str,
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}}}}}}"#,
+        id,
+        json_escape(uri),
+        start_line,
+        start_col,
+        end_line,
+        end_col
     )
     .into_bytes()
 }
@@ -1085,6 +1124,37 @@ pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompl
         .collect()
 }
 
+fn parse_inlay_hint_label(v: &serde_json::Value) -> Option<String> {
+    if let Some(label) = v.as_str() {
+        return Some(label.to_string());
+    }
+    let parts = v.as_array()?;
+    let mut out = String::new();
+    for part in parts {
+        if let Some(value) = part.as_str() {
+            out.push_str(value);
+        } else if let Some(value) = part.get("value").and_then(|value| value.as_str()) {
+            out.push_str(value);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+pub(super) fn parse_inlay_hint_value(v: &serde_json::Value) -> Option<LspInlayHint> {
+    let pos = v.get("position")?;
+    let line = pos.get("line")?.as_u64()? as u32;
+    let col = pos.get("character")?.as_u64()? as u32;
+    let label = parse_inlay_hint_label(v.get("label")?)?;
+    Some(LspInlayHint { line, col, label })
+}
+
+pub(super) fn parse_inlay_hints(result: &serde_json::Value) -> Vec<LspInlayHint> {
+    let Some(items) = result.as_array() else {
+        return Vec::new();
+    };
+    items.iter().filter_map(parse_inlay_hint_value).collect()
+}
+
 fn configuration_response_for(
     server_name: &'static str,
     item: &serde_json::Value,
@@ -1300,10 +1370,19 @@ pub(super) fn dispatch_frame(
                     .and_then(|mut p| p.remove(&(req_id as i32)));
 
                 if msg.get("error").is_some() {
-                    if matches!(pending_kind, Some(PendingRequestKind::WorkspaceDiagnostic)) {
-                        let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
-                            request_id: req_id as i32,
-                        });
+                    match pending_kind {
+                        Some(PendingRequestKind::WorkspaceDiagnostic) => {
+                            let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
+                                request_id: req_id as i32,
+                            });
+                        }
+                        Some(PendingRequestKind::InlayHint) => {
+                            let _ = event_tx.send(LspEvent::InlayHintsResponse {
+                                request_id: req_id as i32,
+                                hints: Vec::new(),
+                            });
+                        }
+                        _ => {}
                     }
                     return;
                 }
@@ -1347,6 +1426,13 @@ pub(super) fn dispatch_frame(
                             let _ = event_tx.send(LspEvent::CompletionResponse {
                                 request_id: req_id as i32,
                                 items,
+                            });
+                        }
+                        Some(PendingRequestKind::InlayHint) => {
+                            let hints = parse_inlay_hints(result);
+                            let _ = event_tx.send(LspEvent::InlayHintsResponse {
+                                request_id: req_id as i32,
+                                hints,
                             });
                         }
                         Some(PendingRequestKind::WorkspaceDiagnostic) => {

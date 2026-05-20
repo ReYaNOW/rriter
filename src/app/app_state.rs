@@ -613,6 +613,74 @@ pub struct CtrlDefinitionState {
     pub target: Option<DefinitionJumpTarget>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PythonInlayHint {
+    pub byte_offset: usize,
+    pub label: String,
+}
+
+fn is_python_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn python_named_argument_at(text: &str, byte_offset: usize, arg_name: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut p = byte_offset.min(bytes.len());
+    while p < bytes.len() && matches!(bytes[p], b' ' | b'\t') {
+        p += 1;
+    }
+    let start = p;
+    while p < bytes.len() && is_python_ident_byte(bytes[p]) {
+        p += 1;
+    }
+    if start == p || text.get(start..p) != Some(arg_name) {
+        return false;
+    }
+    while p < bytes.len() && matches!(bytes[p], b' ' | b'\t') {
+        p += 1;
+    }
+    p < bytes.len() && bytes[p] == b'='
+}
+
+fn python_inlay_parameter_name(label: &str) -> Option<&str> {
+    let label = label.trim();
+    let name = label
+        .strip_suffix('=')
+        .or_else(|| label.strip_suffix(':'))
+        .unwrap_or(label)
+        .trim();
+    if name.is_empty()
+        || name.as_bytes()[0].is_ascii_digit()
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return None;
+    }
+    Some(name)
+}
+
+pub(crate) fn python_positional_inlay_hints_from_lsp(
+    text: &str,
+    hints: &[crate::lsp::LspInlayHint],
+) -> Vec<PythonInlayHint> {
+    let mut out = Vec::new();
+    for hint in hints {
+        let Some(name) = python_inlay_parameter_name(&hint.label) else {
+            continue;
+        };
+        let byte_offset = crate::lsp::lsp_pos_to_offset(text, hint.line, hint.col);
+        if python_named_argument_at(text, byte_offset, name) {
+            continue;
+        }
+        out.push(PythonInlayHint {
+            byte_offset,
+            label: format!("{name}: "),
+        });
+    }
+    out.sort_unstable_by_key(|hint| hint.byte_offset);
+    out.dedup_by(|a, b| a.byte_offset == b.byte_offset && a.label == b.label);
+    out
+}
+
 pub struct App {
     pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,
@@ -753,6 +821,12 @@ pub struct App {
     pub pending_fix_all_id: Option<i32>,
     /// Ctrl-hover definition/declaration jump target.
     pub ctrl_definition: CtrlDefinitionState,
+    pub python_inlay_hints: Vec<PythonInlayHint>,
+    pub python_inlay_hint_path: Option<PathBuf>,
+    pub python_inlay_hint_version: u64,
+    pub python_inlay_hint_pending_request_id: Option<i32>,
+    pub python_inlay_hint_pending_path: Option<PathBuf>,
+    pub python_inlay_hint_pending_version: u64,
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,
@@ -892,6 +966,54 @@ mod tests {
         panels.bottom_height = 180.0;
         assert_eq!(panels.open_bottom_panel_id(), Some(PanelId::LspServers));
         assert_eq!(panels.editor_reserved_bottom_height(2.0), 360.0);
+    }
+
+    #[test]
+    fn python_inlay_hints_keep_positionals_and_skip_named_args() {
+        let text = "build(1, name=2, other = 3, value)\n";
+        let hints = vec![
+            crate::lsp::LspInlayHint {
+                line: 0,
+                col: 6,
+                label: "id=".to_string(),
+            },
+            crate::lsp::LspInlayHint {
+                line: 0,
+                col: 9,
+                label: "name=".to_string(),
+            },
+            crate::lsp::LspInlayHint {
+                line: 0,
+                col: 17,
+                label: "other=".to_string(),
+            },
+            crate::lsp::LspInlayHint {
+                line: 0,
+                col: 28,
+                label: "payload:".to_string(),
+            },
+            crate::lsp::LspInlayHint {
+                line: 0,
+                col: 34,
+                label: ": Unknown".to_string(),
+            },
+        ];
+
+        let out = python_positional_inlay_hints_from_lsp(text, &hints);
+
+        assert_eq!(
+            out,
+            vec![
+                PythonInlayHint {
+                    byte_offset: 6,
+                    label: "id: ".to_string(),
+                },
+                PythonInlayHint {
+                    byte_offset: 28,
+                    label: "payload: ".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]

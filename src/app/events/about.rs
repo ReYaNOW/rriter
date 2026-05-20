@@ -12,6 +12,46 @@ const DRAG_AUTOSCROLL_MIN_SPEED: f32 = 360.0;
 const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 7200.0;
 const DRAG_AUTOSCROLL_ACCEL: f32 = 0.40;
 const DRAG_AUTOSCROLL_TOP_BOOST: f32 = 1.22;
+const PYTHON_INLAY_HINT_IDLE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
+
+fn request_python_inlay_hints_if_needed(app: &mut App) {
+    if !app.is_ide_mode || !matches!(app.file_extension.as_str(), "py" | "pyi") {
+        app.python_inlay_hints.clear();
+        app.python_inlay_hint_path = None;
+        app.python_inlay_hint_pending_request_id = None;
+        app.python_inlay_hint_pending_path = None;
+        return;
+    }
+    let Some(path) = app.file_path.clone() else {
+        app.python_inlay_hints.clear();
+        app.python_inlay_hint_path = None;
+        return;
+    };
+    if app.python_inlay_hint_pending_request_id.is_some()
+        || app.python_inlay_hint_path.as_ref() == Some(&path)
+            && app.python_inlay_hint_version == app.editor.version
+        || app.last_action.elapsed() < PYTHON_INLAY_HINT_IDLE_DELAY
+    {
+        return;
+    }
+
+    let Some(lsp) = app.lsp.as_mut() else {
+        return;
+    };
+    let text = app.editor.get_full_text();
+    let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(
+        &text,
+        text.len(),
+        &app.editor.line_offsets,
+    );
+    if let Some(id) =
+        lsp.request_ty_inlay_hints(&path, &app.file_extension, 0, 0, end_line, end_col)
+    {
+        app.python_inlay_hint_pending_request_id = Some(id);
+        app.python_inlay_hint_pending_path = Some(path);
+        app.python_inlay_hint_pending_version = app.editor.version;
+    }
+}
 
 fn update_sticky_animation(
     current: &mut Vec<(usize, usize)>,
@@ -843,6 +883,25 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 }
             }
+            crate::lsp::LspEvent::InlayHintsResponse { request_id, hints } => {
+                if app.python_inlay_hint_pending_request_id == Some(request_id) {
+                    app.python_inlay_hint_pending_request_id = None;
+                    let Some(path) = app.python_inlay_hint_pending_path.take() else {
+                        continue;
+                    };
+                    let version = app.python_inlay_hint_pending_version;
+                    if app.file_path.as_ref() == Some(&path) && app.editor.version == version {
+                        let text = app.editor.get_full_text();
+                        app.python_inlay_hints =
+                            crate::app::python_positional_inlay_hints_from_lsp(&text, &hints);
+                        app.python_inlay_hint_path = Some(path);
+                        app.python_inlay_hint_version = version;
+                        if let Some(w) = app.window.as_ref() {
+                            w.request_redraw();
+                        }
+                    }
+                }
+            }
             crate::lsp::LspEvent::ServerReady => {}
             crate::lsp::LspEvent::StatusChanged { .. } => {}
             crate::lsp::LspEvent::ConfigurationServed { .. } => {}
@@ -1095,6 +1154,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
         }
     }
+
+    request_python_inlay_hints_if_needed(app);
 
     if app.is_ide_mode {
         if let Some(lsp) = &mut app.lsp {
