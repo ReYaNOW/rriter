@@ -377,6 +377,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_git_diff_tabs() {
         needs_redraw = true;
     }
+    if app.poll_inline_git_diff_popup() {
+        needs_redraw = true;
+    }
     if let Some(until) = app.readonly_notice_until {
         if now < until {
             needs_redraw = true;

@@ -52,10 +52,12 @@ impl App {
     /// Обрабатывает клик по UI элементу
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
+        let editor_was_focused = self.editor_has_input_focus();
         match id {
             UiId::HoverPopupScroll
             | UiId::StatusBar
             | UiId::SearchPanelBody
+            | UiId::InlineGitPanelBody
             | UiId::GitDiffPanelBody => {}
             UiId::StatusDiagnostics => {
                 self.ide_panel.toggle(crate::app::PanelId::Problems);
@@ -830,6 +832,18 @@ impl App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::EditorGitHunk(hunk_idx, clicked_line) => {
+                self.show_inline_git_hunk_popup(hunk_idx, clicked_line.saturating_add(1));
+            }
+            UiId::InlineGitPrevHunk => {
+                self.jump_inline_git_hunk(-1);
+            }
+            UiId::InlineGitNextHunk => {
+                self.jump_inline_git_hunk(1);
+            }
+            UiId::InlineGitRollbackHunk => {
+                self.rollback_inline_git_hunk();
+            }
             UiId::GitDiffRollbackHunk(tab_idx, hunk_idx) => {
                 if tab_idx == self.active_tab {
                     self.rollback_active_git_diff_hunk(hunk_idx);
@@ -1429,6 +1443,9 @@ impl App {
                     window.request_redraw();
                 }
             }
+        }
+        if editor_was_focused && !self.editor_has_input_focus() {
+            self.autosave_current_file_if_dirty();
         }
     }
 }

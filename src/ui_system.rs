@@ -100,6 +100,11 @@ pub enum UiId {
     // Editor
     EditorFoldArrow(usize),
     EditorFoldDots(usize),
+    EditorGitHunk(usize, usize),
+    InlineGitPrevHunk,
+    InlineGitNextHunk,
+    InlineGitRollbackHunk,
+    InlineGitPanelBody,
     GitDiffRollbackHunk(usize, usize),
     GitDiffPrevHunk,
     GitDiffNextHunk,

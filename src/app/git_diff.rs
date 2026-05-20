@@ -1,6 +1,7 @@
 use crate::app::git_panel::{GitFileEntry, GitFileStatus};
-use crate::app::{App, EditorTab, EditorTabKind};
-use crate::editor::Editor;
+use crate::app::{App, EditorTab, EditorTabKind, InlineGitPopup, InlineGitPopupLine};
+use crate::editor::{Editor, LineDiffHunk};
+use crate::highlighter::{ColorSpan, Highlighter};
 use imara_diff::{Algorithm, Diff, InternedInput, TokenSource};
 use rustc_hash::FxHasher;
 use std::hash::Hasher;
@@ -113,6 +114,19 @@ pub struct GitDiffEvent {
     pub version: u64,
 }
 
+pub struct InlineGitDiffEvent {
+    pub hunk_idx: usize,
+    pub target_hunk: LineDiffHunk,
+    pub anchor_line: usize,
+    pub editor_version: u64,
+    pub result: Result<InlineGitDiffPayload, String>,
+}
+
+pub struct InlineGitDiffPayload {
+    pub state: GitDiffState,
+    pub spans: Vec<ColorSpan>,
+}
+
 #[derive(Clone, Copy)]
 struct HashSource<'a>(&'a [u64]);
 
@@ -176,10 +190,25 @@ fn push_line(out: &mut String, kinds: &mut Vec<DiffLineKind>, line: &LineSpan, k
 
 fn range_text(lines: &[LineSpan], start: usize, end: usize) -> String {
     let mut text = String::new();
-    for line in &lines[start..end] {
+    for line in &lines[start.min(lines.len())..end.min(lines.len())] {
         text.push_str(&line.text);
     }
     text
+}
+
+fn line_byte_bounds(
+    lines: &[LineSpan],
+    start: usize,
+    end: usize,
+    text_len: usize,
+) -> (usize, usize) {
+    let start_byte = lines.get(start).map(|line| line.start).unwrap_or(text_len);
+    let end_byte = lines
+        .get(end)
+        .map(|line| line.start)
+        .or_else(|| lines.get(end.saturating_sub(1)).map(|line| line.end))
+        .unwrap_or(start_byte);
+    (start_byte, end_byte)
 }
 
 pub fn build_diff_view(base_text: String, worktree_text: String) -> GitDiffState {
@@ -346,6 +375,14 @@ fn read_head_blob(repo: &git2::Repository, rel_path: &str) -> Result<String, Str
     Ok(String::from_utf8_lossy(blob.content()).into_owned())
 }
 
+pub(crate) fn load_head_text_for_worktree_path(abs_path: &Path) -> Option<String> {
+    let repo = git2::Repository::discover(abs_path).ok()?;
+    let repo_root = repo.workdir()?.to_path_buf();
+    let rel_path = abs_path.strip_prefix(&repo_root).ok()?;
+    let rel_path = rel_path.to_string_lossy();
+    read_head_blob(&repo, &rel_path).ok()
+}
+
 fn read_index_blob(repo: &git2::Repository, rel_path: &str) -> Result<Option<String>, String> {
     let index = repo.index().map_err(|err| err.message().to_string())?;
     let Some(entry) = index.get_path(Path::new(rel_path), 0) else {
@@ -405,6 +442,27 @@ fn load_git_diff_with_side(
     })
 }
 
+fn build_inline_git_diff_payload(
+    payload: GitDiffPayload,
+    file_extension: String,
+    priority_anchor: usize,
+) -> InlineGitDiffPayload {
+    let state = build_diff_view(payload.base_text, payload.worktree_text);
+    let mut highlighter = Highlighter::new();
+    let version = 1;
+    highlighter.reset(
+        version,
+        state.displayed_text.clone(),
+        file_extension,
+        priority_anchor.min(state.displayed_text.len()),
+    );
+    let _ = highlighter.wait_for_first_result(version, std::time::Duration::from_millis(150));
+    InlineGitDiffPayload {
+        state,
+        spans: highlighter.spans,
+    }
+}
+
 fn file_name_for_diff_title(rel_path: &str) -> String {
     Path::new(rel_path)
         .file_name()
@@ -427,6 +485,44 @@ fn new_editor_with_text(text: &str, version: u64) -> Editor {
 }
 
 impl App {
+    fn current_git_file_entry_for_diff(&self) -> Option<GitFileEntry> {
+        if !self.is_ide_mode || self.active_tab_is_git_diff() {
+            return None;
+        }
+        let path = self.file_path.as_ref()?;
+        let abs_path = self.abs_path_for_workspace(path);
+        self.ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .flat_map(|workspace| workspace.files.iter())
+            .find(|file| file.repo_root.join(&file.rel_path) == abs_path)
+            .cloned()
+    }
+
+    pub(crate) fn current_file_git_base_text(&self) -> Option<String> {
+        if !self.is_ide_mode || self.active_tab_is_git_diff() {
+            return None;
+        }
+        let path = self.file_path.as_ref()?;
+        let abs_path = self.abs_path_for_workspace(path);
+        if !self
+            .ide_workspaces
+            .iter()
+            .any(|workspace| abs_path.starts_with(workspace))
+        {
+            return None;
+        }
+        load_head_text_for_worktree_path(&abs_path)
+    }
+
+    pub(crate) fn refresh_current_editor_git_base(&mut self) {
+        let base_text = self.current_file_git_base_text();
+        self.editor.set_git_base_text(base_text);
+        self.inline_git_popup = None;
+    }
+
     pub fn active_tab_is_git_diff(&self) -> bool {
         self.tabs
             .get(self.active_tab)
@@ -611,6 +707,38 @@ impl App {
         updated
     }
 
+    pub fn poll_inline_git_diff_popup(&mut self) -> bool {
+        let Some(rx) = self.inline_git_diff_rx.take() else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(event) => {
+                if event.editor_version == self.editor.version {
+                    if let Ok(payload) = event.result {
+                        self.set_inline_git_popup_from_diff_state(
+                            event.hunk_idx,
+                            event.target_hunk,
+                            event.anchor_line,
+                            &payload.state,
+                            payload.spans,
+                        );
+                    } else {
+                        self.inline_git_popup = None;
+                    }
+                }
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.inline_git_diff_rx = Some(rx);
+                true
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.inline_git_popup = None;
+                true
+            }
+        }
+    }
+
     fn apply_git_diff_event(&mut self, event: GitDiffEvent) {
         let Some(tab_idx) = self.tabs.iter().position(|tab| match &tab.kind {
             EditorTabKind::GitDiff(meta, state) => {
@@ -724,9 +852,8 @@ impl App {
                 )
             })
             .unwrap_or(line_height * 12.0);
-        let target = (line as f32 * line_height - visible_h * GIT_DIFF_FOCUS_RATIO)
-            .max(0.0)
-            .round();
+        let line_y = self.editor_visual_y_for_line(line, line_height);
+        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO).max(0.0).round();
         self.scroll_y.current = target;
         self.scroll_y.target = target;
     }
@@ -759,7 +886,8 @@ impl App {
             self.is_ide_mode,
             s,
         );
-        let target = (line as f32 * line_height - visible_h * GIT_DIFF_FOCUS_RATIO)
+        let line_y = self.editor_visual_y_for_line(line, line_height);
+        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO)
             .max(0.0)
             .round();
         let max_s = self
@@ -767,8 +895,335 @@ impl App {
             .as_mut()
             .map(|r| r.get_max_scroll(&self.editor, visible_h))
             .unwrap_or(target);
-        self.scroll_y.target = target.clamp(0.0, max_s).round();
+        let target = target.clamp(0.0, max_s).round();
+        self.scroll_y.current = target;
+        self.scroll_y.target = target;
         self.scroll_y.anim_speed = 10.0;
+    }
+
+    fn animate_editor_to_line(&mut self, line: usize) {
+        let line_height = self
+            .renderer
+            .as_ref()
+            .map(|r| r.line_height)
+            .unwrap_or(20.0);
+        let Some((renderer_h, s)) = self.renderer.as_ref().map(|r| (r.height, r.scale_factor))
+        else {
+            self.scroll_y.current = line as f32 * line_height;
+            self.scroll_y.target = self.scroll_y.current;
+            return;
+        };
+        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+            0.0
+        } else {
+            38.0 * s
+        };
+        let panel_bottom_h = if self.is_ide_mode {
+            self.ide_panel.editor_reserved_bottom_height(s)
+        } else {
+            0.0
+        };
+        let visible_h = crate::render_view::editor_view_height(
+            renderer_h,
+            tab_bar_h,
+            panel_bottom_h,
+            self.is_ide_mode,
+            s,
+        );
+        let line_y = self.editor_visual_y_for_line(line, line_height);
+        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO)
+            .max(0.0)
+            .round();
+        let max_s = self
+            .renderer
+            .as_mut()
+            .map(|r| r.get_max_scroll(&self.editor, visible_h))
+            .unwrap_or(target);
+        let target = target.clamp(0.0, max_s).round();
+        self.scroll_y.target = target;
+        self.scroll_y.anim_speed = 10.0;
+    }
+
+    fn editor_visual_y_for_line(&self, target_line: usize, line_height: f32) -> f32 {
+        let mut y = 0.0;
+        let mut phys_line = 0usize;
+        while phys_line < self.editor.line_offsets.len() {
+            if phys_line >= target_line {
+                return y;
+            }
+            let is_folded = self.editor.folded_lines.contains(&phys_line)
+                && self.editor.foldable_lines.contains_key(&phys_line);
+            if is_folded
+                && let Some(&fold_end) = self.editor.foldable_lines.get(&phys_line)
+                && target_line <= fold_end
+            {
+                return y;
+            }
+            y += line_height;
+            if is_folded && let Some(&fold_end) = self.editor.foldable_lines.get(&phys_line) {
+                phys_line = fold_end;
+            }
+            phys_line += 1;
+        }
+        y
+    }
+
+    fn inline_git_anchor_line(&self, line: usize) -> usize {
+        let mut anchor = line.min(self.editor.line_offsets.len().saturating_sub(1));
+        for &fold_start in &self.editor.folded_lines {
+            let Some(&fold_end) = self.editor.foldable_lines.get(&fold_start) else {
+                continue;
+            };
+            if anchor > fold_start && anchor <= fold_end {
+                anchor = fold_start;
+                break;
+            }
+        }
+        anchor
+    }
+
+    fn inline_diff_hunk_index_for_target(
+        state: &GitDiffState,
+        target_hunk: LineDiffHunk,
+        fallback_idx: usize,
+    ) -> Option<usize> {
+        state
+            .hunks
+            .iter()
+            .position(|hunk| {
+                hunk.before_line_start == target_hunk.before_start
+                    && hunk.before_line_end == target_hunk.before_end
+                    && hunk.after_line_start == target_hunk.after_start
+                    && hunk.after_line_end == target_hunk.after_end
+            })
+            .or_else(|| {
+                state.hunks.iter().position(|hunk| {
+                    hunk.after_line_start == target_hunk.after_start
+                        && hunk.after_line_end == target_hunk.after_end
+                })
+            })
+            .or_else(|| (fallback_idx < state.hunks.len()).then_some(fallback_idx))
+    }
+
+    fn set_inline_git_popup_from_diff_state(
+        &mut self,
+        hunk_idx: usize,
+        target_hunk: LineDiffHunk,
+        anchor_line: usize,
+        diff_state: &GitDiffState,
+        spans: Vec<ColorSpan>,
+    ) {
+        let Some(diff_idx) =
+            Self::inline_diff_hunk_index_for_target(diff_state, target_hunk, hunk_idx)
+        else {
+            self.inline_git_popup = None;
+            return;
+        };
+        let Some(diff_hunk) = diff_state.hunks.get(diff_idx) else {
+            self.inline_git_popup = None;
+            return;
+        };
+        let displayed_lines = split_lines_preserve(&diff_state.displayed_text);
+        let display_end_line = displayed_lines
+            .partition_point(|line| line.start < diff_hunk.display_end)
+            .max(diff_hunk.display_start_line);
+        let mut lines =
+            Vec::with_capacity(display_end_line.saturating_sub(diff_hunk.display_start_line));
+        for display_line in diff_hunk.display_start_line..display_end_line {
+            let Some(kind) = diff_state.line_kinds.get(display_line).copied() else {
+                continue;
+            };
+            let text = displayed_lines
+                .get(display_line)
+                .map(|line| {
+                    line.text
+                        .trim_end_matches(|c| c == '\r' || c == '\n')
+                        .to_string()
+                })
+                .unwrap_or_default();
+            lines.push(InlineGitPopupLine {
+                text,
+                kind,
+                display_start: displayed_lines
+                    .get(display_line)
+                    .map(|line| line.start)
+                    .unwrap_or(0),
+            });
+        }
+        if lines.is_empty() {
+            self.inline_git_popup = None;
+            return;
+        }
+        self.inline_git_popup = Some(InlineGitPopup {
+            hunk_idx,
+            anchor_line,
+            lines,
+            spans,
+            diff_state: diff_state.clone(),
+        });
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub fn show_inline_git_hunk_popup(&mut self, hunk_idx: usize, anchor_line: usize) {
+        let Some(target_hunk) = self.editor.git_hunks.get(hunk_idx).copied() else {
+            self.inline_git_diff_rx = None;
+            self.inline_git_popup = None;
+            return;
+        };
+        let anchor_line = self.inline_git_anchor_line(anchor_line);
+
+        if let Some(file) = self.current_git_file_entry_for_diff() {
+            let (tx, rx) = mpsc::channel();
+            self.inline_git_diff_rx = Some(rx);
+            let editor_version = self.editor.version;
+            let file_extension = self.file_extension.clone();
+            std::thread::spawn(move || {
+                let result = load_git_diff_with_side(
+                    file.repo_root,
+                    file.rel_path,
+                    file.old_rel_path,
+                    file.status,
+                    file.staged,
+                )
+                .map(|payload| {
+                    build_inline_git_diff_payload(payload, file_extension, target_hunk.after_start)
+                });
+                let _ = tx.send(InlineGitDiffEvent {
+                    hunk_idx,
+                    target_hunk,
+                    anchor_line,
+                    editor_version,
+                    result,
+                });
+            });
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        let Some(base_text) = self.editor.git_base_text.clone() else {
+            self.inline_git_diff_rx = None;
+            self.inline_git_popup = None;
+            return;
+        };
+        let current_text = self.editor.get_full_text();
+        let payload = build_inline_git_diff_payload(
+            GitDiffPayload {
+                base_text,
+                worktree_text: current_text,
+            },
+            self.file_extension.clone(),
+            target_hunk.after_start,
+        );
+        self.set_inline_git_popup_from_diff_state(
+            hunk_idx,
+            target_hunk,
+            anchor_line,
+            &payload.state,
+            payload.spans,
+        );
+    }
+
+    pub fn jump_inline_git_hunk(&mut self, direction: isize) {
+        if self.editor.git_hunks.is_empty() {
+            self.inline_git_popup = None;
+            return;
+        }
+        if self.editor.git_hunks.len() == 1 {
+            let anchor_line = self.inline_git_anchor_line(self.editor.git_hunks[0].after_start + 1);
+            self.show_inline_git_hunk_popup(0, anchor_line);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+        let current = self
+            .inline_git_popup
+            .as_ref()
+            .map(|popup| popup.hunk_idx)
+            .unwrap_or(0);
+        let target = if direction > 0 {
+            (current + 1) % self.editor.git_hunks.len()
+        } else if current == 0 {
+            self.editor.git_hunks.len() - 1
+        } else {
+            current - 1
+        };
+        let target_line = self.editor.git_hunks[target].after_start;
+        let anchor_line = self.inline_git_anchor_line(target_line + 1);
+        if let (Some((diff_state, spans)), Some(target_hunk)) = (
+            self.inline_git_popup
+                .as_ref()
+                .map(|popup| (popup.diff_state.clone(), popup.spans.clone())),
+            self.editor.git_hunks.get(target).copied(),
+        ) {
+            self.set_inline_git_popup_from_diff_state(
+                target,
+                target_hunk,
+                anchor_line,
+                &diff_state,
+                spans,
+            );
+        } else {
+            self.show_inline_git_hunk_popup(target, anchor_line);
+        }
+        self.animate_editor_to_line(target_line);
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub fn rollback_inline_git_hunk(&mut self) {
+        let Some(hunk_idx) = self.inline_git_popup.as_ref().map(|popup| popup.hunk_idx) else {
+            return;
+        };
+        let Some(hunk) = self.editor.git_hunks.get(hunk_idx).copied() else {
+            self.inline_git_popup = None;
+            return;
+        };
+        let Some(base_text) = self.editor.git_base_text.clone() else {
+            self.inline_git_popup = None;
+            return;
+        };
+        let current_text = self.editor.get_full_text();
+        let before_lines = split_lines_preserve(&base_text);
+        let after_lines = split_lines_preserve(&current_text);
+        let old_text = range_text(&before_lines, hunk.before_start, hunk.before_end);
+        let (replace_start, replace_end) = line_byte_bounds(
+            &after_lines,
+            hunk.after_start,
+            hunk.after_end,
+            current_text.len(),
+        );
+        let (offset, len, _) = self
+            .editor
+            .replace_range(replace_start, replace_end, &old_text);
+        self.highlighter.shift_delete(offset, len);
+        self.reset_highlighter_with_text(self.editor.get_full_text(), false);
+        self.editor.sync_edits.clear();
+        self.is_highlighted_once = false;
+        self.inline_git_popup = None;
+        self.inline_git_diff_rx = None;
+        if self.is_ide_mode
+            && let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path)
+        {
+            let text = self.editor.get_full_text();
+            let ext = self.file_extension.clone();
+            lsp.notify_change(path, &ext, &text, self.editor.version as i32);
+            self.last_sent_version = self.editor.version;
+        }
+        if self.show_search && !self.search_editor.get_full_text().is_empty() {
+            self.update_search();
+        } else {
+            self.search_results.clear();
+        }
+        if let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+            window.request_redraw();
+        }
     }
 
     fn active_git_diff_focus_line(&self) -> usize {
@@ -1046,5 +1501,23 @@ mod tests {
         let state = build_diff_view("a\nold\n".to_string(), "a\nnew\n".to_string());
         let hunk = state.hunks.first().unwrap();
         assert_eq!(rollback_hunk_text(&state.worktree_text, hunk), "a\nold\n");
+    }
+
+    #[test]
+    fn inline_diff_hunk_match_prefers_line_ranges() {
+        let state = build_diff_view(
+            "a\nold\nb\nbefore\n".to_string(),
+            "a\nnew\nb\nafter\n".to_string(),
+        );
+        let target = LineDiffHunk {
+            before_start: 3,
+            before_end: 4,
+            after_start: 3,
+            after_end: 4,
+        };
+        assert_eq!(
+            App::inline_diff_hunk_index_for_target(&state, target, 0),
+            Some(1)
+        );
     }
 }

@@ -186,6 +186,7 @@ impl App {
                     self.editor.version as i32,
                 );
             }
+            self.refresh_current_editor_git_base();
         }
 
         self.refresh_file_tree();
@@ -437,6 +438,7 @@ impl App {
         self.autocomplete_active = false;
         self.show_welcome =
             self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+        self.inline_git_popup = None;
         self.reveal_active_tab_now();
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
@@ -694,6 +696,30 @@ impl App {
 
     pub(crate) fn clear_ctrl_definition(&mut self) {
         self.ctrl_definition = CtrlDefinitionState::default();
+    }
+
+    pub(crate) fn editor_has_input_focus(&self) -> bool {
+        !self.show_welcome
+            && !self.active_tab_is_git_diff()
+            && !self.search_focused
+            && !self.settings_ignore_focused
+            && !self.ide_panel.terminal_focused
+            && !self.ide_panel.term_search_focused
+            && !self.ide_panel.git.message_focused
+            && self.ide_panel.lsp_logs_focused.is_none()
+            && !self.ide_panel.lsp_log_filter_focused
+            && !self.ide_panel.file_tree_focused
+    }
+
+    pub(crate) fn autosave_current_file_if_dirty(&mut self) -> bool {
+        if self.active_tab_is_git_diff() || self.file_path.is_none() || !self.editor.is_dirty() {
+            return false;
+        }
+        let saved = self.save_current_file();
+        if saved && let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+        }
+        saved
     }
 
     pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
@@ -1304,6 +1330,7 @@ impl App {
                 self.editor.version = old_version + 1;
                 self.editor.set_clean_text(&content);
                 self.file_path = Some(path.clone());
+                self.refresh_current_editor_git_base();
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.base_title = file_name.into_owned();
                 self.file_extension = path

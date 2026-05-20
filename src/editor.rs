@@ -22,10 +22,26 @@ impl<'a> TokenSource for HashSource<'a> {
     }
 }
 
-fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>) {
+#[derive(Clone)]
+struct DiffInfo {
+    modified: Vec<bool>,
+    deleted_gaps: Vec<bool>,
+    hunks: Vec<LineDiffHunk>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineDiffHunk {
+    pub before_start: usize,
+    pub before_end: usize,
+    pub after_start: usize,
+    pub after_end: usize,
+}
+
+fn get_diff_info(old: &[u64], new: &[u64]) -> DiffInfo {
     let m = new.len();
     let mut modified = vec![false; m];
     let mut deleted_gaps = vec![false; m + 1];
+    let mut hunks = Vec::new();
 
     let input = InternedInput::new(HashSource(old), HashSource(new));
     let diff = Diff::compute(Algorithm::Histogram, &input);
@@ -37,9 +53,55 @@ fn get_diff_info(old: &[u64], new: &[u64]) -> (Vec<bool>, Vec<bool>) {
         if !hunk.before.is_empty() {
             deleted_gaps[hunk.after.start as usize] = true;
         }
+        hunks.push(LineDiffHunk {
+            before_start: hunk.before.start as usize,
+            before_end: hunk.before.end as usize,
+            after_start: hunk.after.start as usize,
+            after_end: hunk.after.end as usize,
+        });
     }
 
-    (modified, deleted_gaps)
+    DiffInfo {
+        modified,
+        deleted_gaps,
+        hunks,
+    }
+}
+
+fn line_hashes_from_text(text: &str) -> Vec<u64> {
+    let mut hashes = Vec::with_capacity(1024);
+    let mut hasher = FxHasher::default();
+    for &b in text.as_bytes() {
+        if b == b'\n' {
+            hashes.push(hasher.finish());
+            hasher = FxHasher::default();
+        } else {
+            hasher.write_u8(b);
+        }
+    }
+    hashes.push(hasher.finish());
+    hashes
+}
+
+fn line_hashes_from_slices(first: &str, second: &str) -> Vec<u64> {
+    let mut hashes = Vec::with_capacity(1024);
+    let mut hasher = FxHasher::default();
+
+    let mut process_slice = |bytes: &[u8]| {
+        for &b in bytes {
+            if b == b'\n' {
+                hashes.push(hasher.finish());
+                hasher = FxHasher::default();
+            } else {
+                hasher.write_u8(b);
+            }
+        }
+    };
+
+    process_slice(first.as_bytes());
+    process_slice(second.as_bytes());
+    hashes.push(hasher.finish());
+    hashes
 }
 
 fn is_delimiter(b: u8) -> bool {
@@ -112,6 +174,8 @@ pub struct Editor {
 
     pub original_hashes: Vec<u64>,
     pub saved_hashes: Vec<u64>,
+    pub git_base_text: Option<String>,
+    pub git_hunks: Vec<LineDiffHunk>,
     pub line_states: Vec<Option<LineModState>>,
     pub deleted_gaps: Vec<Option<LineModState>>,
     pub is_dirty: bool,
@@ -143,6 +207,8 @@ impl Editor {
             is_working_history: false,
             original_hashes: vec![],
             saved_hashes: vec![],
+            git_base_text: None,
+            git_hunks: Vec::new(),
             line_states: vec![],
             deleted_gaps: vec![],
             is_dirty: false,
@@ -279,26 +345,8 @@ impl Editor {
     }
 
     fn get_line_hashes(&self) -> Vec<u64> {
-        let mut hashes = Vec::with_capacity(1024);
-        let mut hasher = FxHasher::default();
         let (first, second) = self.text_parts();
-
-        let mut process_slice = |bytes: &[u8]| {
-            for &b in bytes {
-                if b == b'\n' {
-                    hashes.push(hasher.finish());
-                    hasher = FxHasher::default();
-                } else {
-                    hasher.write_u8(b);
-                }
-            }
-        };
-
-        process_slice(first.as_bytes());
-        process_slice(second.as_bytes());
-        hashes.push(hasher.finish());
-
-        hashes
+        line_hashes_from_slices(first, second)
     }
 
     pub fn ensure_indent_cache_updated(&mut self) {
@@ -453,6 +501,20 @@ impl Editor {
     pub fn set_original_text(&mut self) {
         self.original_hashes = self.get_line_hashes();
         self.saved_hashes = self.original_hashes.clone();
+        self.git_base_text = None;
+        self.git_hunks.clear();
+        self.update_modifications();
+    }
+
+    pub fn set_git_base_text(&mut self, text: Option<String>) {
+        if let Some(text) = text {
+            self.original_hashes = line_hashes_from_text(&text);
+            self.git_base_text = Some(text);
+        } else {
+            self.original_hashes = self.saved_hashes.clone();
+            self.git_base_text = None;
+        }
+        self.git_hunks.clear();
         self.update_modifications();
     }
 
@@ -481,25 +543,46 @@ impl Editor {
         let curr_is_empty = curr_hashes.len() == 1 && curr_hashes[0] == empty_hash;
 
         let saved_was_empty = self.saved_hashes.len() == 1 && self.saved_hashes[0] == empty_hash;
-        let (mod_saved, mut del_saved) = if saved_was_empty && !curr_is_empty {
+        let saved_info = if saved_was_empty && !curr_is_empty {
             // Весь текущий контент — новый, всё помечаем как unsaved.
-            (
-                vec![true; curr_hashes.len()],
-                vec![false; curr_hashes.len() + 1],
-            )
+            DiffInfo {
+                modified: vec![true; curr_hashes.len()],
+                deleted_gaps: vec![false; curr_hashes.len() + 1],
+                hunks: vec![LineDiffHunk {
+                    before_start: 0,
+                    before_end: self.saved_hashes.len(),
+                    after_start: 0,
+                    after_end: curr_hashes.len(),
+                }],
+            }
         } else {
             get_diff_info(&self.saved_hashes, &curr_hashes)
         };
+        let mod_saved = saved_info.modified;
+        let mut del_saved = saved_info.deleted_gaps;
 
         let orig_was_empty =
             self.original_hashes.len() == 1 && self.original_hashes[0] == empty_hash;
-        let (mod_orig, mut del_orig) = if orig_was_empty && !curr_is_empty {
-            (
-                vec![true; curr_hashes.len()],
-                vec![false; curr_hashes.len() + 1],
-            )
+        let orig_info = if orig_was_empty && !curr_is_empty {
+            DiffInfo {
+                modified: vec![true; curr_hashes.len()],
+                deleted_gaps: vec![false; curr_hashes.len() + 1],
+                hunks: vec![LineDiffHunk {
+                    before_start: 0,
+                    before_end: self.original_hashes.len(),
+                    after_start: 0,
+                    after_end: curr_hashes.len(),
+                }],
+            }
         } else {
             get_diff_info(&self.original_hashes, &curr_hashes)
+        };
+        let mod_orig = orig_info.modified;
+        let mut del_orig = orig_info.deleted_gaps;
+        self.git_hunks = if self.git_base_text.is_some() {
+            orig_info.hunks
+        } else {
+            Vec::new()
         };
 
         // Treat a line replacement (delete + insert) as just a modification.
@@ -538,6 +621,16 @@ impl Editor {
         self.line_states = states;
         self.deleted_gaps = gaps;
         self.is_dirty = dirty;
+    }
+
+    pub fn git_hunk_index_at_line(&self, line: usize) -> Option<usize> {
+        self.git_hunks.iter().position(|hunk| {
+            if hunk.after_start == hunk.after_end {
+                line == hunk.after_start || line.saturating_add(1) == hunk.after_start
+            } else {
+                line >= hunk.after_start && line < hunk.after_end
+            }
+        })
     }
 
     pub fn clear_history(&mut self) {
@@ -764,12 +857,29 @@ impl Editor {
         s
     }
 
+    pub fn line_text_owned(&self, line: usize) -> String {
+        let Some(&start) = self.line_offsets.get(line) else {
+            return String::new();
+        };
+        let end = self
+            .line_offsets
+            .get(line + 1)
+            .copied()
+            .unwrap_or_else(|| self.len());
+        let mut bytes = Vec::with_capacity(end.saturating_sub(start));
+        for i in start..end.min(self.len()) {
+            bytes.push(self.byte_at(i));
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     pub fn set_text_preserve_history(&mut self, text: &str) {
         let history = std::mem::take(&mut self.history);
         let redo_stack = std::mem::take(&mut self.redo_stack);
         let history_size = self.history_size;
         let original_hashes = self.original_hashes.clone();
         let saved_hashes = self.saved_hashes.clone();
+        let git_base_text = self.git_base_text.clone();
         let version = self.version.saturating_add(1);
         let cursor = self.cursor.min(text.len());
 
@@ -787,6 +897,7 @@ impl Editor {
         self.is_working_history = false;
         self.original_hashes = original_hashes;
         self.saved_hashes = saved_hashes;
+        self.git_base_text = git_base_text;
         self.sync_edits.clear();
         self.foldable_lines.clear();
         self.folded_lines.clear();
@@ -820,6 +931,8 @@ impl Editor {
         self.rebuild_line_offsets();
         self.original_hashes = self.get_line_hashes();
         self.saved_hashes = self.original_hashes.clone();
+        self.git_base_text = None;
+        self.git_hunks.clear();
         let line_count = self.original_hashes.len();
         self.line_states = vec![None; line_count];
         self.deleted_gaps = vec![None; line_count + 1];

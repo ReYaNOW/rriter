@@ -621,6 +621,25 @@ impl App {
                 }
 
                 let clicked_id = self.ui_registry.find_at(mx, my);
+                if self.inline_git_popup.is_some()
+                    && button == winit::event::MouseButton::Left
+                    && state == ElementState::Pressed
+                    && !matches!(
+                        clicked_id,
+                        Some(
+                            crate::ui_system::UiId::InlineGitPanelBody
+                                | crate::ui_system::UiId::InlineGitPrevHunk
+                                | crate::ui_system::UiId::InlineGitNextHunk
+                                | crate::ui_system::UiId::InlineGitRollbackHunk
+                                | crate::ui_system::UiId::EditorGitHunk(_, _)
+                        )
+                    )
+                {
+                    self.inline_git_popup = None;
+                    self.inline_git_diff_rx = None;
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
                 let in_graph_tooltip_body = self
                     .renderer
                     .as_ref()

@@ -519,6 +519,7 @@ impl ApplicationHandler for App {
                     }
                     self.window.as_ref().unwrap().request_redraw();
                 } else {
+                    self.autosave_current_file_if_dirty();
                     self.render_suspended = true;
                     self.last_frame = Instant::now();
                     self.close_autocomplete();
@@ -722,6 +723,7 @@ impl ApplicationHandler for App {
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
+                    self.inline_git_popup.as_ref(),
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -1132,6 +1134,28 @@ impl ApplicationHandler for App {
                         }
                         Some(_) => winit::window::CursorIcon::Pointer,
                         None => winit::window::CursorIcon::Default,
+                    }
+                } else if let Some(id) = {
+                    let r = self.renderer.as_ref().unwrap();
+                    self.ui_registry
+                        .find_at(r.last_mouse_x, r.last_mouse_y)
+                        .filter(|id| {
+                            matches!(
+                                id,
+                                crate::ui_system::UiId::InlineGitPanelBody
+                                    | crate::ui_system::UiId::InlineGitPrevHunk
+                                    | crate::ui_system::UiId::InlineGitNextHunk
+                                    | crate::ui_system::UiId::InlineGitRollbackHunk
+                            )
+                        })
+                } {
+                    match id {
+                        crate::ui_system::UiId::InlineGitPrevHunk
+                        | crate::ui_system::UiId::InlineGitNextHunk
+                        | crate::ui_system::UiId::InlineGitRollbackHunk => {
+                            winit::window::CursorIcon::Pointer
+                        }
+                        _ => winit::window::CursorIcon::Default,
                     }
                 } else if wants_pointer {
                     winit::window::CursorIcon::Pointer

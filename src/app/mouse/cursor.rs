@@ -83,6 +83,18 @@ fn should_suppress_editor_hover_for_scroll_drag(
     scroll_y_dragging || scroll_x_dragging
 }
 
+fn inline_git_popup_blocks_hover(id: Option<crate::ui_system::UiId>) -> bool {
+    matches!(
+        id,
+        Some(
+            crate::ui_system::UiId::InlineGitPanelBody
+                | crate::ui_system::UiId::InlineGitPrevHunk
+                | crate::ui_system::UiId::InlineGitNextHunk
+                | crate::ui_system::UiId::InlineGitRollbackHunk
+        )
+    )
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
@@ -155,6 +167,15 @@ impl App {
         ) {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);
+            return;
+        }
+
+        if self.inline_git_popup.is_some()
+            && inline_git_popup_blocks_hover(self.ui_registry.find_at(px, py))
+        {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
             return;
         }
 

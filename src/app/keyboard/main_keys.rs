@@ -122,6 +122,13 @@ impl App {
 
         if key_event.state == ElementState::Pressed {
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                && (self.inline_git_popup.take().is_some()
+                    || self.inline_git_diff_rx.take().is_some())
+            {
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                 && crate::app::mouse::clear_hover_popup(self.renderer.as_mut())
             {
                 self.window.as_ref().unwrap().request_redraw();

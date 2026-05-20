@@ -51,6 +51,22 @@ pub struct ExternalFileChange {
     pub disk_text: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct InlineGitPopupLine {
+    pub text: String,
+    pub kind: crate::app::git_diff::DiffLineKind,
+    pub display_start: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct InlineGitPopup {
+    pub hunk_idx: usize,
+    pub anchor_line: usize,
+    pub lines: Vec<InlineGitPopupLine>,
+    pub spans: Vec<crate::highlighter::ColorSpan>,
+    pub diff_state: crate::app::git_diff::GitDiffState,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum PendingAction {
     Quit,
@@ -725,6 +741,9 @@ pub struct App {
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
     pub git_diff_rx: Vec<std::sync::mpsc::Receiver<crate::app::git_diff::GitDiffEvent>>,
+    pub inline_git_diff_rx:
+        Option<std::sync::mpsc::Receiver<crate::app::git_diff::InlineGitDiffEvent>>,
+    pub inline_git_popup: Option<InlineGitPopup>,
     pub readonly_notice_until: Option<Instant>,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,

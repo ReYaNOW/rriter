@@ -446,6 +446,81 @@ pub struct ModInterval {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_inline_git_text_line(
+        &mut self,
+        text: &str,
+        spans: &[ColorSpan],
+        base_offset: Option<usize>,
+        x: f32,
+        y: f32,
+        max_x: f32,
+        scale: f32,
+    ) {
+        let mut draw_x = x;
+        let mut current_offset = base_offset.unwrap_or(usize::MAX);
+        let mut span_idx = base_offset
+            .map(
+                |offset| match spans.binary_search_by_key(&offset, |s| s.start) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx.saturating_sub(1),
+                },
+            )
+            .unwrap_or(0);
+
+        for c in text.chars() {
+            if draw_x > max_x {
+                break;
+            }
+            if c == '\r' || c == '\n' {
+                break;
+            }
+            let char_len = c.len_utf8();
+            let adv = self.char_advance(c);
+            if c != ' '
+                && c != '\t'
+                && let Some(g) = self.get_glyph(c)
+            {
+                let mut color = self.theme.fg;
+                if base_offset.is_some() {
+                    while span_idx < spans.len() && spans[span_idx].end <= current_offset {
+                        span_idx += 1;
+                    }
+                    if span_idx < spans.len() && spans[span_idx].start <= current_offset {
+                        color = spans[span_idx].color;
+                    }
+                }
+                self.push_quad(
+                    draw_x + g.offset_x,
+                    y - g.offset_y,
+                    g.width,
+                    g.height,
+                    g.u,
+                    g.v,
+                    g.uw,
+                    g.vh,
+                    color,
+                    g.is_emoji,
+                );
+                if c == '.' || c == ':' {
+                    self.push_quad(
+                        draw_x + g.offset_x + 1.0 * scale,
+                        y - g.offset_y,
+                        g.width,
+                        g.height,
+                        g.u,
+                        g.v,
+                        g.uw,
+                        g.vh,
+                        color,
+                        g.is_emoji,
+                    );
+                }
+            }
+            draw_x += adv;
+            current_offset = current_offset.saturating_add(char_len);
+        }
+    }
+
     pub fn draw(
         &mut self,
         editor: &mut Editor,
@@ -482,6 +557,7 @@ impl Renderer {
         ctrl_definition_range: Option<(usize, usize)>,
         ide_workspaces: &[std::path::PathBuf],
         show_readonly_notice: bool,
+        inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
         let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
@@ -1294,13 +1370,37 @@ impl Renderer {
             let draw_bottom = m.bottom + 2.0;
             let draw_h = (draw_bottom - draw_top).max(4.0);
             self.push_rounded_rect(
-                self.left_padding - 4.0 * s,
+                self.left_padding - 8.0 * s,
                 draw_top,
-                4.0 * s,
+                7.0 * s,
                 draw_h,
                 2.0 * s,
                 color,
             );
+        }
+
+        if active_git_diff_state.is_none()
+            && is_ide_mode
+            && !editor.git_hunks.is_empty()
+            && !show_welcome
+        {
+            for i in skip_visual_lines..end_visual_line {
+                let v_line = self.visual_lines[i];
+                let phys_idx = v_line.physical_line - 1;
+                let Some(hunk_idx) = editor.git_hunk_index_at_line(phys_idx) else {
+                    continue;
+                };
+                let y_top = v_line.y_offset - render_scroll_y;
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::EditorGitHunk(hunk_idx, phys_idx),
+                    self.left_padding - 14.0 * s,
+                    y_top,
+                    16.0 * s,
+                    self.line_height,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
+            }
         }
 
         self.flush();
@@ -1577,6 +1677,224 @@ impl Renderer {
             self.fps_string = fps_text;
         }
 
+        if active_git_diff_state.is_none()
+            && !show_welcome
+            && let Some(popup) = inline_git_popup
+            && let Some(line_y) = self
+                .visual_lines
+                .iter()
+                .find(|line| line.physical_line == popup.anchor_line.saturating_add(1))
+                .map(|line| line.y_offset - render_scroll_y)
+        {
+            let max_rows = ((editor_height - 64.0 * s) / self.line_height.max(1.0))
+                .floor()
+                .max(4.0)
+                .min(24.0) as usize;
+            let visible_rows = popup.lines.len().min(max_rows);
+            let truncated = popup.lines.len() > visible_rows;
+            let diff_rows = visible_rows + usize::from(truncated);
+            let row_h = self.line_height;
+            let text_x = self.left_padding - render_scroll_x;
+            let panel_x = text_x - 8.0 * s;
+            let panel_w = (scrollbar_x - panel_x - 18.0 * s)
+                .max(360.0 * s)
+                .min(920.0 * s);
+            let toolbar_h = 42.0 * s;
+            let panel_h = toolbar_h + diff_rows.max(1) as f32 * row_h;
+            let top_limit = tab_bar_h + 8.0 * s;
+            let bottom_limit = tab_bar_h + editor_height - 8.0 * s;
+            let gap = 4.0 * s;
+            let panel_y = if line_y + panel_h <= bottom_limit {
+                line_y
+            } else if line_y - panel_h - gap >= top_limit {
+                line_y + self.line_height - panel_h
+            } else {
+                line_y
+                    .max(top_limit)
+                    .min((bottom_limit - panel_h).max(top_limit))
+            };
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::InlineGitPanelBody,
+                panel_x - 2.0 * s,
+                panel_y - 2.0 * s,
+                panel_w + 4.0 * s,
+                panel_h + 4.0 * s,
+                mx,
+                my,
+            );
+            self.push_rounded_rect(
+                panel_x - 3.0 * s,
+                panel_y - 3.0 * s,
+                panel_w + 6.0 * s,
+                panel_h + 6.0 * s,
+                8.0 * s,
+                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
+            );
+            self.push_rounded_rect(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                7.0 * s,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            );
+
+            let btn_y = panel_y + 5.0 * s;
+            let icon_size = 32.0 * s;
+            let hunk_total = editor.git_hunks.len().max(1);
+            let controls_enabled = hunk_total > 1;
+            let mut current_buf = [0u8; 20];
+            let mut total_buf = [0u8; 20];
+            let current_s = decimal_usize_buf(&mut current_buf, popup.hunk_idx + 1);
+            let total_s = decimal_usize_buf(&mut total_buf, hunk_total);
+            let count_x = panel_x + 12.0 * s;
+            self.draw_string_scaled(current_s, count_x, btn_y + 22.0 * s, self.theme.fg, 0.88);
+            let slash_x = count_x + self.measure_ui_width(current_s, 0.88);
+            self.draw_string_scaled("/", slash_x, btn_y + 22.0 * s, self.theme.line_num, 0.88);
+            self.draw_string_scaled(
+                total_s,
+                slash_x + 7.0 * s,
+                btn_y + 22.0 * s,
+                self.theme.fg,
+                0.88,
+            );
+            let nav_x = panel_x + 62.0 * s;
+            let disabled_col = [
+                self.theme.line_num[0],
+                self.theme.line_num[1],
+                self.theme.line_num[2],
+                0.42,
+            ];
+            let up_btn = crate::widgets::IconButton {
+                x: nav_x,
+                y: btn_y,
+                size: icon_size,
+                icon: Some(crate::widgets::IconType::Up),
+                is_active: false,
+                icon_size: Some(30.0 * s),
+                active_square_width: None,
+                custom_color: (!controls_enabled).then_some(disabled_col),
+            };
+            let down_btn = crate::widgets::IconButton {
+                x: nav_x + 34.0 * s,
+                y: btn_y,
+                size: icon_size,
+                icon: Some(crate::widgets::IconType::Down),
+                is_active: false,
+                icon_size: Some(30.0 * s),
+                active_square_width: None,
+                custom_color: (!controls_enabled).then_some(disabled_col),
+            };
+            let rollback_btn = crate::widgets::IconButton {
+                x: nav_x + 76.0 * s,
+                y: btn_y,
+                size: icon_size,
+                icon: Some(crate::widgets::IconType::Rollback),
+                is_active: false,
+                icon_size: Some(22.0 * s),
+                active_square_width: None,
+                custom_color: None,
+            };
+
+            let max_text_x = panel_x + panel_w - 10.0 * s;
+            let mut row_y = panel_y + toolbar_h;
+            for (row_idx, line) in popup.lines.iter().take(visible_rows).enumerate() {
+                let color = match line.kind {
+                    crate::app::git_diff::DiffLineKind::Added
+                    | crate::app::git_diff::DiffLineKind::ModifiedNew => {
+                        Some([0.18, 0.82, 0.34, 0.26])
+                    }
+                    crate::app::git_diff::DiffLineKind::Deleted
+                    | crate::app::git_diff::DiffLineKind::ModifiedOld => {
+                        Some([0.76, 0.78, 0.84, 0.24])
+                    }
+                    crate::app::git_diff::DiffLineKind::Context => None,
+                };
+                if let Some(color) = color {
+                    let prev_kind = row_idx
+                        .checked_sub(1)
+                        .and_then(|idx| popup.lines.get(idx))
+                        .map(|prev| prev.kind);
+                    if !truncated
+                        && row_idx + 1 == visible_rows
+                        && prev_kind != Some(line.kind)
+                    {
+                        self.push_rounded_rect(panel_x, row_y, panel_w, row_h, 7.0 * s, color);
+                    } else {
+                        self.push_rect(panel_x, row_y, panel_w, row_h, color);
+                    }
+                }
+                self.draw_inline_git_text_line(
+                    &line.text,
+                    &popup.spans,
+                    Some(line.display_start),
+                    text_x,
+                    row_y + self.baseline_offset,
+                    max_text_x,
+                    s,
+                );
+                row_y += row_h;
+            }
+            if truncated {
+                let color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.08];
+                self.push_rounded_rect(
+                    panel_x,
+                    row_y,
+                    panel_w,
+                    row_h,
+                    7.0 * s,
+                    color,
+                );
+                self.draw_inline_git_text_line(
+                    "...",
+                    &popup.spans,
+                    None,
+                    text_x,
+                    row_y + self.baseline_offset,
+                    max_text_x,
+                    s,
+                );
+            }
+
+            if controls_enabled {
+                ui_registry.register_icon_button(
+                    crate::ui_system::UiId::InlineGitPrevHunk,
+                    &up_btn,
+                    self,
+                    mx,
+                    my,
+                    s,
+                    false,
+                );
+                ui_registry.register_icon_button(
+                    crate::ui_system::UiId::InlineGitNextHunk,
+                    &down_btn,
+                    self,
+                    mx,
+                    my,
+                    s,
+                    false,
+                );
+            } else {
+                up_btn.render(self, mx, my, s, false);
+                down_btn.render(self, mx, my, s, false);
+            }
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::InlineGitRollbackHunk,
+                &rollback_btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
+
         if let Some(state) = active_git_diff_state
             && !state.hunks.is_empty()
             && !show_welcome
@@ -1787,11 +2105,23 @@ impl Renderer {
             && ide_panel.bottom_panel_blocks_editor_hover()
             && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
             && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
+        let hover_blocked_by_inline_git = inline_git_popup.is_some()
+            && matches!(
+                ui_registry.find_at(mx, my),
+                Some(
+                    crate::ui_system::UiId::InlineGitPanelBody
+                        | crate::ui_system::UiId::InlineGitPrevHunk
+                        | crate::ui_system::UiId::InlineGitNextHunk
+                        | crate::ui_system::UiId::InlineGitRollbackHunk
+                )
+            );
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         if hover_blocked_by_status_bar {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if hover_blocked_by_bottom_panel {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if hover_blocked_by_inline_git {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));

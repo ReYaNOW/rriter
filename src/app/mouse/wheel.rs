@@ -129,6 +129,25 @@ impl App {
         let (dx, dy) = wheel_delta(delta, lh);
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.inline_git_popup.is_some() {
+            let hovered_id = self.ui_registry.find_at(mx, my);
+            if matches!(
+                hovered_id,
+                Some(
+                    crate::ui_system::UiId::InlineGitPanelBody
+                        | crate::ui_system::UiId::InlineGitPrevHunk
+                        | crate::ui_system::UiId::InlineGitNextHunk
+                        | crate::ui_system::UiId::InlineGitRollbackHunk
+                )
+            ) {
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+            self.inline_git_popup = None;
+            self.inline_git_diff_rx = None;
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if self.autocomplete_active {
             if let (Some(rect), Some(popup)) = (
                 self.autocomplete_detail_rect,

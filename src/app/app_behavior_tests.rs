@@ -161,6 +161,8 @@ fn test_app() -> Option<App> {
         file_tree_notify_rx: None,
         external_changes_rx: None,
         git_diff_rx: Vec::new(),
+        inline_git_diff_rx: None,
+        inline_git_popup: None,
         readonly_notice_until: None,
         lsp: None,
         lsp_actions_menu: None,
