@@ -189,6 +189,7 @@ fn completion(
     }
 }
 
+#[test]
 fn search_update_finds_nearest_match_preserves_previous_and_honors_case() {
     let Some(mut app) = test_app() else {
         return;
@@ -249,7 +250,6 @@ fn autocomplete_filters_scores_scrolls_and_applies_selected_completion() {
     assert_eq!(app.autocomplete_selected_idx, 0);
     assert_eq!(app.autocomplete_scroll.target, 0.0);
 }
-
 #[test]
 fn ty_import_autocomplete_waits_for_prefix_and_requires_module() {
     let Some(mut app) = test_app() else {
@@ -941,5 +941,3 @@ fn pending_ty_context_enter_applies_first_response_without_newline() {
     assert!(!app.autocomplete_apply_pending_response);
     assert!(!app.editor.get_full_text().contains('\n'));
 }
-
-#[test]

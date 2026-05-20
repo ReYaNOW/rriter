@@ -1434,6 +1434,39 @@ fn undo_redo_rebuilds_diff_decorations() {
 }
 
 #[test]
+fn inline_git_rollback_undo_restores_cursor_to_changed_block_end() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let base = "a\nold\nz\n";
+    let changed = "a\nnew\nz\n";
+    app.editor = editor_with(changed);
+    app.editor.cursor = 0;
+    app.editor.set_git_base_text(Some(base.to_string()));
+    assert_eq!(app.editor.git_hunks.len(), 1);
+    app.highlighter.spans = vec![crate::highlighter::ColorSpan {
+        start: 0,
+        end: 1,
+        color: crate::highlighter::DRACULA_FG,
+    }];
+    app.inline_git_popup = Some(crate::app::InlineGitPopup {
+        hunk_idx: 0,
+        anchor_line: 1,
+        lines: Vec::new(),
+        spans: Vec::new(),
+        diff_state: crate::app::git_diff::build_diff_view(base.to_string(), changed.to_string()),
+    });
+
+    app.rollback_inline_git_hunk();
+
+    assert_eq!(app.editor.get_full_text(), base);
+    assert!(!app.highlighter.spans.is_empty());
+    app.editor.undo();
+    assert_eq!(app.editor.get_full_text(), changed);
+    assert_eq!(app.editor.cursor, "a\nnew\n".len());
+}
+
+#[test]
 fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
     let Some(mut app) = test_app() else {
         return;

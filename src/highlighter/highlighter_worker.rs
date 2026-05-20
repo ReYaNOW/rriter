@@ -1029,5 +1029,5 @@ impl Highlighter {
 }
 
 #[cfg(test)]
-#[path = "highlighter_tests.rs"]
+#[path = "../highlighter_tests.rs"]
 mod highlighter_tests;

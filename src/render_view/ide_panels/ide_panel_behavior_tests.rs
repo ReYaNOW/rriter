@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn git_graph_render_shift_to_commit_has_no_bottom_tail() {
-        let source = include_str!("ide_panels.rs");
+        let source = include_str!("ide_panel_git_tooltip_renderer.rs");
         let body = source_between(
             source,
             "fn push_git_graph_shift_to_commit_segment",
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn git_graph_render_soft_vertical_preserves_lane_alpha() {
-        let source = include_str!("ide_panels.rs");
+        let source = include_str!("ide_panel_git_tooltip_renderer.rs");
         let body = source_between(
             source,
             "fn push_git_graph_soft_vertical_segment",

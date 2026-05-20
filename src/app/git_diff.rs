@@ -1194,15 +1194,30 @@ impl App {
             hunk.after_end,
             current_text.len(),
         );
+        self.editor.cursor = replace_end;
         let (offset, len, _) = self
             .editor
             .replace_range(replace_start, replace_end, &old_text);
         self.highlighter.shift_delete(offset, len);
-        self.reset_highlighter_with_text(self.editor.get_full_text(), false);
-        self.editor.sync_edits.clear();
-        self.is_highlighted_once = false;
+        self.highlighter
+            .shift_insert(offset, old_text.len(), Some(&old_text));
         self.inline_git_popup = None;
         self.inline_git_diff_rx = None;
+        if !self.editor.sync_edits.is_empty() {
+            let edits = std::mem::take(&mut self.editor.sync_edits);
+            let (invalidate_start_byte, invalidate_end_byte) =
+                crate::highlighter::sync_edit_invalidation_byte_range(&edits);
+            self.highlighter
+                .apply_edits(self.editor.version, edits, None, None);
+            self.highlighter.sync_highlight_after_edit(
+                self.editor.version,
+                None,
+                None,
+                invalidate_start_byte,
+                invalidate_end_byte,
+                std::time::Duration::from_millis(1),
+            );
+        }
         if self.is_ide_mode
             && let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path)
         {

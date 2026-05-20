@@ -1,3 +1,4 @@
+#[test]
 fn ty_completion_cache_uses_request_context_not_current_cursor() {
     let Some(mut app) = test_app() else {
         return;
@@ -48,6 +49,7 @@ fn ty_completion_cache_uses_request_context_not_current_cursor() {
     assert_eq!(app.autocomplete_pending_context_key, None);
 }
 
+#[test]
 fn ty_completion_cache_ignores_uncacheable_prefix_response() {
     let Some(mut app) = test_app() else {
         return;
@@ -130,7 +132,6 @@ fn ty_context_prioritizes_call_argument_completions() {
 
     assert_eq!(app.autocomplete_options[0].0.word, "allow_none");
 }
-
 #[test]
 fn ty_context_preserves_explicit_owner_and_hides_attribute_types() {
     let Some(mut app) = test_app() else {
@@ -970,5 +971,3 @@ fn autocomplete_shows_self_owner_for_current_class() {
     assert_eq!(self_item.kind, SymbolKind::Parameter);
     assert_eq!(self_item.module.as_deref(), Some("BookingService"));
 }
-
-#[test]
