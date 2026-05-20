@@ -1,0 +1,1094 @@
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl Renderer {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_ide_bottom_panel(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp_has_diagnostics: bool,
+        s: f32,
+        mx: f32,
+        my: f32,
+        panel_bottom_h: f32,
+        _is_ui_disabled: bool,
+    ) {
+        let sb_w = 48.0 * s;
+        let panel_x = sb_w;
+        let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
+        let panel_w = self.width - panel_x;
+
+        let uses_translucent_bg = ide_panel.slots.iter().any(|sl| {
+            sl.group == crate::app::PanelGroup::Bottom
+                && sl.open
+                && (sl.id == crate::app::PanelId::Terminal
+                    || sl.id == crate::app::PanelId::Problems)
+        });
+        // Прозрачность терминала/ляпов (0.0 - полностью прозрачный, 1.0 - непрозрачный)
+        let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
+
+        let panel_bg = [
+            0.129, // #21
+            0.133, // #22
+            0.173, // #2c
+            panel_alpha,
+        ];
+        // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
+        self.push_rect(
+            panel_x,
+            panel_y + 1.0,
+            panel_w,
+            panel_bottom_h - 1.0,
+            panel_bg,
+        );
+
+        let blocked = ui_registry.register_blocker(
+            crate::ui_system::UiId::BottomPanelBody,
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_bottom_h,
+            mx,
+            my,
+        );
+        if blocked {
+            ui_registry.reset_cursor_state();
+        }
+
+        let tab_h = 32.0 * s;
+        let tab_bar_bg = [
+            (self.theme.bg[0] + 0.07).min(1.0),
+            (self.theme.bg[1] + 0.07).min(1.0),
+            (self.theme.bg[2] + 0.08).min(1.0),
+            panel_alpha,
+        ];
+        self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
+
+        let mut tx = panel_x + 8.0 * s;
+        for (i, slot) in ide_panel
+            .slots
+            .iter()
+            .filter(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+            .enumerate()
+        {
+            let label = slot.id.label();
+            let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
+            if i == 0 {
+                let act_bg = [
+                    (self.theme.bg[0] + 0.12).min(1.0),
+                    (self.theme.bg[1] + 0.12).min(1.0),
+                    (self.theme.bg[2] + 0.13).min(1.0),
+                    1.0,
+                ];
+                self.push_rect(tx, panel_y + 1.0, tw, tab_h, act_bg);
+                self.push_rect(tx, panel_y + tab_h - 1.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+            }
+            self.draw_string_scaled(
+                label,
+                tx + 10.0 * s,
+                panel_y + 1.0 + tab_h / 2.0 + 5.5 * s,
+                self.theme.fg,
+                0.9,
+            );
+            tx += tw;
+        }
+
+        // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
+        if my >= panel_y - 8.0 * s && my <= panel_y + 8.0 * s && mx >= panel_x {
+            self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
+        }
+
+        // Плейсхолдер контента
+        let content_y = panel_y + 1.0 + tab_h;
+        let content_h = panel_bottom_h - 1.0 - tab_h;
+        if content_h > 8.0 * s {
+            if let Some(slot) = ide_panel
+                .slots
+                .iter()
+                .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+            {
+                if slot.id == crate::app::PanelId::LspServers {
+                    self.draw_lsp_servers_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        ide_panel,
+                        lsp_has_diagnostics,
+                        ui_registry,
+                    );
+                } else if slot.id == crate::app::PanelId::Problems {
+                    self.draw_problems_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        lsp,
+                        ide_panel,
+                        ui_registry,
+                    );
+                } else if slot.id == crate::app::PanelId::Terminal {
+                    self.draw_terminal_panel(
+                        panel_x,
+                        content_y,
+                        panel_w,
+                        content_h,
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        mx,
+                        my,
+                    );
+                } else {
+                    let label = slot.id.label();
+                    let lw = self.measure_ui_width(label, 0.85);
+                    let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
+                    self.draw_string_scaled(
+                        label,
+                        panel_x + (panel_w - lw) / 2.0,
+                        content_y + content_h / 2.0 + 6.0 * s,
+                        col,
+                        0.85,
+                    );
+                }
+            }
+        }
+    }
+
+    pub(crate) fn draw_status_bar(
+        &mut self,
+        editor: &crate::editor::Editor,
+        editor_path: Option<&std::path::PathBuf>,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        s: f32,
+        mx: f32,
+        my: f32,
+        panel_bottom_h: f32,
+        git_progress_label: Option<&str>,
+        git_progress_elapsed_secs: Option<f32>,
+    ) {
+        let bar_h = ide_status_bar_height(s).round();
+        let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
+        let bar_x = (48.0 * s).round();
+        let bar_w = (self.width - bar_x).max(0.0);
+        if bar_w <= 1.0 || bar_h <= 1.0 {
+            return;
+        }
+
+        self.push_rect(bar_x, bar_y, bar_w, bar_h, [0.118, 0.125, 0.165, 1.0]);
+        self.push_rect(
+            bar_x,
+            bar_y,
+            bar_w,
+            1.0,
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.12],
+        );
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::StatusBar,
+            bar_x,
+            bar_y,
+            bar_w,
+            bar_h,
+            mx,
+            my,
+        );
+
+        let (error_count, warning_count) = lsp
+            .map(|l| diagnostic_error_warning_counts(l.diagnostics.values().map(|v| v.as_slice())))
+            .unwrap_or((0, 0));
+
+        let icon_sz = 20.0 * s;
+        let text_scale = 0.95;
+        let pad_x = 10.0 * s;
+        let icon_gap = 5.0 * s;
+        let item_gap = 16.0 * s;
+        let diag_x = bar_x + pad_x;
+        let icon_y = bar_y + (bar_h - icon_sz) / 2.0;
+        let text_y = bar_y + bar_h / 2.0 + 5.0 * s;
+
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
+        let error_w = self.measure_ui_width(&scratch, text_scale).round();
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
+        let warning_w = self.measure_ui_width(&scratch, text_scale).round();
+
+        let diagnostics_w =
+            icon_sz + icon_gap + error_w + item_gap + icon_sz + icon_gap + warning_w + pad_x;
+        let diagnostics_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::StatusDiagnostics,
+            diag_x - 4.0 * s,
+            bar_y,
+            diagnostics_w,
+            bar_h,
+            mx,
+            my,
+        );
+        if diagnostics_hovered {
+            self.push_rect(
+                diag_x - 4.0 * s,
+                bar_y,
+                diagnostics_w,
+                bar_h,
+                [1.0, 1.0, 1.0, 0.07],
+            );
+        }
+
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Error,
+            diag_x,
+            icon_y,
+            icon_sz,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
+        let error_text_x = diag_x + icon_sz + icon_gap;
+        self.draw_string_scaled(&scratch, error_text_x, text_y, self.theme.fg, text_scale);
+
+        let warn_icon_x = error_text_x + error_w + item_gap;
+        self.draw_atlas_icon(
+            crate::widgets::IconType::Warning,
+            warn_icon_x,
+            icon_y,
+            icon_sz,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        scratch.clear();
+        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
+        self.draw_string_scaled(
+            &scratch,
+            warn_icon_x + icon_sz + icon_gap,
+            text_y,
+            self.theme.fg,
+            text_scale,
+        );
+
+        let ext = editor_path
+            .and_then(|path| path.extension())
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        let lang = language_display_name_for_ext(ext);
+        scratch.clear();
+        scratch.push_str(lang);
+        let lang_w = self.measure_ui_width(&scratch, text_scale).round();
+        let lang_x = (bar_x + bar_w - pad_x - lang_w).max(diag_x);
+        self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
+
+        let (line, character) = cursor_line_and_character(editor);
+        const ZERO_SAMPLE: &str = "00000000000000000000";
+        let item_gap = 14.0 * s;
+        let digit_gap = 4.0 * s;
+        let line_digits = line.to_string();
+        let char_digits = character.to_string();
+        let line_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..line_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let char_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..char_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let line_label_w = self.measure_ui_width("Стр", text_scale).round();
+        let char_label_w = self.measure_ui_width("Сим", text_scale).round();
+        let line_block_w = line_label_w + digit_gap + line_digits_w;
+        let char_block_w = char_label_w + digit_gap + char_digits_w;
+        let selected_count = selected_char_count(editor);
+        let selected_count_digits = selected_count.map(|count| count.to_string());
+        let selected_block_w = selected_count_digits
+            .as_ref()
+            .map(|digits| {
+                self.measure_ui_width("(", text_scale).round()
+                    + self
+                        .measure_mono_width(
+                            &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
+                            text_scale,
+                        )
+                        .round()
+                    + self.measure_ui_width(" выделено)", text_scale).round()
+            })
+            .unwrap_or(0.0);
+        let pos_color = self.theme.fg;
+        let mut group_w = line_block_w + item_gap + char_block_w;
+        if selected_block_w > 0.0 {
+            group_w += item_gap + selected_block_w;
+        }
+        let line_x = lang_x - 22.0 * s - group_w;
+        if let Some(label) = git_progress_label {
+            let label_w = self.measure_ui_width(label, 0.82).round();
+            let progress_gap = 8.0 * s;
+            let track_w = 74.0 * s;
+            let track_h = 5.0 * s;
+            let progress_w = label_w + progress_gap + track_w;
+            let progress_x = line_x - 18.0 * s - progress_w;
+            if progress_x > diag_x + diagnostics_w + 8.0 * s {
+                let track_x = progress_x + label_w + progress_gap;
+                let track_y = bar_y + (bar_h - track_h) / 2.0;
+                self.draw_string_scaled(
+                    label,
+                    progress_x,
+                    text_y,
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72],
+                    0.82,
+                );
+                self.push_rounded_rect(
+                    track_x,
+                    track_y,
+                    track_w,
+                    track_h,
+                    track_h / 2.0,
+                    [1.0, 1.0, 1.0, 0.10],
+                );
+                let thumb_w = (28.0 * s).min(track_w);
+                let phase = git_progress_elapsed_secs
+                    .map(git_progress_thumb_phase)
+                    .unwrap_or(1.0);
+                self.push_rounded_rect(
+                    track_x + (track_w - thumb_w) * phase,
+                    track_y,
+                    thumb_w,
+                    track_h,
+                    track_h / 2.0,
+                    [0.60, 0.35, 0.85, 0.88],
+                );
+            }
+        }
+        if line_x > diag_x + diagnostics_w + 8.0 * s {
+            self.draw_string_scaled("Стр", line_x, text_y, pos_color, text_scale);
+            self.draw_string_mono_scaled(
+                &line_digits,
+                line_x + line_label_w + digit_gap,
+                text_y,
+                pos_color,
+                text_scale,
+            );
+            let char_x = line_x + line_block_w + item_gap;
+            self.draw_string_scaled("Сим", char_x, text_y, pos_color, text_scale);
+            self.draw_string_mono_scaled(
+                &char_digits,
+                char_x + char_label_w + digit_gap,
+                text_y,
+                pos_color,
+                text_scale,
+            );
+            if let Some(digits) = selected_count_digits.as_deref() {
+                let selected_x = char_x + char_block_w + item_gap;
+                self.draw_string_scaled("(", selected_x, text_y, pos_color, text_scale);
+                let digit_x = selected_x + self.measure_ui_width("(", text_scale).round();
+                self.draw_string_mono_scaled(digits, digit_x, text_y, pos_color, text_scale);
+                let suffix_x = digit_x
+                    + self
+                        .measure_mono_width(
+                            &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
+                            text_scale,
+                        )
+                        .round();
+                self.draw_string_scaled(" выделено)", suffix_x, text_y, pos_color, text_scale);
+            }
+        }
+
+        if diagnostics_hovered {
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(
+                &mut scratch,
+                format_args!(
+                    "Ляпы: {} ошибок, {} предупреждений",
+                    error_count, warning_count
+                ),
+            );
+            let tip_w = self.measure_ui_width(&scratch, text_scale).round() + 16.0 * s;
+            let tip_h = 24.0 * s;
+            let tip_x = (diag_x - 4.0 * s)
+                .min(self.width - tip_w - 6.0 * s)
+                .max(6.0 * s);
+            let tip_y = (bar_y - tip_h - 6.0 * s).max(6.0 * s);
+            self.push_rounded_rect_border(
+                tip_x,
+                tip_y,
+                tip_w,
+                tip_h,
+                5.0 * s,
+                1.0,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18],
+                [0.08, 0.085, 0.115, 0.96],
+            );
+            self.draw_string_scaled(
+                &scratch,
+                tip_x + 8.0 * s,
+                tip_y + 18.0 * s,
+                self.theme.fg,
+                text_scale,
+            );
+        }
+
+        self.scratch_buffer = scratch;
+    }
+
+    fn draw_file_tree_dialog_shell(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
+        let border = 2.0 * s;
+        self.push_rounded_rect_border(
+            x,
+            y,
+            w,
+            h,
+            10.0 * s,
+            border,
+            self.theme.sel,
+            [0.15, 0.16, 0.20, 1.0],
+        );
+    }
+
+    fn draw_file_tree_dialog_input(
+        &mut self,
+        editor: &crate::editor::Editor,
+        input_x: f32,
+        input_y: f32,
+        input_w: f32,
+        input_h: f32,
+        blink_alpha: f32,
+    ) {
+        let s = self.scale_factor;
+        let text_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+        let pad_x = 8.0 * s;
+        let text_y = input_y + 23.0 * s;
+        let text_start_x = input_x + pad_x;
+        let visible_width = (input_w - pad_x * 2.0).max(0.0);
+
+        self.push_rounded_rect(
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            5.0 * s,
+            [0.08, 0.09, 0.12, 1.0],
+        );
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (input_y + input_h);
+            self.gl.scissor(
+                input_x as i32,
+                scissor_y as i32,
+                input_w as i32,
+                input_h as i32,
+            );
+
+            let text = editor.get_full_text();
+            let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                &text,
+                editor.cursor,
+                visible_width,
+                |c| {
+                    let char_to_render = if c == '\n' { '↵' } else { c };
+                    self.get_ui_glyph(char_to_render)
+                        .map(|g| g.advance * text_scale)
+                        .unwrap_or(10.0 * text_scale)
+                },
+            );
+
+            let sel_start = editor
+                .selection_anchor
+                .unwrap_or(editor.cursor)
+                .min(editor.cursor);
+            let sel_end = editor
+                .selection_anchor
+                .unwrap_or(editor.cursor)
+                .max(editor.cursor);
+
+            let mut current_x = text_start_x - scroll_x;
+            let mut byte_idx = 0usize;
+            let mut cursor_draw_x = current_x;
+            for c in text.chars() {
+                if byte_idx == editor.cursor {
+                    cursor_draw_x = current_x;
+                }
+
+                let char_to_render = if c == '\n' { '↵' } else { c };
+                let adv = self
+                    .get_ui_glyph(char_to_render)
+                    .map(|g| g.advance * text_scale)
+                    .unwrap_or(10.0 * text_scale);
+
+                if byte_idx >= sel_start && byte_idx < sel_end {
+                    self.push_rect(
+                        current_x,
+                        input_y + 7.0 * s,
+                        adv,
+                        input_h - 14.0 * s,
+                        self.theme.sel,
+                    );
+                }
+
+                if current_x + adv >= input_x && current_x <= input_x + input_w {
+                    if let Some(g) = self.get_ui_glyph(char_to_render) {
+                        self.push_quad(
+                            current_x + g.offset_x * text_scale,
+                            text_y - g.offset_y * text_scale,
+                            g.width * text_scale,
+                            g.height * text_scale,
+                            g.u,
+                            g.v,
+                            g.uw,
+                            g.vh,
+                            self.theme.fg,
+                            g.is_emoji,
+                        );
+                    }
+                }
+
+                current_x += adv;
+                byte_idx += c.len_utf8();
+            }
+            if byte_idx == editor.cursor {
+                cursor_draw_x = current_x;
+            }
+
+            if sel_start == sel_end && blink_alpha > 0.5 {
+                self.push_rect(
+                    cursor_draw_x,
+                    input_y + 7.0 * s,
+                    2.0 * s,
+                    input_h - 14.0 * s,
+                    self.theme.fg,
+                );
+            }
+
+            self.flush();
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+
+    fn draw_file_tree_dialog_buttons<const N: usize>(
+        &mut self,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        buttons: [(crate::ui_system::UiId, &str, f32); N],
+        btn_y: f32,
+        btn_w: f32,
+        btn_h: f32,
+        s: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        let mut wants_pointer = false;
+        for (id, label, bx) in buttons {
+            let hovered = ui_registry.register_rect(id, bx, btn_y, btn_w, btn_h, mx, my);
+            if hovered {
+                wants_pointer = true;
+            }
+            let bg = if hovered {
+                [0.30, 0.32, 0.38, 1.0]
+            } else {
+                [0.22, 0.23, 0.28, 1.0]
+            };
+            self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
+            let tw = self.measure_ui_width(label, 0.86);
+            self.draw_string_scaled(
+                label,
+                bx + (btn_w - tw) / 2.0,
+                btn_y + 21.0 * s,
+                self.theme.fg,
+                0.86,
+            );
+        }
+        wants_pointer
+    }
+
+    pub(crate) fn draw_file_tree_overlays(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        blink_alpha: f32,
+    ) -> bool {
+        let s = self.scale_factor;
+        let mut wants_pointer = false;
+        let mut label_scratch = String::new();
+        if crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel) {
+            ui_registry.mark_overlay_start();
+            ui_registry.reset_cursor_state();
+        }
+
+        if let Some(menu) = &ide_panel.file_tree_context_menu {
+            let row_h = 28.0 * s;
+            let pad_x = 12.0 * s;
+            let border = 2.0 * s;
+            let separator_h = 8.0 * s;
+            let mut menu_w = 190.0 * s;
+            for action in &menu.entries {
+                menu_w = menu_w.max(self.measure_ui_width(action.label(), 0.88) + pad_x * 2.0);
+            }
+            let menu_h = menu.entries.len() as f32 * row_h
+                + file_tree_menu_separator_count(&menu.entries) as f32 * separator_h
+                + border * 2.0;
+            let x = menu.x.min((self.width - menu_w - 6.0 * s).max(6.0 * s));
+            let y = menu.y.min((self.height - menu_h - 6.0 * s).max(6.0 * s));
+            let anim_progress = crate::app::file_tree::file_tree_context_menu_anim_progress(
+                menu.opened_at,
+                std::time::Instant::now(),
+            );
+            let visible_h = (menu_h * anim_progress).max(border * 2.0);
+            self.push_rounded_rect_border(
+                x,
+                y,
+                menu_w,
+                visible_h,
+                6.0 * s,
+                border,
+                self.theme.sel,
+                [0.09, 0.10, 0.14, 1.0],
+            );
+
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                let sy = (self.height - (y + visible_h)).round() as i32;
+                self.gl.scissor(
+                    x.round() as i32,
+                    sy,
+                    menu_w.round() as i32,
+                    visible_h.round() as i32,
+                );
+            }
+
+            let mut row_y = y + border;
+            let visible_bottom = y + visible_h;
+            for (idx, action) in menu.entries.iter().enumerate() {
+                if file_tree_menu_separator_before(&menu.entries, idx) {
+                    let line_y = row_y + separator_h / 2.0;
+                    self.push_rect(
+                        x + border + pad_x,
+                        line_y.round(),
+                        menu_w - border * 2.0 - pad_x * 2.0,
+                        1.0,
+                        [1.0, 1.0, 1.0, 0.16],
+                    );
+                    row_y += separator_h;
+                }
+                if row_y >= visible_bottom {
+                    break;
+                }
+                let visible_row_h = (visible_bottom - row_y).min(row_h).max(0.0);
+                let hovered = ui_registry.register_rect(
+                    crate::ui_system::UiId::FileTreeMenuItem(idx),
+                    x,
+                    row_y,
+                    menu_w,
+                    visible_row_h,
+                    mx,
+                    my,
+                );
+                if hovered {
+                    wants_pointer = true;
+                    self.push_rect(
+                        x + border,
+                        row_y,
+                        menu_w - border * 2.0,
+                        visible_row_h,
+                        [1.0, 1.0, 1.0, 0.10],
+                    );
+                }
+                self.draw_string_scaled(
+                    action.label(),
+                    x + pad_x,
+                    row_y + row_h / 2.0 + 5.0 * s,
+                    self.theme.fg,
+                    0.88,
+                );
+                row_y += row_h;
+            }
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_create_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s).min(self.width - 32.0 * s);
+            let h = 178.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                dialog.kind.title(),
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+
+            let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+            let (path_prefix, input_x, input_w) =
+                crate::app::file_tree::file_tree_path_input_layout(
+                    x,
+                    w,
+                    s,
+                    &dialog.parent_dir,
+                    |text| self.measure_ui_width(text, path_scale),
+                );
+            let input_y = y + 66.0 * s;
+            let input_h = 34.0 * s;
+            self.draw_string_scaled(
+                &path_prefix,
+                x + side_pad,
+                input_y + 23.0 * s,
+                [0.55, 0.57, 0.64, 1.0],
+                path_scale,
+            );
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::FileTreeCreateInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                mx,
+                my,
+            );
+            self.draw_file_tree_dialog_input(
+                &dialog.editor,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                blink_alpha,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    input_y + input_h + 20.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 112.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            wants_pointer |= self.draw_file_tree_dialog_buttons(
+                ui_registry,
+                [
+                (
+                    crate::ui_system::UiId::FileTreeCreateConfirm,
+                    "Создать",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeCreateCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+                ],
+                btn_y,
+                btn_w,
+                btn_h,
+                s,
+                mx,
+                my,
+            );
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_rename_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s).min(self.width - 32.0 * s);
+            let h = 178.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Переименовать",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+
+            let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
+            let (path_prefix, input_x, input_w) = if let Some(parent_dir) = dialog.path.parent() {
+                crate::app::file_tree::file_tree_path_input_layout(x, w, s, parent_dir, |text| {
+                    self.measure_ui_width(text, path_scale)
+                })
+            } else {
+                (String::new(), x + side_pad, w - side_pad * 2.0)
+            };
+            let input_y = y + 66.0 * s;
+            let input_h = 34.0 * s;
+            if !path_prefix.is_empty() {
+                self.draw_string_scaled(
+                    &path_prefix,
+                    x + side_pad,
+                    input_y + 23.0 * s,
+                    [0.55, 0.57, 0.64, 1.0],
+                    path_scale,
+                );
+            }
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::FileTreeRenameInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                mx,
+                my,
+            );
+            self.draw_file_tree_dialog_input(
+                &dialog.editor,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                blink_alpha,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    input_y + input_h + 20.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 130.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            wants_pointer |= self.draw_file_tree_dialog_buttons(
+                ui_registry,
+                [
+                (
+                    crate::ui_system::UiId::FileTreeRenameConfirm,
+                    "Переименовать",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeRenameCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+                ],
+                btn_y,
+                btn_w,
+                btn_h,
+                s,
+                mx,
+                my,
+            );
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_move_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
+            let h = 154.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Подтвердить перемещение",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+            let message = crate::app::file_tree::file_tree_move_dialog_message(
+                &dialog.sources,
+                &dialog.target_dir,
+            );
+            self.draw_string_scaled(
+                &message,
+                x + side_pad,
+                y + 74.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.88,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    y + 100.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            wants_pointer |= self.draw_file_tree_dialog_buttons(
+                ui_registry,
+                [
+                (
+                    crate::ui_system::UiId::FileTreeMoveConfirm,
+                    "Переместить",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeMoveCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+                ],
+                btn_y,
+                btn_w,
+                btn_h,
+                s,
+                mx,
+                my,
+            );
+        }
+
+        if let Some(dialog) = &ide_panel.file_tree_delete_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
+            let h = 154.0 * s;
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+            self.draw_string_scaled(
+                "Удалить в корзину",
+                x + side_pad,
+                y + 38.0 * s,
+                self.theme.fg,
+                1.0,
+            );
+            let message = crate::app::file_tree::file_tree_delete_dialog_message(&dialog.paths);
+            self.draw_string_scaled(
+                &message,
+                x + side_pad,
+                y + 74.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.88,
+            );
+            if let Some(error) = &dialog.error {
+                self.draw_string_scaled(
+                    error,
+                    x + side_pad,
+                    y + 100.0 * s,
+                    self.theme.diag_error,
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            wants_pointer |= self.draw_file_tree_dialog_buttons(
+                ui_registry,
+                [
+                (
+                    crate::ui_system::UiId::FileTreeDeleteConfirm,
+                    "В корзину",
+                    ok_x,
+                ),
+                (
+                    crate::ui_system::UiId::FileTreeDeleteCancel,
+                    "Отмена",
+                    cancel_x,
+                ),
+                ],
+                btn_y,
+                btn_w,
+                btn_h,
+                s,
+                mx,
+                my,
+            );
+        }
+
+        if let Some(dialog) = &ide_panel.git.confirm_dialog {
+            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            let w =
+                ((crate::app::file_tree::FILE_TREE_DIALOG_W + 40.0) * s).min(self.width - 32.0 * s);
+            let visible_files = dialog.files.len().min(7);
+            let h = (172.0 * s + visible_files as f32 * 20.0 * s).min(self.height - 32.0 * s);
+            let x = ((self.width - w) / 2.0).round();
+            let y = ((self.height - h) / 2.0).round();
+            let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
+            self.draw_file_tree_dialog_shell(x, y, w, h, s);
+
+            let (title, message, confirm_label) = match dialog.action {
+                crate::app::git_panel::GitConfirmAction::RollbackStaged => (
+                    "Откатить staged файлы",
+                    "Отменить staged изменения в выбранных файлах?",
+                    "Откатить",
+                ),
+            };
+            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.theme.fg, 1.0);
+            self.draw_string_scaled(
+                message,
+                x + side_pad,
+                y + 70.0 * s,
+                [0.75, 0.76, 0.82, 1.0],
+                0.86,
+            );
+
+            let list_x = x + side_pad;
+            let list_y = y + 92.0 * s;
+            let list_w = w - side_pad * 2.0;
+            for (idx, file) in dialog.files.iter().take(visible_files).enumerate() {
+                self.draw_tree_label_clipped(
+                    file.display_path.as_str(),
+                    list_x,
+                    list_y + idx as f32 * 20.0 * s,
+                    list_w,
+                    [0.72, 0.76, 0.88, 1.0],
+                    0.82,
+                    &mut label_scratch,
+                );
+            }
+            if dialog.files.len() > visible_files {
+                let more = format!("+{} more", dialog.files.len() - visible_files);
+                self.draw_string_scaled(
+                    &more,
+                    list_x,
+                    list_y + visible_files as f32 * 20.0 * s,
+                    [0.55, 0.57, 0.64, 1.0],
+                    0.8,
+                );
+            }
+
+            let btn_w = 122.0 * s;
+            let btn_h = 32.0 * s;
+            let (ok_x, cancel_x) = centered_dialog_button_positions(x, w, btn_w, 10.0 * s);
+            let btn_y = y + h - 64.0 * s;
+            wants_pointer |= self.draw_file_tree_dialog_buttons(
+                ui_registry,
+                [
+                (
+                    crate::ui_system::UiId::GitConfirmAction,
+                    confirm_label,
+                    ok_x,
+                ),
+                (crate::ui_system::UiId::GitConfirmCancel, "Отмена", cancel_x),
+                ],
+                btn_y,
+                btn_w,
+                btn_h,
+                s,
+                mx,
+                my,
+            );
+        }
+
+        wants_pointer
+    }
+}

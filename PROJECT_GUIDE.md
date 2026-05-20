@@ -252,9 +252,22 @@ Main `App` behavior impls and app-level editor/workspace operations.
 
 Use when changing tab/file/search behavior that crosses app state and subsystems.
 
+Implementation is split through `include!`:
+
+* `src/app/app_ide_tab_methods.rs` -> IDE mode startup, tab titles, reveal/current tab sync.
+* `src/app/app_file_tab_methods.rs` -> file/tab open, save, switch, highlight wait.
+* `src/app/app_window_external_methods.rs` -> window title, search, close, external file changes.
+
 Autocomplete-specific `App` methods live in `src/app/autocomplete.rs`.
 Python completion/fold/source-owner helpers live in `src/app/python_completion.rs`.
 Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/app/app_file_behavior_tests.rs`.
+
+Large app files use thin include shells to keep source chunks small:
+
+* `src/app/autocomplete/*` -> detail helpers, detail request/merge flow, Ty autocomplete flow, popup/apply flow.
+* `src/app/python_completion/*` -> source/module helpers and class/member helpers.
+* `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
+* `src/app/git_panel/*` -> Git panel types, `App` graph/actions, graph helpers, status/tests.
 
 ### `src/app/app_state.rs`
 
@@ -459,6 +472,11 @@ Responsibilities:
 
 Use when text mutation, history, line indexing, or buffer invariants change.
 
+Implementation is split through `include!`:
+
+* `src/editor/editor_core.rs` -> production editor core.
+* `src/editor/editor_behavior_tests.rs` -> editor behavior tests.
+
 ### `src/editor_navigation.rs`
 
 Cursor and selection navigation.
@@ -491,6 +509,13 @@ Use when changing GPU primitives, shader modes, atlas behavior, or batching.
 
 Vertex layout and primitive geometry helpers live in `src/renderer/geometry.rs`.
 
+Implementation is split through `include!`:
+
+* `src/renderer/renderer_types.rs` -> renderer data types/constants/imports.
+* `src/renderer/renderer_init_methods.rs` -> construction, GL setup, atlas bootstrap.
+* `src/renderer/renderer_glyph_methods.rs` -> glyph/icon cache lookup.
+* `src/renderer/renderer_primitives_tests.rs` -> resize/primitives and renderer tests.
+
 Hot path. Avoid allocations and I/O.
 
 ### `src/render_view.rs`
@@ -506,6 +531,12 @@ Responsibilities:
 * Final GPU flush.
 
 Use when changing overall draw order, layer ordering, viewport/projection behavior, or frame-level UI.
+
+Implementation is split through `include!`:
+
+* `src/render_view/root_helpers.rs` -> frame constants/helpers/tests.
+* `src/render_view/root_frame_helpers.rs` -> inline-git and Git diff floating panel helpers.
+* `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
 
 Hot path.
 
@@ -533,6 +564,16 @@ Responsibilities:
 * Bottom panel shell and dispatch to terminal/problems/LSP panels.
 
 Use when panel chrome or explorer row rendering changes.
+
+Implementation is split through `include!`:
+
+* `src/render_view/ide_panels/ide_panel_helpers.rs` -> shared layout/tooltip helpers.
+* `src/render_view/ide_panels/ide_panel_side_renderer.rs` -> side/top panels and explorer rows.
+* `src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs` -> Git graph/file tooltip drawing.
+* `src/render_view/ide_panels/ide_panel_git_graph_renderer.rs` -> Git graph panel.
+* `src/render_view/ide_panels/ide_panel_git_workspace_renderer.rs` -> Git workspace panel.
+* `src/render_view/ide_panels/ide_panel_dialog_renderer.rs` -> bottom panel and file/Git dialogs.
+* `src/render_view/ide_panels/ide_panel_behavior_tests.rs` -> panel behavior/render helper tests.
 
 ### `src/render_view/hover_overlays.rs`
 
@@ -724,7 +765,12 @@ Responsibilities:
 
 Use when syntax parsing/highlighting logic changes.
 
-Highlighter unit tests live in `src/highlighter_tests.rs`.
+Implementation is split through `include!`:
+
+* `src/highlighter/highlighter_core.rs` -> types, span helpers, query helpers.
+* `src/highlighter/highlighter_worker.rs` -> `Highlighter::new` worker setup and inline tests.
+
+Highlighter unit tests also live in `src/highlighter_tests.rs`.
 
 ### `src/highlighter_runtime.rs`
 
@@ -789,6 +835,11 @@ Responsibilities:
 * Open/change/hover/definition/code-action commands.
 
 Use when LSP process behavior, restart, request dispatch, or manager state changes.
+
+Implementation is split through `include!`:
+
+* `src/lsp/lsp_process.rs` -> process spawn, supervisor, request send/log helpers.
+* `src/lsp/lsp_manager.rs` -> `LspManager` facade, diagnostics merge accessors, JSON formatting.
 
 Tests live in `src/lsp/lsp_tests.rs`.
 

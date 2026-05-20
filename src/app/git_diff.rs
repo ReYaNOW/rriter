@@ -887,9 +887,7 @@ impl App {
             s,
         );
         let line_y = self.editor_visual_y_for_line(line, line_height);
-        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO)
-            .max(0.0)
-            .round();
+        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO).max(0.0).round();
         let max_s = self
             .renderer
             .as_mut()
@@ -931,9 +929,7 @@ impl App {
             s,
         );
         let line_y = self.editor_visual_y_for_line(line, line_height);
-        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO)
-            .max(0.0)
-            .round();
+        let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO).max(0.0).round();
         let max_s = self
             .renderer
             .as_mut()

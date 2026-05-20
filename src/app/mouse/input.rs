@@ -975,76 +975,12 @@ impl App {
                             -self.tab_scroll.current
                         };
 
-                        let mut paths: Vec<Option<&std::path::PathBuf>> =
-                            self.tabs.iter().map(|t| t.file_path.as_ref()).collect();
-                        paths[self.active_tab] = self.file_path.as_ref();
-
-                        let mut display_titles = vec![String::new(); self.tabs.len()];
-                        for i in 0..self.tabs.len() {
-                            if let Some(p1) = paths[i] {
-                                let mut diff_level = 0;
-                                let mut collision = false;
-                                for j in 0..self.tabs.len() {
-                                    if i == j {
-                                        continue;
-                                    }
-                                    if let Some(p2) = paths[j] {
-                                        if p1.file_name() == p2.file_name() {
-                                            collision = true;
-                                            let mut it1 = p1.components().rev();
-                                            let mut it2 = p2.components().rev();
-                                            let mut level = 0;
-                                            loop {
-                                                let c1 = it1.next();
-                                                let c2 = it2.next();
-                                                if c1 != c2 {
-                                                    diff_level = diff_level.max(level);
-                                                    break;
-                                                }
-                                                if c1.is_none() && c2.is_none() {
-                                                    break;
-                                                }
-                                                level += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                if collision && diff_level > 0 {
-                                    let comps: Vec<_> = p1.components().rev().collect();
-                                    if diff_level < comps.len() {
-                                        let diff_dir =
-                                            comps[diff_level].as_os_str().to_string_lossy();
-                                        let file_name = comps[0].as_os_str().to_string_lossy();
-                                        if diff_level == 1 {
-                                            display_titles[i] =
-                                                format!("{}/{}", diff_dir, file_name);
-                                        } else {
-                                            display_titles[i] =
-                                                format!("{}/.../{}", diff_dir, file_name);
-                                        }
-                                    } else {
-                                        display_titles[i] = p1.to_string_lossy().into_owned();
-                                    }
-                                } else {
-                                    display_titles[i] = p1
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .into_owned();
-                                }
-                            } else {
-                                let bt = if i == self.active_tab {
-                                    &self.base_title
-                                } else {
-                                    &self.tabs[i].base_title
-                                };
-                                display_titles[i] = if bt.is_empty() {
-                                    "Безымянный".to_string()
-                                } else {
-                                    bt.to_string()
-                                };
-                            }
-                        }
+                        let display_titles = crate::app::tab_display_titles_for(
+                            &self.tabs,
+                            self.active_tab,
+                            self.file_path.as_ref(),
+                            &self.base_title,
+                        );
 
                         let mut widths = Vec::new();
                         for (i, _tab) in self.tabs.iter().enumerate() {

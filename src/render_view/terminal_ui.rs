@@ -284,22 +284,8 @@ impl Renderer {
 
                     let mut in_sel = false;
                     if let Some((sx, sy, ex, ey)) = grid.selection {
-                        let start_y = sy.min(ey);
-                        let end_y = sy.max(ey);
-                        let start_x = if sy < ey {
-                            sx
-                        } else if sy > ey {
-                            ex
-                        } else {
-                            sx.min(ex)
-                        };
-                        let end_x = if sy < ey {
-                            ex
-                        } else if sy > ey {
-                            sx
-                        } else {
-                            sx.max(ex)
-                        };
+                        let (start_x, start_y, end_x, end_y) =
+                            crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
                         in_sel = if i > start_y && i < end_y {
                             true
                         } else if i == start_y && i == end_y {
@@ -316,22 +302,8 @@ impl Renderer {
                     let mut is_search_res = false;
                     let mut is_active_search = false;
                     for &(idx, (sx, sy, ex, ey)) in &row_search_results {
-                        let start_y = sy.min(ey);
-                        let end_y = sy.max(ey);
-                        let start_x = if sy < ey {
-                            sx
-                        } else if sy > ey {
-                            ex
-                        } else {
-                            sx.min(ex)
-                        };
-                        let end_x = if sy < ey {
-                            ex
-                        } else if sy > ey {
-                            sx
-                        } else {
-                            sx.max(ex)
-                        };
+                        let (start_x, start_y, end_x, end_y) =
+                            crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
 
                         let in_res = if i > start_y && i < end_y {
                             true

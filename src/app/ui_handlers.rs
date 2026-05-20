@@ -279,20 +279,7 @@ impl App {
             UiId::SettingsIdeRemoveWorkspace(idx) => {
                 if idx < self.ide_workspaces.len() {
                     self.ide_workspaces.remove(idx);
-                    let config = crate::Config {
-                        window_width: self.window_width,
-                        window_height: self.window_height,
-                        maximized: self
-                            .window
-                            .as_ref()
-                            .map(|w| w.is_maximized())
-                            .unwrap_or(false),
-                        ide_workspaces: self.ide_workspaces.clone(),
-                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed),
-                    };
-                    crate::save_config(&config);
+                    self.save_current_config();
                     self.refresh_file_tree();
                     self.window.as_ref().unwrap().request_redraw();
                 }
@@ -311,20 +298,7 @@ impl App {
                     self.settings_ignore_editor.version = old_version + 1;
                     self.settings_ignore_editor.cursor = 0;
                     self.settings_ignore_editor.selection_anchor = None;
-                    let config = crate::Config {
-                        window_width: self.window_width,
-                        window_height: self.window_height,
-                        maximized: self
-                            .window
-                            .as_ref()
-                            .map(|w| w.is_maximized())
-                            .unwrap_or(false),
-                        ide_workspaces: self.ide_workspaces.clone(),
-                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed),
-                    };
-                    crate::save_config(&config);
+                    self.save_current_config();
                     self.refresh_file_tree();
                     self.window.as_ref().unwrap().request_redraw();
                 }
@@ -332,20 +306,7 @@ impl App {
             UiId::SettingsIdeRemoveIgnore(idx) => {
                 if idx < self.ide_ignore_patterns.len() {
                     self.ide_ignore_patterns.remove(idx);
-                    let config = crate::Config {
-                        window_width: self.window_width,
-                        window_height: self.window_height,
-                        maximized: self
-                            .window
-                            .as_ref()
-                            .map(|w| w.is_maximized())
-                            .unwrap_or(false),
-                        ide_workspaces: self.ide_workspaces.clone(),
-                        ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-                            .load(std::sync::atomic::Ordering::Relaxed),
-                    };
-                    crate::save_config(&config);
+                    self.save_current_config();
                     self.refresh_file_tree();
                     self.window.as_ref().unwrap().request_redraw();
                 }

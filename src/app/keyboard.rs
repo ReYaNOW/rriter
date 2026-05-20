@@ -233,22 +233,8 @@ impl App {
                                 grid.scrollback.len()
                             };
                             let total_lines = scrollback_len + grid.lines.len();
-                            let start_y = sy.min(ey);
-                            let end_y = sy.max(ey);
-                            let start_x = if sy < ey {
-                                sx
-                            } else if sy > ey {
-                                ex
-                            } else {
-                                sx.min(ex)
-                            };
-                            let end_x = if sy < ey {
-                                ex
-                            } else if sy > ey {
-                                sx
-                            } else {
-                                sx.max(ex)
-                            };
+                            let (start_x, start_y, end_x, end_y) =
+                                crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
 
                             for y in start_y..=end_y {
                                 if y >= total_lines {

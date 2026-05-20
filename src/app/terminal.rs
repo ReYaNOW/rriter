@@ -20,6 +20,32 @@ impl Default for Cell {
     }
 }
 
+#[inline(always)]
+pub(crate) fn normalized_selection_bounds(
+    sx: usize,
+    sy: usize,
+    ex: usize,
+    ey: usize,
+) -> (usize, usize, usize, usize) {
+    let start_y = sy.min(ey);
+    let end_y = sy.max(ey);
+    let start_x = if sy < ey {
+        sx
+    } else if sy > ey {
+        ex
+    } else {
+        sx.min(ex)
+    };
+    let end_x = if sy < ey {
+        ex
+    } else if sy > ey {
+        sx
+    } else {
+        sx.max(ex)
+    };
+    (start_x, start_y, end_x, end_y)
+}
+
 pub struct TermGrid {
     pub scrollback: std::collections::VecDeque<Vec<Cell>>,
     pub lines: std::collections::VecDeque<Vec<Cell>>,
@@ -304,22 +330,7 @@ impl TermGrid {
         if let Some((sx, sy, ex, ey)) = self.selection {
             let mut res = String::new();
             let total_lines = self.scrollback.len() + self.lines.len();
-            let start_y = sy.min(ey);
-            let end_y = sy.max(ey);
-            let start_x = if sy < ey {
-                sx
-            } else if sy > ey {
-                ex
-            } else {
-                sx.min(ex)
-            };
-            let end_x = if sy < ey {
-                ex
-            } else if sy > ey {
-                sx
-            } else {
-                sx.max(ex)
-            };
+            let (start_x, start_y, end_x, end_y) = normalized_selection_bounds(sx, sy, ex, ey);
 
             for y in start_y..=end_y {
                 if y >= total_lines {

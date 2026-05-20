@@ -409,13 +409,19 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
-* `src/app.rs` -> app-level behavior: tabs, files, search, title, dialogs.
+* `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
+* `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
-* `src/app/autocomplete.rs` -> `App` autocomplete detail/request/update/apply behavior.
-* `src/app/python_completion.rs` -> Python autocomplete/fold/source-owner helpers.
-* `src/app/app_behavior_tests.rs` -> app/autocomplete behavior tests.
+* `src/app/autocomplete.rs` -> include shell for `App` autocomplete detail/request/update/apply behavior.
+* `src/app/autocomplete/*` -> autocomplete helper/method chunks split by detail flow, Ty flow, popup/apply flow.
+* `src/app/python_completion.rs` -> include shell for Python autocomplete/fold/source-owner helpers.
+* `src/app/python_completion/*` -> Python completion chunks split by source/module helpers and class/member helpers.
+* `src/app/app_behavior_tests.rs` -> include shell for app/autocomplete behavior tests.
+* `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
+* `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
+* `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/app_file_behavior_tests.rs` -> app file/tab/search/UI behavior tests.
 
 Input:
@@ -443,18 +449,22 @@ UI/actions:
 
 Editor/text:
 
-* `src/editor.rs` -> gap buffer, edits, undo/redo, line offsets, dirty state.
+* `src/editor.rs` -> include shell for gap buffer, edits, undo/redo, line offsets, dirty state.
+* `src/editor/*` -> editor core and editor behavior tests.
 * `src/editor_navigation.rs` -> cursor movement, selection, word/line/page nav, folds.
 * `src/scroll.rs` -> smooth scroll state/physics.
 
 Rendering:
 
-* `src/renderer.rs` -> OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
+* `src/renderer.rs` -> include shell for OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
+* `src/renderer/*` -> renderer chunks for types, init, glyph cache, primitives/tests; `geometry.rs` stays primitive geometry.
 * `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.
-* `src/render_view.rs` -> frame draw orchestration and layer order. Hot path.
+* `src/render_view.rs` -> include shell for frame draw orchestration and layer order. Hot path.
+* `src/render_view/root_*.rs` -> root render helpers and main frame renderer chunks. Hot path.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
-* `src/render_view/ide_panels.rs` -> sidebar, explorer rows, panel shells.
+* `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
+* `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace, dialogs, tests.
 * `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
 * `src/render_view/search.rs` -> search panel UI.
 * `src/render_view/settings_ui.rs` -> settings UI.
@@ -469,7 +479,8 @@ Rendering:
 
 Syntax/languages:
 
-* `src/highlighter.rs` -> Tree-sitter thread, parser/query setup, spans/completions/folds.
+* `src/highlighter.rs` -> include shell for Tree-sitter thread, parser/query setup, spans/completions/folds.
+* `src/highlighter/*` -> highlighter core and worker/test chunks.
 * `src/highlighter_tests.rs` -> highlighter unit tests.
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
@@ -481,7 +492,8 @@ Syntax/languages:
 
 LSP:
 
-* `src/lsp.rs` -> server lifecycle, requests, diagnostics, logs, manager state.
+* `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
+* `src/lsp/lsp_process.rs`, `src/lsp/lsp_manager.rs` -> split process/supervisor code and manager facade.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
 * `src/lsp/protocol.rs` -> JSON-RPC framing, LSP encode/decode, wire parsing.
 * `src/lsp/protocol_tests.rs` -> protocol parse/encode tests.

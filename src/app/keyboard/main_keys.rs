@@ -161,17 +161,7 @@ impl App {
                             self.ide_ignore_patterns.push(trimmed);
                             self.settings_ignore_editor.select_all();
                             self.settings_ignore_editor.delete_selection();
-                            let w = self.window.as_ref().unwrap();
-                            let maximized = w.is_maximized();
-                            crate::save_config(&crate::Config {
-                                window_width: self.window_width,
-                                window_height: self.window_height,
-                                maximized,
-                                ide_workspaces: self.ide_workspaces.clone(),
-                                ide_ignore_patterns: self.ide_ignore_patterns.clone(),
-                                enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-                                    .load(std::sync::atomic::Ordering::Relaxed),
-                            });
+                            self.save_current_config();
                             self.refresh_file_tree();
                         }
                         self.window.as_ref().unwrap().request_redraw();

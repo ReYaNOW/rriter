@@ -44,6 +44,47 @@ fn panel_scroll_rect(
     }
 }
 
+fn app_panel_scroll_rect(
+    app: &App,
+    panel_id: crate::app::PanelId,
+    scale: f32,
+    suppress_unfocused_terminal_bottom: bool,
+) -> (f32, f32, f32, f32, f32) {
+    let sidebar_w = 48.0 * scale;
+    let window_size = app.window.as_ref().unwrap().inner_size();
+    let window_w = window_size.width as f32;
+    let window_h = window_size.height as f32;
+    let panel_bottom_h = if app.ide_panel.any_bottom_open() {
+        app.ide_panel.bottom_height * scale
+    } else {
+        0.0
+    };
+    let is_top = app
+        .ide_panel
+        .slots
+        .iter()
+        .any(|sl| sl.id == panel_id && sl.group == crate::app::PanelGroup::Top);
+    let effective_bottom_h = if suppress_unfocused_terminal_bottom
+        && app.ide_panel.is_open(crate::app::PanelId::Terminal)
+        && !app.ide_panel.terminal_focused
+    {
+        0.0
+    } else {
+        panel_bottom_h
+    };
+    let (cx, cy, cw, ch) = panel_scroll_rect(
+        is_top,
+        scale,
+        sidebar_w,
+        app.ide_panel.left_width,
+        panel_bottom_h,
+        effective_bottom_h,
+        window_w,
+        window_h,
+    );
+    (cx, cy, cw, ch, window_h)
+}
+
 fn autocomplete_max_scroll(total_items: usize, scale: f32) -> f32 {
     let step = 36.0 * scale;
     let total_items = total_items as f32;
@@ -224,38 +265,11 @@ impl App {
         // Скролл в области проводника файлов — перехватываем до всего остального
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Explorer) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            let sb_w = 48.0 * s;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let title_h = 32.0 * s;
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
-                sl.id == crate::app::PanelId::Explorer && sl.group == crate::app::PanelGroup::Top
-            });
-
-            let mut effective_bottom_h = panel_bottom_h;
-            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                && !self.ide_panel.terminal_focused
-            {
-                effective_bottom_h = 0.0;
-            }
-
-            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-            let (cx, cy, cw, ch) = panel_scroll_rect(
-                is_top,
-                s,
-                sb_w,
-                self.ide_panel.left_width,
-                panel_bottom_h,
-                effective_bottom_h,
-                ww,
-                wh,
-            );
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s, true);
 
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
@@ -272,29 +286,10 @@ impl App {
 
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Git) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            let sb_w = 48.0 * s;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
-                sl.id == crate::app::PanelId::Git && sl.group == crate::app::PanelGroup::Top
-            });
-            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-            let (cx, cy, cw, ch) = panel_scroll_rect(
-                is_top,
-                s,
-                sb_w,
-                self.ide_panel.left_width,
-                panel_bottom_h,
-                panel_bottom_h,
-                ww,
-                wh,
-            );
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Git, s, false);
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
@@ -385,36 +380,8 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
-                sl.id == crate::app::PanelId::Problems && sl.group == crate::app::PanelGroup::Top
-            });
-            let sb_w = 48.0 * s;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
-
-            let mut effective_bottom_h = panel_bottom_h;
-            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                && !self.ide_panel.terminal_focused
-            {
-                effective_bottom_h = 0.0;
-            }
-
-            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-            let (cx, cy, cw, ch) = panel_scroll_rect(
-                is_top,
-                s,
-                sb_w,
-                self.ide_panel.left_width,
-                panel_bottom_h,
-                effective_bottom_h,
-                ww,
-                wh,
-            );
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Problems, s, true);
 
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
@@ -433,36 +400,8 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-
-            let is_top = self.ide_panel.slots.iter().any(|sl| {
-                sl.id == crate::app::PanelId::Terminal && sl.group == crate::app::PanelGroup::Top
-            });
-            let sb_w = 48.0 * s;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
-
-            let mut effective_bottom_h = panel_bottom_h;
-            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                && !self.ide_panel.terminal_focused
-            {
-                effective_bottom_h = 0.0;
-            }
-
-            let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-            let (cx, cy, cw, ch) = panel_scroll_rect(
-                is_top,
-                s,
-                sb_w,
-                self.ide_panel.left_width,
-                panel_bottom_h,
-                effective_bottom_h,
-                ww,
-                wh,
-            );
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s, true);
 
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if self.ide_panel.terminal_focused {
