@@ -153,6 +153,10 @@ pub enum LspEvent {
         request_id: i32,
         items: Vec<LspCompletionItem>,
     },
+    SignatureHelpResponse {
+        request_id: i32,
+        parameters: Vec<String>,
+    },
     InlayHintsResponse {
         request_id: i32,
         hints: Vec<LspInlayHint>,
@@ -265,6 +269,13 @@ pub(super) enum Cmd {
         col: u32,
     },
     Completion {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+        trigger: Option<String>,
+    },
+    SignatureHelp {
         id: i32,
         uri: String,
         line: u32,
@@ -478,6 +489,32 @@ pub(super) fn make_completion(
     };
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
+        id,
+        json_escape(uri),
+        line,
+        col,
+        context
+    )
+    .into_bytes()
+}
+
+pub(super) fn make_signature_help(
+    id: i32,
+    uri: &str,
+    line: u32,
+    col: u32,
+    trigger: Option<&str>,
+) -> Vec<u8> {
+    let context = if let Some(ch) = trigger {
+        format!(
+            r#","context":{{"triggerKind":2,"triggerCharacter":"{}"}}"#,
+            json_escape(ch)
+        )
+    } else {
+        String::from(r#","context":{"triggerKind":1}"#)
+    };
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
         id,
         json_escape(uri),
         line,
@@ -1124,6 +1161,79 @@ pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompl
         .collect()
 }
 
+fn signature_parameter_name(label: &str) -> Option<String> {
+    let mut label = label.trim();
+    while let Some(rest) = label
+        .strip_prefix('*')
+        .or_else(|| label.strip_prefix(','))
+        .map(str::trim_start)
+    {
+        label = rest;
+    }
+    let name_end = label
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+        .map(|(idx, _)| idx)
+        .unwrap_or(label.len());
+    let name = label.get(..name_end)?.trim();
+    if name.is_empty()
+        || matches!(name, "self" | "cls" | "args" | "kwargs")
+        || name.as_bytes()[0].is_ascii_digit()
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn parse_signature_parameter_label(
+    signature_label: &str,
+    parameter: &serde_json::Value,
+) -> Option<String> {
+    let label = parameter.get("label")?;
+    if let Some(text) = label.as_str() {
+        return signature_parameter_name(text);
+    }
+    let range = label.as_array()?;
+    let start = range.first()?.as_u64()? as usize;
+    let end = range.get(1)?.as_u64()? as usize;
+    signature_label
+        .get(start..end)
+        .and_then(signature_parameter_name)
+}
+
+pub(super) fn parse_signature_help_parameters(result: &serde_json::Value) -> Vec<String> {
+    let signatures = match result.get("signatures").and_then(|value| value.as_array()) {
+        Some(signatures) if !signatures.is_empty() => signatures,
+        _ => return Vec::new(),
+    };
+    let active = result
+        .get("activeSignature")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let signature = signatures.get(active).or_else(|| signatures.first());
+    let Some(signature) = signature else {
+        return Vec::new();
+    };
+    let signature_label = signature
+        .get("label")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let Some(parameters) = signature.get("parameters").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(parameters.len());
+    for parameter in parameters {
+        if let Some(name) = parse_signature_parameter_label(signature_label, parameter)
+            && !out.contains(&name)
+        {
+            out.push(name);
+        }
+    }
+    out
+}
+
 fn parse_inlay_hint_label(v: &serde_json::Value) -> Option<String> {
     if let Some(label) = v.as_str() {
         return Some(label.to_string());
@@ -1426,6 +1536,13 @@ pub(super) fn dispatch_frame(
                             let _ = event_tx.send(LspEvent::CompletionResponse {
                                 request_id: req_id as i32,
                                 items,
+                            });
+                        }
+                        Some(PendingRequestKind::SignatureHelp) => {
+                            let parameters = parse_signature_help_parameters(result);
+                            let _ = event_tx.send(LspEvent::SignatureHelpResponse {
+                                request_id: req_id as i32,
+                                parameters,
                             });
                         }
                         Some(PendingRequestKind::InlayHint) => {

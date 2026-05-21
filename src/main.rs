@@ -885,6 +885,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         autocomplete_pending_request_mode: None,
         autocomplete_pending_request_path: None,
         autocomplete_pending_context_key: None,
+        autocomplete_signature_request_id: None,
+        autocomplete_signature_items: Vec::new(),
         autocomplete_detail_request_id: None,
         autocomplete_detail_word: None,
         autocomplete_detail_request_path: None,

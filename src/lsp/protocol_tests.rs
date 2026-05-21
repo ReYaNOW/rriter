@@ -19,10 +19,41 @@ fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
     assert!(hover.contains(r#""method":"textDocument/hover""#));
     assert!(hover.contains(r#""character":3"#));
 
+    let signature = String::from_utf8(make_signature_help(8, &uri, 2, 4, Some(","))).unwrap();
+    assert!(signature.contains(r#""id":8"#));
+    assert!(signature.contains(r#""method":"textDocument/signatureHelp""#));
+    assert!(signature.contains(r#""triggerCharacter":",""#));
+
     let open = String::from_utf8(make_did_open(&uri, "python", 2, "x = \"q\"\n")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&open).unwrap();
     assert_eq!(parsed["params"]["textDocument"]["languageId"], "python");
     assert_eq!(parsed["params"]["textDocument"]["text"], "x = \"q\"\n");
+}
+
+#[test]
+fn parses_signature_help_parameter_names() {
+    let help = serde_json::json!({
+        "activeSignature": 0,
+        "signatures": [{
+            "label": "create_pool(dsn=None, *, min_size=10, max_size=10, **kwargs)",
+            "parameters": [
+                {"label": "dsn=None"},
+                {"label": "*, min_size=10"},
+                {"label": [38, 49]},
+                {"label": "**kwargs"},
+                {"label": "self"}
+            ]
+        }]
+    });
+
+    assert_eq!(
+        parse_signature_help_parameters(&help),
+        vec![
+            "dsn".to_string(),
+            "min_size".to_string(),
+            "max_size".to_string()
+        ]
+    );
 }
 
 #[test]

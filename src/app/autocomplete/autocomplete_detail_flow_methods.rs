@@ -111,6 +111,8 @@ impl App {
         self.autocomplete_pending_request_mode = None;
         self.autocomplete_pending_request_path = None;
         self.autocomplete_pending_context_key = None;
+        self.autocomplete_signature_request_id = None;
+        self.autocomplete_signature_items.clear();
         self.autocomplete_detail_request_id = None;
         self.autocomplete_detail_word = None;
         self.autocomplete_detail_request_path = None;
@@ -172,7 +174,10 @@ impl App {
         if let Some(label) = detail_type_label {
             let field_like = matches!(
                 item.kind,
-                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+                SymbolKind::Variable
+                    | SymbolKind::Parameter
+                    | SymbolKind::Argument
+                    | SymbolKind::Property
             ) || completion_item_is_field_like(item);
             if !field_like || path_is_detail_type {
                 return std::borrow::Cow::Owned(format!("class {label}"));
@@ -208,7 +213,10 @@ impl App {
         if self.file_extension != "py"
             || !matches!(
                 item.kind,
-                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+                SymbolKind::Variable
+                    | SymbolKind::Parameter
+                    | SymbolKind::Argument
+                    | SymbolKind::Property
             )
         {
             return None;

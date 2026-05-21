@@ -883,6 +883,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 }
             }
+            crate::lsp::LspEvent::SignatureHelpResponse {
+                request_id,
+                parameters,
+            } => {
+                if app.autocomplete_signature_request_id == Some(request_id) {
+                    app.autocomplete_signature_request_id = None;
+                    app.update_ty_signature_help_autocomplete(parameters);
+                    if let Some(w) = app.window.as_ref() {
+                        w.request_redraw();
+                    }
+                }
+            }
             crate::lsp::LspEvent::InlayHintsResponse { request_id, hints } => {
                 if app.python_inlay_hint_pending_request_id == Some(request_id) {
                     app.python_inlay_hint_pending_request_id = None;

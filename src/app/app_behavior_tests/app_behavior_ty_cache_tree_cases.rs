@@ -131,6 +131,72 @@ fn ty_context_prioritizes_call_argument_completions() {
     ]);
 
     assert_eq!(app.autocomplete_options[0].0.word, "allow_none");
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Argument);
+}
+
+#[test]
+fn ty_context_keeps_empty_call_argument_completions() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("repo.find_one(");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "apple".to_string(),
+            kind: SymbolKind::Variable,
+            module: None,
+            detail: Some("(variable) apple: str".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "allow_none".to_string(),
+            kind: SymbolKind::Variable,
+            module: None,
+            detail: Some("(parameter) allow_none: bool = True".to_string()),
+            insert_text: Some("allow_none=".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    assert_eq!(app.autocomplete_options[0].0.word, "allow_none");
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Argument);
+    assert!(app.autocomplete_active);
+}
+
+#[test]
+fn ty_signature_help_arguments_feed_call_completion() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with(
+        "asyncpg.create_pool(config.database_url, max_size=20, command_timeout=66, ma",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_signature_help_autocomplete(vec![
+        "dsn".to_string(),
+        "max_size".to_string(),
+        "command_timeout".to_string(),
+        "max_queries".to_string(),
+        "max_inactive_connection_lifetime".to_string(),
+    ]);
+
+    assert_eq!(app.autocomplete_options[0].0.word, "max_queries");
+    assert_eq!(app.autocomplete_options[0].0.kind, SymbolKind::Argument);
+    assert_eq!(
+        app.autocomplete_options[0].0.insert_text.as_deref(),
+        Some("max_queries=")
+    );
+    assert!(
+        !app.autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "max_size")
+    );
 }
 #[test]
 fn ty_context_preserves_explicit_owner_and_hides_attribute_types() {

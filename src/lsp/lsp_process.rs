@@ -528,6 +528,21 @@ fn run_supervisor(
                             break 'inner;
                         }
                     }
+                    Ok(Cmd::SignatureHelp {
+                        id,
+                        uri,
+                        line,
+                        col,
+                        trigger,
+                    }) => {
+                        if let Ok(mut pending) = pending_requests.lock() {
+                            pending.insert(id, PendingRequestKind::SignatureHelp);
+                        }
+                        let msg = make_signature_help(id, &uri, line, col, trigger.as_deref());
+                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                            break 'inner;
+                        }
+                    }
                     Ok(Cmd::InlayHint {
                         id,
                         uri,
@@ -695,6 +710,25 @@ impl LspProcess {
         let id = next_id();
         let uri = path_to_uri(&path.to_string_lossy());
         let _ = self.cmd_tx.send(Cmd::Completion {
+            id,
+            uri,
+            line,
+            col,
+            trigger: trigger.map(str::to_string),
+        });
+        id
+    }
+
+    pub fn request_signature_help(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+        trigger: Option<&str>,
+    ) -> i32 {
+        let id = next_id();
+        let uri = path_to_uri(&path.to_string_lossy());
+        let _ = self.cmd_tx.send(Cmd::SignatureHelp {
             id,
             uri,
             line,

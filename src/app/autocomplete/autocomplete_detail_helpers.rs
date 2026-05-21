@@ -38,7 +38,7 @@ fn apply_autocomplete_detail_cache_item(
     } else {
         incoming_kind
     };
-    if item.kind == SymbolKind::Parameter {
+    if matches!(item.kind, SymbolKind::Parameter | SymbolKind::Argument) {
         if item.detail.is_none() && cached.detail.is_some() {
             item.detail = cached.detail.clone();
         }
@@ -51,7 +51,10 @@ fn apply_autocomplete_detail_cache_item(
     if !member_dot_context
         && (matches!(
             effective_kind,
-            SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+            SymbolKind::Variable
+                | SymbolKind::Parameter
+                | SymbolKind::Argument
+                | SymbolKind::Property
         ) || completion_is_lowercase_type_source(
             &item.word,
             cached.module.as_deref(),
@@ -487,4 +490,3 @@ fn infer_python_member_owner(
     }
     best
 }
-

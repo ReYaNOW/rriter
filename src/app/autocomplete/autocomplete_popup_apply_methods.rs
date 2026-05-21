@@ -43,7 +43,10 @@ impl App {
             if comp.scope_start == prefix_start
                 && matches!(
                     comp.kind,
-                    SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Unknown
+                    SymbolKind::Variable
+                        | SymbolKind::Parameter
+                        | SymbolKind::Argument
+                        | SymbolKind::Unknown
                 )
                 && comp.word.to_lowercase().starts_with(&prefix_lower)
             {
@@ -102,7 +105,10 @@ impl App {
                     2
                 };
             let type_priority = match comp.kind {
-                SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property => 0,
+                SymbolKind::Variable
+                | SymbolKind::Parameter
+                | SymbolKind::Argument
+                | SymbolKind::Property => 0,
                 SymbolKind::Function => 1,
                 SymbolKind::Class | SymbolKind::Module => 2,
                 SymbolKind::Builtin => 3,

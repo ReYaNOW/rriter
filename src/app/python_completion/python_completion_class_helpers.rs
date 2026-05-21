@@ -803,13 +803,20 @@ pub(crate) fn cursor_inside_python_call_parens(editor: &Editor) -> bool {
     if cursor_in_python_string_or_comment(prefix) {
         return false;
     }
+    let bytes = text.as_bytes();
     let mut depth = 0usize;
-    for b in prefix.bytes() {
-        match b {
-            b'(' => depth += 1,
-            b')' => depth = depth.saturating_sub(1),
+    for idx in (0..cursor).rev() {
+        match bytes[idx] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' => {
+                if depth > 0 {
+                    depth -= 1;
+                } else {
+                    return bytes[idx] == b'(';
+                }
+            }
             _ => {}
         }
     }
-    depth > 0
+    false
 }

@@ -1,3 +1,78 @@
+fn python_current_call_named_args(text: &str, cursor: usize) -> FxHashSet<String> {
+    let bytes = text.as_bytes();
+    let cursor = cursor.min(bytes.len());
+    let mut depth = 0usize;
+    let mut open = None;
+    for idx in (0..cursor).rev() {
+        match bytes[idx] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' => {
+                if depth == 0 {
+                    open = Some(idx + 1);
+                    break;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    let Some(open) = open else {
+        return FxHashSet::default();
+    };
+    let mut out = FxHashSet::default();
+    let mut p = open;
+    while p < cursor {
+        while p < cursor && !is_python_ident_byte(bytes[p]) {
+            p += 1;
+        }
+        let start = p;
+        while p < cursor && is_python_ident_byte(bytes[p]) {
+            p += 1;
+        }
+        if start == p {
+            continue;
+        }
+        let mut q = p;
+        while q < cursor && matches!(bytes[q], b' ' | b'\t') {
+            q += 1;
+        }
+        if q < cursor
+            && bytes[q] == b'='
+            && start > open
+            && bytes[start - 1] != b'.'
+            && let Some(name) = text.get(start..p)
+        {
+            out.insert(name.to_string());
+        }
+    }
+    out
+}
+
+fn ty_signature_parameter_items(
+    names: Vec<String>,
+    text: &str,
+    cursor: usize,
+) -> Vec<crate::lsp::LspCompletionItem> {
+    let used = python_current_call_named_args(text, cursor);
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        if used.contains(&name) || !seen.insert(name.clone()) {
+            continue;
+        }
+        out.push(crate::lsp::LspCompletionItem {
+            label: name.clone(),
+            kind: SymbolKind::Argument,
+            module: None,
+            detail: Some(format!("(parameter) {name}")),
+            insert_text: Some(format!("{name}=")),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        });
+    }
+    out
+}
+
 impl App {
     pub fn request_ty_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
         if autocomplete_trace_enabled() {
@@ -26,7 +101,8 @@ impl App {
             && (python_member_chain_too_deep(&self.editor)
                 || trigger.is_none()
                     && self.get_current_word_prefix().is_empty()
-                    && !cursor_after_python_member_dot(&self.editor))
+                    && !cursor_after_python_member_dot(&self.editor)
+                    && !cursor_inside_python_call_parens(&self.editor))
         {
             self.close_autocomplete();
             self.trace_autocomplete_state("request_ty:blocked_context");
@@ -94,8 +170,23 @@ impl App {
         );
         let (line, col) =
             crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
-        if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
-        {
+        let request_signature_help = mode == AutocompleteMode::TyContext
+            && cursor_inside_python_call_parens(&self.editor)
+            && !cursor_after_python_member_dot(&self.editor);
+        let completion_id =
+            lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger);
+        let signature_id = if request_signature_help {
+            lsp.request_ty_signature_help(&path, &self.file_extension, line, col, None)
+        } else {
+            None
+        };
+        if request_signature_help {
+            self.autocomplete_signature_items.clear();
+        } else {
+            self.autocomplete_signature_request_id = None;
+            self.autocomplete_signature_items.clear();
+        }
+        if let Some(id) = completion_id {
             if autocomplete_trace_enabled() {
                 println!(
                     "Autocomplete request_ty_sent: id={} cached={} hide_exact={} context_key_len={} line={} col={}",
@@ -126,6 +217,9 @@ impl App {
                 self.autocomplete_detail_rect = None;
             }
             self.trace_autocomplete_state("request_ty:end");
+        }
+        if let Some(id) = signature_id {
+            self.autocomplete_signature_request_id = Some(id);
         }
     }
 
@@ -169,7 +263,9 @@ impl App {
         let prefix = self.get_current_word_prefix();
         if self.autocomplete_mode == AutocompleteMode::TyContext
             && (python_member_chain_too_deep(&self.editor)
-                || prefix.is_empty() && !cursor_after_python_member_dot(&self.editor))
+                || prefix.is_empty()
+                    && !cursor_after_python_member_dot(&self.editor)
+                    && !cursor_inside_python_call_parens(&self.editor))
         {
             self.close_autocomplete();
             self.trace_autocomplete_state("update_ty:blocked_context");
@@ -191,6 +287,20 @@ impl App {
             .flatten();
         let imported_modules = python_context.then(|| imported_python_symbols(&current_text));
         let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        let call_argument_context = self.autocomplete_mode == AutocompleteMode::TyContext
+            && cursor_inside_python_call_parens(&self.editor)
+            && !member_dot_context;
+        if call_argument_context && !self.autocomplete_signature_items.is_empty() {
+            let mut merged = Vec::with_capacity(self.autocomplete_signature_items.len() + items.len());
+            merged.extend(
+                self.autocomplete_signature_items
+                    .iter()
+                    .cloned()
+                    .map(AutocompleteItem::from),
+            );
+            merged.extend(items);
+            items = merged;
+        }
         let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
             && member_dot_context)
             .then(|| common_completion_owner(&items))
@@ -376,7 +486,11 @@ impl App {
                     }
                 }
                 if completion_item_is_argument_like(item) {
-                    item.kind = SymbolKind::Parameter;
+                    item.kind = if call_argument_context {
+                        SymbolKind::Argument
+                    } else {
+                        SymbolKind::Parameter
+                    };
                 }
                 if !member_dot_context
                     && matches!(item.word.as_str(), "self" | "cls")
@@ -401,13 +515,18 @@ impl App {
                     .flatten();
                 if completion_item_is_field_like(item) || source_attr_owner.is_some() {
                     if !member_dot_context {
-                        item.kind = SymbolKind::Variable;
-                        if let Some(module) = top_level_import_module {
-                            item.module = Some(module.clone());
-                            item.module_path.get_or_insert_with(|| module.clone());
-                        } else {
+                        if item.kind == SymbolKind::Argument {
                             item.module = None;
                             item.module_path = None;
+                        } else {
+                            item.kind = SymbolKind::Variable;
+                            if let Some(module) = top_level_import_module {
+                                item.module = Some(module.clone());
+                                item.module_path.get_or_insert_with(|| module.clone());
+                            } else {
+                                item.module = None;
+                                item.module_path = None;
+                            }
                         }
                     } else if let Some(owner) = source_attr_owner {
                         item.kind = SymbolKind::Variable;
@@ -572,11 +691,11 @@ impl App {
             matches.push((is_prefix, item.word.len(), item, indices));
         }
 
-        let prefer_call_arguments = self.autocomplete_mode == AutocompleteMode::TyContext
-            && cursor_inside_python_call_parens(&self.editor)
-            && !cursor_after_python_member_dot(&self.editor);
+        let prefer_call_arguments = call_argument_context;
         matches.sort_unstable_by_key(|(is_prefix, len, item, _)| {
-            let arg_priority = if prefer_call_arguments && completion_item_is_argument_like(item) {
+            let arg_priority = if prefer_call_arguments
+                && (item.kind == SymbolKind::Argument || completion_item_is_argument_like(item))
+            {
                 0
             } else {
                 1
@@ -594,6 +713,7 @@ impl App {
             let low_priority_member =
                 member_dot_context && python_low_priority_member_name(&item.word);
             let type_priority = match item.kind {
+                SymbolKind::Argument => 0,
                 SymbolKind::Parameter => 0,
                 SymbolKind::Property | SymbolKind::Variable => 1,
                 SymbolKind::Function => 2,
@@ -680,4 +800,18 @@ impl App {
         self.trace_autocomplete_state("update_ty:end");
     }
 
+    pub fn update_ty_signature_help_autocomplete(&mut self, parameters: Vec<String>) {
+        if self.autocomplete_mode != AutocompleteMode::TyContext
+            || !cursor_inside_python_call_parens(&self.editor)
+            || cursor_after_python_member_dot(&self.editor)
+        {
+            return;
+        }
+        let text = self.editor.get_full_text();
+        self.autocomplete_signature_items =
+            ty_signature_parameter_items(parameters, &text, self.editor.cursor);
+        if !self.autocomplete_signature_items.is_empty() {
+            self.update_ty_autocomplete(Vec::new());
+        }
+    }
 }

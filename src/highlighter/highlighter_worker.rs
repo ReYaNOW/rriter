@@ -545,7 +545,8 @@ impl Highlighter {
 
                                                     let actual_scope_start = match sym_kind {
                                                         SymbolKind::Variable
-                                                        | SymbolKind::Parameter => {
+                                                        | SymbolKind::Parameter
+                                                        | SymbolKind::Argument => {
                                                             node.start_byte()
                                                         }
                                                         _ => scope_start,

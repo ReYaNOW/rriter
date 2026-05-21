@@ -72,6 +72,7 @@ pub enum SymbolKind {
     Function,
     Class,
     Parameter,
+    Argument,
     Property,
     Module,
     Builtin,

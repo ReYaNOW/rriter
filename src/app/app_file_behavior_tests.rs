@@ -137,6 +137,12 @@ fn python_completion_context_detects_member_dot_and_call_parens() {
     assert!(cursor_inside_python_call_parens(&in_call));
     assert!(!cursor_after_python_member_dot(&in_call));
 
+    let multiline_call = editor_with("asyncpg.create_pool(\n    ma");
+    assert!(cursor_inside_python_call_parens(&multiline_call));
+
+    let closed_multiline_call = editor_with("asyncpg.create_pool()\nma");
+    assert!(!cursor_inside_python_call_parens(&closed_multiline_call));
+
     let plain = editor_with("plain");
     assert!(!cursor_after_python_member_dot(&plain));
     assert!(!cursor_inside_python_call_parens(&plain));

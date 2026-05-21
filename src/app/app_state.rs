@@ -774,6 +774,8 @@ pub struct App {
     pub autocomplete_pending_request_mode: Option<AutocompleteMode>,
     pub autocomplete_pending_request_path: Option<PathBuf>,
     pub autocomplete_pending_context_key: Option<String>,
+    pub autocomplete_signature_request_id: Option<i32>,
+    pub autocomplete_signature_items: Vec<crate::lsp::LspCompletionItem>,
     pub autocomplete_detail_request_id: Option<i32>,
     pub autocomplete_detail_word: Option<String>,
     pub autocomplete_detail_request_path: Option<PathBuf>,

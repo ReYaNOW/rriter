@@ -295,7 +295,10 @@ pub(crate) fn completion_source_missing_or_plain_builtin_type(
 pub(crate) fn should_assign_builtin_completion_module(item: &AutocompleteItem) -> bool {
     if matches!(
         item.kind,
-        SymbolKind::Variable | SymbolKind::Parameter | SymbolKind::Property
+        SymbolKind::Variable
+            | SymbolKind::Parameter
+            | SymbolKind::Argument
+            | SymbolKind::Property
     ) {
         return false;
     }
@@ -414,7 +417,7 @@ pub(crate) fn completion_item_is_field_like(item: &AutocompleteItem) -> bool {
 }
 
 pub(crate) fn completion_item_is_argument_like(item: &AutocompleteItem) -> bool {
-    matches!(item.kind, SymbolKind::Parameter)
+    matches!(item.kind, SymbolKind::Parameter | SymbolKind::Argument)
         || item
             .detail
             .as_deref()
@@ -966,4 +969,3 @@ pub(crate) fn apply_import_module_to_autocomplete_item(item: &mut AutocompleteIt
         item.kind = SymbolKind::Variable;
     }
 }
-

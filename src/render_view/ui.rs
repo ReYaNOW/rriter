@@ -36,6 +36,11 @@ fn autocomplete_badge_style(kind: crate::highlighter::SymbolKind) -> Autocomplet
             bg: [0.42, 0.31, 0.16, 1.0],
             fg: [1.0, 0.79, 0.42, 1.0],
         },
+        crate::highlighter::SymbolKind::Argument => AutocompleteBadgeStyle {
+            letter: Some('A'),
+            bg: [0.44, 0.25, 0.12, 1.0],
+            fg: [1.0, 0.68, 0.34, 1.0],
+        },
         crate::highlighter::SymbolKind::Property => AutocompleteBadgeStyle {
             letter: Some('P'),
             bg: [0.35, 0.25, 0.14, 1.0],
@@ -268,6 +273,10 @@ mod tests {
         assert_eq!(
             autocomplete_badge_style(SymbolKind::Parameter).letter,
             Some('P')
+        );
+        assert_eq!(
+            autocomplete_badge_style(SymbolKind::Argument).letter,
+            Some('A')
         );
         assert_eq!(
             autocomplete_badge_style(SymbolKind::Property).letter,
