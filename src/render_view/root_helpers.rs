@@ -475,9 +475,16 @@ mod tests {
 }
 use glow::HasContext;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ModIntervalKind {
+    Line,
+    Deleted,
+}
+
 #[derive(Clone, Copy)]
 pub struct ModInterval {
     pub top: f32,
     pub bottom: f32,
+    pub kind: ModIntervalKind,
     pub state: crate::editor::LineModState,
 }

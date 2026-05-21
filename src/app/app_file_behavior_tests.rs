@@ -275,6 +275,37 @@ fn file_loading_saving_and_missing_file_cleanup_update_state_without_window() {
 }
 
 #[test]
+fn autosave_only_runs_in_ide_mode() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-autosave-mode-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("note.txt");
+    std::fs::write(&path, "old\n").unwrap();
+
+    app.is_ide_mode = false;
+    app.file_path = Some(path.clone());
+    app.editor = editor_with("old\n");
+    app.editor.insert_str("dirty\n");
+    assert!(app.editor.is_dirty());
+    assert!(!app.autosave_current_file_if_dirty());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\n");
+
+    app.is_ide_mode = true;
+    assert!(app.autosave_current_file_if_dirty());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\ndirty\n");
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
 fn file_open_waits_for_tree_sitter_and_applies_folds_before_return() {
     let Some(mut app) = test_app() else {
         return;

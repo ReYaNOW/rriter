@@ -264,7 +264,11 @@ impl App {
     }
 
     pub(crate) fn autosave_current_file_if_dirty(&mut self) -> bool {
-        if self.active_tab_is_git_diff() || self.file_path.is_none() || !self.editor.is_dirty() {
+        if !self.is_ide_mode
+            || self.active_tab_is_git_diff()
+            || self.file_path.is_none()
+            || !self.editor.is_dirty()
+        {
             return false;
         }
         let saved = self.save_current_file();

@@ -1,6 +1,6 @@
 use crate::editor::Editor;
 use crate::highlighter::ColorSpan;
-use crate::render_view::ModInterval;
+use crate::render_view::{ModInterval, ModIntervalKind};
 use crate::renderer::Renderer;
 
 fn folded_import_keyword_range(
@@ -222,6 +222,7 @@ impl Renderer {
                     self.mod_intervals_cache.push(ModInterval {
                         top: y_top - 3.0,
                         bottom: y_top + 3.0,
+                        kind: ModIntervalKind::Deleted,
                         state: st,
                     });
                 }
@@ -231,6 +232,7 @@ impl Renderer {
                 self.mod_intervals_cache.push(ModInterval {
                     top: y_top,
                     bottom: y_bottom,
+                    kind: ModIntervalKind::Line,
                     state: st,
                 });
             }
@@ -239,10 +241,16 @@ impl Renderer {
 
         if end_visual_line == self.visual_lines.len() {
             if let Some(phys_idx) = last_phys_line {
-                if let Some(st) = editor.deleted_gaps.get(phys_idx + 1).copied().flatten() {
+                if let Some(st) = editor
+                    .deleted_gaps
+                    .get(phys_idx + 1)
+                    .copied()
+                    .flatten()
+                {
                     self.mod_intervals_cache.push(ModInterval {
                         top: last_bottom_y - 3.0,
                         bottom: last_bottom_y + 3.0,
+                        kind: ModIntervalKind::Deleted,
                         state: st,
                     });
                 }
@@ -252,7 +260,10 @@ impl Renderer {
         for int in &self.mod_intervals_cache {
             let mut merged = false;
             if let Some(last) = self.merged_intervals_cache.last_mut() {
-                if int.top <= last.bottom + 0.1 && int.state == last.state {
+                if int.top <= last.bottom + 0.1
+                    && int.kind == last.kind
+                    && int.state == last.state
+                {
                     last.bottom = last.bottom.max(int.bottom);
                     merged = true;
                 }

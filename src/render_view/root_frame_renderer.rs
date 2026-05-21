@@ -845,15 +845,21 @@ impl Renderer {
             }
         }
 
+        let git_line_mod_color =
+            is_ide_mode && active_git_diff_state.is_none() && editor.git_base_text.is_some();
         for i in 0..self.merged_intervals_cache.len() {
             let m = self.merged_intervals_cache[i];
             if m.bottom < 0.0 || m.top > real_height {
                 continue;
             }
-            let color = if m.state == crate::editor::LineModState::ModifiedUnsaved {
+            let color = if matches!(m.kind, crate::render_view::ModIntervalKind::Deleted) {
                 self.theme.modified_unsaved
-            } else {
+            } else if git_line_mod_color
+                || m.state == crate::editor::LineModState::ModifiedSaved
+            {
                 self.theme.modified_saved
+            } else {
+                self.theme.modified_unsaved
             };
             let draw_top = m.top + 2.0;
             let draw_bottom = m.bottom + 2.0;
