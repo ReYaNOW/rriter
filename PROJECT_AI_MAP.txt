@@ -391,7 +391,7 @@ F save_state_and_exit@285
 F autocomplete_detail_placement_stays_below_completion_window@1387>91
 I App
 F resumed@317>4u
-F window_event@401>3b,3c,3e,4u,4v,4w,4x,4y,51,5c,5g,5h,5m,5n,5o,8w,8x,8z,90,91,92,ah,ai,ik,js,np,o6,1d1
+F window_event@401>3b,3c,3e,4u,4v,4w,4x,4y,51,5c,5g,5h,5m,5n,5o,8w,8x,8z,90,91,92,ah,ai,ik,js,np,o6,1d2
 F about_to_wait@1377>7o
 I AutocompleteFrameStats
 F default@66
@@ -1702,10 +1702,10 @@ F editor_with_text@91
 F folded_import_keyword_range_covers_collapsed_click_words@98>13z,140,144
 I Renderer
 F inlay_text_bounds_y@111>1bb
-F draw_editor_visible_text@136>13k,13n,13p,13t,13w,13z,140,1ba,1bs,1bt,1bu,1bx
+F draw_editor_visible_text@136>13k,13n,13p,13t,13w,13z,140,1ba,1bs,1bt,1bu,1by
 M src/render_view/hover_overlays.rs
 I Renderer
-F draw_lsp_squiggles_and_collect_hovered_diag@8>13p,1bt,1bw
+F draw_lsp_squiggles_and_collect_hovered_diag@8>13p,1bt,1bx
 F draw_hover_overlays@213>192,193,194,1bt
 M src/render_view/ide_panels/ide_panel_behavior_tests.rs
 F source_between@5
@@ -1728,15 +1728,15 @@ F git_file_row_layout_draws_icon_between_checkbox_and_label@333>16g,16h
 F file_tree_context_menu_groups_insert_logical_separators@347>15q,15r
 M src/render_view/ide_panels/ide_panel_dialog_renderer.rs
 I Renderer
-F draw_ide_bottom_panel@4>13t,16t,177,187,1ab,1bs,1bx
-F draw_status_bar@160>13t,13u,13w,13y,175,176,17a,17b,17c,17d,1at,1bs,1bx
+F draw_ide_bottom_panel@4>13t,16t,177,187,1ab,1bs,1by
+F draw_status_bar@160>13t,13u,13w,13y,175,176,17a,17b,17c,17d,1at,1bs,1by
 F draw_file_tree_dialog_shell@435>13y
-F draw_file_tree_dialog_input@449>9l,13p,13w,1bb,1bu,1bx
+F draw_file_tree_dialog_input@449>9l,13p,13w,1bb,1bu,1by
 F draw_file_tree_dialog_buttons@570>13t,13w,1bs
-F draw_file_tree_overlays@605>9e,9f,9g,9h,9k,13p,13t,13y,14u,14v,14w,15o,15q,15r,16i,1bs,1bx
+F draw_file_tree_overlays@605>9e,9f,9g,9h,9k,13p,13t,13y,14u,14v,14w,15o,15q,15r,16i,1bs,1by
 M src/render_view/ide_panels/ide_panel_git_graph_renderer.rs
 I Renderer
-F draw_git_graph_panel@4>13p,13t,13w,152,155,156,157,16c,16e,16f,16l,16n,16o,18c,1bs,1bx
+F draw_git_graph_panel@4>13p,13t,13w,152,155,156,157,16c,16e,16f,16l,16n,16o,18c,1bs,1by
 M src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs
 I Renderer
 F draw_git_file_tooltip@4>13t,13w,1bs
@@ -1758,13 +1758,13 @@ F git_graph_tooltip_wrap_end@483>15b
 F git_graph_tooltip_wrapped_line_count@504>15e
 F draw_git_graph_wrapped_selectable_text@523>15e,15h,15i
 F push_git_graph_tooltip_text_row@562
-F draw_git_graph_selectable_text@590>16a,1ba,1bb,1bu,1bx
+F draw_git_graph_selectable_text@590>16a,1ba,1bb,1bu,1by
 F git_graph_tooltip_byte_at@636>15b
 F selected_git_graph_tooltip_text@680>16a
-F draw_git_graph_tooltip@693>13t,13u,13y,15a,15c,15d,15f,15g,15h,15i,168,16e,16n,1at,1bs,1bx
+F draw_git_graph_tooltip@693>13t,13u,13y,15a,15c,15d,15f,15g,15h,15i,168,16e,16n,1at,1bs,1by
 M src/render_view/ide_panels/ide_panel_git_workspace_renderer.rs
 I Renderer
-F draw_git_panel@4>13p,13t,13w,14y,15s,15t,15u,15v,15w,15x,15y,15z,160,161,165,16d,16g,16h,16i,16l,16m,18c,18d,18f,1au,1bb,1bs,1bu,1bx
+F draw_git_panel@4>13p,13t,13w,14y,15s,15t,15u,15v,15w,15x,15y,15z,160,161,165,16d,16g,16h,16i,16l,16m,18c,18d,18f,1au,1bb,1bs,1bu,1by
 M src/render_view/ide_panels/ide_panel_helpers.rs
 C struct GitFileRowLayout@439
 C struct GitFolderRowLayout@428
@@ -1812,7 +1812,7 @@ F ui_text_center_y@79>16k
 F ui_text_baseline_for_center_y@83>16k
 F draw_git_graph_branch_chip@88>13w,15i,15n,16d,16j,16l,16m,1bb,1bs
 F draw_git_graph_label_clipped@146>15n,16j,1bb,1bs
-F draw_ide_side_panels@183>9h,13p,13t,13w,15m,16t,177,189,18e,18f,1au,1bs,1bw,1bx
+F draw_ide_side_panels@183>9h,13p,13t,13w,15m,16t,177,189,18e,18f,1au,1bs,1bx,1by
 M src/render_view/ide_panels.rs
 M src/render_view/lsp_ui.rs
 F lsp_action_label@4
@@ -1820,18 +1820,18 @@ F lsp_action_label_formats_code_actions_and_noqa_codes@59>16q
 F lsp_action_label_formats_static_actions@83>16q
 I Renderer
 F draw_lsp_servers_panel@114>j1,j2,13n,13p,13t,13w,1ba,1bb,1bs,1bt,1bu
-F draw_lsp_actions_menu@1117>13p,13t,13w,16q,1bs,1bx
+F draw_lsp_actions_menu@1117>13p,13t,13w,16q,1bs,1by
 M src/render_view/minimap_ui.rs
 I Renderer
-F draw_minimap@8>13p,172,1bx
+F draw_minimap@8>13p,172,1by
 M src/render_view/root_frame_helpers.rs
 I Renderer
 F draw_inline_git_text_line@3>1ba,1bt,1bu
-F draw_inline_git_popup_panel@78>13t,13w,16w,170,1bs,1bx
+F draw_inline_git_popup_panel@78>13t,13w,16w,170,1bs,1by
 F draw_git_diff_hunk_panel@308>13t,13w,170,1bs
 M src/render_view/root_frame_renderer.rs
 I Renderer
-F draw@3>9h,13i,13n,13p,13s,13t,13u,13v,13w,13y,147,148,149,14s,14t,14x,150,151,16p,16v,16x,16y,173,174,175,176,177,178,17e,17f,17g,17h,17x,180,184,185,1at,1ay,1az,1b0,1bf,1bh,1bs,1bx
+F draw@3>9h,13i,13n,13p,13s,13t,13u,13v,13w,13y,147,148,149,14s,14t,14x,150,151,16p,16v,16x,16y,173,174,175,176,177,178,17e,17f,17g,17h,17x,180,184,185,1at,1ay,1az,1b0,1bf,1bh,1bs,1by
 M src/render_view/root_helpers.rs
 C struct ModInterval@479
 C struct Telemetry@212
@@ -1871,25 +1871,25 @@ I Telemetry
 F default@223
 M src/render_view/search.rs
 I Renderer
-F draw_search_panel@9>13p,13u,13w,1bb,1bu,1bx
+F draw_search_panel@9>13p,13u,13w,1bb,1bu,1by
 M src/render_view/settings_ui.rs
 I Renderer
 F get_faq_max_scroll@7
-F draw_settings@32>13p,13t,13w,13y,17y,1at,1b2,1bb,1bs,1bu,1bx,1by
+F draw_settings@32>13p,13t,13w,13y,17y,1at,1b2,1bb,1bs,1bu,1by,1bz
 M src/render_view/sticky.rs
 I Renderer
-F draw_sticky_lines@8>13p,13q,13t,1ba,1bs,1bt,1bu,1bx
+F draw_sticky_lines@8>13p,13q,13t,1ba,1bs,1bt,1bu,1by
 M src/render_view/tabs_ui.rs
 F tab_path_is_external@7
 F tab_path_external_detection_requires_absolute_outside_workspace@444>181
 F external_tab_title_color_is_orange@466
 I Renderer
-F draw_tab_bar@20>98,rf,13p,13r,13t,13w,181,1at,1au,1bc,1be,1bs,1bx
+F draw_tab_bar@20>98,rf,13p,13r,13t,13w,181,1at,1au,1bc,1be,1bs,1by
 F draw_tab_tooltip@383>13t,13w,1bs
 M src/render_view/terminal_ui.rs
 F terminal_body_rect@6
 I Renderer
-F draw_terminal_panel@16>qi,13p,13t,13u,13w,186,1at,1bb,1bs,1bt,1bu,1bx
+F draw_terminal_panel@16>qi,13p,13t,13u,13w,186,1at,1bb,1bs,1bt,1bu,1by
 M src/render_view/tree_ui.rs
 F tree_dir_icon_y@15
 F tree_icon_x@20
@@ -1926,9 +1926,9 @@ F diag_popup_byte_at@357
 F valid_diagnostic_popup_cache@394
 I Renderer
 F push_hover_popup_frame@406>13w,13x
-F draw_diagnostic_popup@445>13p,13u,13v,13w,18g,18p,18t,18u,18x,18y,190,191,1at,1bt,1bx
+F draw_diagnostic_popup@445>13p,13u,13v,13w,18g,18p,18t,18u,18x,18y,190,191,1at,1bt,1by
 F build_hover_popup_layout@960>18q,1bs,1bt
-F draw_hover_popup@1124>13p,13u,13w,18h,18k,18p,18u,18v,18x,191,193,1au,1bb,1bt,1bu,1bx
+F draw_hover_popup@1124>13p,13u,13w,18h,18k,18p,18u,18v,18x,191,193,1au,1ba,1bb,1bt,1bu,1bv,1by
 M src/render_view/ui/hover_widget_tests.rs
 F module_header_wrap_does_not_split_marker_from_path@4>18q
 F test_valid_diagnostic_popup_cache_drops_stale_indices@12>190
@@ -1974,7 +1974,7 @@ F test_detached_hover_content_scissor_keeps_popup_animation@478>18r,18w
 F test_hover_content_scissor_stays_inside_animated_frame@486>18i,18r,18w
 M src/render_view/ui/problems_panel.rs
 I Renderer
-F draw_problems_panel@5>13p,13t,13w,1at,1bs,1bx
+F draw_problems_panel@5>13p,13t,13w,1at,1bs,1by
 M src/render_view/ui.rs
 C struct AutocompleteBadgeStyle@11
 C struct AutocompleteModuleLayout@197
@@ -1999,12 +1999,12 @@ I Renderer
 F draw_icon@460>13p,1bu
 F draw_atlas_icon@472>13p,1bu
 F draw_file_icon@495>13p,1bu
-F push_autocomplete_text_row_bg@595>13w,1bx
-F draw_autocomplete@623>13p,13t,13w,13x,13y,1ac,1ad,1ae,1af,1aj,1ak,1av,1ba,1bb,1bs,1bu,1bx
-F draw_dialog_window@945>13p,13q,13t,13w,1at,1d1
-F draw_welcome@1057>13p,13q,13t,13w,1as,1bs,1bx,1cz
-F draw_diagnostics_ruler@1301>1bx
-F draw_empty_ide@1377>13p,13t,1bs,1bx
+F push_autocomplete_text_row_bg@595>13w,1by
+F draw_autocomplete@623>13p,13t,13w,13x,13y,1ac,1ad,1ae,1af,1aj,1ak,1av,1ba,1bb,1bs,1bu,1by
+F draw_dialog_window@945>13p,13q,13t,13w,1at,1d2
+F draw_welcome@1057>13p,13q,13t,13w,1as,1bs,1by,1d0
+F draw_diagnostics_ruler@1301>1by
+F draw_empty_ide@1377>13p,13t,1bs,1by
 M src/render_view.rs
 M src/renderer/geometry.rs
 C struct Vertex@5
@@ -2018,7 +2018,7 @@ F squiggle_vertices_encode_wave_params_and_extent@239>1b3
 F rounded_rect_gradient_vertices_keep_top_and_bottom_colors@254>1b4
 M src/renderer/renderer_glyph_methods.rs
 I Renderer
-F get_custom_svg_glyph@3>1c1
+F get_custom_svg_glyph@3>1c2
 F get_glyph@76>1b9
 F get_ui_glyph@250>1b9
 M src/renderer/renderer_init_methods.rs
@@ -2027,27 +2027,28 @@ F delayed_tooltip_anchor@3>1bd
 F reset_delayed_tooltip_anchor@47
 F reset_delayed_tooltip_anchor_namespace@55>1bd
 F suppress_popups_until_next_mouse_move@66
-F popups_waiting_for_mouse_move_at@72>1bz
+F popups_waiting_for_mouse_move_at@72>1c0
 F update_popup_mouse_move_gate@82>1bg
-F new@90>1c2,1c3
+F new@90>1c3,1c4
 M src/renderer/renderer_primitives_tests.rs
-F font_data_sources_return_expected_slices@355>1c2,1c3
-F font_data_ensure_loaded_keeps_missing_lazy_source_empty@372>1c2
-F font_data_ensure_loaded_maps_existing_lazy_source_once@381>1c2
-F popup_mouse_move_gate_waits_for_real_motion_after_focus_restore@398>1bz
-F custom_svg_alpha_bbox_centering_moves_down_glyph_visual_only@412>1c0,1c1
-F custom_svg_alpha_bbox_centering_keeps_centered_glyph_in_place@425>1c0,1c1
-F vertex_layout_is_plain_data_and_visual_line_fields_are_stable@440
-F renderer_constants_keep_expected_atlas_and_batch_sizes@471
+F font_data_sources_return_expected_slices@421>1c3,1c4
+F font_data_ensure_loaded_keeps_missing_lazy_source_empty@438>1c3
+F font_data_ensure_loaded_maps_existing_lazy_source_once@447>1c3
+F popup_mouse_move_gate_waits_for_real_motion_after_focus_restore@464>1c0
+F custom_svg_alpha_bbox_centering_moves_down_glyph_visual_only@478>1c1,1c2
+F custom_svg_alpha_bbox_centering_keeps_centered_glyph_in_place@491>1c1,1c2
+F vertex_layout_is_plain_data_and_visual_line_fields_are_stable@506
+F renderer_constants_keep_expected_atlas_and_batch_sizes@537
 I Renderer
 F resize@3
 F measure_ui_width@14>1bb
 F char_advance@28>1ba
 F push_quad@46>1b1
-F load_builtin_icons@64
-F push_squiggle@312>1b3
-F push_rect@323>1bu
-F push_rounded_rect_gradient@328>1b4
+F push_quad_subpixel_y@64
+F load_builtin_icons@130
+F push_squiggle@378>1b3
+F push_rect@389>1bu
+F push_rounded_rect_gradient@394>1b4
 M src/renderer/renderer_types.rs
 C struct FontData@155
 C enum FontSource@114
@@ -2058,7 +2059,7 @@ C struct Theme@71
 C struct VisualLine@102
 F popup_waiting_for_mouse_move@18
 F alpha_bounds_y@23
-F center_alpha_bbox_y@46>1c0
+F center_alpha_bbox_y@46>1c1
 I FontData
 F new_lazy@161
 F new_static@171
@@ -2108,17 +2109,17 @@ M src/widgets.rs
 C struct Button@34
 C struct IconButton@121
 C enum IconType@4
-F get_welcome_buttons@237>1d0
+F get_welcome_buttons@237>1d1
 F welcome_buttons_from_widths@250
-F get_dialog_buttons@305>1d2
+F get_dialog_buttons@305>1d3
 F dialog_buttons_from_widths@328
 F widget_hitboxes_cover_regular_and_sidebar_buttons@401
-F button_layout_helpers_scale_text_and_icons_consistently@440>1d0,1d2
-F layout_helpers_do_not_overlap_at_small_widths@469>1d0,1d2
-F welcome_and_dialog_button_layouts_are_stable@488>1d0,1d2
+F button_layout_helpers_scale_text_and_icons_consistently@440>1d1,1d3
+F layout_helpers_do_not_overlap_at_small_widths@469>1d1,1d3
+F welcome_and_dialog_button_layouts_are_stable@488>1d1,1d3
 I Button
 F is_hovered@46
 F render@51
 I IconButton
 F is_hovered@133
-F render@144>1d7,1d9
+F render@144>1d8,1da

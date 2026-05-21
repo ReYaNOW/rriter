@@ -61,6 +61,72 @@ impl Renderer {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn push_quad_subpixel_y(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        u: f32,
+        v: f32,
+        uw: f32,
+        vh: f32,
+        color: [f32; 4],
+        mode: f32,
+    ) {
+        let x1 = x.round();
+        let y1 = y;
+        let x2 = (x + w).round();
+        let y2 = y + h;
+        let sdf_params = [0.0, 0.0, 0.0];
+
+        self.vertices.extend_from_slice(&[
+            Vertex {
+                pos: [x1, y1],
+                uv: [u, v],
+                color,
+                mode,
+                sdf_params,
+            },
+            Vertex {
+                pos: [x2, y1],
+                uv: [u + uw, v],
+                color,
+                mode,
+                sdf_params,
+            },
+            Vertex {
+                pos: [x2, y2],
+                uv: [u + uw, v + vh],
+                color,
+                mode,
+                sdf_params,
+            },
+            Vertex {
+                pos: [x1, y1],
+                uv: [u, v],
+                color,
+                mode,
+                sdf_params,
+            },
+            Vertex {
+                pos: [x2, y2],
+                uv: [u + uw, v + vh],
+                color,
+                mode,
+                sdf_params,
+            },
+            Vertex {
+                pos: [x1, y2],
+                uv: [u, v + vh],
+                color,
+                mode,
+                sdf_params,
+            },
+        ]);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn load_builtin_icons(&mut self) {
         let builtin = [
             (

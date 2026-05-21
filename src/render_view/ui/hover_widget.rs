@@ -1300,7 +1300,11 @@ impl Renderer {
             let cur_line_h = line_h * scale_mul;
 
             let rounded_top = current_top.round();
-            let text_y = rounded_top + (cur_line_h * 0.75).round();
+            let text_y = if fixed_visible_size {
+                current_top + cur_line_h * 0.75
+            } else {
+                rounded_top + (cur_line_h * 0.75).round()
+            };
 
             if current_top + cur_line_h > by && current_top < by + box_h {
                 let is_separator = line
@@ -1393,18 +1397,35 @@ impl Renderer {
                                     );
                                 }
                             }
-                            self.push_quad(
-                                (draw_x + g.offset_x * scale_mul).round(),
-                                (text_y - g.offset_y * scale_mul).round(),
-                                g.width * scale_mul,
-                                g.height * scale_mul,
-                                g.u,
-                                g.v,
-                                g.uw,
-                                g.vh,
-                                fade_hover_color(color, opacity),
-                                g.is_emoji,
-                            );
+                            let glyph_x = (draw_x + g.offset_x * scale_mul).round();
+                            let glyph_y = text_y - g.offset_y * scale_mul;
+                            if fixed_visible_size {
+                                self.push_quad_subpixel_y(
+                                    glyph_x,
+                                    glyph_y,
+                                    g.width * scale_mul,
+                                    g.height * scale_mul,
+                                    g.u,
+                                    g.v,
+                                    g.uw,
+                                    g.vh,
+                                    fade_hover_color(color, opacity),
+                                    g.is_emoji,
+                                );
+                            } else {
+                                self.push_quad(
+                                    glyph_x,
+                                    glyph_y.round(),
+                                    g.width * scale_mul,
+                                    g.height * scale_mul,
+                                    g.u,
+                                    g.v,
+                                    g.uw,
+                                    g.vh,
+                                    fade_hover_color(color, opacity),
+                                    g.is_emoji,
+                                );
+                            }
                         }
                         draw_x += adv;
                     }
@@ -1459,13 +1480,30 @@ impl Renderer {
                         }
                         let mut b = [0; 4];
                         let s_str = c.encode_utf8(&mut b);
-                        self.draw_string_mono_scaled(
-                            s_str,
-                            draw_x,
-                            text_y,
-                            fade_hover_color(color, opacity),
-                            1.0,
-                        );
+                        if fixed_visible_size {
+                            if let Some(g) = self.get_glyph(c) {
+                                self.push_quad_subpixel_y(
+                                    (draw_x + g.offset_x).round(),
+                                    text_y - g.offset_y,
+                                    g.width,
+                                    g.height,
+                                    g.u,
+                                    g.v,
+                                    g.uw,
+                                    g.vh,
+                                    fade_hover_color(color, opacity),
+                                    g.is_emoji,
+                                );
+                            }
+                        } else {
+                            self.draw_string_mono_scaled(
+                                s_str,
+                                draw_x,
+                                text_y,
+                                fade_hover_color(color, opacity),
+                                1.0,
+                            );
+                        }
                         draw_x += adv;
                     }
                 }
