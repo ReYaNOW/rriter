@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use crate::highlighter::{CompletionItem, Highlighter, SymbolKind};
+use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
 use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
@@ -681,6 +681,49 @@ pub(crate) fn python_positional_inlay_hints_from_lsp(
     out
 }
 
+pub(crate) fn shift_python_inlay_hints_for_edits(
+    hints: &mut Vec<PythonInlayHint>,
+    edits: &[SyncEdit],
+) {
+    for edit in edits {
+        match edit {
+            SyncEdit::Insert { offset, text } => {
+                let len = text.len();
+                if len == 0 {
+                    continue;
+                }
+                let start = hints.partition_point(|hint| hint.byte_offset < *offset);
+                for hint in &mut hints[start..] {
+                    hint.byte_offset += len;
+                }
+            }
+            SyncEdit::Delete { offset, len } => {
+                if *len == 0 {
+                    continue;
+                }
+                let end = offset.saturating_add(*len);
+                let remove_start = hints.partition_point(|hint| hint.byte_offset < *offset);
+                let remove_end = hints.partition_point(|hint| hint.byte_offset < end);
+                hints.drain(remove_start..remove_end);
+                for hint in &mut hints[remove_start..] {
+                    hint.byte_offset = hint.byte_offset.saturating_sub(*len);
+                }
+            }
+        }
+    }
+}
+
+impl App {
+    pub(crate) fn shift_current_python_inlay_hints_for_edits(&mut self, edits: &[SyncEdit]) {
+        if self.python_inlay_hints.is_empty()
+            || self.python_inlay_hint_path.as_ref() != self.file_path.as_ref()
+        {
+            return;
+        }
+        shift_python_inlay_hints_for_edits(&mut self.python_inlay_hints, edits);
+    }
+}
+
 pub struct App {
     pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,
@@ -1015,6 +1058,44 @@ mod tests {
                     label: "payload: ".to_string(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn python_inlay_hints_shift_with_local_edits() {
+        let mut hints = vec![
+            PythonInlayHint {
+                byte_offset: 10,
+                label: "first: ".to_string(),
+            },
+            PythonInlayHint {
+                byte_offset: 30,
+                label: "second: ".to_string(),
+            },
+        ];
+
+        shift_python_inlay_hints_for_edits(
+            &mut hints,
+            &[
+                SyncEdit::Insert {
+                    offset: 0,
+                    text: "\n".to_string(),
+                },
+                SyncEdit::Delete { offset: 12, len: 2 },
+            ],
+        );
+
+        assert_eq!(hints[0].byte_offset, 11);
+        assert_eq!(hints[1].byte_offset, 29);
+
+        shift_python_inlay_hints_for_edits(&mut hints, &[SyncEdit::Delete { offset: 10, len: 3 }]);
+
+        assert_eq!(
+            hints,
+            vec![PythonInlayHint {
+                byte_offset: 26,
+                label: "second: ".to_string(),
+            }]
         );
     }
 

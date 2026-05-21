@@ -1205,6 +1205,7 @@ impl App {
         self.inline_git_diff_rx = None;
         if !self.editor.sync_edits.is_empty() {
             let edits = std::mem::take(&mut self.editor.sync_edits);
+            self.shift_current_python_inlay_hints_for_edits(&edits);
             let (invalidate_start_byte, invalidate_end_byte) =
                 crate::highlighter::sync_edit_invalidation_byte_range(&edits);
             self.highlighter

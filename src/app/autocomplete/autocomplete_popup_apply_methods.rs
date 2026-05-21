@@ -377,7 +377,11 @@ impl App {
                     self.apply_workspace_edit(&crate::lsp::WorkspaceEdit { changes }, true);
                 }
             }
-            let selected = item.insert_text.as_deref().unwrap_or(&item.word).to_string();
+            let selected = item
+                .insert_text
+                .as_deref()
+                .unwrap_or(&item.word)
+                .to_string();
             let prefix_len = self.get_current_word_prefix().len();
 
             for _ in 0..prefix_len {
@@ -455,6 +459,7 @@ impl App {
             return;
         }
         let edits = std::mem::take(&mut self.editor.sync_edits);
+        self.shift_current_python_inlay_hints_for_edits(&edits);
         if self.is_ide_mode {
             if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                 let text = self.editor.get_full_text();

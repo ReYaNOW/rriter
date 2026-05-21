@@ -880,6 +880,7 @@ impl App {
 
             if !self.editor.sync_edits.is_empty() {
                 let edits = std::mem::take(&mut self.editor.sync_edits);
+                self.shift_current_python_inlay_hints_for_edits(&edits);
                 // LSP can skip low-value keystrokes; highlighter cannot, its replica must stay exact.
                 if should_notify_lsp && self.is_ide_mode {
                     if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {

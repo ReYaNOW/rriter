@@ -356,6 +356,7 @@ impl App {
         // Синхронизируем с LSP и подсветчиком
         if !self.editor.sync_edits.is_empty() {
             let edits = std::mem::take(&mut self.editor.sync_edits);
+            self.shift_current_python_inlay_hints_for_edits(&edits);
             if self.is_ide_mode {
                 if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                     let text = self.editor.get_full_text();
@@ -444,6 +445,7 @@ impl App {
 
                 if !self.editor.sync_edits.is_empty() {
                     let edits = std::mem::take(&mut self.editor.sync_edits);
+                    self.shift_current_python_inlay_hints_for_edits(&edits);
                     if self.is_ide_mode {
                         if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
                             let text = self.editor.get_full_text();
