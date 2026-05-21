@@ -306,11 +306,26 @@ impl App {
             items.into_iter().map(AutocompleteItem::from).collect();
         let current_text = self.editor.get_full_text();
         let python_context = python_completion_context(&self.file_extension, &current_text);
+        let current_module_path = python_context
+            .then(|| {
+                self.file_path.as_deref().and_then(|path| {
+                    crate::app::events::module_path_from_definition_path(
+                        path,
+                        &self.ide_workspaces,
+                    )
+                })
+            })
+            .flatten();
         let local_self_owner = python_context
             .then(|| python_enclosing_class_before_cursor(&current_text, self.editor.cursor))
             .flatten();
         let imported_modules = python_context.then(|| imported_python_symbols(&current_text));
         let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        let local_function_names = if current_module_path.is_some() && !member_dot_context {
+            python_source_function_names(&current_text)
+        } else {
+            FxHashSet::default()
+        };
         let call_argument_context = self.autocomplete_mode == AutocompleteMode::TyContext
             && cursor_inside_python_call_parens(&self.editor)
             && !member_dot_context;
@@ -482,6 +497,16 @@ impl App {
                 normalize_ty_import_kind(item);
             }
             if self.autocomplete_mode == AutocompleteMode::TyContext {
+                if !member_dot_context
+                    && matches!(item.kind, SymbolKind::Function | SymbolKind::Builtin)
+                    && item.module.is_none()
+                    && item.module_path.is_none()
+                    && local_function_names.contains(&item.word)
+                    && let Some(module) = current_module_path.as_ref()
+                {
+                    item.module = Some(module.clone());
+                    item.module_path = Some(module.clone());
+                }
                 if item
                     .module_path
                     .as_deref()

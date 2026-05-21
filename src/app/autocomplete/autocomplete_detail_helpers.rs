@@ -8,6 +8,11 @@ fn autocomplete_trace_enabled() -> bool {
 const AUTOCOMPLETE_CACHE_MAX_ITEMS: usize = 256;
 const AUTOCOMPLETE_DETAIL_DECL_MAX_CHARS: usize = 112;
 
+pub(crate) struct AutocompleteDetailText<'a> {
+    pub(crate) text: std::borrow::Cow<'a, str>,
+    pub(crate) module_path: Option<String>,
+}
+
 fn python_completion_context(file_extension: &str, text: &str) -> bool {
     matches!(file_extension, "py" | "pyi")
         || text.lines().take(200).any(|line| {
@@ -372,6 +377,126 @@ fn autocomplete_module_source_path(module_path: &str, workspaces: &[PathBuf]) ->
     autocomplete_ty_typeshed_source_path(&rel)
 }
 
+fn autocomplete_import_base_module(source_module: &str, source_path: &std::path::Path) -> String {
+    if source_path.file_name().and_then(|name| name.to_str()) == Some("__init__.py")
+        || source_path.file_name().and_then(|name| name.to_str()) == Some("__init__.pyi")
+    {
+        source_module.to_string()
+    } else {
+        source_module
+            .rsplit_once('.')
+            .map(|(base, _)| base.to_string())
+            .unwrap_or_default()
+    }
+}
+
+fn autocomplete_resolve_import_module(
+    import_module: &str,
+    source_module: &str,
+    source_path: &std::path::Path,
+) -> Option<String> {
+    let import_module = import_module.trim();
+    if import_module.is_empty() {
+        return None;
+    }
+    if !import_module.starts_with('.') {
+        return completion_source_is_module_path(import_module).then(|| import_module.to_string());
+    }
+
+    let dot_count = import_module.bytes().take_while(|b| *b == b'.').count();
+    let tail = import_module[dot_count..].trim_matches('.');
+    let base_module = autocomplete_import_base_module(source_module, source_path);
+    let mut parts: Vec<&str> = base_module
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let pop_count = dot_count.saturating_sub(1);
+    if pop_count > parts.len() {
+        return None;
+    }
+    parts.truncate(parts.len().saturating_sub(pop_count));
+    parts.extend(tail.split('.').filter(|part| !part.is_empty()));
+    (!parts.is_empty()).then(|| parts.join("."))
+}
+
+fn autocomplete_import_item_symbol(item: &str, wanted: &str) -> Option<String> {
+    let item = item.trim().trim_end_matches(',').trim();
+    if item.is_empty() || item == ")" {
+        return None;
+    }
+    let mut parts = item.split(" as ");
+    let imported = parts.next()?.trim();
+    let visible = parts.next().map(str::trim).unwrap_or(imported);
+    (visible == wanted && !imported.is_empty()).then(|| imported.to_string())
+}
+
+fn autocomplete_reexport_source(
+    source: &str,
+    source_module: &str,
+    source_path: &std::path::Path,
+    symbol: &str,
+) -> Option<(String, String)> {
+    let mut lines = source.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("from ") else {
+            continue;
+        };
+        let Some((import_module, imports)) = rest.split_once(" import ") else {
+            continue;
+        };
+        let module =
+            autocomplete_resolve_import_module(import_module, source_module, source_path)?;
+        if imports.trim_start().starts_with('(') {
+            for import_line in lines.by_ref() {
+                if let Some(imported) = autocomplete_import_item_symbol(import_line.trim(), symbol)
+                {
+                    return Some((module, imported));
+                }
+                if import_line.trim() == ")" {
+                    break;
+                }
+            }
+        } else {
+            for item in imports.split(',') {
+                if let Some(imported) = autocomplete_import_item_symbol(item, symbol) {
+                    return Some((module, imported));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn autocomplete_class_source_path(
+    module_path: &str,
+    symbol: &str,
+    workspaces: &[PathBuf],
+) -> Option<(PathBuf, String, String)> {
+    let mut module = module_path.to_string();
+    let mut symbol = symbol.to_string();
+    for _ in 0..4 {
+        let path = autocomplete_module_source_path(&module, workspaces)?;
+        if crate::app::events::source_class_signature_from_definition_file(&path, &symbol)
+            .is_some()
+        {
+            return Some((path, module, symbol));
+        }
+        let source = std::fs::read_to_string(&path).ok()?;
+        let Some((next_module, next_symbol)) =
+            autocomplete_reexport_source(&source, &module, &path, &symbol)
+        else {
+            return None;
+        };
+        if next_module == module && next_symbol == symbol {
+            return None;
+        }
+        module = next_module;
+        symbol = next_symbol;
+    }
+    None
+}
+
 fn autocomplete_detail_class_name(detail: &str) -> Option<&str> {
     detail.split('|').find_map(|part| {
         let part = part.trim();
@@ -646,29 +771,34 @@ fn autocomplete_source_class_detail(
     item: &AutocompleteItem,
     detail: &str,
     workspaces: &[PathBuf],
-) -> Option<String> {
+) -> Option<AutocompleteDetailText<'static>> {
     if !matches!(item.kind, SymbolKind::Class | SymbolKind::Builtin) {
         return None;
     }
     let Some(module_path) = autocomplete_detail_module_path(item) else {
         return None;
     };
-    let Some(path) = autocomplete_module_source_path(module_path, workspaces) else {
-        return None;
-    };
-    let Some(signature) =
-        crate::app::events::source_class_signature_from_definition_file(&path, &item.word)
+    let Some((path, source_module, source_symbol)) =
+        autocomplete_class_source_path(module_path, &item.word, workspaces)
     else {
         return None;
     };
-    let doc = autocomplete_class_docstring_from_definition_file(&path, &item.word);
+    let Some(signature) =
+        crate::app::events::source_class_signature_from_definition_file(&path, &source_symbol)
+    else {
+        return None;
+    };
+    let doc = autocomplete_class_docstring_from_definition_file(&path, &source_symbol);
     let Some((start, end)) = autocomplete_class_line_range(detail, &item.word) else {
         let mut out = signature;
         if let Some(doc) = doc {
             out.push_str("\n---\n");
             out.push_str(&doc);
         }
-        return Some(out);
+        return Some(AutocompleteDetailText {
+            text: std::borrow::Cow::Owned(out),
+            module_path: Some(source_module),
+        });
     };
     let signature_changed = detail.get(start..end) != Some(signature.as_str());
     if !signature_changed && doc.is_none() {
@@ -687,25 +817,34 @@ fn autocomplete_source_class_detail(
         out.push_str("\n---\n");
         out.push_str(&doc);
     }
-    Some(out)
+    Some(AutocompleteDetailText {
+        text: std::borrow::Cow::Owned(out),
+        module_path: Some(source_module),
+    })
 }
 
 pub(crate) fn autocomplete_detail_text_for_item<'a>(
     item: &AutocompleteItem,
     detail: &'a str,
     workspaces: &[PathBuf],
-) -> std::borrow::Cow<'a, str> {
+) -> AutocompleteDetailText<'a> {
     if let Some(detail) = python_stdlib_completion_detail(item, detail) {
         if let Some(detail) = autocomplete_source_class_detail(item, detail, workspaces) {
-            return std::borrow::Cow::Owned(detail);
+            return detail;
         }
-        return std::borrow::Cow::Borrowed(detail);
+        return AutocompleteDetailText {
+            text: std::borrow::Cow::Borrowed(detail),
+            module_path: None,
+        };
     }
     if let Some(detail) = autocomplete_python_overload_detail(&item.word, detail) {
-        return std::borrow::Cow::Owned(detail);
+        return AutocompleteDetailText {
+            text: std::borrow::Cow::Owned(detail),
+            module_path: None,
+        };
     }
     if let Some(detail) = autocomplete_source_class_detail(item, detail, workspaces) {
-        return std::borrow::Cow::Owned(detail);
+        return detail;
     }
     let detail_type_label = autocomplete_detail_type_name(detail)
         .map(|name| name.rsplit('.').next().unwrap_or(name));
@@ -729,7 +868,10 @@ pub(crate) fn autocomplete_detail_text_for_item<'a>(
                 | SymbolKind::Property
         ) || completion_item_is_field_like(item);
         if !field_like || path_is_detail_type {
-            return std::borrow::Cow::Owned(format!("class {label}"));
+            return AutocompleteDetailText {
+                text: std::borrow::Cow::Owned(format!("class {label}")),
+                module_path: None,
+            };
         }
     }
     let owner = if item.module.as_deref().is_some_and(is_class_like_type_name)
@@ -740,22 +882,37 @@ pub(crate) fn autocomplete_detail_text_for_item<'a>(
         module_owner.or(path_owner)
     };
     let Some(owner) = owner else {
-        return std::borrow::Cow::Borrowed(detail);
+        return AutocompleteDetailText {
+            text: std::borrow::Cow::Borrowed(detail),
+            module_path: None,
+        };
     };
     if let Some(detail) = autocomplete_source_attr_class_detail(item, detail, owner) {
-        return std::borrow::Cow::Owned(detail);
+        return AutocompleteDetailText {
+            text: std::borrow::Cow::Owned(detail),
+            module_path: None,
+        };
     }
     if detail.contains(owner) || detail.contains(&format!(".{}", item.word)) {
-        return std::borrow::Cow::Borrowed(detail);
+        return AutocompleteDetailText {
+            text: std::borrow::Cow::Borrowed(detail),
+            module_path: None,
+        };
     }
     for prefix in ["(variable) ", "(parameter) "] {
         if let Some(rest) = detail.strip_prefix(prefix) {
             if rest.starts_with(&item.word) {
-                return std::borrow::Cow::Owned(format!("{prefix}{owner}.{rest}"));
+                return AutocompleteDetailText {
+                    text: std::borrow::Cow::Owned(format!("{prefix}{owner}.{rest}")),
+                    module_path: None,
+                };
             }
         }
     }
-    std::borrow::Cow::Borrowed(detail)
+    AutocompleteDetailText {
+        text: std::borrow::Cow::Borrowed(detail),
+        module_path: None,
+    }
 }
 
 fn autocomplete_detail_type_module_path(

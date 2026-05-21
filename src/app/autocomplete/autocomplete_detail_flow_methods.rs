@@ -151,6 +151,44 @@ impl App {
         }
     }
 
+    fn autocomplete_source_function_detail(
+        &self,
+        item: &AutocompleteItem,
+    ) -> Option<(String, Option<String>)> {
+        if self.file_extension != "py"
+            || !matches!(item.kind, SymbolKind::Function | SymbolKind::Builtin)
+        {
+            return None;
+        }
+
+        let current_module = self.file_path.as_deref().and_then(|path| {
+            crate::app::events::module_path_from_definition_path(path, &self.ide_workspaces)
+        });
+        let text = self.editor.get_full_text();
+        if let Some(detail) = crate::app::events::source_function_signature_from_text(
+            &text,
+            &item.word,
+            current_module.as_deref(),
+        ) {
+            return Some((detail, current_module));
+        }
+
+        let module_path = autocomplete_detail_module_path(item)?;
+        let path = autocomplete_module_source_path(module_path, &self.ide_workspaces)?;
+        let source = std::fs::read_to_string(&path).ok()?;
+        let source_module = crate::app::events::module_path_from_definition_path(
+            &path,
+            &self.ide_workspaces,
+        )
+        .or_else(|| Some(module_path.to_string()));
+        let detail = crate::app::events::source_function_signature_from_text(
+            &source,
+            &item.word,
+            source_module.as_deref(),
+        )?;
+        Some((detail, source_module))
+    }
+
     fn autocomplete_source_variable_detail(&self, item: &AutocompleteItem) -> Option<String> {
         if self.file_extension != "py"
             || !matches!(
@@ -251,7 +289,13 @@ impl App {
             self.trace_autocomplete_state("detail_refresh:no_item");
             return;
         };
-        let source_detail = self.autocomplete_source_variable_detail(item);
+        let source_function_detail = self.autocomplete_source_function_detail(item);
+        let source_detail_module_path = source_function_detail
+            .as_ref()
+            .and_then(|(_, module_path)| module_path.clone());
+        let source_detail = source_function_detail
+            .map(|(detail, _)| detail)
+            .or_else(|| self.autocomplete_source_variable_detail(item));
         let has_source_detail = source_detail.is_some();
         let detail = item.detail.as_ref().filter(|s| !s.trim().is_empty());
         if source_detail.is_none() && detail.is_none() {
@@ -260,14 +304,20 @@ impl App {
             self.trace_autocomplete_state("detail_refresh:no_detail");
             return;
         }
-        let module_path = (!has_source_detail)
-            .then(|| autocomplete_detail_module_path(item).map(str::to_string))
-            .flatten();
-        let mut detail_text = source_detail
-            .map(std::borrow::Cow::Owned)
-            .unwrap_or_else(|| {
-                autocomplete_detail_text_for_item(item, detail.unwrap(), &self.ide_workspaces)
-            });
+        let detail_result = if let Some(source_detail) = source_detail {
+            AutocompleteDetailText {
+                text: std::borrow::Cow::Owned(source_detail),
+                module_path: source_detail_module_path,
+            }
+        } else {
+            autocomplete_detail_text_for_item(item, detail.unwrap(), &self.ide_workspaces)
+        };
+        let module_path = detail_result.module_path.or_else(|| {
+            (!has_source_detail)
+                .then(|| autocomplete_detail_module_path(item).map(str::to_string))
+                .flatten()
+        });
+        let mut detail_text = detail_result.text;
         if let Some(module) = module_path.as_deref()
             && detail_text.lines().map(str::trim).find(|line| !line.is_empty())
                 == Some(module)

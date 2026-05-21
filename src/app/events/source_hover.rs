@@ -1,4 +1,4 @@
-pub(super) fn module_path_from_definition_path(
+pub(crate) fn module_path_from_definition_path(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
 ) -> Option<String> {
@@ -685,6 +685,45 @@ pub(super) fn source_attribute_hover_from_definition_file(
             "## {header_prefix} {symbol} of {fq_owner}\n{}",
             assignment
         ));
+    }
+    None
+}
+
+pub(crate) fn source_function_signature_from_text(
+    text: &str,
+    symbol: &str,
+    module_path: Option<&str>,
+) -> Option<String> {
+    if symbol.is_empty() {
+        return None;
+    }
+    let mut byte = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let rest = trimmed
+            .strip_prefix("async def ")
+            .or_else(|| trimmed.strip_prefix("def "));
+        if let Some(rest) = rest {
+            let Some(open_paren) = rest.find('(') else {
+                byte = byte.saturating_add(line.len()).saturating_add(1);
+                continue;
+            };
+            let open_bracket = rest.find('[').unwrap_or(open_paren);
+            let name_end = open_paren.min(open_bracket);
+            if rest[..name_end].trim() == symbol {
+                let indent = line.len().saturating_sub(trimmed.len());
+                let def_prefix = if trimmed.starts_with("async def ") {
+                    "async def "
+                } else {
+                    "def "
+                };
+                let offset = byte + indent + def_prefix.len();
+                let mut editor = crate::editor::Editor::new(text.len().saturating_add(1));
+                editor.insert_str(text);
+                return source_signature_for_hover(&editor, offset, false, None, module_path);
+            }
+        }
+        byte = byte.saturating_add(line.len()).saturating_add(1);
     }
     None
 }

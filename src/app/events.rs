@@ -18,7 +18,9 @@ use winit::window::{Window, WindowId};
 
 mod about;
 mod source_hover;
+pub(crate) use source_hover::module_path_from_definition_path;
 pub(crate) use source_hover::source_class_signature_from_definition_file;
+pub(crate) use source_hover::source_function_signature_from_text;
 use source_hover::*;
 
 #[derive(Default)]

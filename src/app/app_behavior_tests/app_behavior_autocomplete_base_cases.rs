@@ -807,6 +807,51 @@ fn autocomplete_detail_popup_prepends_full_module_path() {
 }
 
 #[test]
+fn ty_context_local_asynccontextmanager_completion_uses_source_signature_and_module() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_lifespan_detail_test_{stamp}"));
+    let main_path = root.join("car_wash/main.py");
+    std::fs::create_dir_all(main_path.parent().unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(main_path);
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with(
+        "from contextlib import asynccontextmanager\nfrom typing import Any, AsyncGenerator\nfrom litestar import Litestar\n\n@asynccontextmanager\nasync def lifespan(_: Litestar) -> AsyncGenerator[None, Any]:\n    yield\n\nlifespa",
+    );
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.update_ty_autocomplete(vec![crate::lsp::LspCompletionItem {
+        label: "lifespan".to_string(),
+        kind: SymbolKind::Function,
+        module: None,
+        detail: Some("(_: Litestar) -> _AsyncGeneratorContextManager[None, None]".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }]);
+
+    let item = &app.autocomplete_options[0].0;
+    assert_eq!(item.module.as_deref(), Some("car_wash.main"));
+    assert_eq!(item.module_path.as_deref(), Some("car_wash.main"));
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(
+        popup.text,
+        "[[MODULE]] car_wash.main\n@asynccontextmanager\nasync def lifespan(_: Litestar) -> AsyncGenerator[None, Any]"
+    );
+    assert!(!popup.text.contains("_AsyncGeneratorContextManager"));
+}
+
+#[test]
 fn autocomplete_detail_popup_expands_class_repr_from_source() {
     let Some(mut app) = test_app() else {
         return;
@@ -851,6 +896,55 @@ fn autocomplete_detail_popup_expands_class_repr_from_source() {
     assert_eq!(
         popup.text,
         "[[MODULE]] car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo docs."
+    );
+}
+
+#[test]
+fn autocomplete_detail_popup_follows_reexported_class_to_definition_module() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_litestar_reexport_detail_test_{stamp}"));
+    let package_dir = root.join("litestar");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(package_dir.join("__init__.py"), "from .app import Litestar\n").unwrap();
+    std::fs::write(
+        package_dir.join("app.py"),
+        "class Router:\n    pass\n\nclass Litestar(Router):\n    \"\"\"The Litestar application.\n\n    Root level docs.\n    \"\"\"\n",
+    )
+    .unwrap();
+
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with("Litesta");
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "Litestar".to_string(),
+            kind: SymbolKind::Class,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: Some("litestar".to_string()),
+            module_path: Some("litestar".to_string()),
+            detail: Some("class Litestar".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(
+        popup.text,
+        "[[MODULE]] litestar.app\nclass Litestar(Router)\n---\nThe Litestar application.\n\nRoot level docs."
     );
 }
 

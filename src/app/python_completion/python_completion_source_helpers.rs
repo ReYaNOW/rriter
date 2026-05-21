@@ -832,6 +832,26 @@ pub(crate) fn completion_source_is_builtin(source: &str) -> bool {
     source == "builtins" || source.starts_with("builtins.")
 }
 
+pub(crate) fn python_source_function_names(text: &str) -> FxHashSet<String> {
+    let mut names = FxHashSet::default();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed
+            .strip_prefix("async def ")
+            .or_else(|| trimmed.strip_prefix("def "))
+        else {
+            continue;
+        };
+        let end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        if end > 0 {
+            names.insert(rest[..end].to_string());
+        }
+    }
+    names
+}
+
 pub(crate) fn completion_word_starts_lower(word: &str) -> bool {
     word.chars()
         .next()
