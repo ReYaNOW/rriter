@@ -251,6 +251,24 @@ fn diagnostic_overlaps_transient_member_dot(
     dot_byte.is_some_and(|dot_byte| diag_start <= cursor && diag_end.saturating_add(1) >= dot_byte)
 }
 
+pub(crate) fn should_suppress_active_line_useless_expression(
+    diagnostic: &crate::lsp::Diagnostic,
+    cursor_phys_line: usize,
+) -> bool {
+    if diagnostic.start_line as usize != cursor_phys_line {
+        return false;
+    }
+    if diagnostic
+        .code
+        .as_deref()
+        .is_some_and(|code| code.eq_ignore_ascii_case("B018") || code == "useless-expression")
+    {
+        return true;
+    }
+    diagnostic.message.contains("Found useless expression")
+        || diagnostic.message.contains("useless-expression")
+}
+
 #[inline(always)]
 fn should_draw_empty_ide_file_tree_overlay(
     is_ide_mode: bool,
@@ -382,6 +400,26 @@ mod tests {
             diagnostic_error_warning_counts([first.as_slice(), second.as_slice()]),
             (1, 2)
         );
+    }
+
+    #[test]
+    fn active_line_useless_expression_suppresses_only_current_b018() {
+        let mut diag = test_diagnostic(crate::lsp::DiagSeverity::Warning);
+        diag.code = Some("B018".to_string());
+        assert!(should_suppress_active_line_useless_expression(&diag, 0));
+        assert!(!should_suppress_active_line_useless_expression(&diag, 1));
+
+        diag.code = Some("useless-expression".to_string());
+        assert!(should_suppress_active_line_useless_expression(&diag, 0));
+
+        diag.code = None;
+        diag.message = "Found useless expression. Either assign it to a variable or remove it."
+            .to_string();
+        assert!(should_suppress_active_line_useless_expression(&diag, 0));
+
+        diag.code = Some("F401".to_string());
+        diag.message = "imported but unused".to_string();
+        assert!(!should_suppress_active_line_useless_expression(&diag, 0));
     }
 
     #[test]

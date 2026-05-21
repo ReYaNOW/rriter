@@ -937,6 +937,9 @@ fn completion_module(
         return Some(owner.to_string());
     }
     let detail_owner = detail.and_then(|detail| owner_from_completion_detail(label, detail));
+    if let Some(module) = detail.and_then(completion_import_detail_source) {
+        return Some(module);
+    }
     let detail_is_field_type = detail.is_some_and(|detail| {
         detail.starts_with("(variable)")
             || detail.starts_with("(parameter)")
@@ -1038,7 +1041,86 @@ fn completion_description_source(desc: &str) -> Option<String> {
     }
 }
 
+fn completion_import_detail_source(detail: &str) -> Option<String> {
+    let source = detail
+        .trim()
+        .strip_prefix("(import ")?
+        .strip_suffix(')')?
+        .trim();
+    completion_description_source(source)
+}
+
+fn completion_documentation(v: &serde_json::Value) -> Option<&str> {
+    let doc = v.get("documentation")?;
+    doc.as_str()
+        .or_else(|| doc.get("value").and_then(|value| value.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn first_non_empty_line(text: &str) -> &str {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+}
+
+fn first_signature_line(text: &str) -> &str {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.chars().all(|c| c == '-'))
+        .find(|line| {
+            line.starts_with("class ") || line.starts_with("def ") || line.starts_with("async def ")
+        })
+        .unwrap_or_else(|| first_non_empty_line(text))
+}
+
+fn completion_doc_is_richer_signature(label: &str, detail: &str, doc: &str) -> bool {
+    if label.is_empty() || doc.len() <= detail.len() {
+        return false;
+    }
+    let first = first_signature_line(doc);
+    if first == detail {
+        return false;
+    }
+    let class_prefix = format!("class {label}");
+    let def_prefix = format!("def {label}");
+    let async_def_prefix = format!("async def {label}");
+    ((detail == class_prefix || detail.starts_with(&format!("{class_prefix}(")))
+        && first.starts_with(&class_prefix)
+        && first[class_prefix.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| matches!(c, '[' | '(' | ':')))
+        || ((detail == def_prefix || detail.starts_with(&format!("{def_prefix}(")))
+            && first.starts_with(&def_prefix)
+            && first[def_prefix.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| matches!(c, '[' | '(')))
+        || ((detail == async_def_prefix || detail.starts_with(&format!("{async_def_prefix}(")))
+            && first.starts_with(&async_def_prefix)
+            && first[async_def_prefix.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| matches!(c, '[' | '(')))
+}
+
+fn completion_detail_with_attached_doc(detail: &str, doc: &str) -> Option<String> {
+    let doc = doc.trim();
+    if doc.is_empty() || doc == detail || detail.contains('\n') {
+        return None;
+    }
+    let attachable = detail.starts_with("class ")
+        || detail.starts_with("def ")
+        || detail.starts_with("async def ")
+        || detail.starts_with("Overload[");
+    attachable.then(|| format!("{detail}\n---\n{doc}"))
+}
+
 fn completion_detail(v: &serde_json::Value) -> Option<String> {
+    let label = v.get("label").and_then(|value| value.as_str()).unwrap_or("");
+    let documentation = completion_documentation(v);
     if let Some(detail) = v
         .get("detail")
         .and_then(|value| value.as_str())
@@ -1046,6 +1128,14 @@ fn completion_detail(v: &serde_json::Value) -> Option<String> {
         .filter(|s| !s.is_empty())
         .filter(|detail| completion_detail_is_more_specific_than_label_detail(detail))
     {
+        if let Some(doc) = documentation {
+            if completion_doc_is_richer_signature(label, detail, doc) {
+                return Some(doc.to_string());
+            }
+            if let Some(detail) = completion_detail_with_attached_doc(detail, doc) {
+                return Some(detail);
+            }
+        }
         return Some(detail.to_string());
     }
     if let Some(label_detail) = v
@@ -1054,6 +1144,14 @@ fn completion_detail(v: &serde_json::Value) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
+        if let Some(doc) = documentation {
+            if completion_doc_is_richer_signature(label, label_detail, doc) {
+                return Some(doc.to_string());
+            }
+            if let Some(detail) = completion_detail_with_attached_doc(label_detail, doc) {
+                return Some(detail);
+            }
+        }
         return Some(label_detail.to_string());
     }
     if let Some(detail) = v
@@ -1064,18 +1162,8 @@ fn completion_detail(v: &serde_json::Value) -> Option<String> {
     {
         return Some(detail.to_string());
     }
-    if let Some(doc) = v.get("documentation") {
-        if let Some(s) = doc.as_str().map(str::trim).filter(|s| !s.is_empty()) {
-            return Some(s.to_string());
-        }
-        if let Some(s) = doc
-            .get("value")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            return Some(s.to_string());
-        }
+    if let Some(doc) = documentation {
+        return Some(doc.to_string());
     }
     None
 }

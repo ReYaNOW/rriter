@@ -46,7 +46,7 @@ fn lsp_action_label<'a>(
             std::borrow::Cow::Borrowed("Упорядочить импорты")
         }
         crate::app::LspActionItem::CompleteImports => {
-            std::borrow::Cow::Borrowed("Подсказки импортов ty")
+            std::borrow::Cow::Borrowed("Подсказки импортов")
         }
     }
 }
@@ -103,7 +103,7 @@ mod tests {
         );
         assert_eq!(
             lsp_action_label(&crate::app::LspActionItem::CompleteImports, &mut scratch),
-            "Подсказки импортов ty"
+            "Подсказки импортов"
         );
     }
 }

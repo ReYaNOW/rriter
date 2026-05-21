@@ -236,7 +236,18 @@ pub(crate) fn python_import_completion_allowed(editor: &Editor) -> bool {
         .and_then(|idx| bytes.get(idx))
         .is_some_and(|&b| is_python_ident_byte(b));
     let next_ident = bytes.get(cursor).is_some_and(|&b| is_python_ident_byte(b));
-    !prev_ident && !next_ident
+    if !prev_ident {
+        return !next_ident;
+    }
+    let mut word_start = cursor;
+    while word_start > line_start
+        && bytes
+            .get(word_start - 1)
+            .is_some_and(|&b| is_python_ident_byte(b))
+    {
+        word_start -= 1;
+    }
+    word_start == line_start || bytes.get(word_start - 1) != Some(&b'.')
 }
 
 pub(crate) fn is_magic_python_name(name: &str) -> bool {
@@ -859,15 +870,32 @@ pub(crate) fn python_stdlib_completion_detail(
     item: &AutocompleteItem,
     detail: &str,
 ) -> Option<&'static str> {
-    if !detail.trim_start().starts_with("Overload[") {
-        return None;
-    }
     let module = item
         .module_path
         .as_deref()
         .or(item.module.as_deref())
         .map(normalized_completion_source)
         .unwrap_or("");
+    if item.word == "map"
+        && (module == "builtins" || module.starts_with("builtins."))
+        && detail
+            .trim_start()
+            .strip_prefix("class map")
+            .or_else(|| detail.trim_start().strip_prefix("<class 'map'>"))
+            .is_some()
+    {
+        return Some(
+            "class map\n\
+---\n\
+Make an iterator that computes the function using arguments from\n\
+each of the iterables.  Stops when the shortest iterable is exhausted.\n\n\
+If strict is true and one of the arguments is exhausted before the others,\n\
+raise a ValueError.",
+        );
+    }
+    if !detail.trim_start().starts_with("Overload[") {
+        return None;
+    }
     match item.word.as_str() {
         "getattr" if module == "builtins" || module.starts_with("builtins.") => Some(
             "@overload\n\

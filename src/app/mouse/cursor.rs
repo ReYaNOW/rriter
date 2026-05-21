@@ -607,8 +607,19 @@ impl App {
                 let render_scroll_x = self.scroll_x.current.round();
                 let left_padding = self.renderer.as_ref().unwrap().left_padding;
                 let last_line = self.editor.line_offsets.len().saturating_sub(1);
+                let cursor_phys_line = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&o| o <= self.editor.cursor)
+                    .saturating_sub(1);
 
                 'diag_scan: for diag in diagnostics {
+                    if crate::render_view::should_suppress_active_line_useless_expression(
+                        diag,
+                        cursor_phys_line,
+                    ) {
+                        continue;
+                    }
                     let start_line = (diag.start_line as usize).min(last_line);
                     let end_line = (diag.end_line as usize).min(last_line);
 

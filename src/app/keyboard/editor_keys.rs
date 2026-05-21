@@ -18,7 +18,7 @@ fn autocomplete_key_action(physical_key: PhysicalKey) -> AutocompleteKeyAction {
         }
         PhysicalKey::Code(KeyCode::ArrowDown) => AutocompleteKeyAction::MoveDown,
         PhysicalKey::Code(KeyCode::ArrowUp) => AutocompleteKeyAction::MoveUp,
-        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Tab) => {
+        PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab) => {
             AutocompleteKeyAction::Apply
         }
         _ => AutocompleteKeyAction::None,
@@ -90,6 +90,21 @@ fn sync_edit_line_range(
 
 fn bounded_repeat_scroll_delta(delta_y: f32, line_height: f32) -> Option<f32> {
     (delta_y.abs() <= line_height * 2.0).then_some(delta_y)
+}
+
+fn line_for_offset(line_offsets: &[usize], offset: usize) -> usize {
+    line_offsets
+        .partition_point(|&line| line <= offset)
+        .saturating_sub(1)
+}
+
+fn backspace_crossed_line(
+    before_lines: &[usize],
+    before_cursor: usize,
+    after_lines: &[usize],
+    after_cursor: usize,
+) -> bool {
+    line_for_offset(before_lines, before_cursor) != line_for_offset(after_lines, after_cursor)
 }
 
 fn key_text_for_editor_insert<'a>(
@@ -207,12 +222,14 @@ impl App {
             }
         }
         if self.autocomplete_mode == AutocompleteMode::TyContext
-            && self.autocomplete_pending_request_id.is_some()
+            && (self.autocomplete_pending_request_id.is_some()
+                || self.autocomplete_signature_request_id.is_some())
             && matches!(
                 physical_key,
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::Tab | KeyCode::NumpadEnter)
             )
-            && cursor_after_python_member_dot(&self.editor)
+            && (cursor_after_python_member_dot(&self.editor)
+                || cursor_inside_python_call_parens(&self.editor))
         {
             self.autocomplete_apply_pending_response = true;
             if let Some(w) = self.window.as_ref() {
@@ -270,6 +287,7 @@ impl App {
         let mut should_trigger_autocomplete = false;
         let mut should_notify_lsp = true;
         let mut ty_completion_trigger: Option<&'static str> = None;
+        let mut force_close_autocomplete = false;
         let is_git_diff_tab = self.active_tab_is_git_diff();
 
         if is_git_diff_tab {
@@ -522,10 +540,18 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Backspace) if ctrl => {
+                let before_cursor = self.editor.cursor;
+                let before_lines = self.editor.line_offsets.clone();
                 if let Some((offset, len)) = self.editor.delete_word_backward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
-                    if self.autocomplete_active {
+                    force_close_autocomplete = backspace_crossed_line(
+                        &before_lines,
+                        before_cursor,
+                        &self.editor.line_offsets,
+                        self.editor.cursor,
+                    );
+                    if self.autocomplete_active && !force_close_autocomplete {
                         should_trigger_autocomplete = true;
                         if self.autocomplete_mode != AutocompleteMode::TreeSitter {
                             ty_completion_trigger = None;
@@ -548,10 +574,18 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
+                let before_cursor = self.editor.cursor;
+                let before_lines = self.editor.line_offsets.clone();
                 if let Some((offset, len)) = self.editor.backspace() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
-                    if self.autocomplete_active {
+                    force_close_autocomplete = backspace_crossed_line(
+                        &before_lines,
+                        before_cursor,
+                        &self.editor.line_offsets,
+                        self.editor.cursor,
+                    );
+                    if self.autocomplete_active && !force_close_autocomplete {
                         should_trigger_autocomplete = true;
                         if self.autocomplete_mode != AutocompleteMode::TreeSitter {
                             ty_completion_trigger = None;
@@ -813,7 +847,9 @@ impl App {
             }
             self.lsp_actions_menu = None;
             self.is_highlighted_once = true;
-            if should_trigger_autocomplete {
+            if force_close_autocomplete {
+                self.close_autocomplete();
+            } else if should_trigger_autocomplete {
                 if let Some(trigger) = ty_completion_trigger {
                     self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
                 } else if self.autocomplete_active
@@ -1071,6 +1107,12 @@ mod tests {
         assert_eq!(autocomplete_next_index(6, 10, false, true), 9);
         assert_eq!(autocomplete_next_index(7, 10, false, true), 9);
         assert_eq!(autocomplete_next_index(9, 10, false, true), 0);
+    }
+
+    #[test]
+    fn backspace_cross_line_detects_only_line_changes() {
+        assert!(!backspace_crossed_line(&[0, 4, 8], 5, &[0, 4, 7], 4));
+        assert!(backspace_crossed_line(&[0, 4, 8], 4, &[0, 7], 3));
     }
 
     #[test]

@@ -149,6 +149,16 @@ impl Renderer {
                         float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
                         if (alpha <= 0.0) discard;
                         out_color = vec4(v_col.rgb, v_col.a * alpha);
+                    } else if (v_mode == 9.0) {
+                        float radius = mod(v_sdf_params.z, 1024.0);
+                        float border = floor(v_sdf_params.z / 1024.0);
+                        float d = roundedBoxSDF(v_uv, vec2(v_sdf_params.x, v_sdf_params.y), radius);
+                        float outer_alpha = 1.0 - smoothstep(-0.5, 0.5, d);
+                        float inner_cut = smoothstep(-border - 0.5, -border + 0.5, d);
+                        float alpha = outer_alpha * inner_cut;
+                        if (alpha <= 0.0) discard;
+                        float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                        out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a * alpha);
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }

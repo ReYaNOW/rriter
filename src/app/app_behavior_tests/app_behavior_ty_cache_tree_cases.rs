@@ -198,6 +198,128 @@ fn ty_signature_help_arguments_feed_call_completion() {
             .any(|(item, _)| item.word == "max_size")
     );
 }
+
+#[test]
+fn pending_ty_signature_enter_applies_first_argument_without_newline() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("asyncpg.create_pool(ma");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_signature_request_id = Some(12);
+    app.autocomplete_apply_pending_response = true;
+
+    app.update_ty_signature_help_autocomplete(vec![
+        "dsn".to_string(),
+        "max_size".to_string(),
+        "max_queries".to_string(),
+    ]);
+
+    assert_eq!(app.editor.get_full_text(), "asyncpg.create_pool(max_size=");
+    assert!(!app.autocomplete_apply_pending_response);
+    assert!(!app.editor.get_full_text().contains('\n'));
+}
+
+#[test]
+fn ty_context_call_argument_completion_hides_auto_import_noise() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("asyncpg.create_pool(\n    m");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "max_queries=".to_string(),
+            kind: SymbolKind::Variable,
+            module: None,
+            detail: Some("Unknown".to_string()),
+            insert_text: Some("max_queries=".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        crate::lsp::LspCompletionItem {
+            label: "math".to_string(),
+            kind: SymbolKind::Module,
+            module: Some("math".to_string()),
+            detail: Some("(import math)".to_string()),
+            insert_text: Some("math".to_string()),
+            text_edit: None,
+            additional_text_edits: vec![crate::lsp::TextChange {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+                new_text: "import math\n".to_string(),
+            }],
+        },
+        crate::lsp::LspCompletionItem {
+            label: "model".to_string(),
+            kind: SymbolKind::Variable,
+            module: None,
+            detail: Some("(variable) model: object".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    assert!(app.autocomplete_options.iter().any(|(item, _)| item.word == "max_queries="));
+    assert!(app.autocomplete_options.iter().any(|(item, _)| item.word == "model"));
+    assert!(
+        !app.autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "math")
+    );
+}
+
+#[test]
+fn ty_context_plain_completion_hides_auto_import_noise() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("RepoB");
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+
+    app.update_ty_autocomplete(vec![
+        crate::lsp::LspCompletionItem {
+            label: "RepoBase".to_string(),
+            kind: SymbolKind::Class,
+            module: Some("car_wash.core.db.repo_base".to_string()),
+            detail: Some("(import car_wash.core.db.repo_base)".to_string()),
+            insert_text: Some("RepoBase".to_string()),
+            text_edit: None,
+            additional_text_edits: vec![crate::lsp::TextChange {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+                new_text: "from car_wash.core.db.repo_base import RepoBase\n".to_string(),
+            }],
+        },
+        crate::lsp::LspCompletionItem {
+            label: "RepoBaseLocal".to_string(),
+            kind: SymbolKind::Class,
+            module: None,
+            detail: Some("class RepoBaseLocal".to_string()),
+            insert_text: Some("RepoBaseLocal".to_string()),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+    ]);
+
+    assert!(
+        !app.autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "RepoBase")
+    );
+    assert!(
+        app.autocomplete_options
+            .iter()
+            .any(|(item, _)| item.word == "RepoBaseLocal")
+    );
+}
+
 #[test]
 fn ty_context_preserves_explicit_owner_and_hides_attribute_types() {
     let Some(mut app) = test_app() else {

@@ -104,9 +104,12 @@ fn ty_context_exact_single_match_hides_without_waiting_for_response() {
 
 #[test]
 fn python_import_completion_guard_rejects_def_async_and_strings() {
-    let mut ok = editor_with("\n");
-    ok.cursor = 0;
+    let ok = editor_with("Path");
     assert!(python_import_completion_allowed(&ok));
+
+    let mut blank = editor_with("\n");
+    blank.cursor = 0;
+    assert!(python_import_completion_allowed(&blank));
 
     let mut in_def = editor_with("def func(");
     in_def.cursor = in_def.len();
@@ -119,6 +122,9 @@ fn python_import_completion_guard_rejects_def_async_and_strings() {
     let mut in_string = editor_with("value = \"Pa");
     in_string.cursor = in_string.len();
     assert!(!python_import_completion_allowed(&in_string));
+
+    let member = editor_with("value.attr");
+    assert!(!python_import_completion_allowed(&member));
 }
 
 #[test]

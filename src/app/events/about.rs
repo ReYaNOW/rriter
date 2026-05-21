@@ -39,11 +39,8 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
         return;
     };
     let text = app.editor.get_full_text();
-    let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(
-        &text,
-        text.len(),
-        &app.editor.line_offsets,
-    );
+    let (end_line, end_col) =
+        crate::lsp::offset_to_lsp_pos(&text, text.len(), &app.editor.line_offsets);
     if let Some(id) =
         lsp.request_ty_inlay_hints(&path, &app.file_extension, 0, 0, end_line, end_col)
     {

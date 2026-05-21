@@ -151,64 +151,6 @@ impl App {
         }
     }
 
-    pub(crate) fn autocomplete_detail_text<'a>(
-        item: &AutocompleteItem,
-        detail: &'a str,
-    ) -> std::borrow::Cow<'a, str> {
-        if let Some(detail) = python_stdlib_completion_detail(item, detail) {
-            return std::borrow::Cow::Borrowed(detail);
-        }
-        let detail_type_label = autocomplete_detail_type_name(detail)
-            .map(|name| name.rsplit('.').next().unwrap_or(name));
-        let module_owner = item
-            .module
-            .as_deref()
-            .filter(|module| !is_type_like_completion_source(module));
-        let path_owner = item
-            .module_path
-            .as_deref()
-            .filter(|module| completion_source_is_module_path(module));
-        let path_is_detail_type = path_owner.is_some_and(|path| {
-            detail_type_label.is_some_and(|label| path.ends_with(&format!(".{label}")))
-        });
-        if let Some(label) = detail_type_label {
-            let field_like = matches!(
-                item.kind,
-                SymbolKind::Variable
-                    | SymbolKind::Parameter
-                    | SymbolKind::Argument
-                    | SymbolKind::Property
-            ) || completion_item_is_field_like(item);
-            if !field_like || path_is_detail_type {
-                return std::borrow::Cow::Owned(format!("class {label}"));
-            }
-        }
-        let owner = if item.module.as_deref().is_some_and(is_class_like_type_name)
-            && !path_is_detail_type
-        {
-            path_owner.or(module_owner)
-        } else {
-            module_owner.or(path_owner)
-        };
-        let Some(owner) = owner else {
-            return std::borrow::Cow::Borrowed(detail);
-        };
-        if let Some(detail) = autocomplete_source_attr_class_detail(item, detail, owner) {
-            return std::borrow::Cow::Owned(detail);
-        }
-        if detail.contains(owner) || detail.contains(&format!(".{}", item.word)) {
-            return std::borrow::Cow::Borrowed(detail);
-        }
-        for prefix in ["(variable) ", "(parameter) "] {
-            if let Some(rest) = detail.strip_prefix(prefix) {
-                if rest.starts_with(&item.word) {
-                    return std::borrow::Cow::Owned(format!("{prefix}{owner}.{rest}"));
-                }
-            }
-        }
-        std::borrow::Cow::Borrowed(detail)
-    }
-
     fn autocomplete_source_variable_detail(&self, item: &AutocompleteItem) -> Option<String> {
         if self.file_extension != "py"
             || !matches!(
@@ -321,9 +263,22 @@ impl App {
         let module_path = (!has_source_detail)
             .then(|| autocomplete_detail_module_path(item).map(str::to_string))
             .flatten();
-        let detail_text = source_detail
+        let mut detail_text = source_detail
             .map(std::borrow::Cow::Owned)
-            .unwrap_or_else(|| Self::autocomplete_detail_text(item, detail.unwrap()));
+            .unwrap_or_else(|| {
+                autocomplete_detail_text_for_item(item, detail.unwrap(), &self.ide_workspaces)
+            });
+        if let Some(module) = module_path.as_deref()
+            && detail_text.lines().map(str::trim).find(|line| !line.is_empty())
+                == Some(module)
+        {
+            let stripped = detail_text
+                .as_ref()
+                .split_once('\n')
+                .map(|(_, rest)| rest.trim_start_matches('\n'))
+                .unwrap_or("");
+            detail_text = std::borrow::Cow::Owned(stripped.to_string());
+        }
         let expected_text = module_path
             .as_ref()
             .map(|module_path| format!("[[MODULE]] {module_path}\n{}", detail_text.as_ref()))

@@ -1,3 +1,94 @@
+fn python_import_completion_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("from ") || trimmed.starts_with("import ")
+}
+
+fn update_python_import_completion_depth(trimmed: &str, paren_depth: &mut i32) -> bool {
+    for b in trimmed.bytes() {
+        match b {
+            b'(' | b'[' | b'{' => *paren_depth += 1,
+            b')' | b']' | b'}' => *paren_depth -= 1,
+            _ => {}
+        }
+    }
+    *paren_depth > 0 || trimmed.ends_with('\\')
+}
+
+fn python_top_import_block_end(text: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    let mut end = None;
+    let mut continuing = false;
+    let mut paren_depth = 0i32;
+    for raw_line in text.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = line.trim_start();
+        let leading = line.len().saturating_sub(trimmed.len());
+
+        if continuing {
+            end = Some(line_start + line.len());
+            continuing = update_python_import_completion_depth(trimmed, &mut paren_depth);
+            if !continuing {
+                paren_depth = 0;
+            }
+            continue;
+        }
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if leading == 0 && python_import_completion_text(trimmed) {
+            end = Some(line_start + line.len());
+            continuing = update_python_import_completion_depth(trimmed, &mut paren_depth);
+            if !continuing {
+                paren_depth = 0;
+            }
+            continue;
+        }
+        break;
+    }
+    end
+}
+
+fn append_python_import_edits_to_block(
+    file_extension: &str,
+    text: &str,
+    line_offsets: &[usize],
+    edits: &mut [crate::lsp::TextChange],
+) {
+    if !matches!(file_extension, "py" | "pyi") {
+        return;
+    }
+    let block_end = python_top_import_block_end(text).or_else(|| {
+        crate::languages::python::import_blocks(text)
+            .first()
+            .map(|block| block.end)
+    });
+    let Some(block_end) = block_end else { return };
+    let (line, col) = crate::lsp::offset_to_lsp_pos(text, block_end, line_offsets);
+    for edit in edits {
+        if edit.start_line != edit.end_line
+            || edit.start_col != edit.end_col
+            || !python_import_completion_text(&edit.new_text)
+        {
+            continue;
+        }
+        let import_text = edit
+            .new_text
+            .trim_matches(|c| c == '\n' || c == '\r')
+            .to_string();
+        if import_text.is_empty() {
+            continue;
+        }
+        edit.start_line = line;
+        edit.start_col = col;
+        edit.end_line = line;
+        edit.end_col = col;
+        edit.new_text = format!("\n{import_text}");
+    }
+}
+
 impl App {
     pub fn update_autocomplete(&mut self) {
         self.trace_autocomplete_state("update_ts:begin");
@@ -271,10 +362,42 @@ impl App {
         let Some(main_edit) = item.text_edit.clone() else {
             if !item.additional_text_edits.is_empty() {
                 if let Some(path) = self.file_path.clone() {
+                    let text = self.editor.get_full_text();
+                    let mut edits = item.additional_text_edits.clone();
+                    if self.autocomplete_mode == AutocompleteMode::TyImports {
+                        append_python_import_edits_to_block(
+                            &self.file_extension,
+                            &text,
+                            &self.editor.line_offsets,
+                            &mut edits,
+                        );
+                    }
                     let mut changes = std::collections::HashMap::new();
-                    changes.insert(path, item.additional_text_edits.clone());
+                    changes.insert(path, edits);
                     self.apply_workspace_edit(&crate::lsp::WorkspaceEdit { changes }, true);
                 }
+            }
+            let selected = item.insert_text.as_deref().unwrap_or(&item.word).to_string();
+            let prefix_len = self.get_current_word_prefix().len();
+
+            for _ in 0..prefix_len {
+                if let Some((offset, len)) = self.editor.backspace() {
+                    self.highlighter.shift_delete(offset, len);
+                }
+            }
+
+            let (del_info, ins_len) = self.editor.insert_str(&selected);
+            if let Some((offset, len)) = del_info {
+                self.highlighter.shift_delete(offset, len);
+            }
+            self.highlighter
+                .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
+
+            self.sync_after_autocomplete();
+
+            if let Some(w) = self.window.as_ref() {
+                App::update_window_title(w, &self.base_title, self.editor.is_dirty());
+                w.request_redraw();
             }
             return;
         };
@@ -284,6 +407,14 @@ impl App {
             crate::lsp::lsp_pos_to_offset(&text, main_edit.start_line, main_edit.start_col);
         let mut target_cursor = main_start + main_edit.new_text.len();
         let mut changes = item.additional_text_edits.clone();
+        if self.autocomplete_mode == AutocompleteMode::TyImports {
+            append_python_import_edits_to_block(
+                &self.file_extension,
+                &text,
+                &self.editor.line_offsets,
+                &mut changes,
+            );
+        }
         changes.push(main_edit);
 
         let mut ops = Vec::with_capacity(changes.len());

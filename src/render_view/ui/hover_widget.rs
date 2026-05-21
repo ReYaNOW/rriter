@@ -74,6 +74,7 @@ pub fn compute_hover_y_position(
     target_by
 }
 
+#[cfg(test)]
 pub fn compute_animated_scissor(
     mx: f32,
     my: f32,
@@ -112,6 +113,13 @@ fn fade_hover_color(mut color: [f32; 4], alpha: f32) -> [f32; 4] {
 fn compute_hover_scrollbar_alpha(anim_progress: f32) -> f32 {
     let p = ((anim_progress.clamp(0.0, 1.0) - 0.88) / 0.12).clamp(0.0, 1.0);
     p * p * (3.0 - 2.0 * p)
+}
+
+#[derive(Clone, Copy)]
+struct HoverPopupPop {
+    frame: (f32, f32, f32, f32),
+    content_scissor: (f32, f32, f32, f32),
+    scrollbar_alpha: f32,
 }
 
 fn smooth_hover_width_progress(anim_progress: f32, target_w: f32) -> f32 {
@@ -193,6 +201,7 @@ pub fn compute_animated_popup_frame(
     compute_hover_popup_anim_rect(mx, my, bx, by, box_w, box_h, anim_progress)
 }
 
+#[cfg(test)]
 fn compute_combined_popup_frame(
     mx: f32,
     my: f32,
@@ -280,6 +289,34 @@ pub fn compute_hover_content_scissor(
         )
     } else {
         compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress)
+    }
+}
+
+fn compute_hover_popup_pop(
+    mx: f32,
+    my: f32,
+    bx: f32,
+    by: f32,
+    box_w: f32,
+    box_h: f32,
+    anim_progress: f32,
+    attached_diag: Option<(f32, f32, f32, f32)>,
+    attached_anim_progress: f32,
+) -> HoverPopupPop {
+    HoverPopupPop {
+        frame: compute_animated_popup_frame(mx, my, bx, by, box_w, box_h, anim_progress),
+        content_scissor: compute_hover_content_scissor(
+            mx,
+            my,
+            bx,
+            by,
+            box_w,
+            box_h,
+            anim_progress,
+            attached_diag,
+            attached_anim_progress,
+        ),
+        scrollbar_alpha: compute_hover_scrollbar_alpha(anim_progress),
     }
 }
 
@@ -380,14 +417,7 @@ impl Renderer {
         }
         let alpha = alpha.clamp(0.0, 1.0);
 
-        self.push_rounded_rect(
-            frame_x.round() - 1.0,
-            frame_y.round() - 1.0,
-            frame_w.round() + 2.0,
-            frame_h.round() + 2.0,
-            radius,
-            [0.4, 0.4, 0.45, 0.6 * alpha],
-        );
+        let border_w = (radius / 3.0).round().max(1.0);
         self.push_rounded_rect(
             frame_x.round(),
             frame_y.round(),
@@ -400,6 +430,15 @@ impl Renderer {
                 self.theme.minimap_bg[2],
                 alpha,
             ],
+        );
+        self.push_rounded_rect_outline(
+            frame_x.round() - border_w,
+            frame_y.round() - border_w,
+            frame_w.round() + border_w * 2.0,
+            frame_h.round() + border_w * 2.0,
+            radius,
+            border_w,
+            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], alpha],
         );
     }
 
@@ -653,8 +692,18 @@ impl Renderer {
         let source_anchor_y = (first_line_y_top + first_diag_y_bottom) * 0.5;
         let (anim_mx, anim_my) =
             stable_hover_animation_mouse(mx, my, source_anchor_x, source_anchor_y, anim_progress);
-        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) =
-            compute_animated_scissor(anim_mx, anim_my, bx, by, box_w, combined_h, anim_progress);
+        let pop = compute_hover_popup_pop(
+            anim_mx,
+            anim_my,
+            bx,
+            by,
+            box_w,
+            combined_h,
+            anim_progress,
+            None,
+            anim_progress,
+        );
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = pop.content_scissor;
 
         let apply_scissor = |gl: &glow::Context,
                              height: f32,
@@ -679,16 +728,7 @@ impl Renderer {
         };
 
         self.flush();
-        let (frame_x, frame_y, frame_w, frame_h) = compute_combined_popup_frame(
-            anim_mx,
-            anim_my,
-            bx,
-            by,
-            box_w,
-            combined_h,
-            anim_progress,
-            combined_hover_h > 0.0,
-        );
+        let (frame_x, frame_y, frame_w, frame_h) = pop.frame;
         self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, 1.0);
 
         self.flush();
@@ -1198,7 +1238,7 @@ impl Renderer {
             popup.anchor_y,
             attached_anim_progress,
         );
-        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = compute_hover_content_scissor(
+        let pop = compute_hover_popup_pop(
             anim_mx,
             anim_my,
             bx,
@@ -1209,6 +1249,7 @@ impl Renderer {
             attached_diag,
             attached_anim_progress,
         );
+        let (anim_sc_x, anim_sc_y, anim_sc_w, anim_sc_h) = pop.content_scissor;
 
         let apply_scissor = |gl: &glow::Context, height: f32, x: f32, y: f32, w: f32, h: f32| {
             let (cx1, cy1, cw, ch) = compute_hover_scissor_rect(
@@ -1228,8 +1269,7 @@ impl Renderer {
 
         if attached_diag.is_none() {
             self.flush();
-            let (frame_x, frame_y, frame_w, frame_h) =
-                compute_animated_popup_frame(anim_mx, anim_my, bx, by, box_w, box_h, anim_progress);
+            let (frame_x, frame_y, frame_w, frame_h) = pop.frame;
             self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, opacity);
         }
 
@@ -1439,11 +1479,7 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        let scrollbar_alpha = if fixed_visible_size {
-            1.0
-        } else {
-            compute_hover_scrollbar_alpha(anim_progress)
-        };
+        let scrollbar_alpha = pop.scrollbar_alpha;
         if max_scroll > 0.0 && scrollbar_alpha > 0.0 {
             let track_h = box_h - 16.0 * s;
             let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);

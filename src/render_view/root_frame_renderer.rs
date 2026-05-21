@@ -115,6 +115,10 @@ impl Renderer {
             let mut suppress = false;
 
             if diag_line == cursor_phys_line {
+                if should_suppress_active_line_useless_expression(d, cursor_phys_line) {
+                    suppress = true;
+                }
+
                 if (diag_version as u64) < editor.version || stale_instant_diagnostics {
                     suppress = true;
                 }

@@ -874,6 +874,60 @@ impl Renderer {
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
+    pub fn push_rounded_rect_outline(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        border_w: f32,
+        color: [f32; 4],
+    ) {
+        let w_round = w.round();
+        let h_round = h.round();
+        let x1 = x.round();
+        let y1 = y.round();
+        let x2 = x1 + w_round;
+        let y2 = y1 + h_round;
+
+        let half_w = w_round / 2.0;
+        let half_h = h_round / 2.0;
+        let border_w = border_w.round().clamp(1.0, 32.0);
+        let sdf_params = [half_w, half_h, r + border_w * 1024.0];
+
+        let v1 = Vertex {
+            pos: [x1, y1],
+            uv: [-half_w, -half_h],
+            color,
+            mode: 9.0,
+            sdf_params,
+        };
+        let v2 = Vertex {
+            pos: [x2, y1],
+            uv: [half_w, -half_h],
+            color,
+            mode: 9.0,
+            sdf_params,
+        };
+        let v3 = Vertex {
+            pos: [x2, y2],
+            uv: [half_w, half_h],
+            color,
+            mode: 9.0,
+            sdf_params,
+        };
+        let v4 = Vertex {
+            pos: [x1, y2],
+            uv: [-half_w, half_h],
+            color,
+            mode: 9.0,
+            sdf_params,
+        };
+
+        self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
+    }
+
     pub fn push_rounded_rect_border(
         &mut self,
         x: f32,

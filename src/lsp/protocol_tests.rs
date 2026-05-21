@@ -155,6 +155,25 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
     assert_eq!(completion.detail.as_deref(), Some("-> Path"));
     assert_eq!(completion.kind, crate::highlighter::SymbolKind::Class);
     assert_eq!(completion.additional_text_edits.len(), 1);
+
+    let ty_import_completion = parse_completion_item_value(&serde_json::json!({
+        "label": "RepoBase",
+        "kind": 7,
+        "labelDetails": {"detail": " (import car_wash.core.db.repo_base)"},
+        "insertText": "RepoBase",
+        "additionalTextEdits": [{
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 0}
+            },
+            "newText": "from car_wash.core.db.repo_base import RepoBase\n"
+        }]
+    }))
+    .unwrap();
+    assert_eq!(
+        ty_import_completion.module.as_deref(),
+        Some("car_wash.core.db.repo_base")
+    );
 }
 
 #[test]
@@ -271,6 +290,47 @@ fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
     assert_eq!(class_detail.kind, crate::highlighter::SymbolKind::Class);
     assert_eq!(class_detail.detail.as_deref(), Some("class Router"));
     assert_eq!(class_detail.module.as_deref(), Some("litestar.router"));
+
+    let class_with_docs = parse_completion_item_value(&serde_json::json!({
+        "label": "map",
+        "kind": 7,
+        "labelDetails": {
+            "detail": "class map",
+            "description": "builtins"
+        },
+        "documentation": {
+            "kind": "plaintext",
+            "value": "Make an iterator that computes the function using arguments from\neach of the iterables."
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        class_with_docs.detail.as_deref(),
+        Some("class map\n---\nMake an iterator that computes the function using arguments from\neach of the iterables.")
+    );
+    assert_eq!(class_with_docs.module.as_deref(), Some("builtins"));
+
+    let generic_class_doc = parse_completion_item_value(&serde_json::json!({
+        "label": "RepoBase",
+        "kind": 7,
+        "labelDetails": {
+            "detail": "class RepoBase",
+            "description": "car_wash.core.db.repo_base"
+        },
+        "documentation": {
+            "kind": "markdown",
+            "value": "car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo core"
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        generic_class_doc.detail.as_deref(),
+        Some("car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo core")
+    );
+    assert_eq!(
+        generic_class_doc.module.as_deref(),
+        Some("car_wash.core.db.repo_base")
+    );
 }
 
 #[test]

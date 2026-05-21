@@ -194,21 +194,21 @@ fn autocomplete_row_source<'a>(item: &'a crate::app::AutocompleteItem) -> Option
 }
 
 #[derive(Debug, PartialEq)]
-struct AutocompleteModuleLayout<'a> {
+struct AutocompleteModuleLayout {
     x: f32,
     width: f32,
-    text: Cow<'a, str>,
+    text: String,
 }
 
-fn autocomplete_module_layout<'a>(
-    source: &'a str,
+fn autocomplete_module_layout(
+    source: &str,
     word: &str,
     min_x: f32,
     right_limit: f32,
     scale: f32,
     ellipsis_w: f32,
     mut char_width: impl FnMut(char, f32) -> f32,
-) -> Option<AutocompleteModuleLayout<'a>> {
+) -> Option<AutocompleteModuleLayout> {
     let label = autocomplete_source_label(source, word)?;
     let limit = (right_limit - min_x).max(0.0);
     if limit < 34.0 * scale {
@@ -240,9 +240,9 @@ fn autocomplete_module_layout<'a>(
         s.push_str(&label[..end]);
         s.push_str("...");
         width += ellipsis_w;
-        Cow::Owned(s)
+        s
     } else {
-        label
+        label.to_string()
     };
     Some(AutocompleteModuleLayout {
         x: (right_limit - width).max(min_x),
@@ -323,7 +323,7 @@ mod tests {
             |_, _| 1.0,
         )
         .unwrap();
-        assert_eq!(full.text.as_ref(), "car_wash.core");
+        assert_eq!(full.text, "car_wash.core");
         assert_eq!(full.x + full.width, 180.0);
     }
 
@@ -438,6 +438,20 @@ mod tests {
             additional_text_edits: Vec::new(),
         };
         assert_eq!(autocomplete_row_source(&builtin), Some("builtins"));
+
+        let generic_builtin = crate::app::AutocompleteItem {
+            word: "map".to_string(),
+            kind: SymbolKind::Class,
+            scope_start: 0,
+            scope_end: 0,
+            module: Some("builtins".to_string()),
+            module_path: Some("builtins.map".to_string()),
+            detail: Some("class map(Generic[_S])\n---\nMake an iterator.".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        };
+        assert_eq!(autocomplete_row_source(&generic_builtin), Some("builtins"));
     }
 }
 
@@ -578,7 +592,7 @@ impl Renderer {
 
     // (функции удалены)
 
-    fn push_autocomplete_row_bg(
+    fn push_autocomplete_text_row_bg(
         &mut self,
         x: f32,
         y: f32,
@@ -588,12 +602,16 @@ impl Renderer {
         color: [f32; 4],
         edges: AutocompleteRowEdges,
     ) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
         if !edges.top && !edges.bottom {
             self.push_rect(x, y, w, h, color);
             return;
         }
         let r = radius.min(h * 0.5).min(w * 0.5);
         self.push_rounded_rect(x, y, w, h, r, color);
+        self.push_rect(x, y, r, h, color);
         if !edges.top {
             self.push_rect(x, y, w, r, color);
         }
@@ -602,36 +620,12 @@ impl Renderer {
         }
     }
 
-    fn push_autocomplete_badge_bg(
-        &mut self,
-        x: f32,
-        y: f32,
-        size: f32,
-        radius: f32,
-        color: [f32; 4],
-        edges: AutocompleteRowEdges,
-    ) {
-        if !edges.top && !edges.bottom {
-            self.push_rect(x, y, size, size, color);
-            return;
-        }
-        let r = radius.min(size * 0.5);
-        self.push_rounded_rect(x, y, size, size, r, color);
-        self.push_rect(x + r, y, size - r, size, color);
-        if !edges.top {
-            self.push_rect(x, y, r, r, color);
-        }
-        if !edges.bottom {
-            self.push_rect(x, y + size - r, r, r, color);
-        }
-    }
-
     pub fn draw_autocomplete(
         &mut self,
         x: f32,
         mut y: f32,
         options: &[(crate::app::AutocompleteItem, Vec<usize>)],
-        _mode: crate::app::AutocompleteMode,
+        mode: crate::app::AutocompleteMode,
         selected_idx: usize,
         anim_progress: f32,
         scroll_y: f32,
@@ -640,7 +634,48 @@ impl Renderer {
     ) -> (f32, f32, f32, f32) {
         let scale = self.scale_factor;
         if options.is_empty() {
-            return (x, y, 0.0, 0.0);
+            if mode != crate::app::AutocompleteMode::TyImports {
+                return (x, y, 0.0, 0.0);
+            }
+
+            let max_w = autocomplete_popup_width(self.width, x, min_width, scale)
+                .max(220.0 * scale)
+                .min((self.width - x - 8.0 * scale).max(195.0 * scale));
+            let target_h = 36.0 * scale;
+            let anim_progress = anim_progress.clamp(0.0, 1.0);
+            let smooth_progress = anim_progress
+                * anim_progress
+                * anim_progress
+                * (anim_progress * (anim_progress * 6.0 - 15.0) + 10.0);
+            let current_h = target_h * smooth_progress;
+            if y + target_h > self.height {
+                y -= target_h + 10.0 * scale;
+            } else {
+                y += 10.0 * scale;
+            }
+            if current_h < 1.0 {
+                return (x, y, max_w, current_h);
+            }
+
+            let border_width = 2.0 * scale;
+            self.push_rounded_rect_border(
+                x - border_width,
+                y - border_width,
+                max_w + border_width * 2.0,
+                current_h + border_width * 2.0,
+                6.0 * scale,
+                border_width,
+                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
+                [0.15, 0.16, 0.20, 1.0],
+            );
+            self.draw_string_scaled(
+                "Начните набирать",
+                x + 12.0 * scale,
+                y + 23.0 * scale,
+                [0.62, 0.64, 0.70, 1.0],
+                0.9,
+            );
+            return (x, y, max_w, current_h);
         }
 
         let step = 36.0 * scale;
@@ -648,6 +683,7 @@ impl Renderer {
         let padding_top = 0.0;
         let padding_bottom = 0.0;
 
+        let border_width = 2.0 * scale;
         let icon_sz = step;
         let icon_gap = 8.0 * scale;
         let right_pad = 18.0 * scale;
@@ -704,17 +740,17 @@ impl Renderer {
         }
 
         let bg_color = [0.15, 0.16, 0.20, 1.0];
-        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.8];
-        let border_width = (2.0 * scale).max(2.0);
-        self.push_rounded_rect(
+        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+        self.push_rounded_rect_border(
             x - border_width,
             y - border_width,
             max_w + border_width * 2.0,
             current_h + border_width * 2.0,
             6.0 * scale,
+            border_width,
             border_color,
+            bg_color,
         );
-        self.push_rounded_rect(x, y, max_w, current_h, 4.0 * scale, bg_color);
 
         self.flush();
 
@@ -741,22 +777,29 @@ impl Renderer {
 
             let row_y = current_y.round();
             let row_edges = autocomplete_row_edges(row_y, y, step, current_h);
+            let badge = autocomplete_badge_style(item.kind);
+            let badge_x = x;
+            let badge_w = icon_sz;
+            let badge_h = step;
+            self.push_rect(badge_x, row_y, badge_w, badge_h, badge.bg);
+            let text_bg_x = x + icon_sz;
+            let text_bg_w = (max_w - icon_sz).max(0.0);
 
             if i == selected_idx {
-                self.push_autocomplete_row_bg(
-                    x,
+                self.push_autocomplete_text_row_bg(
+                    text_bg_x,
                     row_y,
-                    max_w,
+                    text_bg_w,
                     step,
                     4.0 * scale,
                     [0.25, 0.27, 0.35, 1.0],
                     row_edges,
                 );
             } else if Some(i) == hovered_idx {
-                self.push_autocomplete_row_bg(
-                    x,
+                self.push_autocomplete_text_row_bg(
+                    text_bg_x,
                     row_y,
-                    max_w,
+                    text_bg_w,
                     step,
                     4.0 * scale,
                     [0.20, 0.21, 0.28, 1.0],
@@ -764,14 +807,12 @@ impl Renderer {
                 );
             }
 
-            let badge = autocomplete_badge_style(item.kind);
-            self.push_autocomplete_badge_bg(x, row_y, icon_sz, 4.0 * scale, badge.bg, row_edges);
             if let Some(letter) = badge.letter {
                 if let Some(g) = self.get_ui_glyph(letter) {
                     let char_scale = 0.82;
                     let actual_w = g.width * char_scale;
                     let actual_h = g.height * char_scale;
-                    let char_x = x + (icon_sz - actual_w) / 2.0;
+                    let char_x = badge_x + (badge_w - actual_w) / 2.0;
                     let char_y = row_y + (step - actual_h) / 2.0;
 
                     self.push_quad(
@@ -852,7 +893,7 @@ impl Renderer {
 
             if let Some(module) = module_metrics {
                 self.draw_string_scaled(
-                    module.text.as_ref(),
+                    &module.text,
                     module.x.round(),
                     (cy - 1.5 * scale).round(),
                     [0.50, 0.72, 0.82, 1.0],
@@ -888,6 +929,15 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
+        self.push_rounded_rect_outline(
+            x - border_width,
+            y - border_width,
+            max_w + border_width * 2.0,
+            current_h + border_width * 2.0,
+            6.0 * scale,
+            border_width,
+            border_color,
+        );
 
         (x, y, max_w, current_h)
     }
@@ -1262,6 +1312,10 @@ impl Renderer {
 
         let s = self.scale_factor;
         let minimap_w = self.minimap_width;
+        let cursor_phys_line = editor
+            .line_offsets
+            .partition_point(|&o| o <= editor.cursor)
+            .saturating_sub(1);
 
         let total_vis_lines = self.phys_to_visual.last().copied().unwrap_or(0) as f32 + 1.0;
         let bottom_blank_lines = super::editor_bottom_blank_lines(track_h, self.line_height);
@@ -1279,6 +1333,12 @@ impl Renderer {
         let mut lines_with_warnings = std::collections::HashSet::new();
 
         for diag in lsp_diags {
+            if crate::render_view::should_suppress_active_line_useless_expression(
+                diag,
+                cursor_phys_line,
+            ) {
+                continue;
+            }
             match diag.severity {
                 crate::lsp::DiagSeverity::Error => {
                     lines_with_errors.insert(diag.start_line);

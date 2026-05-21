@@ -73,6 +73,14 @@ fn ty_signature_parameter_items(
     out
 }
 
+fn ty_auto_import_completion(item: &AutocompleteItem) -> bool {
+    !item.additional_text_edits.is_empty()
+        || item
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.trim_start().starts_with("(import "))
+}
+
 impl App {
     pub fn request_ty_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
         if autocomplete_trace_enabled() {
@@ -173,8 +181,11 @@ impl App {
         let request_signature_help = mode == AutocompleteMode::TyContext
             && cursor_inside_python_call_parens(&self.editor)
             && !cursor_after_python_member_dot(&self.editor);
-        let completion_id =
-            lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger);
+        let completion_id = if request_signature_help {
+            None
+        } else {
+            lsp.request_ty_completion(&path, &self.file_extension, line, col, trigger)
+        };
         let signature_id = if request_signature_help {
             lsp.request_ty_signature_help(&path, &self.file_extension, line, col, None)
         } else {
@@ -219,7 +230,20 @@ impl App {
             self.trace_autocomplete_state("request_ty:end");
         }
         if let Some(id) = signature_id {
+            self.autocomplete_mode = mode;
             self.autocomplete_signature_request_id = Some(id);
+            if completion_id.is_none() {
+                self.autocomplete_pending_request_id = None;
+                self.autocomplete_pending_request_mode = None;
+                self.autocomplete_pending_request_path = None;
+                self.autocomplete_pending_context_key = None;
+                self.autocomplete_apply_pending_response = false;
+                self.autocomplete_active = false;
+                self.autocomplete_options.clear();
+                self.autocomplete_detail_popup = None;
+                self.autocomplete_detail_rect = None;
+                self.trace_autocomplete_state("request_ty:signature_end");
+            }
         }
     }
 
@@ -300,6 +324,9 @@ impl App {
             );
             merged.extend(items);
             items = merged;
+        }
+        if self.autocomplete_mode == AutocompleteMode::TyContext {
+            items.retain(|item| !ty_auto_import_completion(item));
         }
         let common_owner = (self.autocomplete_mode == AutocompleteMode::TyContext
             && member_dot_context)

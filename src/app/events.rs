@@ -18,6 +18,7 @@ use winit::window::{Window, WindowId};
 
 mod about;
 mod source_hover;
+pub(crate) use source_hover::source_class_signature_from_definition_file;
 use source_hover::*;
 
 #[derive(Default)]
@@ -687,13 +688,12 @@ impl ApplicationHandler for App {
                 }
 
                 let ctrl_definition_range = self.ctrl_definition_highlight_range();
-                let python_inlay_hints = if self.python_inlay_hint_path.as_ref()
-                    == self.file_path.as_ref()
-                {
-                    self.python_inlay_hints.as_slice()
-                } else {
-                    &[]
-                };
+                let python_inlay_hints =
+                    if self.python_inlay_hint_path.as_ref() == self.file_path.as_ref() {
+                        self.python_inlay_hints.as_slice()
+                    } else {
+                        &[]
+                    };
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -892,7 +892,7 @@ impl ApplicationHandler for App {
                                 let r = self.renderer.as_mut().unwrap();
                                 let pad = 12.0 * r.scale_factor;
                                 let line_h = 22.0 * r.scale_factor;
-                                let gap = 8.0 * r.scale_factor;
+                                let gap = 16.0 * r.scale_factor;
                                 let margin = 4.0 * r.scale_factor;
                                 let min_h = line_h + pad * 2.0;
                                 let available_below = r.height - (ry + rh + gap) - margin;
@@ -932,7 +932,7 @@ impl ApplicationHandler for App {
                                 self.stable_autocomplete_detail_size(natural_w, natural_h, max_h);
                             let (popup_x, popup_y, line_top_y) = {
                                 let r = self.renderer.as_mut().unwrap();
-                                let gap = 8.0 * r.scale_factor;
+                                let gap = 16.0 * r.scale_factor;
                                 let margin = 4.0 * r.scale_factor;
                                 let placement =
                                     *self.autocomplete_detail_placement.get_or_insert_with(|| {

@@ -331,6 +331,116 @@ fn ty_import_autocomplete_promotes_unknown_items_with_module() {
 }
 
 #[test]
+fn ty_import_completion_inserts_word_and_appends_import_without_cursor_jump() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("import os\nimport sys\n\nPa");
+    app.file_path = Some(PathBuf::from("main.py"));
+    app.file_extension = "py".to_string();
+    app.autocomplete_mode = AutocompleteMode::TyImports;
+
+    let item = AutocompleteItem {
+        word: "Path".to_string(),
+        kind: SymbolKind::Class,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("pathlib".to_string()),
+        module_path: Some("pathlib".to_string()),
+        detail: None,
+        insert_text: Some("Path".to_string()),
+        text_edit: None,
+        additional_text_edits: vec![crate::lsp::TextChange {
+            start_line: 0,
+            start_col: 0,
+            end_line: 0,
+            end_col: 0,
+            new_text: "from pathlib import Path\n".to_string(),
+        }],
+    };
+
+    app.apply_lsp_completion_item(&item);
+
+    assert_eq!(
+        app.editor.get_full_text(),
+        "import os\nimport sys\nfrom pathlib import Path\n\nPath"
+    );
+    assert_eq!(app.editor.cursor, app.editor.len());
+}
+
+#[test]
+fn ty_import_completion_with_text_edit_appends_after_multiline_import_region() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let text = concat!(
+        "import datetime as dt\n",
+        "from decimal import Decimal\n",
+        "\n",
+        "from car_wash.core.service import (\n",
+        "    GenericCRUDService,\n",
+        ")\n",
+        "from car_wash.utils.schemas.types import (\n",
+        "    StateEnum,\n",
+        ")\n",
+        "\n",
+        "class BookingService:\n",
+        "    Repo",
+    );
+    app.editor = editor_with(text);
+    app.file_path = Some(PathBuf::from("main.py"));
+    app.file_extension = "py".to_string();
+    app.autocomplete_mode = AutocompleteMode::TyImports;
+
+    let item = AutocompleteItem {
+        word: "RepoBase".to_string(),
+        kind: SymbolKind::Class,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("car_wash.core.db.repo_base".to_string()),
+        module_path: Some("car_wash.core.db.repo_base".to_string()),
+        detail: None,
+        insert_text: None,
+        text_edit: Some(crate::lsp::TextChange {
+            start_line: 11,
+            start_col: 4,
+            end_line: 11,
+            end_col: 8,
+            new_text: "RepoBase".to_string(),
+        }),
+        additional_text_edits: vec![crate::lsp::TextChange {
+            start_line: 3,
+            start_col: 0,
+            end_line: 3,
+            end_col: 0,
+            new_text: "from car_wash.core.db.repo_base import RepoBase\n".to_string(),
+        }],
+    };
+
+    app.apply_lsp_completion_item(&item);
+
+    assert_eq!(
+        app.editor.get_full_text(),
+        concat!(
+            "import datetime as dt\n",
+            "from decimal import Decimal\n",
+            "\n",
+            "from car_wash.core.service import (\n",
+            "    GenericCRUDService,\n",
+            ")\n",
+            "from car_wash.utils.schemas.types import (\n",
+            "    StateEnum,\n",
+            ")\n",
+            "from car_wash.core.db.repo_base import RepoBase\n",
+            "\n",
+            "class BookingService:\n",
+            "    RepoBase",
+        )
+    );
+    assert_eq!(app.editor.cursor, app.editor.len());
+}
+
+#[test]
 fn ty_context_top_level_variable_keeps_variable_kind_and_hides_type_source() {
     let Some(mut app) = test_app() else {
         return;
@@ -697,6 +807,54 @@ fn autocomplete_detail_popup_prepends_full_module_path() {
 }
 
 #[test]
+fn autocomplete_detail_popup_expands_class_repr_from_source() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_repo_base_repr_detail_test_{stamp}"));
+    let package_dir = root.join("car_wash/core/db");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("repo_base.py"),
+        "class RepoBase[TModel: Base, TReadStruct: BasedStruct]:\n    \"\"\"Repo docs.\"\"\"\n",
+    )
+    .unwrap();
+
+    app.file_extension = "py".to_string();
+    app.ide_workspaces = vec![root];
+    app.editor = editor_with("Rep");
+    app.autocomplete_active = true;
+    app.autocomplete_mode = AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        AutocompleteItem {
+            word: "RepoBase".to_string(),
+            kind: SymbolKind::Class,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: Some("car_wash.core.db.repo_base".to_string()),
+            module_path: Some("car_wash.core.db.repo_base".to_string()),
+            detail: Some("<class 'RepoBase'>".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(
+        popup.text,
+        "[[MODULE]] car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo docs."
+    );
+}
+
+#[test]
 fn autocomplete_detail_popup_cleans_source_attr_class_type_union() {
     let Some(mut app) = test_app() else {
         return;
@@ -818,6 +976,94 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
     assert!(popup.text.contains("Cast a value to a type"));
     assert!(!popup.text.contains("Overload["));
     assert!(!popup.spans.is_empty());
+
+    app.autocomplete_options[0].0 = AutocompleteItem {
+        word: "max".to_string(),
+        kind: SymbolKind::Function,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("builtins".to_string()),
+        module_path: Some("builtins.max".to_string()),
+        detail: Some(
+            "Overload[[SupportsRichComparisonT](arg1: SupportsRichComparisonT, arg2: SupportsRichComparisonT, /, *_args: SupportsRichComparisonT, *, key: None = None) -> SupportsRichComparisonT, [_T](arg1: _T, arg2: _T, /, *_args: _T, *, key: (_T, /) -> SupportsDunderLT[Any] | SupportsDunderGT[Any]) -> _T, [SupportsRichComparisonT](iterable: Iterable[SupportsRichComparisonT], /, *, key: None = None) -> SupportsRichComparisonT, [_T](iterable: Iterable[_T], /, *, key: (_T, /) -> SupportsDunderLT[Any] | SupportsDunderGT[Any]) -> _T, [SupportsRichComparisonT, _T](iterable: Iterable[SupportsRichComparisonT], /, *, key: None = None, default: _T) -> SupportsRichComparisonT | _T, [_T1, _T2](iterable: Iterable[_T1], /, *, key: (_T1, /) -> SupportsDunderLT[Any] | SupportsDunderGT[Any], default: _T2) -> _T1 | _T2]\n---\nmax(iterable, *[, default=obj, key=func]) -> value\nmax(arg1, arg2, *args, *[, key=func]) -> value\n\nWith a single iterable argument, return its biggest item."
+                .to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    };
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains(
+        "def max(*args: Any, key: Any = None, default: Any = ...) -> Any"
+    ));
+    assert!(popup.text.contains("max(iterable, *[, default=obj, key=func])"));
+    assert!(popup.text.contains("return its biggest item"));
+    assert_eq!(popup.text.matches("def max").count(), 1);
+    assert!(!popup.text.contains("Overload["));
+
+    app.autocomplete_options[0].0.detail = Some(
+        "Overload[[SupportsRichComparisonT](arg1: SupportsRichComparisonT, arg2: SupportsRichComparisonT, /, *_args: SupportsRichComparisonT, *, key: None = None) -> SupportsRichComparisonT, [_T](arg1: _T, arg2: _T, /, *_args: _T, *, key: (_T, /) -> SupportsDunderLT[Any] | SupportsDunderGT[Any]) -> _T, [SupportsRichComparisonT](iterable: Iterable[SupportsRichComparisonT], /, *, key: None = None) -> SupportsRichComparisonT, [_T](iterable: Iterable[_T], /, *, key: (_T, /) -> SupportsDunderLT[Any] | SupportsDunderGT[Any]) -> _T]"
+            .to_string(),
+    );
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(
+        popup.text,
+        "[[MODULE]] builtins\ndef max(*args: Any, key: Any = None, default: Any = ...) -> Any"
+    );
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rriter_builtin_map_detail_test_{stamp}"));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("builtins.pyi"), "class map(Generic[_S]):\n    pass\n").unwrap();
+    app.ide_workspaces = vec![root];
+
+    app.autocomplete_options[0].0 = AutocompleteItem {
+        word: "map".to_string(),
+        kind: SymbolKind::Class,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("builtins".to_string()),
+        module_path: Some("builtins.map".to_string()),
+        detail: Some("class map".to_string()),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    };
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains("[[MODULE]] builtins"));
+    assert!(popup.text.contains("class map(Generic[_S])"));
+    assert!(popup.text.contains("Stops when the shortest iterable is exhausted"));
+
+    app.autocomplete_options[0].0 = AutocompleteItem {
+        word: "map".to_string(),
+        kind: SymbolKind::Class,
+        scope_start: 0,
+        scope_end: usize::MAX,
+        module: Some("builtins".to_string()),
+        module_path: Some("builtins.map".to_string()),
+        detail: Some(
+            "class map\n---\nMake an iterator that computes the function using arguments from\neach of the iterables."
+                .to_string(),
+        ),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    };
+
+    app.refresh_autocomplete_detail_popup();
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert!(popup.text.contains("[[MODULE]] builtins"));
+    assert_eq!(popup.text.matches("[[MODULE]] builtins").count(), 1);
+    assert!(popup.text.contains("class map(Generic[_S])"));
+    assert!(popup.text.contains("Make an iterator"));
 }
 
 #[test]

@@ -689,7 +689,7 @@ pub(super) fn source_attribute_hover_from_definition_file(
     None
 }
 
-pub(super) fn source_class_signature_from_definition_file(
+pub(crate) fn source_class_signature_from_definition_file(
     path: &std::path::Path,
     symbol: &str,
 ) -> Option<String> {
