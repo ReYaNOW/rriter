@@ -28,6 +28,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         search_results: Vec::new(),
         search_current_idx: None,
         is_highlighted_once: true,
+        is_highlight_complete: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
         kind: EditorTabKind::Normal,
@@ -51,6 +52,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         search_results: Vec::new(),
         search_current_idx: None,
         is_highlighted_once: true,
+        is_highlight_complete: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
         kind: EditorTabKind::Normal,
@@ -182,6 +184,7 @@ fn tab_sync_swaps_editor_metadata_and_current_icon() {
     app.search_current_idx = Some(0);
     app.last_sent_version = 7;
     app.is_highlighted_once = true;
+    app.is_highlight_complete = true;
 
     app.tabs
         .push(tab_with("other.py", Some("/tmp/other.py"), "tab text"));
@@ -198,6 +201,7 @@ fn tab_sync_swaps_editor_metadata_and_current_icon() {
     assert_eq!(app.tabs[0].search_current_idx, Some(0));
     assert_eq!(app.tabs[0].last_sent_version, 7);
     assert!(app.tabs[0].is_highlighted_once);
+    assert!(app.tabs[0].is_highlight_complete);
     assert_ne!(app.tabs[0].icon_key, "default_file");
 }
 
@@ -833,6 +837,104 @@ fn switch_to_tab_waits_for_highlight_before_return() {
     }
     assert!(app.is_highlighted_once);
     assert_eq!(app.highlighter.current_version, app.editor.version);
+}
+
+#[test]
+fn switch_to_highlighted_tab_reuses_cached_highlight_without_restart() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.tabs.push(tab_with(
+        "first.py",
+        Some("/tmp/first.py"),
+        "print('first')\n",
+    ));
+    app.tabs.push(tab_with(
+        "second.py",
+        Some("/tmp/second.py"),
+        "def cached():\n    return 1\n",
+    ));
+    app.active_tab = 0;
+    app.editor = editor_with("print('first')\n");
+    app.editor.version = 11;
+    app.file_path = Some(PathBuf::from("/tmp/first.py"));
+    app.file_extension = "py".to_string();
+    app.base_title = "first.py".to_string();
+    app.is_highlighted_once = true;
+    app.is_highlight_complete = true;
+    app.highlighter.current_version = app.editor.version;
+
+    app.tabs[1].editor.version = 22;
+    app.tabs[1].editor.foldable_lines.insert(0, 1);
+    app.tabs[1].editor.folded_lines.insert(0);
+    app.tabs[1].editor.folded_start_bytes.insert(0);
+    app.tabs[1].spans = vec![crate::highlighter::ColorSpan {
+        start: 0,
+        end: 3,
+        color: crate::highlighter::DRACULA_PINK,
+    }];
+    app.tabs[1].foldable_ranges = vec![(0, 26, true, false)];
+    app.tabs[1].is_highlighted_once = true;
+    app.tabs[1].is_highlight_complete = true;
+    let target_version = app.tabs[1].editor.version;
+
+    app.switch_to_tab(1);
+
+    assert_eq!(app.editor.version, target_version);
+    assert_eq!(app.highlighter.current_version, target_version);
+    assert!(app.is_highlighted_once);
+    assert_eq!(app.highlighter.spans.len(), 1);
+    assert_eq!(app.highlighter.spans[0].start, 0);
+    assert!(app.editor.folded_lines.contains(&0));
+    assert!(app.editor.folded_start_bytes.contains(&0));
+}
+
+#[test]
+fn switch_back_to_partial_large_tab_restarts_full_highlight_without_clearing_cache() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.tabs.push(tab_with(
+        "small.py",
+        Some("/tmp/small.py"),
+        "print('small')\n",
+    ));
+    app.tabs.push(tab_with(
+        "large.py",
+        Some("/tmp/large.py"),
+        "def partial():\n    return 1\n",
+    ));
+    app.active_tab = 0;
+    app.editor = editor_with("print('small')\n");
+    app.editor.version = 7;
+    app.file_path = Some(PathBuf::from("/tmp/small.py"));
+    app.file_extension = "py".to_string();
+    app.base_title = "small.py".to_string();
+    app.is_highlighted_once = true;
+    app.is_highlight_complete = true;
+
+    app.tabs[1].editor.version = 42;
+    app.tabs[1].spans = vec![crate::highlighter::ColorSpan {
+        start: 0,
+        end: 3,
+        color: crate::highlighter::DRACULA_PINK,
+    }];
+    app.tabs[1].is_highlighted_once = true;
+    app.tabs[1].is_highlight_complete = false;
+
+    app.switch_to_tab(1);
+
+    assert_eq!(app.editor.version, 42);
+    assert!(app.is_highlighted_once);
+    assert!(!app.is_highlight_complete);
+    assert!(!app.highlighter.is_complete);
+    assert_eq!(app.highlighter.current_version, 42);
+    assert_eq!(app.highlighter.spans.len(), 1);
+    assert_eq!(app.highlighter.spans[0].color, crate::highlighter::DRACULA_PINK);
 }
 
 #[test]
@@ -1643,6 +1745,7 @@ fn undo_redo_rebuilds_diff_decorations() {
         search_results: Vec::new(),
         search_current_idx: None,
         is_highlighted_once: true,
+        is_highlight_complete: true,
         icon_key: "default_file",
         syntax_errors: Vec::new(),
         kind: crate::app::EditorTabKind::GitDiff(

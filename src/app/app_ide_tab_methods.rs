@@ -72,6 +72,7 @@ impl App {
                 search_results: Vec::new(),
                 search_current_idx: None,
                 is_highlighted_once: false,
+                is_highlight_complete: false,
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
                 kind: EditorTabKind::Normal,
@@ -184,6 +185,10 @@ impl App {
             &mut self.is_highlighted_once,
             &mut self.tabs[ai].is_highlighted_once,
         );
+        std::mem::swap(
+            &mut self.is_highlight_complete,
+            &mut self.tabs[ai].is_highlight_complete,
+        );
 
         let title_to_use = if self.base_title.len() > self.tabs[ai].base_title.len() {
             &self.base_title
@@ -273,9 +278,6 @@ impl App {
         }
 
         self.sync_active_tab();
-        // Урезаем потребление RAM: освобождаем тяжелый AST автокомплита у старой вкладки.
-        // При возврате вкладка перепарсится автоматически за 10-30 мс без лагов.
-        self.tabs[self.active_tab].completions.clear();
         self.active_tab = new_idx;
         self.sync_active_tab();
         self.prefetch_active_tab_git_graph();
@@ -285,7 +287,28 @@ impl App {
             if !self.is_highlighted_once {
                 self.editor.version = self.next_tab_highlight_version();
                 self.prepare_active_git_diff_highlight_after_switch();
+            } else {
+                self.highlighter.restore_cached_view(
+                    self.editor.version,
+                    self.editor.get_full_text(),
+                    self.file_extension.clone(),
+                );
             }
+        } else if self.is_highlighted_once && self.is_highlight_complete {
+            self.highlighter.restore_cached_view(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+            );
+        } else if self.is_highlighted_once {
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.is_highlight_complete = false;
+            self.highlighter.restart_cached_view(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+                self.editor.cursor,
+            );
         } else {
             self.editor.version = self.next_tab_highlight_version();
             while let Ok(_) = self.highlighter.rx.try_recv() {}

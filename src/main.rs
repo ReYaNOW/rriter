@@ -461,6 +461,7 @@ mod tests {
             search_results: Vec::new(),
             search_current_idx: None,
             is_highlighted_once: false,
+            is_highlight_complete: false,
             icon_key: "default_file",
             syntax_errors: Vec::new(),
             kind: crate::app::EditorTabKind::Normal,
@@ -869,6 +870,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
 
         is_ready: false,
         is_highlighted_once: false,
+        is_highlight_complete: false,
         tried_maximize: false,
         should_maximize: config.maximized,
 
@@ -934,6 +936,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         python_inlay_hint_pending_request_id: None,
         python_inlay_hint_pending_path: None,
         python_inlay_hint_pending_version: 0,
+        python_inlay_hint_cache: rustc_hash::FxHashMap::default(),
         ui_registry: crate::ui_system::UiRegistry::new(),
         tabs: Vec::new(),
         active_tab: 0,

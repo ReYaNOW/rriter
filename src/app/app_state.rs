@@ -25,6 +25,7 @@ pub struct EditorTab {
     pub search_results: Vec<(usize, usize)>,
     pub search_current_idx: Option<usize>,
     pub is_highlighted_once: bool,
+    pub is_highlight_complete: bool,
     pub icon_key: &'static str,
     pub kind: EditorTabKind,
 }
@@ -801,6 +802,7 @@ pub struct App {
 
     pub is_ready: bool,
     pub is_highlighted_once: bool,
+    pub is_highlight_complete: bool,
     pub tried_maximize: bool,
     pub should_maximize: bool,
 
@@ -872,6 +874,7 @@ pub struct App {
     pub python_inlay_hint_pending_request_id: Option<i32>,
     pub python_inlay_hint_pending_path: Option<PathBuf>,
     pub python_inlay_hint_pending_version: u64,
+    pub python_inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<PythonInlayHint>)>,
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,

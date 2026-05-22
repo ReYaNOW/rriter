@@ -27,6 +27,19 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
         app.python_inlay_hint_path = None;
         return;
     };
+    if let Some((version, hints)) = app.python_inlay_hint_cache.get(&path)
+        && *version == app.editor.version
+    {
+        if app.python_inlay_hint_path.as_ref() != Some(&path)
+            || app.python_inlay_hint_version != app.editor.version
+        {
+            app.python_inlay_hints.clear();
+            app.python_inlay_hints.extend_from_slice(hints);
+            app.python_inlay_hint_path = Some(path);
+            app.python_inlay_hint_version = *version;
+        }
+        return;
+    }
     if app.python_inlay_hint_pending_request_id.is_some()
         || app.python_inlay_hint_path.as_ref() == Some(&path)
             && app.python_inlay_hint_version == app.editor.version
@@ -901,8 +914,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     let version = app.python_inlay_hint_pending_version;
                     if app.file_path.as_ref() == Some(&path) && app.editor.version == version {
                         let text = app.editor.get_full_text();
-                        app.python_inlay_hints =
+                        let parsed =
                             crate::app::python_positional_inlay_hints_from_lsp(&text, &hints);
+                        app.python_inlay_hint_cache
+                            .insert(path.clone(), (version, parsed.clone()));
+                        app.python_inlay_hints = parsed;
                         app.python_inlay_hint_path = Some(path);
                         app.python_inlay_hint_version = version;
                         if let Some(w) = app.window.as_ref() {

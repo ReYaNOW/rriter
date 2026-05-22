@@ -95,6 +95,11 @@ pub enum SyncEdit {
 }
 
 pub enum HighlighterMessage {
+    Restore {
+        text: String,
+        ext: String,
+        spans: Vec<ColorSpan>,
+    },
     Reset {
         request_id: u64,
         version: u64,
@@ -123,12 +128,14 @@ pub struct Highlighter {
         Vec<(usize, usize, bool, bool)>, // (start, end, is_autofold, is_sticky)
         Vec<(usize, usize)>,             // syntax errors
         Option<tree_sitter::Tree>,
+        bool, // true when full-file highlight completed; false for priority preview
     )>,
     pub spans: Vec<ColorSpan>,
     pub completions: Vec<CompletionItem>,
     pub foldable_ranges: Vec<(usize, usize, bool, bool)>,
     pub syntax_errors: Vec<(usize, usize)>,
     pub current_version: u64,
+    pub is_complete: bool,
     current_request_id: u64,
     sync_text: String,
     sync_ext: String,

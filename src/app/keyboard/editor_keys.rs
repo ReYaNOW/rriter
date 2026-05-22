@@ -847,6 +847,7 @@ impl App {
             }
             self.lsp_actions_menu = None;
             self.is_highlighted_once = true;
+            self.is_highlight_complete = false;
             if force_close_autocomplete {
                 self.close_autocomplete();
             } else if should_trigger_autocomplete {
@@ -950,6 +951,7 @@ impl App {
                 }
 
                 self.is_highlighted_once = true;
+                self.is_highlight_complete = self.highlighter.is_complete;
                 if self.autocomplete_active {
                     self.update_autocomplete();
                 }

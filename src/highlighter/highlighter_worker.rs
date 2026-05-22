@@ -9,6 +9,7 @@ impl Highlighter {
             Vec<(usize, usize, bool, bool)>,
             Vec<(usize, usize)>,
             Option<tree_sitter::Tree>,
+            bool,
         )>();
 
         thread::spawn(move || {
@@ -39,6 +40,16 @@ impl Highlighter {
 
                 for m in msgs {
                     match m {
+                        HighlighterMessage::Restore {
+                            text,
+                            ext,
+                            spans,
+                        } => {
+                            replica_text = text;
+                            current_ext = ext;
+                            current_tree = None;
+                            last_full_spans = spans;
+                        }
                         HighlighterMessage::Reset {
                             request_id,
                             version,
@@ -246,6 +257,7 @@ impl Highlighter {
                                         priority_foldable_ranges,
                                         Vec::new(),
                                         current_tree.clone(),
+                                        false,
                                     ));
                                 }
                             }
@@ -961,6 +973,7 @@ impl Highlighter {
                     foldable_ranges,
                     error_ranges,
                     current_tree.clone(),
+                    true,
                 ));
             }
         });
@@ -972,6 +985,7 @@ impl Highlighter {
             foldable_ranges: vec![],
             syntax_errors: vec![],
             current_version: 0,
+            is_complete: true,
             current_request_id: 0,
             sync_text: String::new(),
             sync_ext: String::new(),

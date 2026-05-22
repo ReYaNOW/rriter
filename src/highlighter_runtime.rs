@@ -1,12 +1,44 @@
 use super::*;
 
 impl Highlighter {
+    pub fn restore_cached_view(&mut self, version: u64, text: String, ext: String) {
+        self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
+        self.sync_text = text.clone();
+        self.sync_ext = ext.clone();
+        self.sync_tree = None;
+        self.current_version = version;
+        self.is_complete = true;
+        let _ = self.tx.send(HighlighterMessage::Restore {
+            text,
+            ext,
+            spans: self.spans.clone(),
+        });
+    }
+
+    pub fn restart_cached_view(&mut self, version: u64, text: String, ext: String, anchor: usize) {
+        self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
+        let request_id = self.current_request_id;
+        self.sync_text = text.clone();
+        self.sync_ext = ext.clone();
+        self.sync_tree = None;
+        self.current_version = version;
+        self.is_complete = false;
+        let _ = self.tx.send(HighlighterMessage::Reset {
+            request_id,
+            version,
+            text,
+            ext,
+            priority_anchor: anchor,
+        });
+    }
+
     pub fn reset(&mut self, version: u64, text: String, ext: String, priority_anchor: usize) {
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         let request_id = self.current_request_id;
         self.sync_text = text.clone();
         self.sync_ext = ext.clone();
         self.sync_tree = None;
+        self.is_complete = false;
         let _ = self.tx.send(HighlighterMessage::Reset {
             request_id,
             version,
@@ -40,8 +72,16 @@ impl Highlighter {
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((request_id, ver, spans, completions, foldable_ranges, syntax_errors, tree)) =
-            self.rx.try_recv()
+        while let Ok((
+            request_id,
+            ver,
+            spans,
+            completions,
+            foldable_ranges,
+            syntax_errors,
+            tree,
+            is_complete,
+        )) = self.rx.try_recv()
         {
             updated |= self.apply_poll_result(
                 request_id,
@@ -52,6 +92,7 @@ impl Highlighter {
                 foldable_ranges,
                 syntax_errors,
                 tree,
+                is_complete,
             );
         }
         updated
@@ -67,6 +108,7 @@ impl Highlighter {
         foldable_ranges: Vec<(usize, usize, bool, bool)>,
         syntax_errors: Vec<(usize, usize)>,
         tree: Option<tree_sitter::Tree>,
+        is_complete: bool,
     ) -> bool {
         if request_id != self.current_request_id
             || ver != current_editor_version
@@ -81,6 +123,7 @@ impl Highlighter {
         self.foldable_ranges = foldable_ranges;
         self.syntax_errors = syntax_errors;
         self.sync_tree = tree;
+        self.is_complete = is_complete;
         true
     }
 
@@ -96,7 +139,16 @@ impl Highlighter {
             }
             let remaining = deadline - now;
             match self.rx.recv_timeout(remaining) {
-                Ok((request_id, ver, spans, completions, foldable_ranges, syntax_errors, tree)) => {
+                Ok((
+                    request_id,
+                    ver,
+                    spans,
+                    completions,
+                    foldable_ranges,
+                    syntax_errors,
+                    tree,
+                    is_complete,
+                )) => {
                     if self.apply_poll_result(
                         request_id,
                         version,
@@ -106,6 +158,7 @@ impl Highlighter {
                         foldable_ranges,
                         syntax_errors,
                         tree,
+                        is_complete,
                     ) {
                         // Дренируем оставшиеся ожидающие результаты
                         self.poll(version);
@@ -361,6 +414,7 @@ impl Highlighter {
 
         self.sync_tree = Some(tree);
         self.current_version = version;
+        self.is_complete = true;
         self.spans = flat_spans;
         true
     }
@@ -560,6 +614,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            true,
         );
         assert!(!future_applied);
         assert_eq!(highlighter.current_version, 0);
@@ -574,6 +629,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            true,
         );
         assert!(current_applied);
         assert_eq!(highlighter.current_version, 2);

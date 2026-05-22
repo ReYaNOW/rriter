@@ -605,6 +605,7 @@ impl App {
             search_results: Vec::new(),
             search_current_idx: None,
             is_highlighted_once: true,
+            is_highlight_complete: true,
             icon_key: "default_file",
             kind: EditorTabKind::GitDiff(meta.clone(), state),
         };
@@ -772,6 +773,7 @@ impl App {
             self.tabs[tab_idx].editor = new_editor_with_text(&text, event.version);
             self.tabs[tab_idx].spans.clear();
             self.tabs[tab_idx].is_highlighted_once = false;
+            self.tabs[tab_idx].is_highlight_complete = false;
         }
     }
 
@@ -807,6 +809,7 @@ impl App {
         self.editor.foldable_ranges_bytes.clear();
         self.highlighter.foldable_ranges.clear();
         self.is_highlighted_once = true;
+        self.is_highlight_complete = true;
     }
 
     pub fn scroll_active_git_diff_to_first_change(&mut self) {

@@ -229,6 +229,7 @@ impl App {
             }
         }
         self.is_highlighted_once = true;
+        self.is_highlight_complete = self.highlighter.is_complete;
     }
 
     fn wait_for_current_highlight(&mut self) {
@@ -258,6 +259,7 @@ impl App {
         self.highlighter.completions.clear();
         self.highlighter.foldable_ranges.clear();
         self.highlighter.syntax_errors.clear();
+        self.is_highlight_complete = false;
         let version = self.editor.version;
         if self.highlighter.current_version >= version {
             self.highlighter.current_version = version.saturating_sub(1);
@@ -309,6 +311,7 @@ impl App {
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 self.is_highlighted_once = false;
+                self.is_highlight_complete = false;
                 if start_highlighter {
                     while let Ok(_) = self.highlighter.rx.try_recv() {}
                     self.reset_highlighter_with_text(content.clone(), !wait_highlight);
@@ -394,6 +397,7 @@ impl App {
                             tab.completions.clear();
                             tab.foldable_ranges.clear();
                             tab.is_highlighted_once = false;
+                            tab.is_highlight_complete = false;
                             if self.is_ide_mode {
                                 if let Some(lsp) = &mut self.lsp {
                                     lsp.clear_diagnostics_for_path(path);
@@ -528,6 +532,7 @@ impl App {
             tab.completions.clear();
             tab.foldable_ranges.clear();
             tab.is_highlighted_once = false;
+            tab.is_highlight_complete = false;
             if self.is_ide_mode
                 && let Some(lsp) = &mut self.lsp
             {
