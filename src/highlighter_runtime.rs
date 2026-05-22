@@ -820,6 +820,27 @@ mod tests {
     }
 
     #[test]
+    fn python_priority_range_starts_at_real_top_level_statement() {
+        let text = "class Example:\n    \"\"\"doc\n    still doc\n    \"\"\"\n    def target(self) -> str:\n        return \"ok\"\n\nclass Next:\n    pass\n";
+        let anchor = text.find("target").unwrap();
+        let range = priority_highlight_range("py", text, anchor);
+
+        assert_eq!(range.start, 0);
+        assert!(range.end >= text.find("class Next").unwrap());
+        assert!(range.end <= text.len());
+    }
+
+    #[test]
+    fn python_priority_range_covers_visible_window_before_anchor() {
+        let text = "class Prev:\n    @overload\n    def __new__(self) -> Self: ...\n\n@overload\ndef max(arg: int) -> int:\n    \"\"\"doc\"\"\"\n";
+        let anchor = text.find("max").unwrap();
+        let range = priority_highlight_range("py", text, anchor);
+
+        assert_eq!(range.start, 0);
+        assert_eq!(&text[range.clone()], text);
+    }
+
+    #[test]
     fn highlighter_full_result_follows_priority_result() {
         let mut highlighter = Highlighter::new();
         let text = "def f():\n    return 'x'\n".repeat(TREE_SITTER_HIGHLIGHT_MAX_LINES + 2);

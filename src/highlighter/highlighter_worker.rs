@@ -217,6 +217,39 @@ impl Highlighter {
 
                     if let Some((lang, queries)) = ts_config {
                         if parser.set_language(&lang).is_ok() {
+                            if should_prioritize_front {
+                                let priority_range =
+                                    priority_highlight_range(lang_name, text, final_priority_anchor);
+                                let priority_spans = priority_highlight_spans_from_slice(
+                                    &mut parser,
+                                    &lang,
+                                    lang_name,
+                                    &queries,
+                                    text,
+                                    priority_range,
+                                    &mut query_cache,
+                                    &mut byte_colors_buf,
+                                );
+                                if !priority_spans.is_empty() {
+                                    let mut priority_foldable_ranges = Vec::new();
+                                    push_language_import_foldable_ranges(
+                                        lang_name,
+                                        text,
+                                        &mut priority_foldable_ranges,
+                                    );
+                                    last_full_spans = priority_spans.clone();
+                                    let _ = tx_out.send((
+                                        final_request_id,
+                                        final_version,
+                                        priority_spans,
+                                        Vec::new(),
+                                        priority_foldable_ranges,
+                                        Vec::new(),
+                                        current_tree.clone(),
+                                    ));
+                                }
+                            }
+
                             let parsed_tree = parser.parse(&replica_text, current_tree.as_ref());
                             current_tree = parsed_tree.clone();
 
@@ -272,90 +305,11 @@ impl Highlighter {
                                     }
                                 }
 
-                                match lang_name {
-                                    "py" => {
-                                        for block in crate::languages::python::import_blocks(text) {
-                                            foldable_ranges.push((
-                                                block.start,
-                                                block.end,
-                                                true,
-                                                false,
-                                            ));
-                                        }
-                                    }
-                                    "rs" => {
-                                        for block in crate::languages::rust::import_blocks(text) {
-                                            foldable_ranges.push((
-                                                block.start,
-                                                block.end,
-                                                true,
-                                                false,
-                                            ));
-                                        }
-                                    }
-                                    "dart" => {
-                                        for block in crate::languages::dart::import_blocks(text) {
-                                            foldable_ranges.push((
-                                                block.start,
-                                                block.end,
-                                                true,
-                                                false,
-                                            ));
-                                        }
-                                    }
-                                    _ => {}
-                                }
-
-                                if should_prioritize_front {
-                                    let priority_range =
-                                        priority_highlight_range(text, final_priority_anchor);
-                                    if priority_range.start < priority_range.end {
-                                        let mut priority_spans = Vec::new();
-                                        collect_query_highlight_spans(
-                                            &lang,
-                                            lang_name,
-                                            &queries,
-                                            &tree,
-                                            &text,
-                                            &mut query_cache,
-                                            Some(priority_range.clone()),
-                                            &mut priority_spans,
-                                        );
-                                        let priority_spans = merge_highlight_spans(
-                                            Vec::new(),
-                                            priority_spans,
-                                            lang_name,
-                                            &text,
-                                            true,
-                                            None,
-                                        );
-                                        let priority_spans = flatten_spans_for_range(
-                                            priority_spans,
-                                            priority_range.clone(),
-                                            text,
-                                            &mut byte_colors_buf,
-                                            !lang_name.is_empty() && lang_name != "bash",
-                                        );
-                                        last_full_spans = priority_spans.clone();
-                                        let priority_foldable_ranges = foldable_ranges
-                                            .iter()
-                                            .copied()
-                                            .filter(|&(start, end, _, _)| {
-                                                start < priority_range.end
-                                                    && end <= priority_range.end
-                                            })
-                                            .collect::<Vec<_>>();
-                                        let _ = tx_out.send((
-                                            final_request_id,
-                                            final_version,
-                                            priority_spans,
-                                            Vec::new(),
-                                            priority_foldable_ranges,
-                                            Vec::new(),
-                                            current_tree.clone(),
-                                        ));
-                                    }
-                                }
+                                push_language_import_foldable_ranges(
+                                    lang_name,
+                                    text,
+                                    &mut foldable_ranges,
+                                );
 
                                 let is_same_node = |n1: Option<tree_sitter::Node>,
                                                     n2: tree_sitter::Node|

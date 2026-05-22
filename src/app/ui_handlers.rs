@@ -1265,74 +1265,20 @@ impl App {
                     if diag_idx == usize::MAX {
                         return;
                     }
-                    let file_already_open = self.file_path.as_ref() == Some(&path)
-                        || self
-                            .tabs
-                            .iter()
-                            .any(|tab| tab.file_path.as_ref() == Some(&path));
-                    if self.file_path.as_ref() != Some(&path) {
-                        self.open_file_in_tab(path.clone(), true);
-                    }
-                    if let Some(lsp) = &self.lsp {
-                        let diags = lsp.get_diagnostics(&path);
-                        if let Some(diag) = diags.get(diag_idx) {
-                            let start_line = diag.start_line as usize;
-                            let end_line = diag.end_line as usize;
-                            if start_line < self.editor.line_offsets.len()
-                                && end_line < self.editor.line_offsets.len()
-                            {
-                                let full_text = self.editor.get_full_text();
-
-                                let end_byte = crate::lsp::lsp_pos_to_offset(
-                                    &full_text,
-                                    diag.end_line,
-                                    diag.end_col,
-                                );
-
-                                self.editor.cursor = end_byte.min(self.editor.len());
-                                self.editor.selection_anchor = None;
-                                self.reprioritize_highlighter_around_cursor();
-                                self.wait_for_current_highlight();
-
-                                let tab_h = if self.is_ide_mode {
-                                    32.0 * self.renderer.as_ref().unwrap().scale_factor
-                                } else {
-                                    38.0 * self.renderer.as_ref().unwrap().scale_factor
-                                };
-
-                                crate::app::App::ensure_cursor_visible(
-                                    &mut self.scroll_y.target,
-                                    &mut self.scroll_x.target,
-                                    &self.editor,
-                                    self.renderer.as_mut().unwrap(),
-                                    self.window_height as f32,
-                                    self.window_width as f32,
-                                    tab_h,
-                                );
-
-                                let renderer = self.renderer.as_mut().unwrap();
-                                let (_, cy) = renderer.get_cursor_xy(&self.editor);
-                                let visible_h =
-                                    (self.window_height as f32 - tab_h).max(renderer.line_height);
-                                let max_scroll = renderer.get_max_scroll(&self.editor, visible_h);
-                                self.scroll_y.target =
-                                    (cy - renderer.baseline_offset - visible_h * 0.45)
-                                        .max(0.0)
-                                        .min(max_scroll)
-                                        .round();
-
-                                if !file_already_open {
-                                    self.scroll_y.current = self.scroll_y.target;
-                                    self.scroll_y.velocity = 0.0;
-                                    self.scroll_x.current = self.scroll_x.target;
-                                    self.scroll_x.velocity = 0.0;
-                                }
-
-                                self.scroll_y.anim_speed = 7.0;
-                                self.scroll_x.anim_speed = 7.0;
-
-                                self.window.as_ref().unwrap().request_redraw();
-                            }
+                    let diag = self
+                        .lsp
+                        .as_ref()
+                        .and_then(|lsp| lsp.get_diagnostics(&path).get(diag_idx).cloned());
+                    if let Some(diag) = diag {
+                        self.jump_to_lsp_position_in_file(
+                            path,
+                            diag.end_line,
+                            diag.end_col,
+                            true,
+                            0.45,
+                        );
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
                         }
                     }
                 }

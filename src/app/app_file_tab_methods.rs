@@ -143,8 +143,23 @@ impl App {
         add_to_history: bool,
         wait_highlight: bool,
     ) {
+        self.open_file_in_tab_internal_options(path, add_to_history, wait_highlight, true);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn open_file_in_tab_internal_options(
+        &mut self,
+        path: PathBuf,
+        add_to_history: bool,
+        wait_highlight: bool,
+        start_highlighter: bool,
+    ) {
         if !self.is_ide_mode {
-            self.load_file_internal(path, add_to_history, wait_highlight);
+            if start_highlighter {
+                self.load_file_internal(path, add_to_history, wait_highlight);
+            } else {
+                self.load_file_internal_options(path, add_to_history, wait_highlight, false);
+            }
             return;
         }
 
@@ -180,7 +195,11 @@ impl App {
             self.open_new_tab();
         }
 
-        self.load_file_internal(path, false, wait_highlight);
+        if start_highlighter {
+            self.load_file_internal(path, false, wait_highlight);
+        } else {
+            self.load_file_internal_options(path, false, wait_highlight, false);
+        }
         self.reveal_active_tab_now();
     }
     pub fn ensure_cursor_visible(
@@ -236,6 +255,91 @@ impl App {
         self.file_path
             .as_ref()
             .map(|path| self.abs_path_for_workspace(path))
+    }
+
+    fn path_is_open_in_tabs(&self, path: &Path) -> bool {
+        let abs_path = self.abs_path_for_workspace(path);
+        if self.current_abs_path().as_ref() == Some(&abs_path) {
+            return true;
+        }
+        self.tabs.iter().enumerate().any(|(i, tab)| {
+            i != self.active_tab
+                && tab
+                    .file_path
+                    .as_ref()
+                    .is_some_and(|p| self.abs_path_for_workspace(p) == abs_path)
+        })
+    }
+
+    pub(crate) fn jump_to_lsp_position_in_file(
+        &mut self,
+        path: PathBuf,
+        line: u32,
+        col: u32,
+        add_to_history: bool,
+        center_ratio: f32,
+    ) -> bool {
+        let was_open = self.path_is_open_in_tabs(&path);
+        self.open_file_in_tab_internal_options(path, add_to_history, was_open, was_open);
+
+        let text = self.editor.get_full_text();
+        let offset = crate::lsp::lsp_pos_to_offset(&text, line, col).min(self.editor.len());
+        self.editor.cursor = offset;
+        self.editor.selection_anchor = None;
+
+        if !was_open {
+            self.reprioritize_highlighter_around_cursor();
+            self.wait_for_current_highlight();
+        }
+
+        self.scroll_cursor_near_center(center_ratio, !was_open);
+        was_open
+    }
+
+    fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
+        if let Some(r) = self.renderer.as_mut() {
+            let wh = self
+                .window
+                .as_ref()
+                .map(|w| w.inner_size().height as f32)
+                .unwrap_or(r.height);
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                0.0
+            } else {
+                44.0 * r.scale_factor
+            };
+            let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
+                self.ide_panel.bottom_height * r.scale_factor
+            } else {
+                0.0
+            };
+            let visible_h = crate::render_view::editor_view_height(
+                wh,
+                tab_bar_h,
+                panel_bottom_h,
+                self.is_ide_mode,
+                r.scale_factor,
+            )
+            .max(r.line_height);
+            let max_scroll = r.get_max_scroll(&self.editor, visible_h);
+            let (_, cursor_y) = r.get_cursor_xy(&self.editor);
+            let cursor_line_top_y = (cursor_y - r.baseline_offset).max(0.0);
+            let target_y = (cursor_line_top_y - visible_h * center_ratio)
+                .max(0.0)
+                .min(max_scroll)
+                .round();
+            self.scroll_y.target = target_y;
+            self.scroll_y.anim_speed = 15.0;
+            self.scroll_x.target = 0.0;
+            self.scroll_x.anim_speed = 15.0;
+
+            if snap {
+                self.scroll_y.current = target_y;
+                self.scroll_y.velocity = 0.0;
+                self.scroll_x.current = 0.0;
+                self.scroll_x.velocity = 0.0;
+            }
+        }
     }
 
     pub(crate) fn ctrl_definition_highlight_range(&self) -> Option<(usize, usize)> {
@@ -351,7 +455,7 @@ impl App {
         let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
             0.0
         } else {
-            38.0 * r.scale_factor
+            44.0 * r.scale_factor
         };
         let mouse_x = r.last_mouse_x;
         let mouse_y = r.last_mouse_y + self.scroll_y.current.round() - tab_bar_h;
@@ -362,48 +466,8 @@ impl App {
     }
 
     pub(crate) fn jump_to_definition_target(&mut self, target: DefinitionJumpTarget) {
-        self.open_file_in_tab(target.path.clone(), true);
-        let text = self.editor.get_full_text();
-        let offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
-        self.editor.cursor = offset;
-        self.editor.selection_anchor = None;
-        self.reprioritize_highlighter_around_cursor();
+        self.jump_to_lsp_position_in_file(target.path, target.line, target.col, true, 0.42);
         self.clear_ctrl_definition();
-
-        if let Some(r) = self.renderer.as_mut() {
-            let wh = self
-                .window
-                .as_ref()
-                .map(|w| w.inner_size().height as f32)
-                .unwrap_or(r.height);
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                38.0 * r.scale_factor
-            };
-            let line = (target.line as usize).min(self.editor.line_offsets.len().saturating_sub(1));
-            let line_top_y = line as f32 * r.line_height;
-            let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * r.scale_factor
-            } else {
-                0.0
-            };
-            let visible_h = crate::render_view::editor_view_height(
-                wh,
-                tab_bar_h,
-                panel_bottom_h,
-                self.is_ide_mode,
-                r.scale_factor,
-            )
-            .max(r.line_height);
-            let max_scroll = r.get_max_scroll(&self.editor, visible_h);
-            self.scroll_y.target = (line_top_y - visible_h * 0.45)
-                .max(0.0)
-                .min(max_scroll)
-                .round();
-            self.scroll_y.anim_speed = 15.0;
-            self.scroll_x.target = 0.0;
-        }
 
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
@@ -554,7 +618,6 @@ impl App {
             if let Some(&(start, end)) = self.search_results.get(idx) {
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
-                self.reprioritize_highlighter_around_cursor();
                 if let Some(r) = self.renderer.as_mut() {
                     let phys_line = self
                         .editor
@@ -569,7 +632,7 @@ impl App {
                     let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
                         0.0
                     } else {
-                        38.0 * s
+                        44.0 * s
                     };
                     let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
                         self.ide_panel.bottom_height * s

@@ -946,6 +946,197 @@ fn ctrl_definition_same_declaration_target_redirects_to_usage() {
 }
 
 #[test]
+fn definition_jump_to_open_file_does_not_restart_highlighter() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.tabs
+        .push(tab_with("main.py", Some("/tmp/main.py"), "first\nsecond\n"));
+    app.active_tab = 0;
+    app.sync_active_tab();
+    app.editor.version = 41;
+    app.highlighter.current_version = 41;
+    app.is_highlighted_once = true;
+
+    app.jump_to_definition_target(DefinitionJumpTarget {
+        path: PathBuf::from("/tmp/main.py"),
+        line: 1,
+        col: 0,
+    });
+
+    assert_eq!(app.editor.cursor, "first\n".len());
+    assert_eq!(app.highlighter.current_version, 41);
+    assert!(app.is_highlighted_once);
+}
+
+#[test]
+fn lsp_position_jump_to_closed_large_file_prioritizes_target_region() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+
+    let unique = format!(
+        "rriter-closed-lsp-position-jump-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("large.rs");
+    let prefix_line = "fn filler() {\n    let value = 1;\n}\n";
+    let prefix = prefix_line.repeat(1400);
+    let target = "fn target_jump() {\n    let value = 2;\n}\n";
+    let suffix = prefix_line.repeat(1400);
+    let text = format!("{prefix}{target}{suffix}");
+    let target_line = (prefix.matches('\n').count()) as u32;
+    let target_offset = prefix.len() + "fn ".len();
+    assert!(text.len() > crate::highlighter::TREE_SITTER_HIGHLIGHT_MAX_BYTES);
+    std::fs::write(&path, text).unwrap();
+
+    let was_open = app.jump_to_lsp_position_in_file(path.clone(), target_line, 3, true, 0.42);
+
+    assert!(!was_open);
+    assert_eq!(app.editor.cursor, target_offset);
+    assert_eq!(app.highlighter.current_version, app.editor.version);
+    assert!(app.highlighter.spans.iter().any(|span| {
+        span.start <= target_offset && span.end >= target_offset + "target_jump".len()
+    }));
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn problem_jump_to_closed_large_file_prioritizes_target_region() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+
+    let unique = format!(
+        "rriter-problem-closed-jump-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("large.rs");
+    let prefix_line = "fn filler() {\n    let value = 1;\n}\n";
+    let prefix = prefix_line.repeat(1400);
+    let target = "fn target_problem_jump() {\n    let value = 2;\n}\n";
+    let suffix = prefix_line.repeat(1400);
+    let text = format!("{prefix}{target}{suffix}");
+    let target_line = (prefix.matches('\n').count()) as u32;
+    let target_offset = prefix.len() + "fn ".len();
+    assert!(text.len() > crate::highlighter::TREE_SITTER_HIGHLIGHT_MAX_BYTES);
+    std::fs::write(&path, text).unwrap();
+
+    let mut lsp = crate::lsp::LspManager::new(Vec::new());
+    lsp.diagnostics.insert(
+        path.clone(),
+        vec![crate::lsp::Diagnostic {
+            start_line: target_line,
+            start_col: 0,
+            end_line: target_line,
+            end_col: 3,
+            severity: crate::lsp::DiagSeverity::Error,
+            code: None,
+            code_href: None,
+            message: "problem".to_string(),
+            source: None,
+            quickfixes: Vec::new(),
+            tags: Vec::new(),
+            spans: Vec::new(),
+        }],
+    );
+    app.lsp = Some(lsp);
+    app.ide_panel.flat_diags.push((path.clone(), 0));
+
+    app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
+
+    assert_eq!(app.editor.cursor, target_offset);
+    assert_eq!(app.highlighter.current_version, app.editor.version);
+    assert!(app.highlighter.spans.iter().any(|span| {
+        span.start <= target_offset && span.end >= target_offset + "target_problem_jump".len()
+    }));
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn problem_jump_to_open_file_does_not_restart_highlighter() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let path = PathBuf::from("/tmp/problem-open.py");
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.tabs.push(tab_with(
+        "problem-open.py",
+        Some("/tmp/problem-open.py"),
+        "first\nsecond\n",
+    ));
+    app.active_tab = 0;
+    app.sync_active_tab();
+    app.editor.version = 77;
+    app.highlighter.current_version = 77;
+    app.is_highlighted_once = true;
+
+    let mut lsp = crate::lsp::LspManager::new(Vec::new());
+    lsp.diagnostics.insert(
+        path.clone(),
+        vec![crate::lsp::Diagnostic {
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 0,
+            severity: crate::lsp::DiagSeverity::Warning,
+            code: None,
+            code_href: None,
+            message: "problem".to_string(),
+            source: None,
+            quickfixes: Vec::new(),
+            tags: Vec::new(),
+            spans: Vec::new(),
+        }],
+    );
+    app.lsp = Some(lsp);
+    app.ide_panel.flat_diags.push((path, 0));
+
+    app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
+
+    assert_eq!(app.editor.cursor, "first\n".len());
+    assert_eq!(app.highlighter.current_version, 77);
+    assert!(app.is_highlighted_once);
+}
+
+#[test]
+fn search_jump_moves_selection_without_restarting_highlighter() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("one\ntwo\none\n");
+    app.editor.version = 42;
+    app.highlighter.current_version = 42;
+    app.is_highlighted_once = true;
+    app.search_results = vec![(0, 3), (8, 11)];
+    app.search_current_idx = Some(1);
+
+    app.jump_to_search_result();
+
+    assert_eq!(app.editor.cursor, 11);
+    assert_eq!(app.editor.selection_anchor, Some(8));
+    assert_eq!(app.highlighter.current_version, 42);
+    assert!(app.is_highlighted_once);
+}
+
+#[test]
 fn highlight_thresholds_and_prefix_edges_cover_non_default_paths() {
     let Some(mut app) = test_app() else {
         return;

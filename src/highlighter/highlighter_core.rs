@@ -151,6 +151,8 @@ pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
 const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_LINES: usize = 800;
+const PRIORITY_HIGHLIGHT_HEAD_LINES: usize = 80;
+const PRIORITY_HIGHLIGHT_HEAD_MIN_BYTES: usize = 12 * 1024;
 const PRIORITY_HIGHLIGHT_TAIL_LINES: usize = 240;
 const PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES: usize = 32 * 1024;
 
@@ -490,7 +492,7 @@ pub(crate) fn should_prioritize_front_highlight(ext: &str, text: &str) -> bool {
     false
 }
 
-fn priority_highlight_range(text: &str, anchor: usize) -> Range<usize> {
+fn priority_highlight_range(lang_name: &'static str, text: &str, anchor: usize) -> Range<usize> {
     let bytes = text.as_bytes();
     if bytes.is_empty() {
         return 0..0;
@@ -499,6 +501,23 @@ fn priority_highlight_range(text: &str, anchor: usize) -> Range<usize> {
     let mut anchor = anchor.min(bytes.len());
     while anchor > 0 && !text.is_char_boundary(anchor) {
         anchor -= 1;
+    }
+
+    let mut start = anchor.saturating_sub(PRIORITY_HIGHLIGHT_HEAD_MIN_BYTES);
+    let mut seen = 0usize;
+    let mut i = anchor;
+    while i > 0 && seen < PRIORITY_HIGHLIGHT_HEAD_LINES {
+        i -= 1;
+        if bytes[i] == b'\n' {
+            seen += 1;
+            start = start.min(i + 1);
+        }
+    }
+    while start > 0 && bytes[start - 1] != b'\n' {
+        start -= 1;
+    }
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
     }
 
     let mut end = (anchor + PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES).min(bytes.len());
@@ -516,7 +535,179 @@ fn priority_highlight_range(text: &str, anchor: usize) -> Range<usize> {
         end += 1;
     }
 
-    0..end
+    if lang_name == "py" {
+        python_priority_highlight_range(text, anchor, start, end)
+    } else {
+        start..end
+    }
+}
+
+fn line_start_at_or_before(text: &str, byte: usize) -> usize {
+    let byte = byte.min(text.len());
+    text.as_bytes()[..byte]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|pos| pos + 1)
+        .unwrap_or(0)
+}
+
+fn next_line_start(text: &str, line_start: usize) -> Option<usize> {
+    text.as_bytes()
+        .get(line_start..)?
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|pos| line_start + pos + 1)
+}
+
+fn line_end(text: &str, line_start: usize) -> usize {
+    text.as_bytes()
+        .get(line_start..)
+        .and_then(|tail| tail.iter().position(|&b| b == b'\n'))
+        .map(|pos| line_start + pos)
+        .unwrap_or(text.len())
+}
+
+fn line_indent(line: &str) -> usize {
+    line.bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .count()
+}
+
+fn python_priority_highlight_range(
+    text: &str,
+    anchor: usize,
+    fallback_start: usize,
+    fallback_end: usize,
+) -> Range<usize> {
+    let window_start_line = line_start_at_or_before(text, fallback_start);
+    let mut scan = window_start_line;
+    let mut start = fallback_start;
+
+    loop {
+        let end = line_end(text, scan);
+        if let Some(line) = text.get(scan..end) {
+            let trimmed = line.trim_start();
+            if !trimmed.is_empty() && !trimmed.starts_with('#') && line_indent(line) == 0 {
+                start = scan;
+                break;
+            }
+        }
+        if scan == 0 {
+            break;
+        }
+        scan = line_start_at_or_before(text, scan.saturating_sub(1));
+    }
+
+    while start > 0 {
+        let prev = line_start_at_or_before(text, start.saturating_sub(1));
+        let end = line_end(text, prev);
+        let Some(line) = text.get(prev..end) else {
+            break;
+        };
+        let trimmed = line.trim_start();
+        if line_indent(line) == 0 && (trimmed.starts_with('@') || trimmed.is_empty()) {
+            start = prev;
+        } else {
+            break;
+        }
+    }
+
+    let mut end = fallback_end;
+    let window_end_line = line_start_at_or_before(text, fallback_end);
+    let mut scan = next_line_start(text, window_end_line).unwrap_or(text.len());
+    while scan < text.len() {
+        let line_end = line_end(text, scan);
+        if let Some(line) = text.get(scan..line_end) {
+            let trimmed = line.trim_start();
+            if !trimmed.is_empty() && !trimmed.starts_with('#') && line_indent(line) == 0 {
+                end = scan;
+                break;
+            }
+        }
+        scan = next_line_start(text, scan).unwrap_or(text.len());
+    }
+
+    start..end.max(anchor).min(text.len())
+}
+
+fn push_language_import_foldable_ranges(
+    lang_name: &'static str,
+    text: &str,
+    foldable_ranges: &mut Vec<(usize, usize, bool, bool)>,
+) {
+    match lang_name {
+        "py" => {
+            for block in crate::languages::python::import_blocks(text) {
+                foldable_ranges.push((block.start, block.end, true, false));
+            }
+        }
+        "rs" => {
+            for block in crate::languages::rust::import_blocks(text) {
+                foldable_ranges.push((block.start, block.end, true, false));
+            }
+        }
+        "dart" => {
+            for block in crate::languages::dart::import_blocks(text) {
+                foldable_ranges.push((block.start, block.end, true, false));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn priority_highlight_spans_from_slice(
+    parser: &mut tree_sitter::Parser,
+    lang: &tree_sitter::Language,
+    lang_name: &'static str,
+    queries: &[&'static str],
+    text: &str,
+    range: Range<usize>,
+    query_cache: &mut HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    byte_colors_buf: &mut Vec<[f32; 4]>,
+) -> Vec<ColorSpan> {
+    if range.start >= range.end || range.end > text.len() {
+        return Vec::new();
+    }
+
+    let Some(priority_text) = text.get(range.clone()) else {
+        return Vec::new();
+    };
+    let Some(tree) = parser.parse(priority_text, None) else {
+        return Vec::new();
+    };
+
+    let mut spans = Vec::new();
+    collect_query_highlight_spans(
+        lang,
+        lang_name,
+        queries,
+        &tree,
+        priority_text,
+        query_cache,
+        None,
+        &mut spans,
+    );
+    let mut shifted = Vec::with_capacity(spans.len());
+    for span in &mut spans {
+        let start = span.start + range.start;
+        let end = span.end + range.start;
+        if start < end && start < range.end && end > range.start {
+            shifted.push(ColorSpan {
+                start: start.max(range.start),
+                end: end.min(range.end),
+                color: span.color,
+            });
+        }
+    }
+
+    let spans = merge_highlight_spans(Vec::new(), shifted, lang_name, text, true, None);
+    flatten_spans_for_range(
+        spans,
+        range,
+        text,
+        byte_colors_buf,
+        !lang_name.is_empty() && lang_name != "bash",
+    )
 }
 
 fn expand_highlight_invalidation_range(

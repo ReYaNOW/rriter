@@ -279,6 +279,16 @@ impl App {
         add_to_history: bool,
         wait_highlight: bool,
     ) {
+        self.load_file_internal_options(path, add_to_history, wait_highlight, true);
+    }
+
+    pub fn load_file_internal_options(
+        &mut self,
+        path: PathBuf,
+        add_to_history: bool,
+        wait_highlight: bool,
+        start_highlighter: bool,
+    ) {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 self.show_welcome = false;
@@ -299,12 +309,19 @@ impl App {
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 self.is_highlighted_once = false;
-                while let Ok(_) = self.highlighter.rx.try_recv() {}
-                self.reset_highlighter_with_text(content.clone(), !wait_highlight);
+                if start_highlighter {
+                    while let Ok(_) = self.highlighter.rx.try_recv() {}
+                    self.reset_highlighter_with_text(content.clone(), !wait_highlight);
+                } else {
+                    self.highlighter.spans.clear();
+                    self.highlighter.completions.clear();
+                    self.highlighter.foldable_ranges.clear();
+                    self.highlighter.syntax_errors.clear();
+                }
                 apply_initial_import_folds(&mut self.editor, &self.file_extension, &content);
 
                 // Ждём до 150мс: малые файлы полностью, большие py/rs до первого priority chunk.
-                if wait_highlight {
+                if start_highlighter && wait_highlight {
                     self.wait_for_current_highlight();
                 }
 
