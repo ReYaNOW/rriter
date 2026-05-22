@@ -427,6 +427,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_git_diff_tabs() {
         needs_redraw = true;
     }
+    if app.poll_api_client() {
+        needs_redraw = true;
+    }
     if app.poll_inline_git_diff_popup() {
         needs_redraw = true;
     }
@@ -476,6 +479,19 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
     if app.ide_panel.lsp_scroll_x.update(dt) {
         needs_redraw = true;
+    }
+    if app.ide_panel.api.panel_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.api.route_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    for tab in &mut app.tabs {
+        if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
+            && state.tab_scroll.update(dt)
+        {
+            needs_redraw = true;
+        }
     }
     for scroll in app.ide_panel.lsp_logs_scroll_y.values_mut() {
         if scroll.update(dt) {

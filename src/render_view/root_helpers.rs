@@ -1,4 +1,6 @@
 pub mod core_text;
+pub mod api_client_panel;
+pub mod api_client_tab;
 mod editor_text_layer;
 mod hover_overlays;
 mod ide_panels;

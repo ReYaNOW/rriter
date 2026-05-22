@@ -374,7 +374,7 @@ impl App {
             if !tab.editor.is_dirty() {
                 let diff_path = match &tab.kind {
                     EditorTabKind::GitDiff(meta, _) => Some(meta.repo_root.join(&meta.rel_path)),
-                    EditorTabKind::Normal => None,
+                    EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) => None,
                 };
                 if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref()) {
                     if let Ok(disk_text) = std::fs::read_to_string(path) {
@@ -455,6 +455,7 @@ impl App {
                         Some((idx, meta.repo_root.join(&meta.rel_path)))
                     }
                     EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path)),
+                    EditorTabKind::ApiClient(_, _) => None,
                 }
             })
             .collect::<Vec<_>>();

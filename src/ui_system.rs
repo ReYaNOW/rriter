@@ -42,6 +42,25 @@ pub enum UiId {
     LspLogsFilterRecv,
     LspLogsFilterOther,
 
+    // API client
+    ApiImportAdd,
+    ApiImportFile,
+    ApiImportUrl,
+    ApiImportUrlInput,
+    ApiImportUrlConfirm,
+    ApiSpecSelect(usize),
+    ApiSpecOpen(usize),
+    ApiSpecRefresh(usize),
+    ApiSpecRemove(usize),
+    ApiRouteTag(usize),
+    ApiRouteRow(usize),
+    ApiServerSelect(usize),
+    ApiTryRequest,
+    ApiPathParamInput(usize, usize),
+    ApiQueryParamInput(usize, usize),
+    ApiBodyInput(usize),
+    ApiTabBody,
+
     // Git panel
     GitWorkspaceToggle(usize),
     GitFile(usize, usize),

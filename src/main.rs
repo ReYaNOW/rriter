@@ -188,6 +188,7 @@ fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
         let id_s = match slot.id {
             crate::app::PanelId::Explorer => "Explorer",
             crate::app::PanelId::Git => "Git",
+            crate::app::PanelId::ApiClient => "ApiClient",
             crate::app::PanelId::Terminal => "Terminal",
             crate::app::PanelId::Problems => "Problems",
             crate::app::PanelId::LspServers => "LspServers",
@@ -227,6 +228,7 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
             let id = match parts[0] {
                 "Explorer" => crate::app::PanelId::Explorer,
                 "Git" => crate::app::PanelId::Git,
+                "ApiClient" => crate::app::PanelId::ApiClient,
                 "Terminal" => crate::app::PanelId::Terminal,
                 "Problems" => crate::app::PanelId::Problems,
                 "LspServers" => crate::app::PanelId::LspServers,
@@ -842,6 +844,9 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         pending_action: PendingAction::Quit,
         open_file_rx: None,
         save_file_rx: None,
+        api_import_file_rx: None,
+        api_load_rx: Vec::new(),
+        api_request_rx: Vec::new(),
 
         show_welcome,
         recent_files,

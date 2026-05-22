@@ -104,10 +104,14 @@ impl App {
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
-            self.editor.version = self.next_tab_highlight_version();
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
-            self.wait_for_current_highlight();
+            if self.active_tab_is_api_client() {
+                while let Ok(_) = self.highlighter.rx.try_recv() {}
+            } else {
+                self.editor.version = self.next_tab_highlight_version();
+                while let Ok(_) = self.highlighter.rx.try_recv() {}
+                self.reset_highlighter_with_text(self.editor.get_full_text(), false);
+                self.wait_for_current_highlight();
+            }
             self.clear_ctrl_definition();
             crate::app::mouse::HOVER_STATE.with(|state| {
                 *state.borrow_mut() = crate::app::mouse::HoverState::default();
@@ -193,6 +197,7 @@ impl App {
             || self.file_path.is_some()
             || self.editor.is_dirty()
             || self.editor.len() > 0
+            || self.active_tab_is_api_client()
         {
             self.open_new_tab();
         }
@@ -359,8 +364,10 @@ impl App {
     pub(crate) fn editor_has_input_focus(&self) -> bool {
         !self.show_welcome
             && !self.active_tab_is_git_diff()
+            && !self.active_tab_is_api_client()
             && !self.search_focused
             && !self.settings_ignore_focused
+            && self.ide_panel.api.focused.is_none()
             && !self.ide_panel.terminal_focused
             && !self.ide_panel.term_search_focused
             && !self.ide_panel.git.message_focused
@@ -372,6 +379,7 @@ impl App {
     pub(crate) fn autosave_current_file_if_dirty(&mut self) -> bool {
         if !self.is_ide_mode
             || self.active_tab_is_git_diff()
+            || self.active_tab_is_api_client()
             || self.file_path.is_none()
             || !self.editor.is_dirty()
         {

@@ -40,6 +40,7 @@ impl App {
         }
 
         self.ide_panel = crate::load_panel_state();
+        self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
         self.ide_panel.enforce_single_open_per_group();
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
@@ -282,7 +283,11 @@ impl App {
         self.sync_active_tab();
         self.prefetch_active_tab_git_graph();
 
-        if self.active_tab_is_git_diff() {
+        if self.active_tab_is_api_client() {
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.autocomplete_active = false;
+            self.inline_git_popup = None;
+        } else if self.active_tab_is_git_diff() {
             while let Ok(_) = self.highlighter.rx.try_recv() {}
             if !self.is_highlighted_once {
                 self.editor.version = self.next_tab_highlight_version();
@@ -316,7 +321,7 @@ impl App {
             self.wait_for_current_highlight();
         }
 
-        if self.is_ide_mode {
+        if self.is_ide_mode && !self.active_tab_is_api_client() {
             if let Some(lsp) = &mut self.lsp {
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();

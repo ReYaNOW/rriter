@@ -376,6 +376,24 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
         }
 
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::ApiClient) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::ApiClient, s, false);
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                self.ide_panel.api.panel_scroll.anim_speed = 7.0;
+                self.ide_panel.api.panel_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .panel_scroll
+                    .clamp_target(0.0, 50_000.0);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
@@ -608,6 +626,18 @@ impl App {
             let max_scroll = self.renderer.as_ref().unwrap().max_tab_scroll_x;
             self.tab_scroll.clamp_target(0.0, max_scroll);
             self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.active_tab_is_api_client() {
+            if let Some(crate::app::EditorTabKind::ApiClient(_, state)) =
+                self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
+            {
+                state.tab_scroll.anim_speed = 7.0;
+                state.tab_scroll.scroll_by(dy);
+                state.tab_scroll.clamp_target(0.0, 50_000.0);
+                self.window.as_ref().unwrap().request_redraw();
+            }
             return;
         }
 

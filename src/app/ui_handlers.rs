@@ -54,6 +54,25 @@ impl App {
     pub fn handle_ui_click(&mut self, id: UiId) {
         let editor_was_focused = self.editor_has_input_focus();
         match id {
+            UiId::ApiImportAdd
+            | UiId::ApiImportFile
+            | UiId::ApiImportUrl
+            | UiId::ApiImportUrlInput
+            | UiId::ApiImportUrlConfirm
+            | UiId::ApiSpecSelect(_)
+            | UiId::ApiSpecOpen(_)
+            | UiId::ApiSpecRefresh(_)
+            | UiId::ApiSpecRemove(_)
+            | UiId::ApiRouteTag(_)
+            | UiId::ApiRouteRow(_)
+            | UiId::ApiServerSelect(_)
+            | UiId::ApiTryRequest
+            | UiId::ApiPathParamInput(_, _)
+            | UiId::ApiQueryParamInput(_, _)
+            | UiId::ApiBodyInput(_)
+            | UiId::ApiTabBody => {
+                self.handle_api_client_click(id);
+            }
             UiId::HoverPopupScroll
             | UiId::StatusBar
             | UiId::SearchPanelBody

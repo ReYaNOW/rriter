@@ -372,6 +372,109 @@ impl Renderer {
                 blink_alpha,
             );
         }
+        if is_ide_mode
+            && !show_welcome
+            && let Some(crate::app::EditorTabKind::ApiClient(tab_meta, tab_state)) =
+                tabs.get(active_tab).map(|tab| &tab.kind)
+        {
+            let gutter_x = 48.0 * s + panel_left_w;
+            let tab_x = gutter_x.round() + 1.0;
+            let tab_w = self.width - tab_x;
+            let tab_tooltip = self.draw_tab_bar(
+                tabs,
+                active_tab,
+                editor,
+                editor_title,
+                editor_path,
+                tab_x,
+                0.0,
+                tab_w,
+                tab_bar_h,
+                s,
+                mx,
+                my,
+                ui_registry,
+                tab_scroll_x,
+                ide_panel.tab_drag.as_ref(),
+                ide_workspaces,
+            );
+            self.draw_api_client_tab(
+                tab_x,
+                tab_bar_h,
+                tab_w,
+                editor_height,
+                s,
+                ide_panel,
+                tab_meta,
+                tab_state,
+                ui_registry,
+                mx,
+                my,
+                blink_alpha,
+            );
+            if is_ide_mode {
+                self.draw_status_bar(
+                    editor,
+                    None,
+                    lsp,
+                    ui_registry,
+                    s,
+                    mx,
+                    my,
+                    panel_bottom_h,
+                    ide_panel.git.pending_label,
+                    ide_panel.git.pending_elapsed_secs(frame_now),
+                );
+            }
+            if panel_bottom_h > 0.0 {
+                self.draw_ide_bottom_panel(
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    has_lsp_diagnostics,
+                    s,
+                    mx,
+                    my,
+                    panel_bottom_h,
+                    is_ui_disabled,
+                );
+            }
+            if let Some((path, tx, ty)) = tab_tooltip {
+                self.draw_tab_tooltip(&path, tx, ty, s);
+            }
+            self.flush();
+            if panel_left_w > 0.0 && !is_ui_disabled {
+                let resize_x = 48.0 * s + panel_left_w;
+                let resize_h =
+                    if panel_bottom_h > 0.0 && ide_panel.bottom_panel_blocks_editor_hover() {
+                        ide_bottom_panel_y(self.height, panel_bottom_h, s)
+                    } else {
+                        real_height
+                    };
+                ui_registry.register_blocker(
+                    crate::ui_system::UiId::ResizeLeft,
+                    resize_x - 8.0 * s,
+                    0.0,
+                    16.0 * s,
+                    resize_h,
+                    mx,
+                    my,
+                );
+            }
+            if panel_bottom_h > 0.0 && !is_ui_disabled {
+                let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
+                ui_registry.register_blocker(
+                    crate::ui_system::UiId::ResizeBottom,
+                    48.0 * s,
+                    panel_y - 8.0 * s,
+                    self.width - 48.0 * s,
+                    16.0 * s,
+                    mx,
+                    my,
+                );
+            }
+            return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
+        }
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
         if is_ide_mode && tabs.is_empty() {
             self.draw_empty_ide(panel_left_w);
@@ -658,7 +761,7 @@ impl Renderer {
         let end_visual_line = self.visual_lines.len();
         let active_git_diff_state = tabs.get(active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::GitDiff(_, state) => Some(state),
-            crate::app::EditorTabKind::Normal => None,
+            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::ApiClient(_, _) => None,
         });
 
         let editor_clip_x = self.left_padding.round().max(0.0);

@@ -1,4 +1,5 @@
 mod app_state;
+pub mod api_client;
 mod autocomplete;
 pub mod events;
 pub mod file_icons;

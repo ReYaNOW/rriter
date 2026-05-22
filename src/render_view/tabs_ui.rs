@@ -172,6 +172,11 @@ impl Renderer {
                     hovered_tab_x = current_x.max(x);
                     hovered_tab_y = y + h;
                     current_hovered_idx = Some(i);
+                } else if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind {
+                    hovered_tab_tooltip = Some(format!("{} · API клиент", meta.title));
+                    hovered_tab_x = current_x.max(x);
+                    hovered_tab_y = y + h;
+                    current_hovered_idx = Some(i);
                 }
             }
 
@@ -219,6 +224,14 @@ impl Renderer {
             if tab.kind.is_git_diff() {
                 self.draw_atlas_icon(
                     crate::widgets::IconType::GitCompare,
+                    current_x + tab_pad,
+                    icon_y,
+                    icon_size_tab,
+                    self.theme.line_num,
+                );
+            } else if tab.kind.is_api_client() {
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::LspServers,
                     current_x + tab_pad,
                     icon_y,
                     icon_size_tab,

@@ -37,11 +37,19 @@ pub enum EditorTabKind {
         crate::app::git_diff::GitDiffTabMeta,
         crate::app::git_diff::GitDiffState,
     ),
+    ApiClient(
+        crate::app::api_client::ApiClientTabMeta,
+        crate::app::api_client::ApiClientTabState,
+    ),
 }
 
 impl EditorTabKind {
     pub fn is_git_diff(&self) -> bool {
         matches!(self, Self::GitDiff(_, _))
+    }
+
+    pub fn is_api_client(&self) -> bool {
+        matches!(self, Self::ApiClient(_, _))
     }
 }
 
@@ -79,6 +87,7 @@ pub enum PendingAction {
 pub enum PanelId {
     Explorer,
     Git,
+    ApiClient,
     Terminal,
     Problems,
     LspServers,
@@ -89,6 +98,7 @@ impl PanelId {
         match self {
             PanelId::Explorer => "Проводник",
             PanelId::Git => "Git",
+            PanelId::ApiClient => "API клиент",
             PanelId::Terminal => "Терминал",
             PanelId::Problems => "Ляпы",
             PanelId::LspServers => "Языковые серверы",
@@ -98,6 +108,7 @@ impl PanelId {
         match self {
             PanelId::Explorer => crate::widgets::IconType::Explorer,
             PanelId::Git => crate::widgets::IconType::Git,
+            PanelId::ApiClient => crate::widgets::IconType::LspServers,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
             PanelId::Problems => crate::widgets::IconType::Problems,
             PanelId::LspServers => crate::widgets::IconType::LspServers,
@@ -303,6 +314,7 @@ pub struct IdePanelState {
     pub file_tree_undo_stack: Vec<crate::app::file_tree::FileTreeUndoEntry>,
     pub file_tree_dialog_input_drag: Option<crate::app::file_tree::FileTreeDialogInputKind>,
     pub git: crate::app::git_panel::GitPanelState,
+    pub api: crate::app::api_client::ApiClientState,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
     pub lsp_logs_expanded: FxHashSet<String>,
@@ -354,6 +366,11 @@ impl Default for IdePanelState {
                     open: false,
                 },
                 PanelSlot {
+                    id: PanelId::ApiClient,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
                     id: PanelId::LspServers,
                     group: PanelGroup::Top,
                     open: false,
@@ -390,6 +407,7 @@ impl Default for IdePanelState {
             file_tree_undo_stack: Vec::new(),
             file_tree_dialog_input_drag: None,
             git: crate::app::git_panel::GitPanelState::default(),
+            api: crate::app::api_client::ApiClientState::default(),
             lsp_servers: Vec::new(),
             lsp_logs_expanded: FxHashSet::default(),
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -771,6 +789,9 @@ pub struct App {
     pub pending_action: PendingAction,
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    pub api_load_rx: Vec<std::sync::mpsc::Receiver<crate::app::api_client::ApiLoadResult>>,
+    pub api_request_rx: Vec<std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>>,
 
     pub show_welcome: bool,
     pub recent_files: Vec<PathBuf>,

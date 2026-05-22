@@ -438,6 +438,34 @@ impl Renderer {
                 }
             }
 
+            // --- API клиент ---
+            if ide_panel.is_open(crate::app::PanelId::ApiClient) {
+                let is_top = ide_panel.slots.iter().any(|s| {
+                    s.id == crate::app::PanelId::ApiClient
+                        && s.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    let panel_bottom_h = if ide_panel.any_bottom_open() {
+                        ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                    self.draw_api_client_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        (content_bottom - title_h).max(0.0),
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        hit_mx,
+                        hit_my,
+                        blink_alpha,
+                    );
+                }
+            }
+
             // --- Git ---
             if ide_panel.is_open(crate::app::PanelId::Git) {
                 let is_top = ide_panel.slots.iter().any(|s| {
