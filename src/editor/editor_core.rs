@@ -222,6 +222,15 @@ impl Editor {
         }
     }
 
+    pub fn set_text_clean(&mut self, text: &str) {
+        *self = Self::new(text.len().saturating_add(512));
+        let _ = self.insert_str(text);
+        self.history.clear();
+        self.redo_stack.clear();
+        self.history_size = 0;
+        self.is_dirty = false;
+    }
+
     pub fn shift_folds_insert(&mut self, offset: usize, len: usize) {
         let mut new_folded = std::collections::HashSet::new();
         for &b in &self.folded_start_bytes {

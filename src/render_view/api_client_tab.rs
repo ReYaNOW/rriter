@@ -1,9 +1,10 @@
 use crate::app::api_client::{
-    json_body_is_valid, write_api_path_display, ApiFocus, ApiPrimitiveType,
+    ApiFocus, ApiPrimitiveType, json_body_is_valid, write_api_path_display,
 };
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconType};
 use glow::HasContext;
+use tree_sitter::StreamingIterator;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
@@ -35,7 +36,9 @@ impl Renderer {
             );
             return;
         };
-        let Some(route_idx) = tab_state.route_idx.or_else(|| (!model.routes.is_empty()).then_some(0))
+        let Some(route_idx) = tab_state
+            .route_idx
+            .or_else(|| (!model.routes.is_empty()).then_some(0))
         else {
             self.draw_string_scaled_stable(
                 "В спецификации нет routes",
@@ -283,19 +286,41 @@ impl Renderer {
                 } else {
                     tab_state.body_json.clone()
                 };
-                self.draw_json_text_area(&body_text, x + pad + 10.0 * s, cy + 22.0 * s, content_w - 20.0 * s, body_h - 16.0 * s, s);
+                if matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::Body { spec_id, route_idx: f_route })
+                        if spec_id == tab_meta.spec_id && f_route == route_idx
+                ) {
+                    self.draw_api_editor_selection_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 8.0 * s,
+                        content_w - 20.0 * s,
+                        body_h - 16.0 * s,
+                        s,
+                    );
+                }
+                self.draw_json_text_area(
+                    &body_text,
+                    x + pad + 10.0 * s,
+                    cy + 22.0 * s,
+                    content_w - 20.0 * s,
+                    body_h - 16.0 * s,
+                    s,
+                );
                 if matches!(
                     ide_panel.api.focused,
                     Some(ApiFocus::Body { spec_id, route_idx: f_route })
                         if spec_id == tab_meta.spec_id && f_route == route_idx
                 ) && blink_alpha > 0.15
                 {
-                    self.push_rect(
-                        x + pad + 12.0 * s,
-                        cy + body_h - 20.0 * s,
-                        1.5 * s,
-                        14.0 * s,
-                        self.theme.fg,
+                    self.draw_api_editor_cursor_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 8.0 * s,
+                        content_w - 20.0 * s,
+                        body_h - 16.0 * s,
+                        s,
                     );
                 }
                 cy += body_h + 16.0 * s;
@@ -305,16 +330,16 @@ impl Renderer {
         let try_btn = Button {
             x: x + pad,
             y: cy,
-            w: 112.0 * s,
-            h: 34.0 * s,
+            w: 126.0 * s,
+            h: 38.0 * s,
             text: if tab_state.pending {
                 "Pending".to_string()
             } else {
                 "Try".to_string()
             },
             icon: Some(IconType::Reload),
-            text_scale: 0.82,
-            icon_size: 18.0 * s,
+            text_scale: 0.96,
+            icon_size: 22.0 * s,
         };
         try_btn.render(self, mx, my, s, false);
         if !tab_state.pending {
@@ -341,7 +366,9 @@ impl Renderer {
                     [1.0, 0.42, 0.42, 1.0],
                     0.78,
                 );
-            } else {
+                cy += 28.0 * s;
+            }
+            if response.error.is_none() || !response.body.is_empty() {
                 let status_text = response
                     .status
                     .map(|s| s.to_string())
@@ -350,7 +377,7 @@ impl Renderer {
                     &status_text,
                     x + pad,
                     cy + 18.0 * s,
-                    [0.48, 0.86, 0.52, 1.0],
+                    api_status_color(response.status),
                     0.82,
                 );
                 self.draw_string_scaled_stable(
@@ -378,6 +405,29 @@ impl Renderer {
                     6.0 * s,
                     [0.12, 0.13, 0.17, 1.0],
                 );
+                ui_registry.register_text_input(
+                    crate::ui_system::UiId::ApiResponseBody(route_idx),
+                    x + pad,
+                    cy,
+                    content_w,
+                    resp_h,
+                    mx,
+                    my,
+                );
+                if matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::Response { spec_id, route_idx: f_route })
+                        if spec_id == tab_meta.spec_id && f_route == route_idx
+                ) {
+                    self.draw_api_editor_selection_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 8.0 * s,
+                        content_w - 20.0 * s,
+                        resp_h - 16.0 * s,
+                        s,
+                    );
+                }
                 self.draw_json_text_area(
                     &response.body,
                     x + pad + 10.0 * s,
@@ -386,6 +436,21 @@ impl Renderer {
                     resp_h - 16.0 * s,
                     s,
                 );
+                if matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::Response { spec_id, route_idx: f_route })
+                        if spec_id == tab_meta.spec_id && f_route == route_idx
+                ) && blink_alpha > 0.15
+                {
+                    self.draw_api_editor_cursor_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 8.0 * s,
+                        content_w - 20.0 * s,
+                        resp_h - 16.0 * s,
+                        s,
+                    );
+                }
                 if response.truncated {
                     self.draw_string_scaled_stable(
                         "truncated",
@@ -442,7 +507,13 @@ impl Renderer {
         let name_w = (w * 0.32).clamp(80.0 * s, 180.0 * s);
         self.draw_string_scaled_stable(name, x, y + 24.0 * s, self.theme.fg, 0.80);
         if required {
-            self.draw_string_scaled_stable("*", x + name_w - 18.0 * s, y + 22.0 * s, [1.0, 0.42, 0.42, 1.0], 0.78);
+            self.draw_string_scaled_stable(
+                "*",
+                x + name_w - 18.0 * s,
+                y + 22.0 * s,
+                [1.0, 0.42, 0.42, 1.0],
+                0.78,
+            );
         }
         let type_text = match ty {
             ApiPrimitiveType::String => "string",
@@ -453,7 +524,13 @@ impl Renderer {
             ApiPrimitiveType::Object => "object",
             ApiPrimitiveType::Unknown => "any",
         };
-        self.draw_string_scaled_stable(type_text, x + name_w - 64.0 * s, y + 24.0 * s, [0.58, 0.61, 0.70, 1.0], 0.74);
+        self.draw_string_scaled_stable(
+            type_text,
+            x + name_w - 64.0 * s,
+            y + 24.0 * s,
+            [0.58, 0.61, 0.70, 1.0],
+            0.74,
+        );
         let input_x = x + name_w;
         let input_w = (w - name_w).max(80.0 * s);
         self.push_rounded_rect_border(
@@ -476,11 +553,29 @@ impl Renderer {
         } else {
             value.to_string()
         };
-        self.draw_string_scaled_stable(&shown, input_x + 8.0 * s, y + 25.0 * s, self.theme.fg, 0.76);
+        if focused {
+            self.draw_api_editor_selection_one_line(
+                editor,
+                input_x + 8.0 * s,
+                y + 9.0 * s,
+                input_w - 16.0 * s,
+                22.0 * s,
+                0.76,
+            );
+        }
+        self.draw_string_scaled_stable(
+            &shown,
+            input_x + 8.0 * s,
+            y + 25.0 * s,
+            self.theme.fg,
+            0.76,
+        );
         if focused && blink_alpha > 0.15 {
-            let text_w = self.measure_ui_width(&shown, 0.76).min(input_w - 16.0 * s);
+            let cursor_w = self
+                .api_editor_cursor_x_one_line(editor, 0.76)
+                .min(input_w - 16.0 * s);
             self.push_rect(
-                input_x + 8.0 * s + text_w,
+                input_x + 8.0 * s + cursor_w,
                 y + 10.0 * s,
                 1.5 * s,
                 20.0 * s,
@@ -490,31 +585,177 @@ impl Renderer {
         y + row_h
     }
 
-    fn draw_json_text_area(&mut self, text: &str, x: f32, y: f32, w: f32, h: f32, s: f32) {
-        let line_h = 18.0 * s;
-        let max_lines = (h / line_h).floor().max(1.0) as usize;
-        for (line_idx, line) in text.lines().take(max_lines).enumerate() {
-            self.draw_json_colored_line(line, x, y + line_idx as f32 * line_h, w, s);
+    pub(crate) fn draw_api_editor_selection_one_line(
+        &mut self,
+        editor: &crate::editor::Editor,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        text_scale: f32,
+    ) {
+        let Some(anchor) = editor.selection_anchor else {
+            return;
+        };
+        if anchor == editor.cursor {
+            return;
+        }
+        let text = editor.get_full_text();
+        let start = anchor.min(editor.cursor).min(text.len());
+        let end = anchor.max(editor.cursor).min(text.len());
+        let sel_x = self.measure_ui_width(&text[..start], text_scale).min(w);
+        let sel_w = (self.measure_ui_width(&text[start..end], text_scale)).min(w - sel_x);
+        if sel_w > 0.0 {
+            self.push_rect(x + sel_x, y, sel_w, h, [0.55, 0.36, 0.90, 0.36]);
         }
     }
 
-    fn draw_json_colored_line(&mut self, line: &str, x: f32, y: f32, w: f32, _s: f32) {
+    pub(crate) fn api_editor_cursor_x_one_line(
+        &mut self,
+        editor: &crate::editor::Editor,
+        text_scale: f32,
+    ) -> f32 {
+        let text = editor.get_full_text();
+        let cursor = editor.cursor.min(text.len());
+        self.measure_ui_width(&text[..cursor], text_scale)
+    }
+
+    fn draw_api_editor_selection_multiline(
+        &mut self,
+        editor: &crate::editor::Editor,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+    ) {
+        let Some(anchor) = editor.selection_anchor else {
+            return;
+        };
+        if anchor == editor.cursor {
+            return;
+        }
+        let text = editor.get_full_text();
+        let start = anchor.min(editor.cursor).min(text.len());
+        let end = anchor.max(editor.cursor).min(text.len());
+        let line_h = 18.0 * s;
+        let max_lines = (h / line_h).floor().max(1.0) as usize;
+        let mut line_start = 0usize;
+        for (line_idx, line) in text.lines().take(max_lines).enumerate() {
+            let line_end = line_start + line.len();
+            let sel_start = start.max(line_start).min(line_end);
+            let sel_end = end.max(line_start).min(line_end);
+            if sel_start < sel_end {
+                let prefix = self
+                    .measure_ui_width(&text[line_start..sel_start], 0.76)
+                    .min(w);
+                let sel_w = self
+                    .measure_ui_width(&text[sel_start..sel_end], 0.76)
+                    .min(w - prefix);
+                if sel_w > 0.0 {
+                    self.push_rect(
+                        x + prefix,
+                        y + 5.0 * s + line_idx as f32 * line_h,
+                        sel_w,
+                        line_h,
+                        [0.55, 0.36, 0.90, 0.36],
+                    );
+                }
+            }
+            if end <= line_end {
+                break;
+            }
+            line_start = line_end + 1;
+        }
+    }
+
+    fn draw_api_editor_cursor_multiline(
+        &mut self,
+        editor: &crate::editor::Editor,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+    ) {
+        let text = editor.get_full_text();
+        let cursor = editor.cursor.min(text.len());
+        let line_h = 18.0 * s;
+        let max_lines = (h / line_h).floor().max(1.0) as usize;
+        let mut line_start = 0usize;
+        for (line_idx, line) in text.lines().take(max_lines).enumerate() {
+            let line_end = line_start + line.len();
+            if cursor <= line_end {
+                let cursor_x = self
+                    .measure_ui_width(&text[line_start..cursor], 0.76)
+                    .min(w);
+                self.push_rect(
+                    x + cursor_x,
+                    y + 1.0 * s + line_idx as f32 * line_h,
+                    1.5 * s,
+                    18.0 * s,
+                    self.theme.fg,
+                );
+                return;
+            }
+            line_start = line_end + 1;
+        }
+        if max_lines > 0 {
+            self.push_rect(x, y + 1.0 * s, 1.5 * s, 18.0 * s, self.theme.fg);
+        }
+    }
+
+    fn draw_json_text_area(&mut self, text: &str, x: f32, y: f32, w: f32, h: f32, s: f32) {
+        let line_h = 18.0 * s;
+        let max_lines = (h / line_h).floor().max(1.0) as usize;
+        let mut visible = String::new();
+        for (idx, line) in text.lines().take(max_lines).enumerate() {
+            if idx > 0 {
+                visible.push('\n');
+            }
+            visible.push_str(line);
+        }
+        let spans = json_tree_sitter_spans(&visible);
+        let mut span_idx = 0usize;
+        let mut byte_idx = 0usize;
+        for (line_idx, line) in visible.lines().enumerate() {
+            self.draw_json_colored_line(
+                line,
+                byte_idx,
+                &spans,
+                &mut span_idx,
+                x,
+                y + line_idx as f32 * line_h,
+                w,
+            );
+            byte_idx += line.len() + 1;
+        }
+    }
+
+    fn draw_json_colored_line(
+        &mut self,
+        line: &str,
+        line_start: usize,
+        spans: &[crate::highlighter::ColorSpan],
+        span_idx: &mut usize,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) {
         let mut draw_x = x;
-        let mut in_string = false;
-        let mut escaped = false;
-        for ch in line.chars() {
+        for (local_byte, ch) in line.char_indices() {
             if draw_x > x + w {
                 break;
             }
-            let color = if in_string {
-                [0.62, 0.86, 0.64, 1.0]
-            } else if matches!(ch, '{' | '}' | '[' | ']' | ':' | ',') {
-                [0.78, 0.58, 1.0, 1.0]
-            } else if ch.is_ascii_digit() || ch == '-' {
-                [1.0, 0.76, 0.32, 1.0]
-            } else {
-                self.theme.fg
-            };
+            let byte = line_start + local_byte;
+            while *span_idx < spans.len() && spans[*span_idx].end <= byte {
+                *span_idx += 1;
+            }
+            let color = spans
+                .get(*span_idx)
+                .filter(|span| span.start <= byte && byte < span.end)
+                .map(|span| span.color)
+                .unwrap_or(self.theme.fg);
             let mut buf = [0u8; 4];
             let s_ch = ch.encode_utf8(&mut buf);
             self.draw_string_scaled_stable(s_ch, draw_x, y, color, 0.76);
@@ -522,13 +763,71 @@ impl Renderer {
                 .get_ui_glyph(ch)
                 .map(|g| g.advance * 0.76)
                 .unwrap_or(8.0);
-            if ch == '"' && !escaped {
-                in_string = !in_string;
+        }
+    }
+}
+
+fn json_tree_sitter_spans(text: &str) -> Vec<crate::highlighter::ColorSpan> {
+    let lang = tree_sitter_json::LANGUAGE.into();
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&lang).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return Vec::new();
+    };
+    let query_src = r#"
+        (pair key: (_) @property)
+        (string) @string
+        (number) @number
+        (null) @keyword.control
+        (true) @boolean
+        (false) @boolean
+        (escape_sequence) @keyword.control
+        (comment) @comment
+    "#;
+    let Ok(query) = tree_sitter::Query::new(&lang, query_src) else {
+        return Vec::new();
+    };
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    let mut spans = Vec::new();
+    while let Some(m) = matches.next() {
+        for cap in m.captures {
+            let name = query.capture_names()[cap.index as usize];
+            if name == "string"
+                && cap
+                    .node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "pair")
+            {
+                continue;
             }
-            escaped = ch == '\\' && !escaped;
-            if ch != '\\' {
-                escaped = false;
+            let color = match name {
+                "property" => crate::highlighter::DRACULA_FG,
+                "string" => crate::highlighter::DRACULA_YELLOW,
+                "number" => crate::highlighter::DRACULA_PURPLE,
+                "keyword.control" | "boolean" => crate::highlighter::DRACULA_PINK,
+                "comment" => crate::highlighter::DRACULA_COMMENT,
+                _ => crate::highlighter::DRACULA_FG,
+            };
+            if color != crate::highlighter::DRACULA_FG {
+                spans.push(crate::highlighter::ColorSpan {
+                    start: cap.node.start_byte(),
+                    end: cap.node.end_byte(),
+                    color,
+                });
             }
         }
+    }
+    crate::highlighter::flatten_color_spans_prefer_specific(spans, text.len())
+}
+
+fn api_status_color(status: Option<u16>) -> [f32; 4] {
+    match status {
+        Some(200..=399) => [0.48, 0.86, 0.52, 1.0],
+        Some(400..=499) => [0.35, 0.75, 1.0, 1.0],
+        Some(500..=599) => [1.0, 0.42, 0.42, 1.0],
+        _ => [0.68, 0.70, 0.78, 1.0],
     }
 }

@@ -60,6 +60,7 @@ pub enum UiId {
     ApiPathParamInput(usize, usize),
     ApiQueryParamInput(usize, usize),
     ApiBodyInput(usize),
+    ApiResponseBody(usize),
     ApiTabBody,
 
     // Git panel
@@ -423,6 +424,40 @@ impl UiRegistry {
             .rev()
             .find(|el| el.contains(mx, my))
             .map(|el| el.id())
+    }
+
+    pub fn rect_for(&self, id: UiId) -> Option<(f32, f32, f32, f32)> {
+        self.elements.iter().rev().find_map(|el| match el {
+            UiElement::Button {
+                id: el_id,
+                x,
+                y,
+                w,
+                h,
+            }
+            | UiElement::TextInput {
+                id: el_id,
+                x,
+                y,
+                w,
+                h,
+            }
+            | UiElement::Rect {
+                id: el_id,
+                x,
+                y,
+                w,
+                h,
+            } if *el_id == id => Some((*x, *y, *w, *h)),
+            UiElement::IconButton {
+                id: el_id,
+                x,
+                y,
+                size,
+                ..
+            } if *el_id == id => Some((*x, *y, *size, *size)),
+            _ => None,
+        })
     }
 
     /// Возвращает текущий наведённый элемент

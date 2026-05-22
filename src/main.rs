@@ -187,7 +187,10 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
         crate::app::EditorTabKind::ApiClient(meta, state) => Some(format!(
             "API\t{}\t{}",
             meta.spec_id.0,
-            state.route_idx.map(|idx| idx.to_string()).unwrap_or_default()
+            state
+                .route_idx
+                .map(|idx| idx.to_string())
+                .unwrap_or_default()
         )),
         crate::app::EditorTabKind::GitDiff(_, _) => None,
     }

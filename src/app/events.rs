@@ -304,6 +304,7 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
             .load(std::sync::atomic::Ordering::Relaxed),
     });
     if app.is_ide_mode {
+        app.ide_panel.api.persist();
         crate::save_panel_state(&app.ide_panel);
     }
     event_loop.exit();

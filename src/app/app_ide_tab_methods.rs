@@ -88,20 +88,29 @@ impl App {
             for saved_tab in saved_tabs {
                 match saved_tab {
                     crate::OpenTabSnapshot::File(path) => {
-                    if path.exists() {
-                        self.open_file_in_tab_bg(path, false);
-                        loaded_any = true;
-                    }
+                        if path.exists() {
+                            self.open_file_in_tab_bg(path, false);
+                            loaded_any = true;
+                        }
                     }
                     crate::OpenTabSnapshot::Empty => {
                         self.open_new_tab();
                         loaded_any = true;
                     }
                     crate::OpenTabSnapshot::Api { spec_id, route_idx } => {
-                        if self.ide_panel.api.specs.iter().any(|entry| entry.id == spec_id) {
+                        if self
+                            .ide_panel
+                            .api
+                            .specs
+                            .iter()
+                            .any(|entry| entry.id == spec_id)
+                        {
                             self.open_api_spec_tab(spec_id);
                             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                                 state.route_idx = route_idx;
+                            }
+                            if let Some(route_idx) = route_idx {
+                                self.sync_api_tab_inputs(spec_id, route_idx);
                             }
                             loaded_any = true;
                         }
@@ -290,6 +299,8 @@ impl App {
             return;
         }
 
+        self.commit_api_focus();
+        self.ide_panel.api.focused = None;
         self.sync_active_tab();
         self.active_tab = new_idx;
         self.sync_active_tab();
@@ -358,5 +369,4 @@ impl App {
         }
         self.save_tabs_state();
     }
-
 }

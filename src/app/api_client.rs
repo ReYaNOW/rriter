@@ -3,6 +3,8 @@ use crate::scroll::ScrollState;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::io::Read;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,6 +16,18 @@ pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const API_SCHEMA_MAX_DEPTH: usize = 12;
 const API_SCHEMA_MAX_COUNT: usize = 768;
 const API_SCHEMA_MAX_PROPERTIES: usize = 160;
+const API_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+static API_HTTP_CLIENTS: std::sync::LazyLock<
+    std::sync::Mutex<FxHashMap<ApiHttpClientKey, reqwest::blocking::Client>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(FxHashMap::default()));
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ApiHttpClientKey {
+    host: Option<String>,
+    ip: Option<IpAddr>,
+    port: Option<u16>,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ApiSpecId(pub u64);
@@ -28,6 +42,13 @@ pub enum ApiSpecSource {
 pub enum ApiUrlStatus {
     Ok(u16),
     Failed(ApiLoadErrorKind),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiResolvedHost {
+    pub host: String,
+    pub ip: IpAddr,
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -281,6 +302,7 @@ pub struct ApiLoadPayload {
     pub entry: ApiSpecEntry,
     pub model: ApiSpecModel,
     pub raw_json: Option<String>,
+    pub resolved_host: Option<ApiResolvedHost>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -359,6 +381,10 @@ pub enum ApiFocus {
         spec_id: ApiSpecId,
         route_idx: usize,
     },
+    Response {
+        spec_id: ApiSpecId,
+        route_idx: usize,
+    },
 }
 
 pub struct ApiClientState {
@@ -369,6 +395,7 @@ pub struct ApiClientState {
     pub import_menu_open: bool,
     pub import_url_open: bool,
     pub import_error: Option<String>,
+    pub import_error_at: Option<u64>,
     pub loading: FxHashSet<ApiSpecId>,
     pub collapsed_tags: FxHashSet<(ApiSpecId, String)>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
@@ -376,6 +403,7 @@ pub struct ApiClientState {
     pub route_scroll: ScrollState,
     pub input_editor: Editor,
     pub focused: Option<ApiFocus>,
+    pub last_resolved_host: Option<ApiResolvedHost>,
 }
 
 impl Default for ApiClientState {
@@ -388,6 +416,7 @@ impl Default for ApiClientState {
             import_menu_open: false,
             import_url_open: false,
             import_error: None,
+            import_error_at: None,
             loading: FxHashSet::default(),
             collapsed_tags: FxHashSet::default(),
             collapsed_route_roots: FxHashSet::default(),
@@ -395,6 +424,7 @@ impl Default for ApiClientState {
             route_scroll: ScrollState::new(7.0),
             input_editor: Editor::new(512),
             focused: None,
+            last_resolved_host: None,
         }
     }
 }
@@ -407,6 +437,10 @@ impl ApiClientState {
                 state.specs = saved.specs;
                 state.selected_spec = saved.selected_spec;
                 state.next_id = saved.next_id.max(1);
+                state.last_resolved_host = saved.last_resolved_host;
+                if let Some(resolved) = state.last_resolved_host.clone() {
+                    spawn_api_preconnect(resolved);
+                }
                 for spec in &mut state.specs {
                     spec.selected = Some(spec.id) == state.selected_spec;
                 }
@@ -433,6 +467,7 @@ impl ApiClientState {
         let saved = ApiSpecsPersist {
             specs: self.specs.clone(),
             selected_spec: self.selected_spec,
+            last_resolved_host: self.last_resolved_host.clone(),
             next_id: self.next_id.max(
                 self.specs
                     .iter()
@@ -483,6 +518,9 @@ impl ApiClientState {
             self.specs.push(payload.entry.clone());
         }
         self.models.insert(id, payload.model);
+        if payload.resolved_host.is_some() {
+            self.last_resolved_host = payload.resolved_host;
+        }
         self.select_spec(id);
         if let Some(raw) = payload.raw_json {
             save_url_cache(id, &raw);
@@ -499,6 +537,7 @@ impl ApiClientState {
             }
         } else {
             self.import_error = Some(err.message.clone());
+            self.import_error_at = Some(now_epoch_secs());
         }
         self.persist();
     }
@@ -522,13 +561,47 @@ impl ApiClientState {
         self.persist();
         Some(id)
     }
+
+    fn clear_stale_keyboard_focus(&mut self, active: Option<(ApiSpecId, Option<usize>)>) -> bool {
+        let Some(focus) = self.focused.as_ref() else {
+            return false;
+        };
+        if api_focus_targets_active_tab(focus, active) {
+            return true;
+        }
+        self.focused = None;
+        false
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ApiSpecsPersist {
     specs: Vec<ApiSpecEntry>,
     selected_spec: Option<ApiSpecId>,
+    #[serde(default)]
+    last_resolved_host: Option<ApiResolvedHost>,
     next_id: u64,
+}
+
+fn api_focus_targets_active_tab(
+    focus: &ApiFocus,
+    active: Option<(ApiSpecId, Option<usize>)>,
+) -> bool {
+    match focus {
+        ApiFocus::ImportUrl => true,
+        ApiFocus::PathParam {
+            spec_id, route_idx, ..
+        }
+        | ApiFocus::QueryParam {
+            spec_id, route_idx, ..
+        }
+        | ApiFocus::Body { spec_id, route_idx }
+        | ApiFocus::Response { spec_id, route_idx } => {
+            active.is_some_and(|(active_spec, active_route)| {
+                active_spec == *spec_id && active_route == Some(*route_idx)
+            })
+        }
+    }
 }
 
 pub fn validate_api_url(input: &str) -> Result<Url, ApiLoadError> {
@@ -539,13 +612,18 @@ pub fn validate_api_url(input: &str) -> Result<Url, ApiLoadError> {
             "URL пустой",
         ));
     }
-    let parsed = Url::parse(raw).map_err(|_| {
-        ApiLoadError::new(ApiLoadErrorKind::InvalidUrl, "URL не распознан")
-    })?;
+    let parsed = Url::parse(raw)
+        .map_err(|_| ApiLoadError::new(ApiLoadErrorKind::InvalidUrl, "URL не распознан"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(ApiLoadError::new(
             ApiLoadErrorKind::InvalidUrl,
             "URL должен быть http или https",
+        ));
+    }
+    if parsed.fragment().is_some() {
+        return Err(ApiLoadError::new(
+            ApiLoadErrorKind::InvalidUrl,
+            "URL должен указывать на openapi.json без #fragment",
         ));
     }
     let Some(host) = parsed.host() else {
@@ -581,8 +659,59 @@ fn valid_domain(domain: &str) -> bool {
             && label.len() <= 63
             && !label.starts_with('-')
             && !label.ends_with('-')
-            && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
     })
+}
+
+fn api_client_key(resolved: Option<&ApiResolvedHost>) -> ApiHttpClientKey {
+    ApiHttpClientKey {
+        host: resolved.map(|r| r.host.clone()),
+        ip: resolved.map(|r| r.ip),
+        port: resolved.map(|r| r.port),
+    }
+}
+
+fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Client {
+    let key = api_client_key(resolved);
+    if let Ok(mut clients) = API_HTTP_CLIENTS.lock() {
+        if let Some(client) = clients.get(&key) {
+            return client.clone();
+        }
+        let mut builder = reqwest::blocking::Client::builder()
+            .timeout(API_FETCH_TIMEOUT)
+            .pool_idle_timeout(API_POOL_IDLE_TIMEOUT)
+            .use_rustls_tls();
+        if let Some(resolved) = resolved {
+            builder = builder.resolve(&resolved.host, SocketAddr::new(resolved.ip, resolved.port));
+        }
+        if let Ok(client) = builder.build() {
+            clients.insert(key, client.clone());
+            return client;
+        }
+    }
+    reqwest::blocking::Client::new()
+}
+
+fn resolve_api_url_host(url: &str) -> Option<ApiResolvedHost> {
+    let parsed = Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_string();
+    let port = parsed.port_or_known_default()?;
+    let ip = match parsed.host()? {
+        Host::Ipv4(ip) => IpAddr::V4(ip),
+        Host::Ipv6(ip) => IpAddr::V6(ip),
+        Host::Domain(_) => (host.as_str(), port).to_socket_addrs().ok()?.next()?.ip(),
+    };
+    Some(ApiResolvedHost { host, ip, port })
+}
+
+fn spawn_api_preconnect(resolved: ApiResolvedHost) {
+    std::thread::spawn(move || {
+        let client = api_http_client(Some(&resolved));
+        let url = format!("https://{}/", resolved.host);
+        let _ = client.head(url).send();
+    });
 }
 
 pub fn spawn_load_local(id: ApiSpecId, path: PathBuf) -> Receiver<ApiLoadResult> {
@@ -608,10 +737,7 @@ pub fn spawn_load_cached_url(id: ApiSpecId, url: String) -> Receiver<ApiLoadResu
     std::thread::spawn(move || {
         let result = match read_url_cache(id) {
             Some(raw) => parse_openapi_payload(id, ApiSpecSource::Url(url), raw, None, None),
-            None => Err(ApiLoadError::new(
-                ApiLoadErrorKind::Io,
-                "URL cache пустой",
-            )),
+            None => Err(ApiLoadError::new(ApiLoadErrorKind::Io, "URL cache пустой")),
         };
         let _ = tx.send(ApiLoadResult { id, result });
     });
@@ -620,10 +746,7 @@ pub fn spawn_load_cached_url(id: ApiSpecId, url: String) -> Receiver<ApiLoadResu
 
 fn load_local_spec(id: ApiSpecId, path: &Path) -> Result<ApiLoadPayload, ApiLoadError> {
     let bytes = std::fs::read(path).map_err(|err| {
-        ApiLoadError::new(
-            ApiLoadErrorKind::Io,
-            format!("файл не прочитан: {}", err),
-        )
+        ApiLoadError::new(ApiLoadErrorKind::Io, format!("файл не прочитан: {}", err))
     })?;
     if bytes.len() > API_MAX_SPEC_BYTES {
         return Err(ApiLoadError::new(
@@ -631,32 +754,41 @@ fn load_local_spec(id: ApiSpecId, path: &Path) -> Result<ApiLoadPayload, ApiLoad
             "openapi.json слишком большой",
         ));
     }
-    let raw = String::from_utf8(bytes).map_err(|_| {
-        ApiLoadError::new(ApiLoadErrorKind::InvalidJson, "JSON не UTF-8")
-    })?;
-    parse_openapi_payload(id, ApiSpecSource::Local(path.to_path_buf()), raw, None, None)
+    let raw = String::from_utf8(bytes)
+        .map_err(|_| ApiLoadError::new(ApiLoadErrorKind::InvalidJson, "JSON не UTF-8"))?;
+    parse_openapi_payload(
+        id,
+        ApiSpecSource::Local(path.to_path_buf()),
+        raw,
+        None,
+        None,
+    )
 }
 
 fn load_url_spec(id: ApiSpecId, url: &str) -> Result<ApiLoadPayload, ApiLoadError> {
     validate_api_url(url)?;
+    let resolved = resolve_api_url_host(url);
     let fetch_started = std::time::Instant::now();
-    let raw = fetch_json(url)?;
+    let raw = fetch_json(url, resolved.as_ref())?;
     let fetch_secs = fetch_started.elapsed().as_secs_f64();
-    parse_openapi_payload(
+    let mut payload = parse_openapi_payload(
         id,
         ApiSpecSource::Url(url.to_string()),
         raw,
         Some(ApiUrlStatus::Ok(200)),
         Some(fetch_secs),
-    )
+    )?;
+    payload.resolved_host = resolved;
+    Ok(payload)
 }
 
-fn fetch_json(url: &str) -> Result<String, ApiLoadError> {
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(API_FETCH_TIMEOUT))
-        .build()
-        .new_agent();
-    let mut response = agent.get(url).call().map_err(classify_ureq_error)?;
+fn fetch_json(url: &str, resolved: Option<&ApiResolvedHost>) -> Result<String, ApiLoadError> {
+    let client = api_http_client(resolved);
+    let mut response = client
+        .get(url)
+        .header("Accept", "application/json, */*")
+        .send()
+        .map_err(classify_reqwest_error)?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(ApiLoadError::new(
@@ -664,7 +796,7 @@ fn fetch_json(url: &str) -> Result<String, ApiLoadError> {
             format!("HTTP {}", status),
         ));
     }
-    if let Some(content_len) = response.body().content_length()
+    if let Some(content_len) = response.content_length()
         && content_len > API_MAX_SPEC_BYTES as u64
     {
         return Err(ApiLoadError::new(
@@ -672,45 +804,63 @@ fn fetch_json(url: &str) -> Result<String, ApiLoadError> {
             "ответ больше лимита",
         ));
     }
-    response
-        .body_mut()
-        .with_config()
-        .limit(API_MAX_SPEC_BYTES as u64)
-        .read_to_string()
-        .map_err(classify_ureq_error)
+    read_limited_text(&mut response, API_MAX_SPEC_BYTES)
 }
 
-fn classify_ureq_error(err: ureq::Error) -> ApiLoadError {
-    match err {
-        ureq::Error::StatusCode(code) => {
-            ApiLoadError::new(ApiLoadErrorKind::HttpStatus(code), format!("HTTP {}", code))
-        }
-        ureq::Error::Timeout(_) => {
-            ApiLoadError::new(ApiLoadErrorKind::Timeout, "таймаут запроса")
-        }
-        ureq::Error::HostNotFound => {
-            ApiLoadError::new(ApiLoadErrorKind::Dns, "DNS не нашел host")
-        }
-        ureq::Error::ConnectionFailed => ApiLoadError::new(
-            ApiLoadErrorKind::NoInternet,
-            "соединение не установлено",
-        ),
-        ureq::Error::Tls(_) | ureq::Error::Rustls(_) => {
-            ApiLoadError::new(ApiLoadErrorKind::Tls, "TLS ошибка")
-        }
-        ureq::Error::Io(err) => {
-            let kind = match err.kind() {
-                std::io::ErrorKind::ConnectionRefused => ApiLoadErrorKind::ConnectRefused,
-                std::io::ErrorKind::TimedOut => ApiLoadErrorKind::Timeout,
-                std::io::ErrorKind::NotConnected
-                | std::io::ErrorKind::NetworkDown
-                | std::io::ErrorKind::NetworkUnreachable => ApiLoadErrorKind::NoInternet,
-                _ => ApiLoadErrorKind::Io,
-            };
-            ApiLoadError::new(kind, err.to_string())
-        }
-        other => ApiLoadError::new(ApiLoadErrorKind::Other, other.to_string()),
+fn read_limited_text(
+    response: &mut reqwest::blocking::Response,
+    max_bytes: usize,
+) -> Result<String, ApiLoadError> {
+    let mut raw = Vec::new();
+    let mut limited = response.take(max_bytes as u64 + 1);
+    limited.read_to_end(&mut raw).map_err(classify_io_error)?;
+    if raw.len() > max_bytes {
+        return Err(ApiLoadError::new(
+            ApiLoadErrorKind::TooLarge,
+            "ответ больше лимита",
+        ));
     }
+    String::from_utf8(raw)
+        .map_err(|_| ApiLoadError::new(ApiLoadErrorKind::InvalidJson, "ответ не UTF-8"))
+}
+
+fn classify_reqwest_error(err: reqwest::Error) -> ApiLoadError {
+    if err.is_timeout() {
+        return ApiLoadError::new(ApiLoadErrorKind::Timeout, "таймаут запроса");
+    }
+    if let Some(status) = err.status() {
+        return ApiLoadError::new(
+            ApiLoadErrorKind::HttpStatus(status.as_u16()),
+            format!("HTTP {}", status.as_u16()),
+        );
+    }
+    if err.is_decode() {
+        return ApiLoadError::new(ApiLoadErrorKind::InvalidJson, err.to_string());
+    }
+    if err.is_connect() {
+        let text = err.to_string();
+        let kind = if text.contains("dns") || text.contains("Name or service not known") {
+            ApiLoadErrorKind::Dns
+        } else if text.contains("tls") || text.contains("certificate") {
+            ApiLoadErrorKind::Tls
+        } else {
+            ApiLoadErrorKind::NoInternet
+        };
+        return ApiLoadError::new(kind, text);
+    }
+    ApiLoadError::new(ApiLoadErrorKind::Other, err.to_string())
+}
+
+fn classify_io_error(err: std::io::Error) -> ApiLoadError {
+    let kind = match err.kind() {
+        std::io::ErrorKind::ConnectionRefused => ApiLoadErrorKind::ConnectRefused,
+        std::io::ErrorKind::TimedOut => ApiLoadErrorKind::Timeout,
+        std::io::ErrorKind::NotConnected
+        | std::io::ErrorKind::NetworkDown
+        | std::io::ErrorKind::NetworkUnreachable => ApiLoadErrorKind::NoInternet,
+        _ => ApiLoadErrorKind::Io,
+    };
+    ApiLoadError::new(kind, err.to_string())
 }
 
 fn parse_openapi_payload(
@@ -721,8 +871,13 @@ fn parse_openapi_payload(
     fetch_secs: Option<f64>,
 ) -> Result<ApiLoadPayload, ApiLoadError> {
     let parse_started = std::time::Instant::now();
-    let root: Value = serde_json::from_str(&raw)
-        .map_err(|err| ApiLoadError::new(ApiLoadErrorKind::InvalidJson, err.to_string()))?;
+    let root: Value = serde_json::from_str(&raw).map_err(|err| {
+        let message = match source {
+            ApiSpecSource::Url(_) => "URL не ведет на валидный openapi.json".to_string(),
+            ApiSpecSource::Local(_) => err.to_string(),
+        };
+        ApiLoadError::new(ApiLoadErrorKind::InvalidJson, message)
+    })?;
     let model = parse_openapi_model(id, &root)?;
     let parse_secs = parse_started.elapsed().as_secs_f64();
     let entry = ApiSpecEntry {
@@ -742,6 +897,7 @@ fn parse_openapi_payload(
         entry,
         model,
         raw_json: Some(raw),
+        resolved_host: None,
     })
 }
 
@@ -902,10 +1058,7 @@ fn parse_servers(value: Option<&Value>) -> Vec<ApiServer> {
     servers
 }
 
-fn parse_parameters(
-    value: Option<&Value>,
-    root: &Value,
-) -> Vec<ApiParam> {
+fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
     let mut out = Vec::new();
     if let Some(items) = value.and_then(Value::as_array) {
         for item in items {
@@ -925,10 +1078,11 @@ fn parse_parameters(
             let default_value = schema
                 .and_then(|schema| schema.get("default"))
                 .and_then(value_to_string);
-            let example = item
-                .get("example")
-                .and_then(value_to_string)
-                .or_else(|| schema.and_then(|schema| schema.get("example")).and_then(value_to_string));
+            let example = item.get("example").and_then(value_to_string).or_else(|| {
+                schema
+                    .and_then(|schema| schema.get("example"))
+                    .and_then(value_to_string)
+            });
             out.push(ApiParam {
                 name: name.to_string(),
                 location,
@@ -1142,7 +1296,9 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     if let Some(model) = api.selected_model() {
         content_h += 34.0 * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
-            for (_, _, len, collapsed) in grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id) {
+            for (_, _, len, collapsed) in
+                grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id)
+            {
                 content_h += 28.0 * scale;
                 if !collapsed {
                     content_h += len as f32 * 30.0 * scale;
@@ -1269,6 +1425,7 @@ pub struct ApiJobRequest {
     pub method: ApiMethod,
     pub url: String,
     pub body_json: Option<String>,
+    pub resolved_host: Option<ApiResolvedHost>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1281,6 +1438,7 @@ pub struct ApiJobResponse {
     pub body: String,
     pub truncated: bool,
     pub error: Option<ApiLoadError>,
+    pub resolved_host: Option<ApiResolvedHost>,
 }
 
 pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
@@ -1303,56 +1461,65 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         body: String::new(),
         truncated: false,
         error: None,
+        resolved_host: job.resolved_host.clone(),
     };
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(API_FETCH_TIMEOUT))
-        .build()
-        .new_agent();
+    let client = api_http_client(job.resolved_host.as_ref());
     let result = match job.method {
-        ApiMethod::Get => agent.get(&job.url).call(),
-        ApiMethod::Delete => agent.delete(&job.url).call(),
-        ApiMethod::Head => agent.head(&job.url).call(),
-        ApiMethod::Options => agent.options(&job.url).call(),
-        ApiMethod::Trace => agent.trace(&job.url).call(),
-        ApiMethod::Post => agent
+        ApiMethod::Get => client.get(&job.url).send(),
+        ApiMethod::Delete => client.delete(&job.url).send(),
+        ApiMethod::Head => client.head(&job.url).send(),
+        ApiMethod::Options => client.request(reqwest::Method::OPTIONS, &job.url).send(),
+        ApiMethod::Trace => client.request(reqwest::Method::TRACE, &job.url).send(),
+        ApiMethod::Post => client
             .post(&job.url)
             .header("Content-Type", "application/json")
-            .send(job.body_json.as_deref().unwrap_or("")),
-        ApiMethod::Put => agent
+            .body(job.body_json.clone().unwrap_or_default())
+            .send(),
+        ApiMethod::Put => client
             .put(&job.url)
             .header("Content-Type", "application/json")
-            .send(job.body_json.as_deref().unwrap_or("")),
-        ApiMethod::Patch => agent
+            .body(job.body_json.clone().unwrap_or_default())
+            .send(),
+        ApiMethod::Patch => client
             .patch(&job.url)
             .header("Content-Type", "application/json")
-            .send(job.body_json.as_deref().unwrap_or("")),
+            .body(job.body_json.clone().unwrap_or_default())
+            .send(),
     };
     response.elapsed_ms = started.elapsed().as_millis();
     match result {
         Ok(mut res) => {
             response.status = Some(res.status().as_u16());
-            for (name, value) in res.headers() {
+            for (name, value) in res.headers().iter() {
                 if let Ok(v) = value.to_str() {
-                    response.headers.push((name.as_str().to_string(), v.to_string()));
+                    response
+                        .headers
+                        .push((name.as_str().to_string(), v.to_string()));
                 }
             }
-            match res
-                .body_mut()
-                .with_config()
-                .limit(API_MAX_RESPONSE_BYTES as u64)
-                .read_to_string()
-            {
-                Ok(body) => response.body = body,
-                Err(ureq::Error::BodyExceedsLimit(_)) => {
+            match read_limited_text(&mut res, API_MAX_RESPONSE_BYTES) {
+                Ok(body) => response.body = format_api_response_body(body),
+                Err(err) if err.kind == ApiLoadErrorKind::TooLarge => {
                     response.truncated = true;
                     response.body = "Ответ больше лимита".to_string();
                 }
-                Err(err) => response.error = Some(classify_ureq_error(err)),
+                Err(err) => response.error = Some(err),
             }
         }
-        Err(err) => response.error = Some(classify_ureq_error(err)),
+        Err(err) => response.error = Some(classify_reqwest_error(err)),
     }
     response
+}
+
+fn format_api_response_body(body: String) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return body;
+    }
+    serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or(body)
 }
 
 pub fn now_epoch_secs() -> u64 {
@@ -1380,7 +1547,7 @@ pub fn format_last_loaded_at(last_loaded: Option<u64>, now: u64) -> String {
 
 pub fn format_api_secs(value: Option<f64>) -> String {
     match value {
-        Some(v) => format!("{:.3} с", v.max(0.0)),
+        Some(v) => format!("{:.3}с", v.max(0.0)),
         None => "-".to_string(),
     }
 }
@@ -1422,7 +1589,111 @@ pub fn api_timing_visible_at(last_loaded: Option<u64>, now: u64) -> bool {
         .unwrap_or(false)
 }
 
+fn line_end_without_newline(editor: &Editor, line_idx: usize) -> usize {
+    editor
+        .line_offsets
+        .get(line_idx + 1)
+        .map(|&offset| offset.saturating_sub(1))
+        .unwrap_or(editor.len())
+}
+
+fn move_api_input_vertical(editor: &mut Editor, down: bool, shift: bool) {
+    if shift {
+        if editor.selection_anchor.is_none() {
+            editor.selection_anchor = Some(editor.cursor);
+        }
+    } else {
+        editor.selection_anchor = None;
+    }
+    let line_idx = editor
+        .line_offsets
+        .partition_point(|&offset| offset <= editor.cursor)
+        .saturating_sub(1);
+    let Some(&line_start) = editor.line_offsets.get(line_idx) else {
+        editor.cursor = editor.len();
+        return;
+    };
+    let col = editor.cursor.saturating_sub(line_start);
+    let target_line = if down {
+        (line_idx + 1).min(editor.line_offsets.len().saturating_sub(1))
+    } else {
+        line_idx.saturating_sub(1)
+    };
+    let Some(&target_start) = editor.line_offsets.get(target_line) else {
+        return;
+    };
+    let target_end = line_end_without_newline(editor, target_line);
+    editor.cursor = target_start.saturating_add(col).min(target_end);
+}
+
+fn api_line_byte_at_x(
+    renderer: &mut crate::renderer::Renderer,
+    line: &str,
+    target_x: f32,
+    scale: f32,
+) -> usize {
+    let mut x = 0.0;
+    for (byte_idx, ch) in line.char_indices() {
+        let adv = renderer
+            .get_ui_glyph(ch)
+            .map(|glyph| glyph.advance * scale)
+            .unwrap_or(8.0);
+        if target_x <= x + adv * 0.5 {
+            return byte_idx;
+        }
+        x += adv;
+    }
+    line.len()
+}
+
+fn api_multiline_byte_at_pointer(
+    renderer: &mut crate::renderer::Renderer,
+    text: &str,
+    rect: (f32, f32, f32, f32),
+    mx: f32,
+    my: f32,
+    scale: f32,
+) -> usize {
+    let (x, y, w, h) = rect;
+    let text_x = x + 10.0 * scale;
+    let text_y = y + 22.0 * scale;
+    let line_h = 18.0 * scale;
+    let max_lines = ((h - 16.0 * scale).max(line_h) / line_h).floor() as usize;
+    let target_line = ((my - text_y).max(0.0) / line_h).floor() as usize;
+    let target_x = (mx - text_x).clamp(0.0, (w - 20.0 * scale).max(0.0));
+    let mut line_start = 0usize;
+    for (line_idx, line) in text.split('\n').take(max_lines.max(1)).enumerate() {
+        if line_idx == target_line {
+            return line_start + api_line_byte_at_x(renderer, line, target_x, 0.76);
+        }
+        line_start = line_start.saturating_add(line.len()).saturating_add(1);
+    }
+    text.len()
+}
+
 impl crate::app::App {
+    fn place_api_cursor_from_last_click(&mut self, id: crate::ui_system::UiId, multiline: bool) {
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return;
+        };
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let mx = renderer.last_mouse_x;
+        let my = renderer.last_mouse_y;
+        let scale = renderer.scale_factor;
+        let cursor = if multiline {
+            api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale)
+        } else {
+            let target_x =
+                (mx - (rect.0 + 8.0 * scale)).clamp(0.0, (rect.2 - 16.0 * scale).max(0.0));
+            api_line_byte_at_x(renderer, &text, target_x, 0.76)
+        };
+        self.ide_panel.api.input_editor.cursor = cursor;
+        self.ide_panel.api.input_editor.selection_anchor = Some(cursor);
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_api_file_picker(&mut self) {
         let (tx, rx) = mpsc::channel();
@@ -1451,6 +1722,7 @@ impl crate::app::App {
             Ok(url) => url.to_string(),
             Err(err) => {
                 self.ide_panel.api.import_error = Some(err.message);
+                self.ide_panel.api.import_error_at = Some(now_epoch_secs());
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -1459,6 +1731,7 @@ impl crate::app::App {
         };
         let id = self.ide_panel.api.alloc_spec_id();
         self.ide_panel.api.import_error = None;
+        self.ide_panel.api.import_error_at = None;
         self.ide_panel.api.import_url_open = false;
         self.ide_panel.api.focused = None;
         self.ide_panel.api.loading.insert(id);
@@ -1532,6 +1805,14 @@ impl crate::app::App {
             return;
         }
 
+        let mut api_state = ApiClientTabState::default();
+        if let Some(model) = self.ide_panel.api.models.get(&id)
+            && let Some(route) = model.routes.first()
+        {
+            api_state.route_idx = Some(0);
+            fill_api_tab_inputs(&mut api_state, route, model);
+        }
+
         let tab = crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: None,
@@ -1551,7 +1832,7 @@ impl crate::app::App {
             icon_key: "api",
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta { spec_id: id, title },
-                ApiClientTabState::default(),
+                api_state,
             ),
         };
 
@@ -1588,6 +1869,7 @@ impl crate::app::App {
             state.response = None;
             self.sync_api_tab_inputs(spec_id, route_idx);
         }
+        self.save_tabs_state();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -1620,7 +1902,7 @@ impl crate::app::App {
         }
     }
 
-    fn sync_api_tab_inputs(&mut self, spec_id: ApiSpecId, route_idx: usize) {
+    pub(crate) fn sync_api_tab_inputs(&mut self, spec_id: ApiSpecId, route_idx: usize) {
         let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
             return;
         };
@@ -1663,9 +1945,8 @@ impl crate::app::App {
         self.commit_api_focus();
         let text = self.api_focus_text(&focus);
         let old_version = self.ide_panel.api.input_editor.version;
-        self.ide_panel.api.input_editor = Editor::new(text.len().saturating_add(512));
+        self.ide_panel.api.input_editor.set_text_clean(&text);
         self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
-        let _ = self.ide_panel.api.input_editor.insert_str(&text);
         self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
         self.ide_panel.api.input_editor.selection_anchor =
             Some(self.ide_panel.api.input_editor.cursor);
@@ -1727,6 +2008,21 @@ impl crate::app::App {
                     _ => None,
                 })
                 .unwrap_or_default(),
+            ApiFocus::Response { spec_id, route_idx } => self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::ApiClient(meta, state)
+                        if meta.spec_id == *spec_id && state.route_idx == Some(*route_idx) =>
+                    {
+                        state
+                            .response
+                            .as_ref()
+                            .map(|response| response.body.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -1768,6 +2064,7 @@ impl crate::app::App {
                     state.body_json = text;
                 }
             }
+            ApiFocus::Response { .. } => {}
         }
     }
 
@@ -1788,6 +2085,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiImportUrlInput => {
                 self.ide_panel.api.import_url_open = true;
                 self.focus_api_input(ApiFocus::ImportUrl);
+                self.place_api_cursor_from_last_click(id, false);
             }
             crate::ui_system::UiId::ApiImportUrlConfirm => {
                 self.commit_api_focus();
@@ -1847,8 +2145,7 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiRoutesRoot => {
-                if let Some(spec_id) = self.ide_panel.api.selected_spec
-                {
+                if let Some(spec_id) = self.ide_panel.api.selected_spec {
                     if self.ide_panel.api.collapsed_route_roots.contains(&spec_id) {
                         self.ide_panel.api.collapsed_route_roots.remove(&spec_id);
                     } else {
@@ -1892,6 +2189,7 @@ impl crate::app::App {
                     route_idx,
                     name,
                 });
+                self.place_api_cursor_from_last_click(id, false);
             }
             crate::ui_system::UiId::ApiQueryParamInput(route_idx, param_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -1912,16 +2210,23 @@ impl crate::app::App {
                     route_idx,
                     name,
                 });
+                self.place_api_cursor_from_last_click(id, false);
             }
             crate::ui_system::UiId::ApiBodyInput(route_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                self.focus_api_input(ApiFocus::Body {
-                    spec_id,
-                    route_idx,
-                });
+                self.focus_api_input(ApiFocus::Body { spec_id, route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiResponseBody(route_idx) => {
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
+                self.place_api_cursor_from_last_click(id, true);
             }
             crate::ui_system::UiId::ApiTabBody => {
                 self.commit_api_focus();
@@ -1935,12 +2240,15 @@ impl crate::app::App {
         true
     }
 
-    pub fn handle_api_client_keyboard_input(
-        &mut self,
-        key_event: &winit::event::KeyEvent,
-    ) -> bool {
+    pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
         if self.ide_panel.api.focused.is_none() {
             return self.active_tab_is_api_client();
+        }
+        let active = self
+            .active_api_tab()
+            .map(|(meta, state)| (meta.spec_id, state.route_idx));
+        if !self.ide_panel.api.clear_stale_keyboard_focus(active) {
+            return false;
         }
         if key_event.state != winit::event::ElementState::Pressed {
             return true;
@@ -1948,6 +2256,7 @@ impl crate::app::App {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let is_body = matches!(self.ide_panel.api.focused, Some(ApiFocus::Body { .. }));
+        let is_response = matches!(self.ide_panel.api.focused, Some(ApiFocus::Response { .. }));
         match key_event.physical_key {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
                 self.commit_api_focus();
@@ -1974,13 +2283,14 @@ impl crate::app::App {
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) if ctrl => {
-                if let Some(text) = self.ide_panel.api.input_editor.get_selection() {
+                if !is_response && let Some(text) = self.ide_panel.api.input_editor.get_selection()
+                {
                     self.set_clipboard_text(text);
                     self.ide_panel.api.input_editor.delete_selection();
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if ctrl => {
-                if let Some(text) = self.get_clipboard_text() {
+                if !is_response && let Some(text) = self.get_clipboard_text() {
                     let clean = if is_body {
                         text
                     } else {
@@ -1989,15 +2299,26 @@ impl crate::app::App {
                     let _ = self.ide_panel.api.input_editor.insert_str(&clean);
                 }
             }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl && shift => {
+                let _ = self.ide_panel.api.input_editor.redo();
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl => {
+                let _ = self.ide_panel.api.input_editor.undo();
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY) if ctrl => {
+                let _ = self.ide_panel.api.input_editor.redo();
+            }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
-                if ctrl {
+                if is_response {
+                } else if ctrl {
                     self.ide_panel.api.input_editor.delete_word_backward();
                 } else {
                     self.ide_panel.api.input_editor.backspace();
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) => {
-                if ctrl {
+                if is_response {
+                } else if ctrl {
                     self.ide_panel.api.input_editor.delete_word_forward();
                 } else {
                     self.ide_panel.api.input_editor.delete_forward();
@@ -2017,17 +2338,31 @@ impl crate::app::App {
                     self.ide_panel.api.input_editor.move_right(shift);
                 }
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) if is_body => {}
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp)
+                if is_body || is_response =>
+            {
+                move_api_input_vertical(&mut self.ide_panel.api.input_editor, false, shift);
+            }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown)
-                if is_body => {}
+                if is_body || is_response =>
+            {
+                move_api_input_vertical(&mut self.ide_panel.api.input_editor, true, shift);
+            }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Home) => {
                 self.ide_panel.api.input_editor.move_home(shift);
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::End) => {
                 self.ide_panel.api.input_editor.move_end(shift);
             }
-            _ if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() => {
-                if let Some(text) = key_event.text.as_ref().and_then(|s| (!s.is_empty()).then_some(s))
+            _ if !is_response
+                && !ctrl
+                && !self.modifiers.alt_key()
+                && !self.modifiers.super_key() =>
+            {
+                if let Some(text) = key_event
+                    .text
+                    .as_ref()
+                    .and_then(|s| (!s.is_empty()).then_some(s))
                 {
                     let clean = if is_body {
                         text.to_string()
@@ -2104,10 +2439,7 @@ impl crate::app::App {
         let query_values = state.query_values.clone();
         let body_json_text = state.body_json.clone();
         let server = server.clone();
-        if route.method.can_send_body()
-            && is_json_body
-            && !json_body_is_valid(&body_json_text)
-        {
+        if route.method.can_send_body() && is_json_body && !json_body_is_valid(&body_json_text) {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                 state.response = Some(ApiJobResponse {
                     spec_id,
@@ -2121,6 +2453,7 @@ impl crate::app::App {
                         ApiLoadErrorKind::InvalidJson,
                         "JSON body невалиден",
                     )),
+                    resolved_host: None,
                 });
             }
             return;
@@ -2138,6 +2471,7 @@ impl crate::app::App {
                         body: String::new(),
                         truncated: false,
                         error: Some(err),
+                        resolved_host: None,
                     });
                 }
                 return;
@@ -2151,12 +2485,12 @@ impl crate::app::App {
             spec_id,
             route_idx,
             method,
+            resolved_host: resolve_api_url_host(&url),
             url,
             body_json,
         };
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.pending = true;
-            state.response = None;
         }
         self.api_request_rx.push(spawn_api_request(job));
         if let Some(window) = self.window.as_ref() {
@@ -2243,6 +2577,13 @@ impl crate::app::App {
     }
 
     fn apply_api_job_response(&mut self, result: ApiJobResponse) {
+        let resolved = result.resolved_host.clone();
+        let focused_response = matches!(
+            self.ide_panel.api.focused,
+            Some(ApiFocus::Response { spec_id, route_idx })
+                if spec_id == result.spec_id && route_idx == result.route_idx
+        );
+        let focused_body = focused_response.then(|| result.body.clone());
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
                 && meta.spec_id == result.spec_id
@@ -2252,6 +2593,15 @@ impl crate::app::App {
                 state.response = Some(result);
                 break;
             }
+        }
+        if resolved.is_some() {
+            self.ide_panel.api.last_resolved_host = resolved;
+            self.ide_panel.api.persist();
+        }
+        if let Some(body) = focused_body {
+            let old_version = self.ide_panel.api.input_editor.version;
+            self.ide_panel.api.input_editor.set_text_clean(&body);
+            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
         }
     }
 }
@@ -2415,6 +2765,68 @@ mod tests {
     }
 
     #[test]
+    fn stale_api_focus_clears_so_editor_ctrl_shortcuts_are_not_swallowed() {
+        let mut state = ApiClientState::default();
+        state.focused = Some(ApiFocus::Body {
+            spec_id: ApiSpecId(1),
+            route_idx: 0,
+        });
+
+        assert!(!state.clear_stale_keyboard_focus(Some((ApiSpecId(2), Some(0)))));
+        assert_eq!(state.focused, None);
+
+        state.focused = Some(ApiFocus::Response {
+            spec_id: ApiSpecId(1),
+            route_idx: 2,
+        });
+        assert!(state.clear_stale_keyboard_focus(Some((ApiSpecId(1), Some(2)))));
+        assert!(state.focused.is_some());
+
+        state.focused = Some(ApiFocus::ImportUrl);
+        assert!(state.clear_stale_keyboard_focus(None));
+    }
+
+    #[test]
+    fn api_input_vertical_arrows_move_cursor_and_shift_selects() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("abc\ndefg\nhi");
+        editor.cursor = 1;
+
+        move_api_input_vertical(&mut editor, true, false);
+        assert_eq!(editor.cursor, 5);
+        assert_eq!(editor.selection_anchor, None);
+
+        move_api_input_vertical(&mut editor, true, true);
+        assert_eq!(editor.cursor, 10);
+        assert_eq!(editor.selection_anchor, Some(5));
+
+        move_api_input_vertical(&mut editor, false, false);
+        assert_eq!(editor.cursor, 5);
+        assert_eq!(editor.selection_anchor, None);
+    }
+
+    #[test]
+    fn api_tab_prefill_uses_selected_restored_route() {
+        let model = parse_openapi_model(ApiSpecId(9), &sample_spec()).expect("parse");
+        let post_idx = model
+            .routes
+            .iter()
+            .position(|route| route.method == ApiMethod::Post)
+            .expect("post route");
+        let mut state = ApiClientTabState {
+            route_idx: Some(post_idx),
+            ..Default::default()
+        };
+
+        fill_api_tab_inputs(&mut state, &model.routes[post_idx], &model);
+
+        assert!(state.path_values.is_empty());
+        assert!(state.query_values.is_empty());
+        assert!(state.body_json.contains("\"name\": \"\""));
+        assert!(state.body_json.contains("\"age\": 0"));
+    }
+
+    #[test]
     fn url_validation_rejects_bad_parts() {
         assert!(validate_api_url("https://example.com/openapi.json").is_ok());
         assert_eq!(
@@ -2432,6 +2844,12 @@ mod tests {
                 .unwrap_err()
                 .kind,
             ApiLoadErrorKind::InvalidDomain
+        );
+        assert_eq!(
+            validate_api_url("https://api.example.com/docs#post-/items")
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::InvalidUrl
         );
     }
 
@@ -2701,6 +3119,7 @@ mod tests {
                 body: "{}".to_string(),
                 truncated: false,
                 error: None,
+                resolved_host: None,
             }),
             ..Default::default()
         };

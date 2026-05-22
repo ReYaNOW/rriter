@@ -430,6 +430,25 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_api_client() {
         needs_redraw = true;
     }
+    let api_now = crate::app::api_client::now_epoch_secs();
+    if let Some(at) = app.ide_panel.api.import_error_at {
+        if api_now.saturating_sub(at) < 5 {
+            needs_redraw = true;
+        } else {
+            app.ide_panel.api.import_error = None;
+            app.ide_panel.api.import_error_at = None;
+            needs_redraw = true;
+        }
+    }
+    if app
+        .ide_panel
+        .api
+        .specs
+        .iter()
+        .any(|spec| crate::app::api_client::api_timing_visible_at(spec.last_loaded, api_now))
+    {
+        needs_redraw = true;
+    }
     if app.poll_inline_git_diff_popup() {
         needs_redraw = true;
     }

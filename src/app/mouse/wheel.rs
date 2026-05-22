@@ -387,7 +387,10 @@ impl App {
                 self.ide_panel.api.panel_scroll.scroll_by(dy);
                 let max_scroll =
                     crate::app::api_client::api_panel_max_scroll(&self.ide_panel.api, ch, s);
-                self.ide_panel.api.panel_scroll.clamp_target(0.0, max_scroll);
+                self.ide_panel
+                    .api
+                    .panel_scroll
+                    .clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }

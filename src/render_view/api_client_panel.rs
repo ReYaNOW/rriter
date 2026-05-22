@@ -211,11 +211,23 @@ impl Renderer {
             } else {
                 self.theme.fg
             };
+            if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl)) {
+                self.draw_api_editor_selection_one_line(
+                    &api.input_editor,
+                    input_x + 8.0 * s,
+                    cy + 6.0 * s,
+                    input_w - 16.0 * s,
+                    input_h - 12.0 * s,
+                    0.76,
+                );
+            }
             self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
             if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl))
                 && blink_alpha > 0.15
             {
-                let text_w = self.measure_ui_width(&text, 0.76).min(input_w - 16.0 * s);
+                let text_w = self
+                    .api_editor_cursor_x_one_line(&api.input_editor, 0.76)
+                    .min(input_w - 16.0 * s);
                 self.push_rect(
                     input_x + 8.0 * s + text_w,
                     cy + 7.0 * s,
@@ -246,9 +258,20 @@ impl Renderer {
             cy += input_h + 10.0 * s;
         }
 
-        if let Some(err) = &api.import_error {
-            self.draw_string_scaled_stable(err, x + pad, cy + 18.0 * s, [1.0, 0.38, 0.38, 1.0], 0.72);
-            cy += 24.0 * s;
+        let now = now_epoch_secs();
+        if let Some(err) = &api.import_error
+            && api
+                .import_error_at
+                .map(|at| now.saturating_sub(at) < 5)
+                .unwrap_or(true)
+        {
+            self.draw_string_scaled_stable(
+                err,
+                x + pad,
+                cy + 18.0 * s,
+                [1.0, 0.38, 0.38, 1.0],
+                0.72,
+            );
         }
 
         if api.specs.is_empty() {
@@ -261,7 +284,6 @@ impl Renderer {
             );
         }
 
-        let now = now_epoch_secs();
         let card_h = 112.0 * s;
         for (idx, spec) in api.specs.iter().enumerate() {
             let card_x = x + pad;
@@ -341,7 +363,7 @@ impl Renderer {
                 let fetch = format_api_secs(spec.last_fetch_secs);
                 let parse = format_api_secs(spec.last_parse_secs);
                 self.draw_string_scaled_stable(
-                    "Запрос",
+                    "Запрос ",
                     card_x + 10.0 * s,
                     cy + 96.0 * s,
                     self.theme.fg,
@@ -349,21 +371,21 @@ impl Renderer {
                 );
                 self.draw_string_scaled_stable(
                     &fetch,
-                    card_x + 60.0 * s,
+                    card_x + 68.0 * s,
                     cy + 96.0 * s,
                     self.theme.fg,
                     0.78,
                 );
                 self.draw_string_scaled_stable(
-                    "Парсинг",
-                    card_x + 126.0 * s,
+                    "Парсинг ",
+                    card_x + 132.0 * s,
                     cy + 96.0 * s,
                     self.theme.fg,
                     0.78,
                 );
                 self.draw_string_scaled_stable(
                     &parse,
-                    card_x + 188.0 * s,
+                    card_x + 202.0 * s,
                     cy + 96.0 * s,
                     self.theme.fg,
                     0.78,
