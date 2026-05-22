@@ -15,7 +15,7 @@ impl Renderer {
         }
         let full_w = self.measure_ui_width(text, scale);
         if full_w <= max_w {
-            self.draw_string_scaled(text, x, y, color, scale);
+            self.draw_string_scaled_stable(text, x, y, color, scale);
             return full_w;
         }
 
@@ -32,7 +32,7 @@ impl Renderer {
         scratch.clear();
         scratch.push_str(&text[..prefix_len]);
         scratch.push_str(ellipsis);
-        self.draw_string_scaled(scratch, x, y, color, scale);
+        self.draw_string_scaled_stable(scratch, x, y, color, scale);
         self.measure_ui_width(scratch, scale).min(max_w)
     }
 
@@ -193,6 +193,7 @@ impl Renderer {
         panel_left_w: f32,
         is_ui_disabled: bool,
         blink_alpha: f32,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
         self.git_file_tooltip = None;
 
@@ -462,6 +463,7 @@ impl Renderer {
                         hit_mx,
                         hit_my,
                         blink_alpha,
+                        active_api_route,
                     );
                 }
             }

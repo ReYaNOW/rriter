@@ -30,7 +30,7 @@ pub enum ApiUrlStatus {
     Failed(ApiLoadErrorKind),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ApiSpecEntry {
     pub id: ApiSpecId,
     pub title: String,
@@ -38,6 +38,10 @@ pub struct ApiSpecEntry {
     pub openapi_version: String,
     pub source: ApiSpecSource,
     pub last_loaded: Option<u64>,
+    #[serde(default)]
+    pub last_fetch_secs: Option<f64>,
+    #[serde(default)]
+    pub last_parse_secs: Option<f64>,
     pub last_url_status: Option<ApiUrlStatus>,
     pub selected: bool,
     pub error: Option<String>,
@@ -117,6 +121,32 @@ impl ApiMethod {
             Self::Head => "HEAD",
             Self::Options => "OPTIONS",
             Self::Trace => "TRACE",
+        }
+    }
+
+    pub fn chip_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POS",
+            Self::Patch => "PAT",
+            Self::Put => "PUT",
+            Self::Delete => "DEL",
+            Self::Head => "HEA",
+            Self::Options => "OPT",
+            Self::Trace => "TRA",
+        }
+    }
+
+    pub fn sort_rank(self) -> u8 {
+        match self {
+            Self::Get => 0,
+            Self::Post => 1,
+            Self::Patch => 2,
+            Self::Put => 3,
+            Self::Delete => 4,
+            Self::Head => 5,
+            Self::Options => 6,
+            Self::Trace => 7,
         }
     }
 
@@ -246,14 +276,14 @@ impl ApiLoadError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ApiLoadPayload {
     pub entry: ApiSpecEntry,
     pub model: ApiSpecModel,
     pub raw_json: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ApiLoadResult {
     pub id: ApiSpecId,
     pub result: Result<ApiLoadPayload, ApiLoadError>,
@@ -341,6 +371,7 @@ pub struct ApiClientState {
     pub import_error: Option<String>,
     pub loading: FxHashSet<ApiSpecId>,
     pub collapsed_tags: FxHashSet<(ApiSpecId, String)>,
+    pub collapsed_route_roots: FxHashSet<ApiSpecId>,
     pub panel_scroll: ScrollState,
     pub route_scroll: ScrollState,
     pub input_editor: Editor,
@@ -359,6 +390,7 @@ impl Default for ApiClientState {
             import_error: None,
             loading: FxHashSet::default(),
             collapsed_tags: FxHashSet::default(),
+            collapsed_route_roots: FxHashSet::default(),
             panel_scroll: ScrollState::new(7.0),
             route_scroll: ScrollState::new(7.0),
             input_editor: Editor::new(512),
@@ -377,6 +409,20 @@ impl ApiClientState {
                 state.next_id = saved.next_id.max(1);
                 for spec in &mut state.specs {
                     spec.selected = Some(spec.id) == state.selected_spec;
+                }
+                for entry in &state.specs {
+                    if let ApiSpecSource::Url(url) = &entry.source
+                        && let Some(raw) = read_url_cache(entry.id)
+                        && let Ok(payload) = parse_openapi_payload(
+                            entry.id,
+                            ApiSpecSource::Url(url.clone()),
+                            raw,
+                            entry.last_url_status.clone(),
+                            None,
+                        )
+                    {
+                        state.models.insert(entry.id, payload.model);
+                    }
                 }
             }
         }
@@ -455,6 +501,26 @@ impl ApiClientState {
             self.import_error = Some(err.message.clone());
         }
         self.persist();
+    }
+
+    pub fn remove_spec(&mut self, idx: usize) -> Option<ApiSpecId> {
+        if idx >= self.specs.len() {
+            return None;
+        }
+        let id = self.specs[idx].id;
+        self.specs.remove(idx);
+        self.models.remove(&id);
+        self.loading.remove(&id);
+        self.collapsed_tags.retain(|(spec_id, _)| *spec_id != id);
+        self.collapsed_route_roots.remove(&id);
+        if self.selected_spec == Some(id) {
+            self.selected_spec = self.specs.first().map(|entry| entry.id);
+            for entry in &mut self.specs {
+                entry.selected = Some(entry.id) == self.selected_spec;
+            }
+        }
+        self.persist();
+        Some(id)
     }
 }
 
@@ -541,7 +607,7 @@ pub fn spawn_load_cached_url(id: ApiSpecId, url: String) -> Receiver<ApiLoadResu
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let result = match read_url_cache(id) {
-            Some(raw) => parse_openapi_payload(id, ApiSpecSource::Url(url), raw, None),
+            Some(raw) => parse_openapi_payload(id, ApiSpecSource::Url(url), raw, None, None),
             None => Err(ApiLoadError::new(
                 ApiLoadErrorKind::Io,
                 "URL cache пустой",
@@ -568,17 +634,20 @@ fn load_local_spec(id: ApiSpecId, path: &Path) -> Result<ApiLoadPayload, ApiLoad
     let raw = String::from_utf8(bytes).map_err(|_| {
         ApiLoadError::new(ApiLoadErrorKind::InvalidJson, "JSON не UTF-8")
     })?;
-    parse_openapi_payload(id, ApiSpecSource::Local(path.to_path_buf()), raw, None)
+    parse_openapi_payload(id, ApiSpecSource::Local(path.to_path_buf()), raw, None, None)
 }
 
 fn load_url_spec(id: ApiSpecId, url: &str) -> Result<ApiLoadPayload, ApiLoadError> {
     validate_api_url(url)?;
+    let fetch_started = std::time::Instant::now();
     let raw = fetch_json(url)?;
+    let fetch_secs = fetch_started.elapsed().as_secs_f64();
     parse_openapi_payload(
         id,
         ApiSpecSource::Url(url.to_string()),
         raw,
         Some(ApiUrlStatus::Ok(200)),
+        Some(fetch_secs),
     )
 }
 
@@ -649,10 +718,13 @@ fn parse_openapi_payload(
     source: ApiSpecSource,
     raw: String,
     url_status: Option<ApiUrlStatus>,
+    fetch_secs: Option<f64>,
 ) -> Result<ApiLoadPayload, ApiLoadError> {
+    let parse_started = std::time::Instant::now();
     let root: Value = serde_json::from_str(&raw)
         .map_err(|err| ApiLoadError::new(ApiLoadErrorKind::InvalidJson, err.to_string()))?;
     let model = parse_openapi_model(id, &root)?;
+    let parse_secs = parse_started.elapsed().as_secs_f64();
     let entry = ApiSpecEntry {
         id,
         title: model.title.clone(),
@@ -660,6 +732,8 @@ fn parse_openapi_payload(
         openapi_version: model.openapi_version.clone(),
         source,
         last_loaded: Some(now_epoch_secs()),
+        last_fetch_secs: fetch_secs,
+        last_parse_secs: Some(parse_secs),
         last_url_status: url_status,
         selected: true,
         error: None,
@@ -787,7 +861,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
             .to_lowercase()
             .cmp(&b.tag.to_lowercase())
             .then_with(|| a.path.cmp(&b.path))
-            .then_with(|| a.method.cmp(&b.method))
+            .then_with(|| a.method.sort_rank().cmp(&b.method.sort_rank()))
     });
     model
         .routes
@@ -1049,6 +1123,89 @@ pub fn grouped_route_ranges(
     groups
 }
 
+pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) -> f32 {
+    let pad = 10.0 * scale;
+    let mut content_h = pad + 40.0 * scale;
+    if api.import_menu_open {
+        content_h += 28.0 * scale * 2.0 + 12.0 * scale;
+    }
+    if api.import_url_open {
+        content_h += 42.0 * scale;
+    }
+    if api.import_error.is_some() {
+        content_h += 24.0 * scale;
+    }
+    if api.specs.is_empty() {
+        content_h += 34.0 * scale;
+    }
+    content_h += api.specs.len() as f32 * 122.0 * scale;
+    if let Some(model) = api.selected_model() {
+        content_h += 34.0 * scale;
+        if !api.collapsed_route_roots.contains(&model.id) {
+            for (_, _, len, collapsed) in grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id) {
+                content_h += 28.0 * scale;
+                if !collapsed {
+                    content_h += len as f32 * 30.0 * scale;
+                }
+            }
+        }
+    }
+    (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
+pub fn api_tab_max_scroll(
+    model: Option<&ApiSpecModel>,
+    tab_state: &ApiClientTabState,
+    visible_h: f32,
+    scale: f32,
+) -> f32 {
+    let Some(model) = model else {
+        return 0.0;
+    };
+    let Some(route_idx) = tab_state
+        .route_idx
+        .or_else(|| (!model.routes.is_empty()).then_some(0))
+    else {
+        return 0.0;
+    };
+    let Some(route) = model.routes.get(route_idx) else {
+        return 0.0;
+    };
+    let pad = 28.0 * scale;
+    let mut content_h = pad + 38.0 * scale;
+    if !route.summary.is_empty() {
+        content_h += 28.0 * scale;
+    }
+    content_h += 28.0 * scale;
+    content_h += model.servers.len().max(1) as f32 * 30.0 * scale + 42.0 * scale;
+    if !route.path_params.is_empty() {
+        content_h += 28.0 * scale + route.path_params.len() as f32 * 40.0 * scale + 8.0 * scale;
+    }
+    if !route.query_params.is_empty() {
+        content_h += 28.0 * scale + route.query_params.len() as f32 * 40.0 * scale + 8.0 * scale;
+    }
+    if let Some(body) = &route.request_body {
+        content_h += 28.0 * scale;
+        if body.is_multipart {
+            let prop_count = body
+                .schema
+                .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+                .map(|schema| schema.properties.len())
+                .unwrap_or(0);
+            content_h += 28.0 * scale + prop_count as f32 * 26.0 * scale;
+        } else {
+            content_h += 236.0 * scale;
+        }
+    }
+    content_h += 84.0 * scale;
+    if tab_state.response.is_some() {
+        content_h += 208.0 * scale;
+    } else if tab_state.pending {
+        content_h += 24.0 * scale;
+    }
+    (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
 pub fn build_request_url(
     server: &ApiServer,
     path_template: &str,
@@ -1205,14 +1362,13 @@ pub fn now_epoch_secs() -> u64 {
         .unwrap_or(0)
 }
 
-pub fn format_last_loaded(last_loaded: Option<u64>) -> String {
+pub fn format_last_loaded_at(last_loaded: Option<u64>, now: u64) -> String {
     let Some(loaded) = last_loaded else {
         return "не загружено".to_string();
     };
-    let now = now_epoch_secs();
     let age = now.saturating_sub(loaded);
     if age < 60 {
-        format!("{age} сек назад")
+        "только что".to_string()
     } else if age < 3600 {
         format!("{} мин назад", age / 60)
     } else if age < 86_400 {
@@ -1220,6 +1376,50 @@ pub fn format_last_loaded(last_loaded: Option<u64>) -> String {
     } else {
         format!("{} д назад", age / 86_400)
     }
+}
+
+pub fn format_api_secs(value: Option<f64>) -> String {
+    match value {
+        Some(v) => format!("{:.3} с", v.max(0.0)),
+        None => "-".to_string(),
+    }
+}
+
+#[cfg(test)]
+pub fn format_api_path_display(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() + 8);
+    write_api_path_display(path, &mut out);
+    out
+}
+
+pub fn write_api_path_display(path: &str, out: &mut String) {
+    out.clear();
+    let mut chars = path.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            if !out.ends_with(' ') {
+                out.push(' ');
+            }
+            out.push(ch);
+            for inner in chars.by_ref() {
+                out.push(inner);
+                if inner == '}' {
+                    break;
+                }
+            }
+            if chars.peek() == Some(&'/') {
+                out.push(' ');
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+}
+
+pub fn api_timing_visible_at(last_loaded: Option<u64>, now: u64) -> bool {
+    last_loaded
+        .map(|loaded| now.saturating_sub(loaded) < 10)
+        .unwrap_or(false)
 }
 
 impl crate::app::App {
@@ -1259,6 +1459,8 @@ impl crate::app::App {
         };
         let id = self.ide_panel.api.alloc_spec_id();
         self.ide_panel.api.import_error = None;
+        self.ide_panel.api.import_url_open = false;
+        self.ide_panel.api.focused = None;
         self.ide_panel.api.loading.insert(id);
         self.api_load_rx.push(spawn_load_url(id, url));
         if let Some(window) = self.window.as_ref() {
@@ -1346,7 +1548,7 @@ impl crate::app::App {
             search_current_idx: None,
             is_highlighted_once: true,
             is_highlight_complete: true,
-            icon_key: "json",
+            icon_key: "api",
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta { spec_id: id, title },
                 ApiClientTabState::default(),
@@ -1405,7 +1607,7 @@ impl crate::app::App {
         }
     }
 
-    fn active_api_tab_mut_for(
+    pub(crate) fn active_api_tab_mut_for(
         &mut self,
         spec_id: ApiSpecId,
     ) -> Option<(&mut ApiClientTabMeta, &mut ApiClientTabState)> {
@@ -1602,16 +1804,21 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiSpecRemove(idx) => {
-                if idx < self.ide_panel.api.specs.len() {
-                    let id = self.ide_panel.api.specs[idx].id;
-                    self.ide_panel.api.specs.remove(idx);
-                    self.ide_panel.api.models.remove(&id);
-                    self.ide_panel.api.loading.remove(&id);
-                    if self.ide_panel.api.selected_spec == Some(id) {
-                        self.ide_panel.api.selected_spec =
-                            self.ide_panel.api.specs.first().map(|entry| entry.id);
+                if let Some(id) = self.ide_panel.api.remove_spec(idx) {
+                    let mut tab_idxs = self
+                        .tabs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, tab)| match &tab.kind {
+                            crate::app::EditorTabKind::ApiClient(meta, _) if meta.spec_id == id => {
+                                Some(idx)
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    while let Some(tab_idx) = tab_idxs.pop() {
+                        self.close_tab_at(tab_idx);
                     }
-                    self.ide_panel.api.persist();
                 }
             }
             crate::ui_system::UiId::ApiSpecSelect(idx) => {
@@ -1636,6 +1843,16 @@ impl crate::app::App {
                                 self.ide_panel.api.collapsed_tags.insert(key);
                             }
                         }
+                    }
+                }
+            }
+            crate::ui_system::UiId::ApiRoutesRoot => {
+                if let Some(spec_id) = self.ide_panel.api.selected_spec
+                {
+                    if self.ide_panel.api.collapsed_route_roots.contains(&spec_id) {
+                        self.ide_panel.api.collapsed_route_roots.remove(&spec_id);
+                    } else {
+                        self.ide_panel.api.collapsed_route_roots.insert(spec_id);
                     }
                 }
             }
@@ -1837,9 +2054,33 @@ impl crate::app::App {
             return;
         }
         let spec_id = meta.spec_id;
-        let Some(route_idx) = state.route_idx else {
+        let requested_route_idx = state.route_idx;
+        let needs_input_sync = requested_route_idx.is_none()
+            || (state.path_values.is_empty()
+                && state.query_values.is_empty()
+                && state.body_json == ApiClientTabState::default().body_json);
+        let route_idx = {
+            let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
+                return;
+            };
+            let route_idx = requested_route_idx.unwrap_or(0);
+            if model.routes.get(route_idx).is_none() {
+                return;
+            }
+            route_idx
+        };
+        if needs_input_sync {
+            self.sync_api_tab_inputs(spec_id, route_idx);
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                state.route_idx = Some(route_idx);
+            }
+        }
+        let Some((_, state)) = self.active_api_tab() else {
             return;
         };
+        if state.pending {
+            return;
+        }
         let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
             return;
         };
@@ -1985,28 +2226,17 @@ impl crate::app::App {
                     meta.title = entry.title.clone();
                     tab.base_title = entry.title.clone();
                 }
-                if state.route_idx.is_none()
-                    && let Some(model) = self.ide_panel.api.models.get(&id)
+                if let Some(model) = self.ide_panel.api.models.get(&id)
                     && !model.routes.is_empty()
                 {
-                    state.route_idx = Some(0);
-                    state.path_values = model.routes[0]
-                        .path_params
-                        .iter()
-                        .map(|param| ApiInputValue {
-                            name: param.name.clone(),
-                            value: param.default_value.clone().unwrap_or_default(),
-                        })
-                        .collect();
-                    state.query_values = model.routes[0]
-                        .query_params
-                        .iter()
-                        .map(|param| ApiInputValue {
-                            name: param.name.clone(),
-                            value: param.default_value.clone().unwrap_or_default(),
-                        })
-                        .collect();
-                    state.body_json = default_body_for_route(&model.routes[0], model);
+                    let route_idx = state.route_idx.unwrap_or(0).min(model.routes.len() - 1);
+                    state.route_idx = Some(route_idx);
+                    if state.path_values.is_empty()
+                        && state.query_values.is_empty()
+                        && state.body_json == ApiClientTabState::default().body_json
+                    {
+                        fill_api_tab_inputs(state, &model.routes[route_idx], model);
+                    }
                 }
             }
         }
@@ -2024,6 +2254,34 @@ impl crate::app::App {
             }
         }
     }
+}
+
+fn fill_api_tab_inputs(state: &mut ApiClientTabState, route: &ApiRouteRow, model: &ApiSpecModel) {
+    state.path_values = route
+        .path_params
+        .iter()
+        .map(|param| ApiInputValue {
+            name: param.name.clone(),
+            value: param
+                .default_value
+                .clone()
+                .or_else(|| param.example.clone())
+                .unwrap_or_default(),
+        })
+        .collect();
+    state.query_values = route
+        .query_params
+        .iter()
+        .map(|param| ApiInputValue {
+            name: param.name.clone(),
+            value: param
+                .default_value
+                .clone()
+                .or_else(|| param.example.clone())
+                .unwrap_or_default(),
+        })
+        .collect();
+    state.body_json = default_body_for_route(route, model);
 }
 
 fn default_body_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> String {
@@ -2105,6 +2363,12 @@ fn read_url_cache(id: ApiSpecId) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn persist_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn sample_spec() -> Value {
         serde_json::json!({
@@ -2181,9 +2445,59 @@ mod tests {
         assert_eq!(model.routes.len(), 2);
         assert_eq!(model.routes[0].tag, "pets");
         assert_eq!(model.routes[0].method, ApiMethod::Get);
+        assert_eq!(model.routes[1].method, ApiMethod::Post);
         assert_eq!(model.routes[0].path_params[0].name, "id");
         assert_eq!(model.routes[0].query_params[0].name, "verbose");
         assert!(!model.schema_arena.is_empty());
+    }
+
+    #[test]
+    fn api_method_display_and_sort_order_match_client_rows() {
+        assert_eq!(ApiMethod::Get.chip_str(), "GET");
+        assert_eq!(ApiMethod::Post.chip_str(), "POS");
+        assert_eq!(ApiMethod::Patch.chip_str(), "PAT");
+        assert_eq!(ApiMethod::Put.chip_str(), "PUT");
+        assert_eq!(ApiMethod::Delete.chip_str(), "DEL");
+        assert_eq!(ApiMethod::Head.chip_str(), "HEA");
+        assert_eq!(ApiMethod::Options.chip_str(), "OPT");
+        assert_eq!(ApiMethod::Trace.chip_str(), "TRA");
+
+        let mut methods = [
+            ApiMethod::Trace,
+            ApiMethod::Put,
+            ApiMethod::Get,
+            ApiMethod::Delete,
+            ApiMethod::Patch,
+            ApiMethod::Options,
+            ApiMethod::Post,
+            ApiMethod::Head,
+        ];
+        methods.sort_unstable_by_key(|method| (*method).sort_rank());
+        assert_eq!(
+            methods,
+            [
+                ApiMethod::Get,
+                ApiMethod::Post,
+                ApiMethod::Patch,
+                ApiMethod::Put,
+                ApiMethod::Delete,
+                ApiMethod::Head,
+                ApiMethod::Options,
+                ApiMethod::Trace,
+            ]
+        );
+    }
+
+    #[test]
+    fn api_path_display_spaces_path_params_without_changing_path() {
+        assert_eq!(
+            format_api_path_display("/sites/{id}/complete"),
+            "/sites/ {id} /complete"
+        );
+        assert_eq!(
+            format_api_path_display("/orgs/{org_id}/sites/{site_id}"),
+            "/orgs/ {org_id} /sites/ {site_id}"
+        );
     }
 
     #[test]
@@ -2223,5 +2537,176 @@ mod tests {
         )
         .expect("url");
         assert_eq!(url, "https://api.example.com/v1/pets/a%20b?verbose=true");
+    }
+
+    #[test]
+    fn parse_openapi_rejects_missing_or_old_version() {
+        assert_eq!(
+            parse_openapi_model(ApiSpecId(1), &serde_json::json!({}))
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::UnsupportedOpenApi
+        );
+        assert_eq!(
+            parse_openapi_model(
+                ApiSpecId(1),
+                &serde_json::json!({"openapi": "2.0", "paths": {}})
+            )
+            .unwrap_err()
+            .message,
+            "поддерживается OpenAPI 3.x"
+        );
+    }
+
+    #[test]
+    fn last_loaded_text_uses_now_then_minutes_without_seconds() {
+        let now = now_epoch_secs();
+        assert_eq!(
+            format_last_loaded_at(Some(now.saturating_sub(30)), now),
+            "только что"
+        );
+        assert_eq!(
+            format_last_loaded_at(Some(now.saturating_sub(60)), now),
+            "1 мин назад"
+        );
+        assert_eq!(format_last_loaded_at(None, now), "не загружено");
+        assert!(api_timing_visible_at(Some(now.saturating_sub(9)), now));
+        assert!(!api_timing_visible_at(Some(now.saturating_sub(10)), now));
+        assert!(!api_timing_visible_at(None, now));
+    }
+
+    #[test]
+    fn api_state_remove_spec_clears_model_loading_collapsed_and_selection() {
+        let first = ApiSpecId(1);
+        let second = ApiSpecId(2);
+        let mut state = ApiClientState::default();
+        state.specs.push(ApiSpecEntry {
+            id: first,
+            title: "One".to_string(),
+            version: String::new(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/one.json".to_string()),
+            last_loaded: Some(1),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: true,
+            error: None,
+        });
+        state.specs.push(ApiSpecEntry {
+            id: second,
+            title: "Two".to_string(),
+            version: String::new(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/two.json".to_string()),
+            last_loaded: Some(2),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: false,
+            error: None,
+        });
+        state.selected_spec = Some(first);
+        state.models.insert(first, ApiSpecModel::default());
+        state.loading.insert(first);
+        state.collapsed_tags.insert((first, "pets".to_string()));
+
+        assert_eq!(state.remove_spec(0), Some(first));
+        assert_eq!(state.selected_spec, Some(second));
+        assert!(!state.models.contains_key(&first));
+        assert!(!state.loading.contains(&first));
+        assert!(state.collapsed_tags.is_empty());
+        assert!(state.specs[0].selected);
+        assert_eq!(state.remove_spec(99), None);
+    }
+
+    #[test]
+    fn api_specs_persist_roundtrip_keeps_imported_sources_and_selection() {
+        let _guard = persist_test_lock().lock().expect("lock");
+        let _ = std::fs::remove_dir_all(api_config_dir());
+
+        let mut state = ApiClientState::default();
+        state.next_id = 8;
+        state.selected_spec = Some(ApiSpecId(7));
+        state.specs.push(ApiSpecEntry {
+            id: ApiSpecId(7),
+            title: "Persisted".to_string(),
+            version: "1.0".to_string(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/openapi.json".to_string()),
+            last_loaded: Some(123),
+            last_fetch_secs: Some(0.1234),
+            last_parse_secs: Some(0.0456),
+            last_url_status: Some(ApiUrlStatus::Ok(200)),
+            selected: true,
+            error: None,
+        });
+        save_url_cache(ApiSpecId(7), &sample_spec().to_string());
+        state.persist();
+
+        let loaded = ApiClientState::load_persisted();
+        assert_eq!(loaded.next_id, 8);
+        assert_eq!(loaded.selected_spec, Some(ApiSpecId(7)));
+        assert_eq!(loaded.specs.len(), 1);
+        assert_eq!(loaded.specs[0].title, "Persisted");
+        assert_eq!(
+            loaded.specs[0].source,
+            ApiSpecSource::Url("https://example.com/openapi.json".to_string())
+        );
+        assert_eq!(loaded.specs[0].last_loaded, Some(123));
+        assert_eq!(loaded.specs[0].last_fetch_secs, Some(0.1234));
+        assert_eq!(loaded.specs[0].last_parse_secs, Some(0.0456));
+        assert!(loaded.specs[0].selected);
+        assert!(loaded.models.contains_key(&ApiSpecId(7)));
+        assert!(loaded.loading.is_empty());
+
+        let _ = std::fs::remove_dir_all(api_config_dir());
+    }
+
+    #[test]
+    fn api_scroll_limits_are_finite_and_shrink_when_routes_collapsed() {
+        let mut state = ApiClientState::default();
+        let model = parse_openapi_model(ApiSpecId(5), &sample_spec()).expect("parse");
+        state.specs.push(ApiSpecEntry {
+            id: model.id,
+            title: model.title.clone(),
+            version: model.version.clone(),
+            openapi_version: model.openapi_version.clone(),
+            source: ApiSpecSource::Url("https://example.com/openapi.json".to_string()),
+            last_loaded: Some(1),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: Some(ApiUrlStatus::Ok(200)),
+            selected: true,
+            error: None,
+        });
+        state.selected_spec = Some(model.id);
+        state.models.insert(model.id, model.clone());
+
+        let expanded = api_panel_max_scroll(&state, 120.0, 1.0);
+        state.collapsed_tags.insert((model.id, "pets".to_string()));
+        let collapsed = api_panel_max_scroll(&state, 120.0, 1.0);
+        assert!(expanded.is_finite());
+        assert!(collapsed.is_finite());
+        assert!(collapsed < expanded);
+
+        let tab_state = ApiClientTabState {
+            route_idx: Some(0),
+            response: Some(ApiJobResponse {
+                spec_id: model.id,
+                route_idx: 0,
+                status: Some(200),
+                elapsed_ms: 1,
+                headers: Vec::new(),
+                body: "{}".to_string(),
+                truncated: false,
+                error: None,
+            }),
+            ..Default::default()
+        };
+        let tab_max = api_tab_max_scroll(Some(&model), &tab_state, 180.0, 1.0);
+        assert!(tab_max.is_finite());
+        assert!(tab_max > 0.0);
+        assert_eq!(api_tab_max_scroll(None, &tab_state, 180.0, 1.0), 0.0);
     }
 }

@@ -52,6 +52,7 @@ pub enum UiId {
     ApiSpecOpen(usize),
     ApiSpecRefresh(usize),
     ApiSpecRemove(usize),
+    ApiRoutesRoot,
     ApiRouteTag(usize),
     ApiRouteRow(usize),
     ApiServerSelect(usize),

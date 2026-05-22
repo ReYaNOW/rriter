@@ -357,6 +357,12 @@ impl Renderer {
         let indent_levels = editor.get_cached_indent_levels();
         let (first, second) = editor.text_parts();
 
+        let active_api_route = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::ApiClient(meta, state) => {
+                Some((meta.spec_id, state.route_idx.unwrap_or(0)))
+            }
+            _ => None,
+        });
         if is_ide_mode {
             self.draw_ide_side_panels(
                 ide_panel,
@@ -370,6 +376,7 @@ impl Renderer {
                 panel_left_w,
                 is_ui_disabled,
                 blink_alpha,
+                active_api_route,
             );
         }
         if is_ide_mode

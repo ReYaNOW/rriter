@@ -63,6 +63,7 @@ impl App {
             | UiId::ApiSpecOpen(_)
             | UiId::ApiSpecRefresh(_)
             | UiId::ApiSpecRemove(_)
+            | UiId::ApiRoutesRoot
             | UiId::ApiRouteTag(_)
             | UiId::ApiRouteRow(_)
             | UiId::ApiServerSelect(_)

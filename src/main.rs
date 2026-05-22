@@ -115,7 +115,17 @@ pub fn save_recent_files(files: &[PathBuf]) {
     let _ = std::fs::write(dir.join("recent.txt"), format_recent_files(files));
 }
 
-fn parse_open_tabs_content(content: &str) -> (Vec<Option<PathBuf>>, usize) {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OpenTabSnapshot {
+    Empty,
+    File(PathBuf),
+    Api {
+        spec_id: crate::app::api_client::ApiSpecId,
+        route_idx: Option<usize>,
+    },
+}
+
+fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
     let mut tabs = Vec::new();
     let mut active = 0;
     let mut lines = content.lines();
@@ -124,9 +134,22 @@ fn parse_open_tabs_content(content: &str) -> (Vec<Option<PathBuf>>, usize) {
     }
     for line in lines {
         if line.is_empty() {
-            tabs.push(None);
+            tabs.push(OpenTabSnapshot::Empty);
+        } else if let Some(rest) = line.strip_prefix("API\t") {
+            let mut parts = rest.splitn(2, '\t');
+            let spec_id = parts
+                .next()
+                .and_then(|raw| raw.parse::<u64>().ok())
+                .map(crate::app::api_client::ApiSpecId);
+            let route_idx = parts
+                .next()
+                .and_then(|raw| (!raw.is_empty()).then_some(raw))
+                .and_then(|raw| raw.parse::<usize>().ok());
+            if let Some(spec_id) = spec_id {
+                tabs.push(OpenTabSnapshot::Api { spec_id, route_idx });
+            }
         } else {
-            tabs.push(Some(PathBuf::from(line)));
+            tabs.push(OpenTabSnapshot::File(PathBuf::from(line)));
         }
     }
     (tabs, active)
@@ -134,33 +157,49 @@ fn parse_open_tabs_content(content: &str) -> (Vec<Option<PathBuf>>, usize) {
 
 fn format_open_tabs_content(tabs: &[crate::app::EditorTab], active_tab: usize) -> String {
     let mut lines = Vec::new();
-    let active_persist_idx = tabs
-        .iter()
-        .take(active_tab.saturating_add(1))
-        .filter(|tab| matches!(&tab.kind, crate::app::EditorTabKind::Normal))
-        .count()
-        .saturating_sub(1);
+    let mut active_persist_idx = 0usize;
+    let mut persisted_seen = 0usize;
+    for (idx, tab) in tabs.iter().enumerate() {
+        if open_tab_line(tab).is_some() {
+            if idx <= active_tab {
+                active_persist_idx = persisted_seen;
+            }
+            persisted_seen = persisted_seen.saturating_add(1);
+        }
+    }
     lines.push(active_persist_idx.to_string());
-    for tab in tabs
-        .iter()
-        .filter(|tab| matches!(&tab.kind, crate::app::EditorTabKind::Normal))
-    {
-        if let Some(p) = &tab.file_path {
-            lines.push(p.to_string_lossy().into_owned());
-        } else {
-            lines.push(String::new());
+    for tab in tabs {
+        if let Some(line) = open_tab_line(tab) {
+            lines.push(line);
         }
     }
     lines.join("\n")
 }
 
+fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
+    match &tab.kind {
+        crate::app::EditorTabKind::Normal => Some(
+            tab.file_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        ),
+        crate::app::EditorTabKind::ApiClient(meta, state) => Some(format!(
+            "API\t{}\t{}",
+            meta.spec_id.0,
+            state.route_idx.map(|idx| idx.to_string()).unwrap_or_default()
+        )),
+        crate::app::EditorTabKind::GitDiff(_, _) => None,
+    }
+}
+
 #[cfg(test)]
-pub fn load_open_tabs(_is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
+pub fn load_open_tabs(_is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
     (Vec::new(), 0)
 }
 
 #[cfg(not(test))]
-pub fn load_open_tabs(is_ide: bool) -> (Vec<Option<PathBuf>>, usize) {
+pub fn load_open_tabs(is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
     let path = open_tabs_path(is_ide);
     if let Ok(content) = std::fs::read_to_string(&path) {
         parse_open_tabs_content(&content)
@@ -487,14 +526,45 @@ mod tests {
         assert_eq!(
             tabs,
             vec![
-                Some(PathBuf::from("/tmp/a.py")),
-                None,
-                Some(PathBuf::from("rel.rs"))
+                OpenTabSnapshot::File(PathBuf::from("/tmp/a.py")),
+                OpenTabSnapshot::Empty,
+                OpenTabSnapshot::File(PathBuf::from("rel.rs"))
             ]
         );
 
         let formatted = format_open_tabs_content(&[tab(Some("/tmp/a.py")), tab(None)], 1);
         assert_eq!(formatted, "1\n/tmp/a.py\n");
+    }
+
+    #[test]
+    fn open_tabs_text_preserves_api_tabs_and_ignores_bad_api_lines() {
+        let mut api_tab = tab(None);
+        api_tab.kind = crate::app::EditorTabKind::ApiClient(
+            crate::app::api_client::ApiClientTabMeta {
+                spec_id: crate::app::api_client::ApiSpecId(42),
+                title: "Pets".to_string(),
+            },
+            crate::app::api_client::ApiClientTabState {
+                route_idx: Some(7),
+                ..Default::default()
+            },
+        );
+
+        let formatted = format_open_tabs_content(&[tab(Some("/tmp/a.py")), api_tab], 1);
+        assert_eq!(formatted, "1\n/tmp/a.py\nAPI\t42\t7");
+
+        let (tabs, active) = parse_open_tabs_content("1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n");
+        assert_eq!(active, 1);
+        assert_eq!(
+            tabs,
+            vec![
+                OpenTabSnapshot::Api {
+                    spec_id: crate::app::api_client::ApiSpecId(42),
+                    route_idx: Some(7)
+                },
+                OpenTabSnapshot::File(PathBuf::from("api:/tmp/file"))
+            ]
+        );
     }
 
     #[test]
@@ -590,7 +660,13 @@ mod tests {
 
         let (tabs, active) = parse_open_tabs_content("not-a-number\n\n/tmp/a.py\n");
         assert_eq!(active, 0);
-        assert_eq!(tabs, vec![None, Some(PathBuf::from("/tmp/a.py"))]);
+        assert_eq!(
+            tabs,
+            vec![
+                OpenTabSnapshot::Empty,
+                OpenTabSnapshot::File(PathBuf::from("/tmp/a.py"))
+            ]
+        );
 
         let (empty_tabs, empty_active) = parse_open_tabs_content("");
         assert!(empty_tabs.is_empty());

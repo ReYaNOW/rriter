@@ -108,7 +108,7 @@ impl PanelId {
         match self {
             PanelId::Explorer => crate::widgets::IconType::Explorer,
             PanelId::Git => crate::widgets::IconType::Git,
-            PanelId::ApiClient => crate::widgets::IconType::LspServers,
+            PanelId::ApiClient => crate::widgets::IconType::Api,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
             PanelId::Problems => crate::widgets::IconType::Problems,
             PanelId::LspServers => crate::widgets::IconType::LspServers,
@@ -1178,6 +1178,7 @@ mod tests {
         assert_eq!(PanelId::Terminal.label(), "Терминал");
         assert!(PanelId::Problems.icon() == crate::widgets::IconType::Problems);
         assert!(PanelId::LspServers.icon() == crate::widgets::IconType::LspServers);
+        assert!(PanelId::ApiClient.icon() == crate::widgets::IconType::Api);
         assert_eq!(IdePanelState::default().bottom_height, 180.0);
     }
 }

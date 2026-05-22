@@ -85,15 +85,27 @@ impl App {
 
         if !saved_tabs.is_empty() {
             let mut loaded_any = false;
-            for path_opt in saved_tabs {
-                if let Some(path) = path_opt {
+            for saved_tab in saved_tabs {
+                match saved_tab {
+                    crate::OpenTabSnapshot::File(path) => {
                     if path.exists() {
                         self.open_file_in_tab_bg(path, false);
                         loaded_any = true;
                     }
-                } else {
-                    self.open_new_tab();
-                    loaded_any = true;
+                    }
+                    crate::OpenTabSnapshot::Empty => {
+                        self.open_new_tab();
+                        loaded_any = true;
+                    }
+                    crate::OpenTabSnapshot::Api { spec_id, route_idx } => {
+                        if self.ide_panel.api.specs.iter().any(|entry| entry.id == spec_id) {
+                            self.open_api_spec_tab(spec_id);
+                            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                                state.route_idx = route_idx;
+                            }
+                            loaded_any = true;
+                        }
+                    }
                 }
             }
 

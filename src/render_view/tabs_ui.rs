@@ -227,15 +227,15 @@ impl Renderer {
                     current_x + tab_pad,
                     icon_y,
                     icon_size_tab,
-                    self.theme.line_num,
+                    self.theme.fg,
                 );
             } else if tab.kind.is_api_client() {
                 self.draw_atlas_icon(
-                    crate::widgets::IconType::LspServers,
+                    crate::widgets::IconType::Api,
                     current_x + tab_pad,
                     icon_y,
                     icon_size_tab,
-                    self.theme.line_num,
+                    [1.0, 1.0, 1.0, 1.0],
                 );
             } else {
                 let icon_key = if is_active {

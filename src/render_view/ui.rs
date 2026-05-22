@@ -482,6 +482,11 @@ impl Renderer {
             unsafe {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             }
+            let color = if icon == crate::widgets::IconType::Api {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                color
+            };
             self.push_quad(x, y, size, size, 0.0, 0.0, 1.0, 1.0, color, 5.0);
             self.flush();
             unsafe {

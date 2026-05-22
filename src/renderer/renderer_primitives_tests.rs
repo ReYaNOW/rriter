@@ -206,6 +206,10 @@ impl Renderer {
                     include_bytes!("../icons/atom/icons/ui/server.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Api,
+                    include_bytes!("../icons/api.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Copy,
                     include_bytes!("../icons/copy.svg").as_slice(),
             ),

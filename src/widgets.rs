@@ -21,6 +21,7 @@ pub enum IconType {
     Branch,
     Problems,
     LspServers,
+    Api,
     Copy,
     Check,
     Rollback,

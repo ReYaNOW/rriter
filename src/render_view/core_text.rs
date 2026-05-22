@@ -797,6 +797,28 @@ impl Renderer {
         }
     }
 
+    pub fn draw_string_scaled_stable(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        scale: f32,
+    ) {
+        let mut draw_x = x.round();
+        let y = y.round();
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(g) = self.get_ui_glyph(c) {
+                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(draw_x.round(), y, g, scale);
+                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                draw_x += g.advance * scale;
+            }
+        }
+    }
+
     pub fn draw_string_mono_scaled(
         &mut self,
         text: &str,

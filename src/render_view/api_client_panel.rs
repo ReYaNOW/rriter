@@ -1,12 +1,39 @@
 use crate::app::api_client::{
-    format_last_loaded, grouped_route_ranges, ApiSpecSource, ApiUrlStatus,
+    api_timing_visible_at, format_api_secs, format_last_loaded_at, grouped_route_ranges,
+    now_epoch_secs, write_api_path_display, ApiMethod, ApiSpecSource,
 };
 use crate::renderer::Renderer;
-use crate::widgets::{Button, IconButton, IconType};
+use crate::render_view::tree_ui::{TREE_INDENT_W, TREE_ROW_H, TREE_TEXT_SCALE};
+use crate::widgets::{IconButton, IconType};
 use glow::HasContext;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn draw_api_method_chip(
+        &mut self,
+        method: ApiMethod,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        text_scale: f32,
+    ) {
+        let color = method_color(method);
+        let r = (h * 0.5).min(8.0 * s);
+        self.push_rounded_rect(x, y, w, h, r, color);
+        self.push_rect(x + w - r, y, r, h, color);
+        let label = method.chip_str();
+        let text_w = self.measure_ui_width(label, text_scale);
+        self.draw_string_scaled_stable(
+            label,
+            x + (w - text_w) * 0.5,
+            y + h * 0.5 + 4.5 * s,
+            [0.04, 0.05, 0.07, 1.0],
+            text_scale,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_api_client_panel(
         &mut self,
@@ -20,6 +47,7 @@ impl Renderer {
         mx: f32,
         my: f32,
         blink_alpha: f32,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
         self.flush();
         unsafe {
@@ -119,7 +147,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 "Файл openapi.json",
                 x + pad + 10.0 * s,
                 cy + 19.0 * s,
@@ -135,7 +163,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 "URL openapi.json",
                 x + pad + 10.0 * s,
                 cy + item_h + 19.0 * s,
@@ -183,7 +211,7 @@ impl Renderer {
             } else {
                 self.theme.fg
             };
-            self.draw_string_scaled(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
+            self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
             if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl))
                 && blink_alpha > 0.15
             {
@@ -219,12 +247,12 @@ impl Renderer {
         }
 
         if let Some(err) = &api.import_error {
-            self.draw_string_scaled(err, x + pad, cy + 18.0 * s, [1.0, 0.38, 0.38, 1.0], 0.72);
+            self.draw_string_scaled_stable(err, x + pad, cy + 18.0 * s, [1.0, 0.38, 0.38, 1.0], 0.72);
             cy += 24.0 * s;
         }
 
         if api.specs.is_empty() {
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 "Нет импортированных API",
                 x + pad,
                 cy + 24.0 * s,
@@ -233,6 +261,7 @@ impl Renderer {
             );
         }
 
+        let now = now_epoch_secs();
         let card_h = 112.0 * s;
         for (idx, spec) in api.specs.iter().enumerate() {
             let card_x = x + pad;
@@ -267,24 +296,24 @@ impl Renderer {
                 mx,
                 my,
             );
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 &spec.title,
                 card_x + 10.0 * s,
                 cy + 22.0 * s,
                 self.theme.fg,
-                0.86,
+                0.90,
             );
             let version = if spec.version.is_empty() {
                 spec.openapi_version.as_str()
             } else {
                 spec.version.as_str()
             };
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 version,
                 card_x + 10.0 * s,
                 cy + 42.0 * s,
                 [0.68, 0.70, 0.78, 1.0],
-                0.72,
+                0.80,
             );
             let source = match &spec.source {
                 ApiSpecSource::Local(path) => path
@@ -293,30 +322,57 @@ impl Renderer {
                     .unwrap_or("local"),
                 ApiSpecSource::Url(url) => url.as_str(),
             };
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 source,
                 card_x + 10.0 * s,
                 cy + 62.0 * s,
                 [0.58, 0.61, 0.70, 1.0],
-                0.66,
+                0.74,
             );
-            let loaded = format_last_loaded(spec.last_loaded);
-            self.draw_string_scaled(
+            let loaded = format_last_loaded_at(spec.last_loaded, now);
+            self.draw_string_scaled_stable(
                 &loaded,
                 card_x + 10.0 * s,
-                cy + 82.0 * s,
+                cy + 78.0 * s,
                 [0.58, 0.61, 0.70, 1.0],
-                0.66,
+                0.74,
             );
+            if api_timing_visible_at(spec.last_loaded, now) {
+                let fetch = format_api_secs(spec.last_fetch_secs);
+                let parse = format_api_secs(spec.last_parse_secs);
+                self.draw_string_scaled_stable(
+                    "Запрос",
+                    card_x + 10.0 * s,
+                    cy + 96.0 * s,
+                    self.theme.fg,
+                    0.78,
+                );
+                self.draw_string_scaled_stable(
+                    &fetch,
+                    card_x + 60.0 * s,
+                    cy + 96.0 * s,
+                    self.theme.fg,
+                    0.78,
+                );
+                self.draw_string_scaled_stable(
+                    "Парсинг",
+                    card_x + 126.0 * s,
+                    cy + 96.0 * s,
+                    self.theme.fg,
+                    0.78,
+                );
+                self.draw_string_scaled_stable(
+                    &parse,
+                    card_x + 188.0 * s,
+                    cy + 96.0 * s,
+                    self.theme.fg,
+                    0.78,
+                );
+            }
             if matches!(spec.source, ApiSpecSource::Url(_)) {
-                let (icon, color) = match spec.last_url_status {
-                    Some(ApiUrlStatus::Ok(_)) => (IconType::Check, [0.48, 0.86, 0.52, 1.0]),
-                    _ => (IconType::Error, [1.0, 0.36, 0.36, 1.0]),
-                };
-                self.draw_atlas_icon(icon, card_x + card_w - 32.0 * s, cy + 8.0 * s, 20.0 * s, color);
                 let refresh = IconButton {
                     x: card_x + card_w - 34.0 * s,
-                    y: cy + 40.0 * s,
+                    y: cy + 8.0 * s,
                     size: 26.0 * s,
                     icon: Some(IconType::Reload),
                     is_active: api.loading.contains(&spec.id),
@@ -334,43 +390,53 @@ impl Renderer {
                     false,
                 );
             }
-            let open = Button {
-                x: card_x + card_w - 96.0 * s,
-                y: cy + card_h - 34.0 * s,
-                w: 84.0 * s,
-                h: 26.0 * s,
-                text: "Открыть".to_string(),
-                icon: None,
-                text_scale: 0.72,
-                icon_size: 0.0,
-            };
-            open.render(self, mx, my, s, false);
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ApiSpecOpen(idx),
-                open.x,
-                open.y,
-                open.w,
-                open.h,
-                mx,
-                my,
-            );
             cy += card_h + 10.0 * s;
         }
 
         if let Some(model) = api.selected_model() {
             cy += 6.0 * s;
-            self.draw_string_scaled(
-                "Routes",
-                x + pad,
-                cy + 18.0 * s,
-                [0.74, 0.76, 0.84, 1.0],
-                0.76,
+            let tree_text_y = |row_y: f32| Renderer::tree_row_text_y(row_y, TREE_ROW_H * s, s);
+            let active_route_idx = active_api_route
+                .filter(|(spec_id, _)| *spec_id == model.id)
+                .map(|(_, route_idx)| route_idx);
+            let root_collapsed = api.collapsed_route_roots.contains(&model.id);
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ApiRoutesRoot,
+                x,
+                cy,
+                w,
+                TREE_ROW_H * s,
+                mx,
+                my,
             );
-            cy += 28.0 * s;
-            let row_h = 30.0 * s;
-            let tag_h = 28.0 * s;
+            self.draw_tree_disclosure_icon(
+                !root_collapsed,
+                x + pad,
+                cy,
+                TREE_ROW_H * s,
+                self.theme.line_num,
+            );
+            self.draw_string_scaled_stable(
+                "Routes",
+                x + pad + 18.0 * s,
+                tree_text_y(cy),
+                self.theme.fg,
+                TREE_TEXT_SCALE,
+            );
+            cy += TREE_ROW_H * s;
+            let row_h = TREE_ROW_H * s;
+            let tag_h = TREE_ROW_H * s;
+            let indent_w = TREE_INDENT_W * s;
+            if root_collapsed {
+                self.flush();
+                unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
+                }
+                return;
+            }
             let groups = grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id);
             let mut group_idx = 0usize;
+            let mut path_scratch = String::new();
             for (tag, start, len, collapsed) in groups {
                 ui_registry.register_rect(
                     crate::ui_system::UiId::ApiRouteTag(group_idx),
@@ -381,14 +447,20 @@ impl Renderer {
                     mx,
                     my,
                 );
-                let arrow = if collapsed { "›" } else { "⌄" };
-                self.draw_string_scaled(arrow, x + pad, cy + 19.0 * s, self.theme.line_num, 0.84);
-                self.draw_string_scaled(
+                let tag_x = x + pad + indent_w;
+                self.draw_tree_disclosure_icon(
+                    !collapsed,
+                    tag_x,
+                    cy,
+                    tag_h,
+                    self.theme.line_num,
+                );
+                self.draw_string_scaled_stable(
                     &tag,
-                    x + pad + 18.0 * s,
-                    cy + 19.0 * s,
+                    tag_x + 18.0 * s,
+                    tree_text_y(cy),
                     self.theme.fg,
-                    0.78,
+                    TREE_TEXT_SCALE,
                 );
                 cy += tag_h;
                 if !collapsed {
@@ -405,23 +477,32 @@ impl Renderer {
                         );
                         let hovered = ui_registry.hovered()
                             == Some(crate::ui_system::UiId::ApiRouteRow(route_idx));
+                        let active = active_route_idx == Some(route_idx);
+                        if active {
+                            self.push_rect(x, cy, w, row_h, [0.60, 0.35, 0.85, 0.14]);
+                            self.push_rect(x, cy, 3.0 * s, row_h, method_color(route.method));
+                        }
                         if hovered {
                             self.push_rect(x, cy, w, row_h, [1.0, 1.0, 1.0, 0.06]);
                         }
-                        let method_color = method_color(route.method);
-                        self.draw_string_scaled(
-                            route.method.as_str(),
-                            x + pad + 8.0 * s,
-                            cy + 20.0 * s,
-                            method_color,
-                            0.66,
+                        let route_x = x + pad + indent_w * 2.0;
+                        let chip_w = 34.0 * s;
+                        self.draw_api_method_chip(
+                            route.method,
+                            route_x,
+                            cy + 5.0 * s,
+                            chip_w,
+                            18.0 * s,
+                            s,
+                            0.62,
                         );
-                        self.draw_string_scaled(
-                            &route.path,
-                            x + pad + 58.0 * s,
-                            cy + 20.0 * s,
+                        write_api_path_display(&route.path, &mut path_scratch);
+                        self.draw_string_scaled_stable(
+                            &path_scratch,
+                            route_x + chip_w + 8.0 * s,
+                            tree_text_y(cy),
                             self.theme.fg,
-                            0.70,
+                            TREE_TEXT_SCALE,
                         );
                         cy += row_h;
                     }

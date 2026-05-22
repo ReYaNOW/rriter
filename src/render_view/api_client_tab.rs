@@ -1,4 +1,6 @@
-use crate::app::api_client::{json_body_is_valid, ApiFocus, ApiPrimitiveType};
+use crate::app::api_client::{
+    json_body_is_valid, write_api_path_display, ApiFocus, ApiPrimitiveType,
+};
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconType};
 use glow::HasContext;
@@ -22,10 +24,10 @@ impl Renderer {
         blink_alpha: f32,
     ) {
         self.push_rect(x, y, w, h, self.theme.bg);
-        ui_registry.register_rect(crate::ui_system::UiId::ApiTabBody, x, y, w, h, mx, my);
+        ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, x, y, w, h, mx, my);
         let Some(model) = ide_panel.api.models.get(&tab_meta.spec_id) else {
-            self.draw_string_scaled(
-                "Спецификация загружается или cache пустой",
+            self.draw_string_scaled_stable(
+                "Спецификация загружается или кэш пустой",
                 x + 28.0 * s,
                 y + 46.0 * s,
                 [0.72, 0.74, 0.82, 1.0],
@@ -35,7 +37,7 @@ impl Renderer {
         };
         let Some(route_idx) = tab_state.route_idx.or_else(|| (!model.routes.is_empty()).then_some(0))
         else {
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 "В спецификации нет routes",
                 x + 28.0 * s,
                 y + 46.0 * s,
@@ -64,24 +66,12 @@ impl Renderer {
         let scroll = tab_state.tab_scroll.current.round();
         let mut cy = y + pad - scroll;
 
-        let method_w = 64.0 * s;
-        self.push_rounded_rect(
-            x + pad,
-            cy,
-            method_w,
-            30.0 * s,
-            5.0 * s,
-            crate::render_view::api_client_panel::method_color(route.method),
-        );
-        self.draw_string_scaled(
-            route.method.as_str(),
-            x + pad + 12.0 * s,
-            cy + 21.0 * s,
-            [0.04, 0.05, 0.07, 1.0],
-            0.78,
-        );
-        self.draw_string_scaled(
-            &route.path,
+        let method_w = 50.0 * s;
+        self.draw_api_method_chip(route.method, x + pad, cy, method_w, 30.0 * s, s, 0.78);
+        let mut display_path = String::new();
+        write_api_path_display(&route.path, &mut display_path);
+        self.draw_string_scaled_stable(
+            &display_path,
             x + pad + method_w + 12.0 * s,
             cy + 23.0 * s,
             self.theme.fg,
@@ -89,12 +79,12 @@ impl Renderer {
         );
         cy += 38.0 * s;
         if !route.summary.is_empty() {
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 &route.summary,
                 x + pad,
                 cy + 18.0 * s,
                 [0.68, 0.70, 0.78, 1.0],
-                0.78,
+                0.84,
             );
             cy += 28.0 * s;
         }
@@ -104,7 +94,8 @@ impl Renderer {
         let mut sx = x + pad;
         for (idx, server) in model.servers.iter().enumerate() {
             let label = server.url.as_str();
-            let chip_w = (self.measure_ui_width(label, 0.72) + 20.0 * s)
+            let server_text_scale = 0.82;
+            let chip_w = (self.measure_ui_width(label, server_text_scale) + 20.0 * s)
                 .max(72.0 * s)
                 .min(content_w);
             if sx + chip_w > x + pad + content_w {
@@ -116,7 +107,7 @@ impl Renderer {
                 sx,
                 cy,
                 chip_w,
-                24.0 * s,
+                28.0 * s,
                 5.0 * s,
                 if active {
                     [0.35, 0.26, 0.48, 1.0]
@@ -129,11 +120,17 @@ impl Renderer {
                 sx,
                 cy,
                 chip_w,
-                24.0 * s,
+                28.0 * s,
                 mx,
                 my,
             );
-            self.draw_string_scaled(label, sx + 10.0 * s, cy + 17.0 * s, self.theme.fg, 0.72);
+            self.draw_string_scaled_stable(
+                label,
+                sx + 10.0 * s,
+                cy + 20.0 * s,
+                self.theme.fg,
+                server_text_scale,
+            );
             sx += chip_w + 8.0 * s;
         }
         cy += 42.0 * s;
@@ -213,7 +210,7 @@ impl Renderer {
         if let Some(body) = &route.request_body {
             self.draw_api_section_title("Body", x + pad, cy + 18.0 * s, s);
             let valid = body.is_multipart || json_body_is_valid(&tab_state.body_json);
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 if valid { "valid" } else { "invalid JSON" },
                 x + pad + 58.0 * s,
                 cy + 18.0 * s,
@@ -226,7 +223,7 @@ impl Renderer {
             );
             cy += 28.0 * s;
             if body.is_multipart {
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     "multipart/form-data fields",
                     x + pad,
                     cy + 18.0 * s,
@@ -238,7 +235,7 @@ impl Renderer {
                     && let Some(schema) = model.schema_arena.get(schema_ref.0)
                 {
                     for prop in &schema.properties {
-                        self.draw_string_scaled(
+                        self.draw_string_scaled_stable(
                             &prop.name,
                             x + pad + 10.0 * s,
                             cy + 19.0 * s,
@@ -337,7 +334,7 @@ impl Renderer {
         cy += 30.0 * s;
         if let Some(response) = &tab_state.response {
             if let Some(err) = &response.error {
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     &err.message,
                     x + pad,
                     cy + 18.0 * s,
@@ -349,14 +346,14 @@ impl Renderer {
                     .status
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "-".to_string());
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     &status_text,
                     x + pad,
                     cy + 18.0 * s,
                     [0.48, 0.86, 0.52, 1.0],
                     0.82,
                 );
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     "ms",
                     x + pad + 62.0 * s,
                     cy + 18.0 * s,
@@ -364,7 +361,7 @@ impl Renderer {
                     0.70,
                 );
                 let elapsed = response.elapsed_ms.to_string();
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     &elapsed,
                     x + pad + 84.0 * s,
                     cy + 18.0 * s,
@@ -390,7 +387,7 @@ impl Renderer {
                     s,
                 );
                 if response.truncated {
-                    self.draw_string_scaled(
+                    self.draw_string_scaled_stable(
                         "truncated",
                         x + pad + content_w - 86.0 * s,
                         cy + 18.0 * s,
@@ -400,7 +397,7 @@ impl Renderer {
                 }
             }
         } else if tab_state.pending {
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 "Запрос выполняется",
                 x + pad,
                 cy + 18.0 * s,
@@ -416,7 +413,7 @@ impl Renderer {
     }
 
     fn draw_api_section_title(&mut self, text: &str, x: f32, y: f32, s: f32) {
-        self.draw_string_scaled(text, x, y, [0.74, 0.76, 0.84, 1.0], 0.80);
+        self.draw_string_scaled_stable(text, x, y, [0.74, 0.76, 0.84, 1.0], 0.80);
         self.push_rect(x, y + 6.0 * s, 120.0 * s, 1.0, [1.0, 1.0, 1.0, 0.10]);
     }
 
@@ -443,9 +440,9 @@ impl Renderer {
     ) -> f32 {
         let row_h = 40.0 * s;
         let name_w = (w * 0.32).clamp(80.0 * s, 180.0 * s);
-        self.draw_string_scaled(name, x, y + 24.0 * s, self.theme.fg, 0.76);
+        self.draw_string_scaled_stable(name, x, y + 24.0 * s, self.theme.fg, 0.80);
         if required {
-            self.draw_string_scaled("*", x + name_w - 18.0 * s, y + 22.0 * s, [1.0, 0.42, 0.42, 1.0], 0.78);
+            self.draw_string_scaled_stable("*", x + name_w - 18.0 * s, y + 22.0 * s, [1.0, 0.42, 0.42, 1.0], 0.78);
         }
         let type_text = match ty {
             ApiPrimitiveType::String => "string",
@@ -456,7 +453,7 @@ impl Renderer {
             ApiPrimitiveType::Object => "object",
             ApiPrimitiveType::Unknown => "any",
         };
-        self.draw_string_scaled(type_text, x + name_w - 58.0 * s, y + 24.0 * s, [0.58, 0.61, 0.70, 1.0], 0.64);
+        self.draw_string_scaled_stable(type_text, x + name_w - 64.0 * s, y + 24.0 * s, [0.58, 0.61, 0.70, 1.0], 0.74);
         let input_x = x + name_w;
         let input_w = (w - name_w).max(80.0 * s);
         self.push_rounded_rect_border(
@@ -479,7 +476,7 @@ impl Renderer {
         } else {
             value.to_string()
         };
-        self.draw_string_scaled(&shown, input_x + 8.0 * s, y + 25.0 * s, self.theme.fg, 0.76);
+        self.draw_string_scaled_stable(&shown, input_x + 8.0 * s, y + 25.0 * s, self.theme.fg, 0.76);
         if focused && blink_alpha > 0.15 {
             let text_w = self.measure_ui_width(&shown, 0.76).min(input_w - 16.0 * s);
             self.push_rect(
@@ -520,7 +517,7 @@ impl Renderer {
             };
             let mut buf = [0u8; 4];
             let s_ch = ch.encode_utf8(&mut buf);
-            self.draw_string_scaled(s_ch, draw_x, y, color, 0.76);
+            self.draw_string_scaled_stable(s_ch, draw_x, y, color, 0.76);
             draw_x += self
                 .get_ui_glyph(ch)
                 .map(|g| g.advance * 0.76)

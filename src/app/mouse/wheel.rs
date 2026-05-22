@@ -385,10 +385,9 @@ impl App {
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.api.panel_scroll.anim_speed = 7.0;
                 self.ide_panel.api.panel_scroll.scroll_by(dy);
-                self.ide_panel
-                    .api
-                    .panel_scroll
-                    .clamp_target(0.0, 50_000.0);
+                let max_scroll =
+                    crate::app::api_client::api_panel_max_scroll(&self.ide_panel.api, ch, s);
+                self.ide_panel.api.panel_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
@@ -630,12 +629,26 @@ impl App {
         }
 
         if self.active_tab_is_api_client() {
+            let model = self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::ApiClient(meta, _) => {
+                        self.ide_panel.api.models.get(&meta.spec_id)
+                    }
+                    _ => None,
+                });
+            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+            let status_h = crate::render_view::ide_status_bar_height(s);
+            let visible_h = (wh - tab_bar_h - status_h).max(0.0);
             if let Some(crate::app::EditorTabKind::ApiClient(_, state)) =
                 self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
             {
+                let max_scroll =
+                    crate::app::api_client::api_tab_max_scroll(model, state, visible_h, s);
                 state.tab_scroll.anim_speed = 7.0;
                 state.tab_scroll.scroll_by(dy);
-                state.tab_scroll.clamp_target(0.0, 50_000.0);
+                state.tab_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
             }
             return;

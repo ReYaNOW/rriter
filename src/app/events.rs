@@ -1167,6 +1167,14 @@ impl ApplicationHandler for App {
                         }
                         _ => winit::window::CursorIcon::Default,
                     }
+                } else if self.active_tab_is_api_client() {
+                    if self.ui_registry.wants_text() {
+                        winit::window::CursorIcon::Text
+                    } else if wants_pointer {
+                        winit::window::CursorIcon::Pointer
+                    } else {
+                        winit::window::CursorIcon::Default
+                    }
                 } else if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if popup_blocks_background {
