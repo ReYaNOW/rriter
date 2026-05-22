@@ -651,11 +651,11 @@ impl Renderer {
                     final_x += self.char_advance(v_line_info.fold_suffix[i as usize]);
                 }
 
-                let hit_y_top = y - self.line_height;
-                let hit_y_bottom = y + 5.0 * s;
                 if let Some((word_start, word_end)) =
                     folded_import_keyword_range(editor, start_byte, end_byte)
                 {
+                    let hit_y_top = box_y_draw;
+                    let hit_y_bottom = box_y_draw + box_h_draw;
                     let word_x = self.left_padding
                         + self.measure_width(first, second, start_byte, word_start)
                         - render_scroll_x;
@@ -670,13 +670,12 @@ impl Renderer {
                         self.last_mouse_y,
                     );
                 }
-                let hit_w = next_x + 10.0 * s - (box_x - 2.0 * s);
                 ui_registry.register_rect(
                     crate::ui_system::UiId::EditorFoldDots(phys_idx),
-                    box_x - 2.0 * s,
-                    hit_y_top,
-                    hit_w,
-                    hit_y_bottom - hit_y_top,
+                    box_x,
+                    box_y_draw,
+                    box_w,
+                    box_h_draw,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
