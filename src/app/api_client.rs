@@ -4,10 +4,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
 pub const API_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
@@ -18,6 +19,7 @@ const API_SCHEMA_MAX_DEPTH: usize = 12;
 const API_SCHEMA_MAX_COUNT: usize = 768;
 const API_SCHEMA_MAX_PROPERTIES: usize = 160;
 const API_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const API_REACH_TIMEOUT: Duration = Duration::from_millis(1200);
 const API_UNTAGGED_GROUP: &str = "Без тэга";
 
 static API_HTTP_CLIENTS: std::sync::LazyLock<
@@ -346,6 +348,13 @@ pub struct ApiClientTabMeta {
     pub title: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApiResponseView {
+    #[default]
+    Body,
+    Headers,
+}
+
 #[derive(Clone, Debug)]
 pub struct ApiClientTabState {
     pub route_idx: Option<usize>,
@@ -355,6 +364,7 @@ pub struct ApiClientTabState {
     pub body_values: Vec<ApiInputValue>,
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
+    pub response_view: ApiResponseView,
     pub pending: bool,
     pub pending_request_id: Option<u64>,
     pub tab_scroll: ScrollState,
@@ -372,6 +382,7 @@ impl Default for ApiClientTabState {
             body_values: Vec::new(),
             body_json: "{\n  \n}".to_string(),
             response: None,
+            response_view: ApiResponseView::Body,
             pending: false,
             pending_request_id: None,
             tab_scroll: ScrollState::new(7.0),
@@ -390,6 +401,7 @@ impl PartialEq for ApiClientTabState {
             && self.body_values == other.body_values
             && self.body_json == other.body_json
             && self.response == other.response
+            && self.response_view == other.response_view
             && self.pending == other.pending
             && self.pending_request_id == other.pending_request_id
     }
@@ -1525,7 +1537,7 @@ pub fn api_tab_max_scroll(
     }
     content_h += 84.0 * scale;
     if tab_state.response.is_some() {
-        content_h += 208.0 * scale;
+        content_h += 242.0 * scale;
     } else if tab_state.pending {
         content_h += 24.0 * scale;
     }
@@ -1654,11 +1666,21 @@ pub struct ApiJobResponse {
     pub route_idx: usize,
     pub status: Option<u16>,
     pub elapsed_ms: u128,
+    pub server_reach_ms: Option<u128>,
+    pub timing_text: String,
     pub headers: Vec<(String, String)>,
+    pub headers_text: String,
     pub body: String,
     pub truncated: bool,
     pub error: Option<ApiLoadError>,
     pub resolved_host: Option<ApiResolvedHost>,
+}
+
+pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &str {
+    match view {
+        ApiResponseView::Body => &response.body,
+        ApiResponseView::Headers => &response.headers_text,
+    }
 }
 
 pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
@@ -1676,7 +1698,10 @@ fn send_api_request_body(
     multipart_body: Option<(String, Vec<u8>)>,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
     if let Some((content_type, body)) = multipart_body {
-        request.header("Content-Type", content_type).body(body).send()
+        request
+            .header("Content-Type", content_type)
+            .body(body)
+            .send()
     } else {
         request
             .header("Content-Type", "application/json")
@@ -1708,12 +1733,12 @@ fn build_multipart_body(
                     ));
                 }
                 let bytes = std::fs::read(path).map_err(|err| {
-                    ApiLoadError::new(
-                        ApiLoadErrorKind::Io,
-                        format!("файл не прочитан: {}", err),
-                    )
+                    ApiLoadError::new(ApiLoadErrorKind::Io, format!("файл не прочитан: {}", err))
                 })?;
-                let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("file");
                 push_multipart_field(&mut body, &boundary, name, Some(file_name), &bytes);
             }
         }
@@ -1757,19 +1782,23 @@ fn push_multipart_quoted(out: &mut Vec<u8>, value: &str) {
 }
 
 fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
-    let started = std::time::Instant::now();
+    let server_reach_ms = measure_api_server_reach_ms(job.resolved_host.as_ref());
     let mut response = ApiJobResponse {
         request_id: job.request_id,
         spec_id: job.spec_id,
         route_idx: job.route_idx,
         status: None,
         elapsed_ms: 0,
+        server_reach_ms,
+        timing_text: String::new(),
         headers: Vec::new(),
+        headers_text: String::new(),
         body: String::new(),
         truncated: false,
         error: None,
         resolved_host: job.resolved_host.clone(),
     };
+    let started = Instant::now();
     let client = api_http_client(job.resolved_host.as_ref());
     let multipart_body = job
         .body_multipart
@@ -1798,11 +1827,14 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         },
         Err(err) => {
             response.elapsed_ms = started.elapsed().as_millis();
+            response.timing_text =
+                format_api_timing_text(response.elapsed_ms, response.server_reach_ms);
             response.error = Some(err);
             return response;
         }
     };
     response.elapsed_ms = started.elapsed().as_millis();
+    response.timing_text = format_api_timing_text(response.elapsed_ms, response.server_reach_ms);
     match result {
         Ok(mut res) => {
             response.status = Some(res.status().as_u16());
@@ -1813,6 +1845,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
                         .push((name.as_str().to_string(), v.to_string()));
                 }
             }
+            response.headers_text = format_api_response_headers(&response.headers);
             match read_limited_text(&mut res, API_MAX_RESPONSE_BYTES) {
                 Ok(body) => response.body = format_api_response_body(body),
                 Err(err) if err.kind == ApiLoadErrorKind::TooLarge => {
@@ -1825,6 +1858,78 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         Err(err) => response.error = Some(classify_reqwest_error(err)),
     }
     response
+}
+
+fn format_api_response_headers(headers: &[(String, String)]) -> String {
+    if headers.is_empty() {
+        return "No headers".to_string();
+    }
+    let capacity = headers
+        .iter()
+        .map(|(name, value)| name.len() + value.len() + 3)
+        .sum();
+    let mut out = String::with_capacity(capacity);
+    for (idx, (name, value)) in headers.iter().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        out.push_str(name);
+        out.push_str(": ");
+        out.push_str(value);
+    }
+    out
+}
+
+fn measure_api_server_reach_ms(resolved: Option<&ApiResolvedHost>) -> Option<u128> {
+    let resolved = resolved?;
+    measure_api_icmp_reach_ms(resolved).or_else(|| measure_api_tcp_reach_ms(resolved))
+}
+
+fn measure_api_icmp_reach_ms(resolved: &ApiResolvedHost) -> Option<u128> {
+    let ip = resolved.ip.to_string();
+    let output = Command::new("ping")
+        .args(["-n", "-c", "1", "-W", "1", ip.as_str()])
+        .output()
+        .ok()?;
+    parse_api_ping_rtt_ms(&output.stdout)
+        .or_else(|| parse_api_ping_rtt_ms(&output.stderr))
+        .map(|rtt_ms| rtt_ms.saturating_add(1) / 2)
+}
+
+fn measure_api_tcp_reach_ms(resolved: &ApiResolvedHost) -> Option<u128> {
+    let addr = SocketAddr::new(resolved.ip, resolved.port);
+    let started = Instant::now();
+    TcpStream::connect_timeout(&addr, API_REACH_TIMEOUT)
+        .ok()
+        .map(|_| started.elapsed().as_millis().max(1).saturating_add(1) / 2)
+}
+
+fn parse_api_ping_rtt_ms(bytes: &[u8]) -> Option<u128> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    if text.contains("time<1") {
+        return Some(1);
+    }
+    let rest = text.split_once("time=")?.1;
+    let mut end = 0usize;
+    for (idx, ch) in rest.char_indices() {
+        if ch.is_ascii_digit() || ch == '.' || ch == ',' {
+            end = idx + ch.len_utf8();
+        } else if end > 0 {
+            break;
+        } else {
+            return None;
+        }
+    }
+    let value = rest.get(..end)?.replace(',', ".");
+    let millis = value.parse::<f64>().ok()?;
+    Some((millis.round().max(1.0)) as u128)
+}
+
+fn format_api_timing_text(elapsed_ms: u128, server_reach_ms: Option<u128>) -> String {
+    match server_reach_ms {
+        Some(server_reach_ms) => format!("{elapsed_ms} ms (~{server_reach_ms} ms до сервера)"),
+        None => format!("{elapsed_ms} ms (n/a до сервера)"),
+    }
 }
 
 fn format_api_response_body(body: String) -> String {
@@ -2339,6 +2444,7 @@ impl crate::app::App {
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.route_idx = Some(route_idx);
             state.response = None;
+            state.response_view = ApiResponseView::Body;
             state.pending = false;
             state.pending_request_id = None;
             state.body_scroll.current = 0.0;
@@ -2518,10 +2624,9 @@ impl crate::app::App {
                     crate::app::EditorTabKind::ApiClient(meta, state)
                         if meta.spec_id == *spec_id && state.route_idx == Some(*route_idx) =>
                     {
-                        state
-                            .response
-                            .as_ref()
-                            .map(|response| response.body.clone())
+                        state.response.as_ref().map(|response| {
+                            api_response_text(response, state.response_view).to_string()
+                        })
                     }
                     _ => None,
                 })
@@ -2693,6 +2798,35 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiTryRequest => {
                 self.start_active_api_request();
             }
+            crate::ui_system::UiId::ApiResponseBodyTab(route_idx)
+            | crate::ui_system::UiId::ApiResponseHeadersTab(route_idx) => {
+                let Some((meta, state)) = self.active_api_tab() else {
+                    return true;
+                };
+                if state.route_idx != Some(route_idx) {
+                    return true;
+                }
+                let spec_id = meta.spec_id;
+                let view = match id {
+                    crate::ui_system::UiId::ApiResponseBodyTab(_) => ApiResponseView::Body,
+                    crate::ui_system::UiId::ApiResponseHeadersTab(_) => ApiResponseView::Headers,
+                    _ => ApiResponseView::Body,
+                };
+                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                    state.response_view = view;
+                    state.response_scroll.current = 0.0;
+                    state.response_scroll.target = 0.0;
+                }
+                if matches!(
+                    self.ide_panel.api.focused,
+                    Some(ApiFocus::Response {
+                        spec_id: focused_spec,
+                        route_idx: focused_route,
+                    }) if focused_spec == spec_id && focused_route == route_idx
+                ) {
+                    self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
+                }
+            }
             crate::ui_system::UiId::ApiPathParamInput(route_idx, param_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
@@ -2791,7 +2925,10 @@ impl crate::app::App {
                         let root = route.request_body.as_ref()?.schema?;
                         let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
                         let schema = model.schema_arena.get(prop.schema.0)?;
-                        Some((prop.name.clone(), schema.enum_values.get(value_idx)?.clone()))
+                        Some((
+                            prop.name.clone(),
+                            schema.enum_values.get(value_idx)?.clone(),
+                        ))
                     });
                 let mut applied = None;
                 if let Some((name, value)) = picked
@@ -3088,7 +3225,10 @@ impl crate::app::App {
                     route_idx,
                     status: None,
                     elapsed_ms: 0,
+                    server_reach_ms: None,
+                    timing_text: String::new(),
                     headers: Vec::new(),
+                    headers_text: String::new(),
                     body: String::new(),
                     truncated: false,
                     error: Some(ApiLoadError::new(
@@ -3110,7 +3250,10 @@ impl crate::app::App {
                         route_idx,
                         status: None,
                         elapsed_ms: 0,
+                        server_reach_ms: None,
+                        timing_text: String::new(),
                         headers: Vec::new(),
+                        headers_text: String::new(),
                         body: String::new(),
                         truncated: false,
                         error: Some(err),
@@ -3267,7 +3410,7 @@ impl crate::app::App {
             Some(ApiFocus::Response { spec_id, route_idx })
                 if spec_id == result.spec_id && route_idx == result.route_idx
         );
-        let focused_body = focused_response.then(|| result.body.clone());
+        let mut focused_text = None;
         let mut applied = false;
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
@@ -3279,6 +3422,10 @@ impl crate::app::App {
                 state.pending_request_id = None;
                 state.response_scroll.current = 0.0;
                 state.response_scroll.target = 0.0;
+                if focused_response {
+                    focused_text =
+                        Some(api_response_text(&result, state.response_view).to_string());
+                }
                 state.response = Some(result);
                 applied = true;
                 break;
@@ -3291,9 +3438,9 @@ impl crate::app::App {
             self.ide_panel.api.last_resolved_host = resolved;
             self.ide_panel.api.persist();
         }
-        if let Some(body) = focused_body {
+        if let Some(text) = focused_text {
             let old_version = self.ide_panel.api.input_editor.version;
-            self.ide_panel.api.input_editor.set_text_clean(&body);
+            self.ide_panel.api.input_editor.set_text_clean(&text);
             self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
         }
     }
@@ -3374,7 +3521,9 @@ fn api_multipart_parts_for_route(
     let Some(body) = route.request_body.as_ref().filter(|body| body.is_multipart) else {
         return Vec::new();
     };
-    let Some(schema) = body.schema.and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+    let Some(schema) = body
+        .schema
+        .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
     else {
         return Vec::new();
     };
@@ -3888,7 +4037,10 @@ mod tests {
                 route_idx: 0,
                 status: Some(200),
                 elapsed_ms: 1,
+                server_reach_ms: Some(1),
+                timing_text: "1 ms (~1 ms до сервера)".to_string(),
                 headers: Vec::new(),
+                headers_text: String::new(),
                 body: "{}".to_string(),
                 truncated: false,
                 error: None,

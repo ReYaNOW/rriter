@@ -63,6 +63,8 @@ pub enum UiId {
     ApiBodyFieldInput(usize, usize),
     ApiBodyAllowedValue(usize, usize, usize),
     ApiBodyFilePick(usize, usize),
+    ApiResponseBodyTab(usize),
+    ApiResponseHeadersTab(usize),
     ApiResponseBody(usize),
     ApiTabBody,
 

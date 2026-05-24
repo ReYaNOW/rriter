@@ -673,7 +673,13 @@ impl App {
                             state
                                 .response
                                 .as_ref()
-                                .map(|response| response.body.clone())
+                                .map(|response| {
+                                    crate::app::api_client::api_response_text(
+                                        response,
+                                        state.response_view,
+                                    )
+                                    .to_string()
+                                })
                                 .unwrap_or_default()
                         };
                         let max_scroll =

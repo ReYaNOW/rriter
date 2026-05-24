@@ -1,6 +1,6 @@
 use crate::app::api_client::{
-    API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiSchema, ApiSchemaKind,
-    api_body_prop_row_height, api_param_row_height, api_schema_is_file_input,
+    API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiResponseView, ApiSchema, ApiSchemaKind,
+    api_body_prop_row_height, api_param_row_height, api_response_text, api_schema_is_file_input,
     api_schema_is_multi_file_input, api_text_area_line_height, json_body_is_valid,
     write_api_path_display,
 };
@@ -368,6 +368,7 @@ impl Renderer {
                         body_h - 16.0 * s,
                         s,
                         tab_state.body_scroll.current,
+                        false,
                     );
                     self.draw_api_text_scrollbar(
                         &body_text,
@@ -448,21 +449,44 @@ impl Renderer {
                     0.92,
                 );
                 self.draw_string_scaled_stable(
-                    "ms",
+                    &response.timing_text,
                     x + pad + 62.0 * s,
                     cy + 18.0 * s,
                     [0.68, 0.70, 0.78, 1.0],
-                    0.80,
-                );
-                let elapsed = response.elapsed_ms.to_string();
-                self.draw_string_scaled_stable(
-                    &elapsed,
-                    x + pad + 84.0 * s,
-                    cy + 18.0 * s,
-                    self.theme.fg,
                     0.88,
                 );
                 cy += 28.0 * s;
+                let tab_y = cy;
+                let tab_h = 28.0 * s;
+                let body_w = self.measure_ui_width("Body", 0.86) + 22.0 * s;
+                let headers_w = self.measure_ui_width("Headers", 0.86) + 22.0 * s;
+                self.draw_api_response_tab(
+                    "Body",
+                    tab_state.response_view == ApiResponseView::Body,
+                    x + pad,
+                    tab_y,
+                    body_w,
+                    tab_h,
+                    s,
+                    crate::ui_system::UiId::ApiResponseBodyTab(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                self.draw_api_response_tab(
+                    "Headers",
+                    tab_state.response_view == ApiResponseView::Headers,
+                    x + pad + body_w + 8.0 * s,
+                    tab_y,
+                    headers_w,
+                    tab_h,
+                    s,
+                    crate::ui_system::UiId::ApiResponseHeadersTab(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                cy += 34.0 * s;
                 let resp_h = 180.0 * s;
                 self.push_rounded_rect(
                     x + pad,
@@ -489,7 +513,7 @@ impl Renderer {
                 let response_text = if response_focused {
                     ide_panel.api.input_editor.get_full_text()
                 } else {
-                    response.body.clone()
+                    api_response_text(response, tab_state.response_view).to_string()
                 };
                 let resp_clip = (
                     x + pad + 2.0 * s,
@@ -517,6 +541,7 @@ impl Renderer {
                         resp_h - 16.0 * s,
                         s,
                         tab_state.response_scroll.current,
+                        tab_state.response_view == ApiResponseView::Headers,
                     );
                     self.draw_api_text_scrollbar(
                         &response_text,
@@ -575,6 +600,49 @@ impl Renderer {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_response_tab(
+        &mut self,
+        label: &str,
+        active: bool,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        id: crate::ui_system::UiId,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
+        let hovered = ui_registry.register_rect(id, x, y, w, h, mx, my);
+        if active || hovered {
+            self.push_rounded_rect(
+                x,
+                y,
+                w,
+                h,
+                5.0 * s,
+                if active {
+                    [1.0, 1.0, 1.0, 0.12]
+                } else {
+                    [1.0, 1.0, 1.0, 0.06]
+                },
+            );
+        }
+        self.draw_string_scaled_stable(
+            label,
+            x + 11.0 * s,
+            y + 20.0 * s,
+            if active {
+                self.theme.fg
+            } else {
+                [0.64, 0.66, 0.74, 1.0]
+            },
+            0.86,
+        );
+    }
+
     fn draw_api_dynamic_table_frame(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
         if h <= 0.0 {
             return;
@@ -587,7 +655,6 @@ impl Renderer {
         self.push_rect(x + w, y, (1.0 * s).max(1.0), h, line);
     }
 
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     fn draw_api_body_prop_row(
         &mut self,
@@ -613,8 +680,7 @@ impl Renderer {
         let input_w = (w * 0.60).max(120.0 * s);
         let input_x = x + (w - input_w) * 0.5;
         let input_h = 36.0 * s;
-        let input_y =
-            y + (row_h - input_h) * 0.5 - schema.examples.len().min(3) as f32 * 8.0 * s;
+        let input_y = y + (row_h - input_h) * 0.5 - schema.examples.len().min(3) as f32 * 8.0 * s;
         let left_x = (input_x - 150.0 * s).max(x + 12.0 * s);
         let text_y = input_y + 24.0 * s;
         self.draw_string_scaled_stable(name, left_x, text_y, self.theme.fg, API_FIELD_NAME_SCALE);
@@ -1046,8 +1112,7 @@ impl Renderer {
             }
             let sel_start = start.max(line_start).min(line_end);
             let sel_end = end.max(line_start).min(line_end);
-            let newline_selected =
-                line_end < text.len() && start <= line_end && end > line_end;
+            let newline_selected = line_end < text.len() && start <= line_end && end > line_end;
             if sel_start < sel_end || newline_selected {
                 let prefix = self
                     .measure_ui_width(&text[line_start..sel_start], API_BODY_TEXT_SCALE)
@@ -1057,8 +1122,8 @@ impl Renderer {
                 } else {
                     0.0
                 };
-                let sel_w = (text_w + if newline_selected { 10.0 * s } else { 0.0 })
-                    .min(w - prefix);
+                let sel_w =
+                    (text_w + if newline_selected { 10.0 * s } else { 0.0 }).min(w - prefix);
                 if sel_w > 0.0 {
                     let sel_y = y - line_offset + visible_idx as f32 * line_h;
                     self.push_rect(x + prefix, sel_y, sel_w, line_h, self.theme.sel);
@@ -1130,6 +1195,7 @@ impl Renderer {
         h: f32,
         s: f32,
         scroll_y: f32,
+        headers: bool,
     ) {
         let line_h = api_text_area_line_height(s);
         let scroll_y = scroll_y.clamp(
@@ -1151,7 +1217,21 @@ impl Renderer {
             if visible_idx >= max_lines {
                 break;
             }
-            self.draw_json_lexed_line(line, x, y - line_offset + visible_idx as f32 * line_h, w);
+            if headers {
+                self.draw_header_lexed_line(
+                    line,
+                    x,
+                    y - line_offset + visible_idx as f32 * line_h,
+                    w,
+                );
+            } else {
+                self.draw_json_lexed_line(
+                    line,
+                    x,
+                    y - line_offset + visible_idx as f32 * line_h,
+                    w,
+                );
+            }
             byte_idx = line_end.saturating_add(1);
         }
     }
@@ -1229,6 +1309,37 @@ impl Renderer {
         }
     }
 
+    fn draw_header_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
+        let Some(colon_idx) = line.find(':') else {
+            let mut draw_x = x;
+            self.draw_json_colored_segment(line, [0.70, 0.72, 0.78, 1.0], x, y, w, &mut draw_x);
+            return;
+        };
+        let (key, rest) = line.split_at(colon_idx);
+        let value_start = rest
+            .as_bytes()
+            .iter()
+            .position(|b| !matches!(*b, b':' | b' ' | b'\t'))
+            .unwrap_or(rest.len());
+        let mut draw_x = x;
+        self.draw_json_colored_segment(key, [1.0, 0.68, 0.26, 1.0], x, y, w, &mut draw_x);
+        self.draw_json_colored_segment(
+            &rest[..value_start],
+            [0.86, 0.87, 0.91, 1.0],
+            x,
+            y,
+            w,
+            &mut draw_x,
+        );
+        let value = &rest[value_start..];
+        let value_color = if header_value_is_number(value) {
+            crate::highlighter::DRACULA_PURPLE
+        } else {
+            [0.70, 0.72, 0.78, 1.0]
+        };
+        self.draw_json_colored_segment(value, value_color, x, y, w, &mut draw_x);
+    }
+
     fn draw_json_colored_segment(
         &mut self,
         segment: &str,
@@ -1300,8 +1411,7 @@ fn json_number_end(line: &str, start: usize) -> usize {
     let bytes = line.as_bytes();
     let mut idx = start;
     while idx < bytes.len()
-        && (bytes[idx].is_ascii_digit()
-            || matches!(bytes[idx], b'-' | b'+' | b'.' | b'e' | b'E'))
+        && (bytes[idx].is_ascii_digit() || matches!(bytes[idx], b'-' | b'+' | b'.' | b'e' | b'E'))
     {
         idx += 1;
     }
@@ -1322,6 +1432,11 @@ fn json_token_boundary(line: &str, idx: usize) -> bool {
     line.as_bytes()
         .get(idx)
         .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+}
+
+fn header_value_is_number(value: &str) -> bool {
+    let value = value.trim();
+    value.bytes().any(|b| b.is_ascii_digit()) && value.parse::<f64>().is_ok()
 }
 
 fn api_param_type_text(param: &ApiParam) -> &'static str {
