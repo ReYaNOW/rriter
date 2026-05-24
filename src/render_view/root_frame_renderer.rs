@@ -358,7 +358,7 @@ impl Renderer {
         let (first, second) = editor.text_parts();
 
         let active_api_route = tabs.get(active_tab).and_then(|tab| match &tab.kind {
-            crate::app::EditorTabKind::ApiClient(meta, state) => {
+            crate::app::EditorTabKind::ApiClient(meta, state) if !state.auth_view => {
                 Some((meta.spec_id, state.route_idx.unwrap_or(0)))
             }
             _ => None,

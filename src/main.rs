@@ -122,6 +122,7 @@ pub enum OpenTabSnapshot {
     Api {
         spec_id: crate::app::api_client::ApiSpecId,
         route_idx: Option<usize>,
+        auth_view: bool,
     },
 }
 
@@ -141,12 +142,18 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
                 .next()
                 .and_then(|raw| raw.parse::<u64>().ok())
                 .map(crate::app::api_client::ApiSpecId);
-            let route_idx = parts
-                .next()
+            let tail = parts.next().unwrap_or("");
+            let auth_view = tail == "auth";
+            let route_idx = (!auth_view)
+                .then_some(tail)
                 .and_then(|raw| (!raw.is_empty()).then_some(raw))
                 .and_then(|raw| raw.parse::<usize>().ok());
             if let Some(spec_id) = spec_id {
-                tabs.push(OpenTabSnapshot::Api { spec_id, route_idx });
+                tabs.push(OpenTabSnapshot::Api {
+                    spec_id,
+                    route_idx,
+                    auth_view,
+                });
             }
         } else {
             tabs.push(OpenTabSnapshot::File(PathBuf::from(line)));
@@ -187,10 +194,14 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
         crate::app::EditorTabKind::ApiClient(meta, state) => Some(format!(
             "API\t{}\t{}",
             meta.spec_id.0,
-            state
-                .route_idx
-                .map(|idx| idx.to_string())
-                .unwrap_or_default()
+            if state.auth_view {
+                "auth".to_string()
+            } else {
+                state
+                    .route_idx
+                    .map(|idx| idx.to_string())
+                    .unwrap_or_default()
+            }
         )),
         crate::app::EditorTabKind::GitDiff(_, _) => None,
     }
@@ -563,10 +574,33 @@ mod tests {
             vec![
                 OpenTabSnapshot::Api {
                     spec_id: crate::app::api_client::ApiSpecId(42),
-                    route_idx: Some(7)
+                    route_idx: Some(7),
+                    auth_view: false,
                 },
                 OpenTabSnapshot::File(PathBuf::from("api:/tmp/file"))
             ]
+        );
+
+        let mut auth_tab = tab(None);
+        auth_tab.kind = crate::app::EditorTabKind::ApiClient(
+            crate::app::api_client::ApiClientTabMeta {
+                spec_id: crate::app::api_client::ApiSpecId(42),
+                title: "Auth".to_string(),
+            },
+            crate::app::api_client::ApiClientTabState {
+                auth_view: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(format_open_tabs_content(&[auth_tab], 0), "0\nAPI\t42\tauth");
+        let (tabs, _) = parse_open_tabs_content("0\nAPI\t42\tauth\n");
+        assert_eq!(
+            tabs,
+            vec![OpenTabSnapshot::Api {
+                spec_id: crate::app::api_client::ApiSpecId(42),
+                route_idx: None,
+                auth_view: true,
+            }]
         );
     }
 

@@ -1,6 +1,8 @@
 use crate::app::api_client::{
     API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiResponseView, ApiSchema, ApiSchemaKind,
-    api_body_prop_row_height, api_param_row_height, api_response_text, api_schema_is_file_input,
+    ApiSecuritySchemeKind, api_auth_scheme_row_height, api_body_prop_row_height,
+    api_param_row_height, api_response_text, api_route_auth_missing,
+    api_route_auth_scheme_indices, api_schema_is_file_input,
     api_schema_is_multi_file_input, api_text_area_line_height, json_body_is_valid,
     write_api_path_display,
 };
@@ -44,6 +46,69 @@ impl Renderer {
             );
             return;
         };
+        if tab_state.auth_view {
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    x.round() as i32,
+                    (self.height - (y + h)).round() as i32,
+                    w.round() as i32,
+                    h.round() as i32,
+                );
+            }
+            let tab_clip = (x, y, w, h);
+            let pad = 28.0 * s;
+            let content_w = (w - pad * 2.0).max(1.0);
+            let scroll = tab_state.tab_scroll.current.round();
+            let mut cy = y + pad - scroll;
+
+            self.draw_string_scaled_stable("Auth", x + pad, cy + 24.0 * s, self.theme.fg, 1.18);
+            cy += 38.0 * s;
+            if model.security_schemes.is_empty() {
+                self.draw_string_scaled_stable(
+                    "No auth schemes",
+                    x + pad,
+                    cy + 20.0 * s,
+                    [0.68, 0.70, 0.78, 1.0],
+                    0.90,
+                );
+            } else {
+                self.draw_api_dynamic_table_frame(
+                    x + pad,
+                    cy,
+                    content_w,
+                    model
+                        .security_schemes
+                        .iter()
+                        .map(|scheme| api_auth_scheme_row_height(scheme, s))
+                        .sum::<f32>(),
+                    s,
+                );
+                for (scheme_idx, scheme) in model.security_schemes.iter().enumerate() {
+                    cy = self.draw_api_auth_scheme_row(
+                        x + pad,
+                        cy,
+                        content_w,
+                        s,
+                        tab_meta.spec_id,
+                        scheme_idx,
+                        scheme,
+                        ide_panel,
+                        blink_alpha,
+                        ui_registry,
+                        mx,
+                        my,
+                    );
+                }
+            }
+            self.restore_api_tab_clip(tab_clip);
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+            return;
+        }
         let Some(route_idx) = tab_state
             .route_idx
             .or_else(|| (!model.routes.is_empty()).then_some(0))
@@ -139,13 +204,58 @@ impl Renderer {
             self.draw_string_scaled_stable(
                 label,
                 sx + 10.0 * s,
-                cy + 23.0 * s,
+                api_centered_text_y(cy, 32.0 * s, s),
                 self.theme.fg,
                 server_text_scale,
             );
             sx += chip_w + 8.0 * s;
         }
         cy += 42.0 * s;
+
+        let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
+        if !auth_scheme_indices.is_empty() {
+            self.draw_api_section_title("Auth", x + pad, cy + 18.0 * s, s);
+            if api_route_auth_missing(model, route, &ide_panel.api.auth) {
+                self.draw_string_scaled_stable(
+                    "missing auth",
+                    x + pad + 52.0 * s,
+                    cy + 18.0 * s,
+                    [1.0, 0.42, 0.42, 1.0],
+                    0.86,
+                );
+            }
+            cy += 28.0 * s;
+            self.draw_api_dynamic_table_frame(
+                x + pad,
+                cy,
+                content_w,
+                auth_scheme_indices
+                    .iter()
+                    .filter_map(|idx| model.security_schemes.get(*idx))
+                    .map(|scheme| api_auth_scheme_row_height(scheme, s))
+                    .sum::<f32>(),
+                s,
+            );
+            for scheme_idx in auth_scheme_indices {
+                if let Some(scheme) = model.security_schemes.get(scheme_idx) {
+                    cy = self.draw_api_auth_scheme_row(
+                        x + pad,
+                        cy,
+                        content_w,
+                        s,
+                        tab_meta.spec_id,
+                        scheme_idx,
+                        scheme,
+                        ide_panel,
+                        blink_alpha,
+                        ui_registry,
+                        mx,
+                        my,
+                    );
+                }
+            }
+            cy += 8.0 * s;
+        }
 
         if !route.path_params.is_empty() {
             self.draw_api_section_title("Path params", x + pad, cy + 18.0 * s, s);
@@ -229,12 +339,20 @@ impl Renderer {
 
         if let Some(body) = &route.request_body {
             self.draw_api_section_title("Body", x + pad, cy + 18.0 * s, s);
+            self.draw_string_scaled_stable(
+                &body.content_type,
+                x + pad + 52.0 * s,
+                cy + 18.0 * s,
+                [0.35, 0.75, 1.0, 1.0],
+                0.84,
+            );
             let body_focused = matches!(
                 ide_panel.api.focused,
                 Some(ApiFocus::Body { spec_id, route_idx: f_route })
                     if spec_id == tab_meta.spec_id && f_route == route_idx
             );
             let valid = body.is_multipart
+                || body.is_form_urlencoded
                 || if body_focused {
                     ide_panel
                         .api
@@ -247,9 +365,10 @@ impl Renderer {
                 } else {
                     json_body_is_valid(&tab_state.body_json)
                 };
+            let body_type_w = self.measure_ui_width(&body.content_type, 0.84);
             self.draw_string_scaled_stable(
                 if valid { "valid" } else { "invalid JSON" },
-                x + pad + 58.0 * s,
+                x + pad + 52.0 * s + body_type_w + 12.0 * s,
                 cy + 18.0 * s,
                 if valid {
                     [0.48, 0.86, 0.52, 1.0]
@@ -259,7 +378,7 @@ impl Renderer {
                 0.92,
             );
             cy += 28.0 * s;
-            if body.is_multipart {
+            if body.is_multipart || body.is_form_urlencoded {
                 if let Some(schema_ref) = body.schema
                     && let Some(schema) = model.schema_arena.get(schema_ref.0)
                 {
@@ -633,7 +752,7 @@ impl Renderer {
         self.draw_string_scaled_stable(
             label,
             x + 11.0 * s,
-            y + 20.0 * s,
+            api_centered_text_y(y, h, s),
             if active {
                 self.theme.fg
             } else {
@@ -653,6 +772,262 @@ impl Renderer {
         self.push_rect(x, y + h, w, (1.0 * s).max(1.0), line);
         self.push_rect(x, y, (1.0 * s).max(1.0), h, line);
         self.push_rect(x + w, y, (1.0 * s).max(1.0), h, line);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_auth_scheme_row(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        s: f32,
+        spec_id: crate::app::api_client::ApiSpecId,
+        scheme_idx: usize,
+        scheme: &crate::app::api_client::ApiSecurityScheme,
+        ide_panel: &crate::app::IdePanelState,
+        blink_alpha: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) -> f32 {
+        let row_h = api_auth_scheme_row_height(scheme, s);
+        let label_x = x + 12.0 * s;
+        let text_y = y + 24.0 * s;
+        self.draw_string_scaled_stable(&scheme.name, label_x, text_y, self.theme.fg, 0.90);
+        self.draw_string_scaled_stable(
+            &scheme.summary(),
+            label_x,
+            text_y + 18.0 * s,
+            [0.35, 0.75, 1.0, 1.0],
+            API_FIELD_META_SCALE,
+        );
+
+        let save_w = 58.0 * s;
+        let clear_w = 58.0 * s;
+        let input_x = x + (w * 0.34).max(145.0 * s);
+        let input_w = (w - (input_x - x) - save_w - clear_w - 28.0 * s).max(120.0 * s);
+        let entry = ide_panel.api.auth.entry(spec_id, &scheme.name);
+        if matches!(
+            scheme.kind,
+            ApiSecuritySchemeKind::Http { ref scheme, .. } if scheme.eq_ignore_ascii_case("basic")
+        ) {
+            let user_focused = matches!(
+                ide_panel.api.focused,
+                Some(ApiFocus::AuthUsername { spec_id: f_spec, scheme: ref focused_scheme })
+                    if f_spec == spec_id && focused_scheme == &scheme.name
+            );
+            let pass_focused = matches!(
+                ide_panel.api.focused,
+                Some(ApiFocus::AuthPassword { spec_id: f_spec, scheme: ref focused_scheme })
+                    if f_spec == spec_id && focused_scheme == &scheme.name
+            );
+            let username = entry.map(|entry| entry.username.as_str()).unwrap_or("");
+            let password = entry.map(|entry| entry.password.as_str()).unwrap_or("");
+            let user_edit_text;
+            let shown_username = if user_focused {
+                user_edit_text = ide_panel.api.input_editor.get_full_text();
+                user_edit_text.as_str()
+            } else {
+                username
+            };
+            self.draw_api_auth_input(
+                input_x,
+                y + 10.0 * s,
+                input_w,
+                32.0 * s,
+                s,
+                shown_username,
+                user_focused,
+                false,
+                &ide_panel.api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiAuthUsername(scheme_idx),
+                ui_registry,
+                mx,
+                my,
+            );
+            let pass_edit_text;
+            let shown_password = if pass_focused {
+                pass_edit_text = ide_panel.api.input_editor.get_full_text();
+                pass_edit_text.as_str()
+            } else {
+                password
+            };
+            self.draw_api_auth_input(
+                input_x,
+                y + 48.0 * s,
+                input_w,
+                32.0 * s,
+                s,
+                shown_password,
+                pass_focused,
+                true,
+                &ide_panel.api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiAuthPassword(scheme_idx),
+                ui_registry,
+                mx,
+                my,
+            );
+        } else {
+            let focused = matches!(
+                ide_panel.api.focused,
+                Some(ApiFocus::AuthValue { spec_id: f_spec, scheme: ref focused_scheme })
+                    if f_spec == spec_id && focused_scheme == &scheme.name
+            );
+            let value = entry
+                .map(|entry| {
+                    if !entry.access_token.is_empty() {
+                        entry.access_token.as_str()
+                    } else {
+                        entry.value.as_str()
+                    }
+                })
+                .unwrap_or("");
+            let edit_text;
+            let shown_value = if focused {
+                edit_text = ide_panel.api.input_editor.get_full_text();
+                edit_text.as_str()
+            } else {
+                value
+            };
+            self.draw_api_auth_input(
+                input_x,
+                y + (row_h - 34.0 * s) * 0.5,
+                input_w,
+                34.0 * s,
+                s,
+                shown_value,
+                focused,
+                false,
+                &ide_panel.api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiAuthValue(scheme_idx),
+                ui_registry,
+                mx,
+                my,
+            );
+            if entry.is_some_and(|entry| !entry.refresh_token.is_empty()) {
+                self.draw_string_scaled_stable(
+                    "refresh saved",
+                    input_x,
+                    y + row_h - 8.0 * s,
+                    [0.48, 0.86, 0.52, 1.0],
+                    API_FIELD_META_SCALE,
+                );
+            }
+        }
+
+        let btn_y = y + (row_h - 30.0 * s) * 0.5;
+        let save = Button {
+            x: input_x + input_w + 8.0 * s,
+            y: btn_y,
+            w: save_w,
+            h: 30.0 * s,
+            text: "Save".to_string(),
+            icon: None,
+            text_scale: API_FIELD_META_SCALE,
+            icon_size: 0.0,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiAuthSave(scheme_idx),
+            &save,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        let clear = Button {
+            x: save.x + save.w + 6.0 * s,
+            y: btn_y,
+            w: clear_w,
+            h: 30.0 * s,
+            text: "Clear".to_string(),
+            icon: None,
+            text_scale: API_FIELD_META_SCALE,
+            icon_size: 0.0,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiAuthClear(scheme_idx),
+            &clear,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        self.push_rect(x, y + row_h, w, 1.0, [1.0, 1.0, 1.0, 0.08]);
+        y + row_h
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_auth_input(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        value: &str,
+        focused: bool,
+        mask: bool,
+        editor: &crate::editor::Editor,
+        blink_alpha: f32,
+        id: crate::ui_system::UiId,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
+        self.push_rounded_rect_border(
+            x,
+            y,
+            w,
+            h,
+            5.0 * s,
+            (1.0 * s).max(1.0),
+            if focused {
+                [0.60, 0.35, 0.85, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 0.12]
+            },
+            [0.13, 0.14, 0.18, 1.0],
+        );
+        ui_registry.register_text_input(id, x, y, w, h, mx, my);
+        if focused {
+            self.draw_api_editor_selection_one_line(
+                editor,
+                x + 8.0 * s,
+                y + 5.0 * s,
+                w - 16.0 * s,
+                22.0 * s,
+                API_FIELD_VALUE_SCALE,
+            );
+        }
+        let shown = if mask && !focused && !value.is_empty() {
+            "••••••••".to_string()
+        } else {
+            value.to_string()
+        };
+        self.draw_string_scaled_stable(
+            &shown,
+            x + 8.0 * s,
+            y + 23.0 * s,
+            self.theme.fg,
+            API_FIELD_VALUE_SCALE,
+        );
+        if focused && blink_alpha > 0.5 {
+            let cursor_w = self
+                .api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE)
+                .min(w - 16.0 * s);
+            self.push_rect(
+                x + 8.0 * s + cursor_w,
+                y + 7.0 * s,
+                1.5 * s,
+                20.0 * s,
+                self.theme.fg,
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -681,23 +1056,26 @@ impl Renderer {
         let input_x = x + (w - input_w) * 0.5;
         let input_h = 36.0 * s;
         let input_y = y + (row_h - input_h) * 0.5 - schema.examples.len().min(3) as f32 * 8.0 * s;
-        let left_x = (input_x - 150.0 * s).max(x + 12.0 * s);
-        let text_y = input_y + 24.0 * s;
-        self.draw_string_scaled_stable(name, left_x, text_y, self.theme.fg, API_FIELD_NAME_SCALE);
+        let label_right = input_x - 12.0 * s;
+        let name_w = self.measure_ui_width(name, API_FIELD_NAME_SCALE);
+        let name_x = (label_right - name_w).max(x + 12.0 * s);
+        let name_y = api_split_label_text_y(input_y, input_h, s, false);
+        self.draw_string_scaled_stable(name, name_x, name_y, self.theme.fg, API_FIELD_NAME_SCALE);
         if required {
-            let text_w = self.measure_ui_width(name, API_FIELD_NAME_SCALE);
             self.draw_string_scaled_stable(
                 "*",
-                left_x + text_w + 5.0 * s,
-                text_y,
+                label_right + 4.0 * s,
+                name_y,
                 [1.0, 0.42, 0.42, 1.0],
                 API_FIELD_NAME_SCALE,
             );
         }
+        let type_text = api_body_schema_type_text(schema, model);
+        let type_w = self.measure_ui_width(type_text, API_FIELD_TYPE_SCALE);
         self.draw_string_scaled_stable(
-            api_body_schema_type_text(schema, model),
-            left_x,
-            text_y + 20.0 * s,
+            type_text,
+            (label_right - type_w).max(x + 12.0 * s),
+            api_split_label_text_y(input_y, input_h, s, true),
             [0.35, 0.75, 1.0, 1.0],
             API_FIELD_TYPE_SCALE,
         );
@@ -787,9 +1165,9 @@ impl Renderer {
             );
         }
         let mut right_y = input_y + 13.0 * s;
-        let right_x = input_x + input_w + 10.0 * s;
+        let right_x = input_x + input_w + 12.0 * s;
         if let Some(max) = schema.max_chars {
-            let text = format!("max {}", max);
+            let text = format!("Max {} chars", max);
             self.draw_string_scaled_stable(
                 &text,
                 right_x,
@@ -884,29 +1262,32 @@ impl Renderer {
         let input_x = x + (w - input_w) * 0.5;
         let input_h = 36.0 * s;
         let input_y = y + (row_h - input_h) * 0.5;
-        let name_x = (input_x - 150.0 * s).max(x + 12.0 * s);
-        let text_y = input_y + 24.0 * s;
+        let label_right = input_x - 12.0 * s;
+        let name_w = self.measure_ui_width(&param.name, API_FIELD_NAME_SCALE);
+        let name_x = (label_right - name_w).max(x + 12.0 * s);
+        let name_y = api_split_label_text_y(input_y, input_h, s, false);
         self.draw_string_scaled_stable(
             &param.name,
             name_x,
-            text_y,
+            name_y,
             self.theme.fg,
             API_FIELD_NAME_SCALE,
         );
         if param.required {
-            let text_w = self.measure_ui_width(&param.name, API_FIELD_NAME_SCALE);
             self.draw_string_scaled_stable(
                 "*",
-                name_x + text_w + 5.0 * s,
-                text_y,
+                label_right + 4.0 * s,
+                name_y,
                 [1.0, 0.42, 0.42, 1.0],
                 API_FIELD_NAME_SCALE,
             );
         }
+        let type_text = api_param_type_text(param);
+        let type_w = self.measure_ui_width(type_text, API_FIELD_TYPE_SCALE);
         self.draw_string_scaled_stable(
-            api_param_type_text(param),
-            name_x,
-            text_y + 20.0 * s,
+            type_text,
+            (label_right - type_w).max(x + 12.0 * s),
+            api_split_label_text_y(input_y, input_h, s, true),
             [0.35, 0.75, 1.0, 1.0],
             API_FIELD_TYPE_SCALE,
         );
@@ -1378,6 +1759,14 @@ fn api_rect_intersection(
     let x2 = (a.0 + a.2).min(b.0 + b.2);
     let y2 = (a.1 + a.3).min(b.1 + b.3);
     (x2 > x1 && y2 > y1).then_some((x1, y1, x2 - x1, y2 - y1))
+}
+
+fn api_centered_text_y(y: f32, h: f32, scale: f32) -> f32 {
+    y + h * 0.5 + 4.5 * scale
+}
+
+fn api_split_label_text_y(y: f32, h: f32, scale: f32, bottom: bool) -> f32 {
+    y + h * if bottom { 0.74 } else { 0.30 } + 4.5 * scale
 }
 
 fn json_string_end(line: &str, start: usize) -> usize {

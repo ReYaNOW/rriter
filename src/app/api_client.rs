@@ -80,6 +80,8 @@ pub struct ApiSpecModel {
     pub openapi_version: String,
     pub servers: Vec<ApiServer>,
     pub routes: Vec<ApiRouteRow>,
+    pub security_schemes: Vec<ApiSecurityScheme>,
+    pub root_security: Vec<ApiSecurityRequirement>,
     pub schema_arena: Vec<ApiSchema>,
 }
 
@@ -103,10 +105,107 @@ pub struct ApiRouteRow {
     pub path: String,
     pub summary: String,
     pub operation_id: String,
+    pub security: Option<Vec<ApiSecurityRequirement>>,
     pub path_params: Vec<ApiParam>,
     pub query_params: Vec<ApiParam>,
     pub request_body: Option<ApiRequestBody>,
     pub responses: Vec<ApiResponseSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiSecurityRequirement {
+    pub schemes: Vec<ApiSecurityRequirementScheme>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiSecurityRequirementScheme {
+    pub name: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiSecurityScheme {
+    pub name: String,
+    pub kind: ApiSecuritySchemeKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiSecuritySchemeKind {
+    ApiKey {
+        name: String,
+        location: ApiSecurityApiKeyLocation,
+    },
+    Http {
+        scheme: String,
+        bearer_format: String,
+    },
+    OAuth2 {
+        flows: Vec<ApiOAuthFlow>,
+    },
+    OpenIdConnect {
+        open_id_connect_url: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiSecurityApiKeyLocation {
+    Header,
+    Query,
+    Cookie,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiOAuthFlow {
+    Implicit,
+    Password,
+    ClientCredentials,
+    AuthorizationCode,
+}
+
+impl ApiSecurityScheme {
+    fn token_capable(&self) -> bool {
+        match &self.kind {
+            ApiSecuritySchemeKind::Http { scheme, .. } => scheme.eq_ignore_ascii_case("bearer"),
+            ApiSecuritySchemeKind::OAuth2 { .. } | ApiSecuritySchemeKind::OpenIdConnect { .. } => {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn summary(&self) -> String {
+        match &self.kind {
+            ApiSecuritySchemeKind::ApiKey { location, .. } => match location {
+                ApiSecurityApiKeyLocation::Header => "apiKey header".to_string(),
+                ApiSecurityApiKeyLocation::Query => "apiKey query".to_string(),
+                ApiSecurityApiKeyLocation::Cookie => "apiKey cookie".to_string(),
+            },
+            ApiSecuritySchemeKind::Http {
+                scheme,
+                bearer_format,
+            } => {
+                if bearer_format.is_empty() {
+                    format!("http {scheme}")
+                } else {
+                    format!("http {scheme} {bearer_format}")
+                }
+            }
+            ApiSecuritySchemeKind::OAuth2 { flows } => {
+                let mut out = String::from("oauth2");
+                for flow in flows {
+                    out.push(' ');
+                    out.push_str(match flow {
+                        ApiOAuthFlow::Implicit => "implicit",
+                        ApiOAuthFlow::Password => "password",
+                        ApiOAuthFlow::ClientCredentials => "client",
+                        ApiOAuthFlow::AuthorizationCode => "code",
+                    });
+                }
+                out
+            }
+            ApiSecuritySchemeKind::OpenIdConnect { .. } => "openIdConnect".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -239,6 +338,7 @@ pub struct ApiRequestBody {
     pub content_type: String,
     pub schema: Option<ApiSchemaRef>,
     pub is_multipart: bool,
+    pub is_form_urlencoded: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,6 +458,7 @@ pub enum ApiResponseView {
 #[derive(Clone, Debug)]
 pub struct ApiClientTabState {
     pub route_idx: Option<usize>,
+    pub auth_view: bool,
     pub server_idx: usize,
     pub path_values: Vec<ApiInputValue>,
     pub query_values: Vec<ApiInputValue>,
@@ -376,6 +477,7 @@ impl Default for ApiClientTabState {
     fn default() -> Self {
         Self {
             route_idx: None,
+            auth_view: false,
             server_idx: 0,
             path_values: Vec::new(),
             query_values: Vec::new(),
@@ -395,6 +497,7 @@ impl Default for ApiClientTabState {
 impl PartialEq for ApiClientTabState {
     fn eq(&self, other: &Self) -> bool {
         self.route_idx == other.route_idx
+            && self.auth_view == other.auth_view
             && self.server_idx == other.server_idx
             && self.path_values == other.path_values
             && self.query_values == other.query_values
@@ -412,6 +515,18 @@ impl Eq for ApiClientTabState {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiFocus {
     ImportUrl,
+    AuthValue {
+        spec_id: ApiSpecId,
+        scheme: String,
+    },
+    AuthUsername {
+        spec_id: ApiSpecId,
+        scheme: String,
+    },
+    AuthPassword {
+        spec_id: ApiSpecId,
+        scheme: String,
+    },
     PathParam {
         spec_id: ApiSpecId,
         route_idx: usize,
@@ -437,9 +552,72 @@ pub enum ApiFocus {
     },
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiAuthStore {
+    #[serde(default)]
+    pub entries: Vec<ApiAuthEntry>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiAuthEntry {
+    pub spec_id: ApiSpecId,
+    pub scheme: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub refresh_token: String,
+    #[serde(default)]
+    pub token_type: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub expires_at: Option<u64>,
+}
+
+impl ApiAuthStore {
+    pub(crate) fn entry(&self, spec_id: ApiSpecId, scheme: &str) -> Option<&ApiAuthEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.spec_id == spec_id && entry.scheme == scheme)
+    }
+
+    fn entry_mut(&mut self, spec_id: ApiSpecId, scheme: &str) -> &mut ApiAuthEntry {
+        if let Some(idx) = self
+            .entries
+            .iter()
+            .position(|entry| entry.spec_id == spec_id && entry.scheme == scheme)
+        {
+            return &mut self.entries[idx];
+        }
+        self.entries.push(ApiAuthEntry {
+            spec_id,
+            scheme: scheme.to_string(),
+            ..Default::default()
+        });
+        let idx = self.entries.len().saturating_sub(1);
+        &mut self.entries[idx]
+    }
+
+    fn remove(&mut self, spec_id: ApiSpecId, scheme: &str) {
+        self.entries
+            .retain(|entry| !(entry.spec_id == spec_id && entry.scheme == scheme));
+    }
+
+    fn retain_spec(&mut self, spec_id: ApiSpecId) {
+        self.entries.retain(|entry| entry.spec_id != spec_id);
+    }
+}
+
 pub struct ApiClientState {
     pub specs: Vec<ApiSpecEntry>,
     pub models: FxHashMap<ApiSpecId, ApiSpecModel>,
+    pub auth: ApiAuthStore,
     pub selected_spec: Option<ApiSpecId>,
     pub next_id: u64,
     pub import_menu_open: bool,
@@ -480,6 +658,7 @@ impl Default for ApiClientState {
         Self {
             specs: Vec::new(),
             models: FxHashMap::default(),
+            auth: ApiAuthStore::default(),
             selected_spec: None,
             next_id: 1,
             import_menu_open: false,
@@ -505,6 +684,7 @@ impl Default for ApiClientState {
 impl ApiClientState {
     pub fn load_persisted() -> Self {
         let mut state = Self::default();
+        state.auth = load_api_auth();
         if let Ok(content) = std::fs::read_to_string(api_specs_path()) {
             if let Ok(saved) = serde_json::from_str::<ApiSpecsPersist>(&content) {
                 state.specs = saved.specs;
@@ -555,6 +735,7 @@ impl ApiClientState {
             }
             let _ = std::fs::write(api_specs_path(), content);
         }
+        save_api_auth(&self.auth);
     }
 
     pub fn body_json_valid_for(
@@ -635,6 +816,7 @@ impl ApiClientState {
         let id = self.specs[idx].id;
         self.specs.remove(idx);
         self.models.remove(&id);
+        self.auth.retain_spec(id);
         self.loading.remove(&id);
         self.collapsed_tags.retain(|(spec_id, _)| *spec_id != id);
         self.collapsed_route_roots.remove(&id);
@@ -675,6 +857,11 @@ fn api_focus_targets_active_tab(
 ) -> bool {
     match focus {
         ApiFocus::ImportUrl => true,
+        ApiFocus::AuthValue { spec_id, .. }
+        | ApiFocus::AuthUsername { spec_id, .. }
+        | ApiFocus::AuthPassword { spec_id, .. } => {
+            active.is_some_and(|(active_spec, _)| active_spec == *spec_id)
+        }
         ApiFocus::PathParam {
             spec_id, route_idx, ..
         }
@@ -1022,6 +1209,8 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         openapi_version: openapi_version.to_string(),
         servers: parse_servers(root.get("servers")),
         routes: Vec::new(),
+        security_schemes: parse_security_schemes(root),
+        root_security: parse_security_requirements(root.get("security")).unwrap_or_default(),
         schema_arena: Vec::new(),
     };
     if model.servers.is_empty() {
@@ -1094,6 +1283,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         path: path.to_string(),
                         summary,
                         operation_id,
+                        security: parse_security_requirements(op.get("security")),
                         path_params,
                         query_params,
                         request_body,
@@ -1177,6 +1367,117 @@ fn parse_servers(value: Option<&Value>) -> Vec<ApiServer> {
     servers
 }
 
+fn parse_security_schemes(root: &Value) -> Vec<ApiSecurityScheme> {
+    let mut schemes = Vec::new();
+    let Some(items) = root
+        .get("components")
+        .and_then(|v| v.get("securitySchemes"))
+        .and_then(Value::as_object)
+    else {
+        return schemes;
+    };
+    for (name, value) in items {
+        let Some(kind) = parse_security_scheme_kind(value) else {
+            continue;
+        };
+        schemes.push(ApiSecurityScheme {
+            name: name.to_string(),
+            kind,
+        });
+    }
+    schemes.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    schemes
+}
+
+fn parse_security_scheme_kind(value: &Value) -> Option<ApiSecuritySchemeKind> {
+    match value.get("type").and_then(Value::as_str)? {
+        "apiKey" => {
+            let name = value.get("name").and_then(Value::as_str)?;
+            let location = match value.get("in").and_then(Value::as_str)? {
+                "header" => ApiSecurityApiKeyLocation::Header,
+                "query" => ApiSecurityApiKeyLocation::Query,
+                "cookie" => ApiSecurityApiKeyLocation::Cookie,
+                _ => return None,
+            };
+            Some(ApiSecuritySchemeKind::ApiKey {
+                name: name.to_string(),
+                location,
+            })
+        }
+        "http" => Some(ApiSecuritySchemeKind::Http {
+            scheme: value
+                .get("scheme")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_ascii_lowercase(),
+            bearer_format: value
+                .get("bearerFormat")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        "oauth2" => Some(ApiSecuritySchemeKind::OAuth2 {
+            flows: parse_oauth_flows(value.get("flows")),
+        }),
+        "openIdConnect" => Some(ApiSecuritySchemeKind::OpenIdConnect {
+            open_id_connect_url: value
+                .get("openIdConnectUrl")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        _ => None,
+    }
+}
+
+fn parse_oauth_flows(value: Option<&Value>) -> Vec<ApiOAuthFlow> {
+    let Some(flows) = value.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (key, flow) in [
+        ("implicit", ApiOAuthFlow::Implicit),
+        ("password", ApiOAuthFlow::Password),
+        ("clientCredentials", ApiOAuthFlow::ClientCredentials),
+        ("authorizationCode", ApiOAuthFlow::AuthorizationCode),
+    ] {
+        if flows.contains_key(key) {
+            out.push(flow);
+        }
+    }
+    out
+}
+
+fn parse_security_requirements(value: Option<&Value>) -> Option<Vec<ApiSecurityRequirement>> {
+    let items = value?.as_array()?;
+    let mut requirements = Vec::new();
+    for item in items {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let mut schemes = Vec::new();
+        for (name, scopes) in obj {
+            let scopes = scopes
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            schemes.push(ApiSecurityRequirementScheme {
+                name: name.to_string(),
+                scopes,
+            });
+        }
+        schemes.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+        requirements.push(ApiSecurityRequirement { schemes });
+    }
+    Some(requirements)
+}
+
 fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
     let mut out = Vec::new();
     if let Some(items) = value.and_then(Value::as_array) {
@@ -1236,7 +1537,8 @@ fn parse_request_body(
     let body = value?;
     let content = body.get("content").and_then(Value::as_object)?;
     let (content_type, media) = content
-        .get_key_value("application/json")
+        .get_key_value("application/x-www-form-urlencoded")
+        .or_else(|| content.get_key_value("application/json"))
         .or_else(|| content.get_key_value("multipart/form-data"))
         .or_else(|| content.iter().next())?;
     let schema = media
@@ -1250,6 +1552,7 @@ fn parse_request_body(
         content_type: content_type.to_string(),
         schema,
         is_multipart: content_type == "multipart/form-data",
+        is_form_urlencoded: content_type == "application/x-www-form-urlencoded",
     })
 }
 
@@ -1458,6 +1761,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     }
     content_h += api.specs.len() as f32 * 122.0 * scale;
     if let Some(model) = api.selected_model() {
+        content_h += 28.0 * scale;
         content_h += 34.0 * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
             for (_, _, len, collapsed) in
@@ -1482,6 +1786,21 @@ pub fn api_tab_max_scroll(
     let Some(model) = model else {
         return 0.0;
     };
+    if tab_state.auth_view {
+        let pad = 28.0 * scale;
+        let content_h = pad
+            + 38.0 * scale
+            + if model.security_schemes.is_empty() {
+                28.0 * scale
+            } else {
+                model
+                    .security_schemes
+                    .iter()
+                    .map(|scheme| api_auth_scheme_row_height(scheme, scale))
+                    .sum::<f32>()
+            };
+        return (content_h + pad + 36.0 * scale - visible_h).max(0.0);
+    }
     let Some(route_idx) = tab_state
         .route_idx
         .or_else(|| (!model.routes.is_empty()).then_some(0))
@@ -1498,6 +1817,16 @@ pub fn api_tab_max_scroll(
     }
     content_h += 28.0 * scale;
     content_h += model.servers.len().max(1) as f32 * 34.0 * scale + 42.0 * scale;
+    let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
+    if !auth_scheme_indices.is_empty() {
+        content_h += 28.0 * scale
+            + auth_scheme_indices
+                .iter()
+                .filter_map(|idx| model.security_schemes.get(*idx))
+                .map(|scheme| api_auth_scheme_row_height(scheme, scale))
+                .sum::<f32>()
+            + 8.0 * scale;
+    }
     if !route.path_params.is_empty() {
         content_h += 28.0 * scale
             + route
@@ -1518,7 +1847,7 @@ pub fn api_tab_max_scroll(
     }
     if let Some(body) = &route.request_body {
         content_h += 28.0 * scale;
-        if body.is_multipart {
+        if body.is_multipart || body.is_form_urlencoded {
             content_h += body
                 .schema
                 .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
@@ -1542,6 +1871,17 @@ pub fn api_tab_max_scroll(
         content_h += 24.0 * scale;
     }
     (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
+pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32 {
+    if matches!(
+        scheme.kind,
+        ApiSecuritySchemeKind::Http { ref scheme, .. } if scheme.eq_ignore_ascii_case("basic")
+    ) {
+        92.0 * scale
+    } else {
+        58.0 * scale
+    }
 }
 
 pub fn api_param_row_height(param: &ApiParam, scale: f32) -> f32 {
@@ -1610,6 +1950,182 @@ pub fn build_request_url(
     Ok(url.to_string())
 }
 
+fn route_security_requirements<'a>(
+    route: &'a ApiRouteRow,
+    model: &'a ApiSpecModel,
+) -> &'a [ApiSecurityRequirement] {
+    route
+        .security
+        .as_deref()
+        .unwrap_or(model.root_security.as_slice())
+}
+
+pub fn api_route_auth_scheme_indices(model: &ApiSpecModel, route: &ApiRouteRow) -> Vec<usize> {
+    let mut out = Vec::new();
+    for requirement in route_security_requirements(route, model) {
+        for req_scheme in &requirement.schemes {
+            if let Some(idx) = model
+                .security_schemes
+                .iter()
+                .position(|scheme| scheme.name == req_scheme.name)
+                && !out.contains(&idx)
+            {
+                out.push(idx);
+            }
+        }
+    }
+    out
+}
+
+pub fn api_route_auth_missing(
+    model: &ApiSpecModel,
+    route: &ApiRouteRow,
+    auth: &ApiAuthStore,
+) -> bool {
+    let requirements = route_security_requirements(route, model);
+    requirements
+        .iter()
+        .any(|requirement| !requirement.schemes.is_empty())
+        && !requirements
+            .iter()
+            .any(|requirement| auth_requirement_satisfied(model, requirement, auth))
+}
+
+fn prepared_auth_for_route(
+    model: &ApiSpecModel,
+    route: &ApiRouteRow,
+    auth: &ApiAuthStore,
+) -> Vec<ApiPreparedAuthPart> {
+    for requirement in route_security_requirements(route, model) {
+        let mut parts = Vec::new();
+        for req_scheme in &requirement.schemes {
+            let Some(scheme) = model
+                .security_schemes
+                .iter()
+                .find(|scheme| scheme.name == req_scheme.name)
+            else {
+                parts.clear();
+                break;
+            };
+            let Some(entry) = auth.entry(model.id, &scheme.name) else {
+                parts.clear();
+                break;
+            };
+            let Some(part) = prepared_auth_part(scheme, entry) else {
+                parts.clear();
+                break;
+            };
+            parts.push(part);
+        }
+        if parts.len() == requirement.schemes.len() {
+            return parts;
+        }
+    }
+    Vec::new()
+}
+
+fn auth_requirement_satisfied(
+    model: &ApiSpecModel,
+    requirement: &ApiSecurityRequirement,
+    auth: &ApiAuthStore,
+) -> bool {
+    requirement.schemes.iter().all(|req_scheme| {
+        let Some(scheme) = model
+            .security_schemes
+            .iter()
+            .find(|scheme| scheme.name == req_scheme.name)
+        else {
+            return false;
+        };
+        auth.entry(model.id, &scheme.name)
+            .and_then(|entry| prepared_auth_part(scheme, entry))
+            .is_some()
+    })
+}
+
+fn prepared_auth_part(
+    scheme: &ApiSecurityScheme,
+    entry: &ApiAuthEntry,
+) -> Option<ApiPreparedAuthPart> {
+    match &scheme.kind {
+        ApiSecuritySchemeKind::ApiKey { name, location } => {
+            let value = non_empty_auth_value(entry)?;
+            Some(match location {
+                ApiSecurityApiKeyLocation::Header => ApiPreparedAuthPart::Header {
+                    name: name.clone(),
+                    value,
+                },
+                ApiSecurityApiKeyLocation::Query => ApiPreparedAuthPart::Query {
+                    name: name.clone(),
+                    value,
+                },
+                ApiSecurityApiKeyLocation::Cookie => ApiPreparedAuthPart::Cookie {
+                    name: name.clone(),
+                    value,
+                },
+            })
+        }
+        ApiSecuritySchemeKind::Http { scheme, .. } if scheme.eq_ignore_ascii_case("basic") => {
+            (!entry.username.is_empty() && !entry.password.is_empty()).then(|| {
+                ApiPreparedAuthPart::Basic {
+                    username: entry.username.clone(),
+                    password: entry.password.clone(),
+                }
+            })
+        }
+        ApiSecuritySchemeKind::Http { scheme, .. } if scheme.eq_ignore_ascii_case("bearer") => {
+            bearer_token(entry).map(|token| ApiPreparedAuthPart::Bearer { token })
+        }
+        ApiSecuritySchemeKind::Http { scheme, .. } if scheme.eq_ignore_ascii_case("digest") => {
+            non_empty_auth_value(entry).map(|value| ApiPreparedAuthPart::Digest { value })
+        }
+        ApiSecuritySchemeKind::OAuth2 { .. } | ApiSecuritySchemeKind::OpenIdConnect { .. } => {
+            bearer_token(entry).map(|token| ApiPreparedAuthPart::Bearer { token })
+        }
+        ApiSecuritySchemeKind::Http { scheme, .. } => non_empty_auth_value(entry).map(|value| {
+            ApiPreparedAuthPart::Header {
+                name: "Authorization".to_string(),
+                value: format!("{scheme} {value}"),
+            }
+        }),
+    }
+}
+
+fn non_empty_auth_value(entry: &ApiAuthEntry) -> Option<String> {
+    (!entry.value.is_empty()).then(|| entry.value.clone())
+}
+
+fn bearer_token(entry: &ApiAuthEntry) -> Option<String> {
+    if !entry.access_token.is_empty() {
+        Some(entry.access_token.clone())
+    } else if !entry.value.is_empty() {
+        Some(entry.value.clone())
+    } else {
+        None
+    }
+}
+
+fn append_auth_query(url: &mut String, auth_parts: &[ApiPreparedAuthPart]) {
+    if !auth_parts
+        .iter()
+        .any(|part| matches!(part, ApiPreparedAuthPart::Query { .. }))
+    {
+        return;
+    }
+    let Ok(mut parsed) = Url::parse(url) else {
+        return;
+    };
+    {
+        let mut pairs = parsed.query_pairs_mut();
+        for part in auth_parts {
+            if let ApiPreparedAuthPart::Query { name, value } = part {
+                pairs.append_pair(name, value);
+            }
+        }
+    }
+    *url = parsed.to_string();
+}
+
 fn percent_encode_path_param(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for b in input.bytes() {
@@ -1648,9 +2164,21 @@ pub struct ApiJobRequest {
     pub route_idx: usize,
     pub method: ApiMethod,
     pub url: String,
+    pub auth_parts: Vec<ApiPreparedAuthPart>,
     pub body_json: Option<String>,
+    pub body_form: Option<Vec<ApiInputValue>>,
     pub body_multipart: Option<Vec<ApiMultipartPart>>,
     pub resolved_host: Option<ApiResolvedHost>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiPreparedAuthPart {
+    Header { name: String, value: String },
+    Query { name: String, value: String },
+    Cookie { name: String, value: String },
+    Basic { username: String, password: String },
+    Bearer { token: String },
+    Digest { value: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1695,6 +2223,7 @@ pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
 fn send_api_request_body(
     request: reqwest::blocking::RequestBuilder,
     body_json: Option<&str>,
+    body_form: Option<&[ApiInputValue]>,
     multipart_body: Option<(String, Vec<u8>)>,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
     if let Some((content_type, body)) = multipart_body {
@@ -1702,12 +2231,58 @@ fn send_api_request_body(
             .header("Content-Type", content_type)
             .body(body)
             .send()
+    } else if let Some(fields) = body_form {
+        request.form(&api_form_pairs(fields)).send()
     } else {
         request
             .header("Content-Type", "application/json")
             .body(body_json.unwrap_or_default().to_string())
             .send()
     }
+}
+
+fn api_form_pairs(fields: &[ApiInputValue]) -> Vec<(&str, &str)> {
+    fields
+        .iter()
+        .filter(|field| !field.value.is_empty())
+        .map(|field| (field.name.as_str(), field.value.as_str()))
+        .collect()
+}
+
+fn apply_auth_to_builder(
+    mut request: reqwest::blocking::RequestBuilder,
+    auth_parts: &[ApiPreparedAuthPart],
+) -> reqwest::blocking::RequestBuilder {
+    let mut cookie_header = String::new();
+    for part in auth_parts {
+        match part {
+            ApiPreparedAuthPart::Header { name, value } => {
+                request = request.header(name, value);
+            }
+            ApiPreparedAuthPart::Basic { username, password } => {
+                request = request.basic_auth(username, Some(password));
+            }
+            ApiPreparedAuthPart::Bearer { token } => {
+                request = request.bearer_auth(token);
+            }
+            ApiPreparedAuthPart::Digest { value } => {
+                request = request.header("Authorization", format!("Digest {value}"));
+            }
+            ApiPreparedAuthPart::Cookie { name, value } => {
+                if !cookie_header.is_empty() {
+                    cookie_header.push_str("; ");
+                }
+                cookie_header.push_str(name);
+                cookie_header.push('=');
+                cookie_header.push_str(value);
+            }
+            ApiPreparedAuthPart::Query { .. } => {}
+        }
+    }
+    if !cookie_header.is_empty() {
+        request = request.header("Cookie", cookie_header);
+    }
+    request
 }
 
 fn build_multipart_body(
@@ -1807,22 +2382,49 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         .transpose();
     let result = match multipart_body {
         Ok(multipart_body) => match job.method {
-            ApiMethod::Get => client.get(&job.url).send(),
-            ApiMethod::Delete => client.delete(&job.url).send(),
-            ApiMethod::Head => client.head(&job.url).send(),
-            ApiMethod::Options => client.request(reqwest::Method::OPTIONS, &job.url).send(),
-            ApiMethod::Trace => client.request(reqwest::Method::TRACE, &job.url).send(),
+            ApiMethod::Get => apply_auth_to_builder(client.get(&job.url), &job.auth_parts).send(),
+            ApiMethod::Delete => {
+                apply_auth_to_builder(client.delete(&job.url), &job.auth_parts).send()
+            }
+            ApiMethod::Head => {
+                apply_auth_to_builder(client.head(&job.url), &job.auth_parts).send()
+            }
+            ApiMethod::Options => apply_auth_to_builder(
+                client.request(reqwest::Method::OPTIONS, &job.url),
+                &job.auth_parts,
+            )
+            .send(),
+            ApiMethod::Trace => apply_auth_to_builder(
+                client.request(reqwest::Method::TRACE, &job.url),
+                &job.auth_parts,
+            )
+            .send(),
             ApiMethod::Post => {
-                let req = client.post(&job.url);
-                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+                let req = apply_auth_to_builder(client.post(&job.url), &job.auth_parts);
+                send_api_request_body(
+                    req,
+                    job.body_json.as_deref(),
+                    job.body_form.as_deref(),
+                    multipart_body,
+                )
             }
             ApiMethod::Put => {
-                let req = client.put(&job.url);
-                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+                let req = apply_auth_to_builder(client.put(&job.url), &job.auth_parts);
+                send_api_request_body(
+                    req,
+                    job.body_json.as_deref(),
+                    job.body_form.as_deref(),
+                    multipart_body,
+                )
             }
             ApiMethod::Patch => {
-                let req = client.patch(&job.url);
-                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+                let req = apply_auth_to_builder(client.patch(&job.url), &job.auth_parts);
+                send_api_request_body(
+                    req,
+                    job.body_json.as_deref(),
+                    job.body_form.as_deref(),
+                    multipart_body,
+                )
             }
         },
         Err(err) => {
@@ -1878,6 +2480,127 @@ fn format_api_response_headers(headers: &[(String, String)]) -> String {
         out.push_str(value);
     }
     out
+}
+
+fn capture_response_auth(
+    auth: &mut ApiAuthStore,
+    spec_id: ApiSpecId,
+    schemes: &[ApiSecurityScheme],
+    response: &ApiJobResponse,
+) -> bool {
+    let mut changed = false;
+    if let Ok(json) = serde_json::from_str::<Value>(&response.body) {
+        changed |= capture_token_json(auth, spec_id, schemes, &json);
+    }
+    for (name, value) in &response.headers {
+        if name.eq_ignore_ascii_case("set-cookie") {
+            changed |= capture_set_cookie(auth, spec_id, schemes, value);
+        }
+    }
+    changed
+}
+
+fn capture_token_json(
+    auth: &mut ApiAuthStore,
+    spec_id: ApiSpecId,
+    schemes: &[ApiSecurityScheme],
+    json: &Value,
+) -> bool {
+    let access_token = json.get("access_token").and_then(Value::as_str);
+    let refresh_token = json.get("refresh_token").and_then(Value::as_str);
+    if access_token.is_none() && refresh_token.is_none() {
+        return false;
+    }
+    let token_type = json
+        .get("token_type")
+        .and_then(Value::as_str)
+        .unwrap_or("Bearer");
+    let expires_at = json
+        .get("expires_in")
+        .and_then(Value::as_u64)
+        .map(|secs| now_epoch_secs().saturating_add(secs));
+    let scopes = json
+        .get("scope")
+        .and_then(Value::as_str)
+        .map(|scope| {
+            scope
+                .split_whitespace()
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .or_else(|| {
+            json.get("scopes").and_then(Value::as_array).map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    let mut changed = false;
+    for scheme in schemes.iter().filter(|scheme| scheme.token_capable()) {
+        let entry = auth.entry_mut(spec_id, &scheme.name);
+        if let Some(token) = access_token
+            && entry.access_token != token
+        {
+            entry.access_token = token.to_string();
+            entry.value = token.to_string();
+            changed = true;
+        }
+        if let Some(token) = refresh_token
+            && entry.refresh_token != token
+        {
+            entry.refresh_token = token.to_string();
+            changed = true;
+        }
+        if entry.token_type != token_type {
+            entry.token_type = token_type.to_string();
+            changed = true;
+        }
+        if entry.expires_at != expires_at {
+            entry.expires_at = expires_at;
+            changed = true;
+        }
+        if !scopes.is_empty() && entry.scopes != scopes {
+            entry.scopes = scopes.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn capture_set_cookie(
+    auth: &mut ApiAuthStore,
+    spec_id: ApiSpecId,
+    schemes: &[ApiSecurityScheme],
+    header: &str,
+) -> bool {
+    let Some((cookie_name, rest)) = header.split_once('=') else {
+        return false;
+    };
+    let cookie_name = cookie_name.trim();
+    if cookie_name.is_empty() {
+        return false;
+    }
+    let cookie_value = rest.split(';').next().unwrap_or("").trim();
+    let mut changed = false;
+    for scheme in schemes {
+        if let ApiSecuritySchemeKind::ApiKey {
+            name,
+            location: ApiSecurityApiKeyLocation::Cookie,
+        } = &scheme.kind
+            && name == cookie_name
+        {
+            let entry = auth.entry_mut(spec_id, &scheme.name);
+            if entry.value != cookie_value {
+                entry.value = cookie_value.to_string();
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 fn measure_api_server_reach_ms(resolved: Option<&ApiResolvedHost>) -> Option<u128> {
@@ -2375,7 +3098,8 @@ impl crate::app::App {
         if let Some(idx) = self.tabs.iter().position(|tab| {
             matches!(
                 &tab.kind,
-                crate::app::EditorTabKind::ApiClient(meta, _) if meta.spec_id == id
+                crate::app::EditorTabKind::ApiClient(meta, state)
+                    if meta.spec_id == id && !state.auth_view
             )
         }) {
             self.switch_to_tab(idx);
@@ -2439,9 +3163,85 @@ impl crate::app::App {
         self.save_tabs_state();
     }
 
+    pub fn open_api_auth_tab(&mut self, id: ApiSpecId) {
+        self.ide_panel.api.select_spec(id);
+        self.ensure_api_model_loaded(id);
+        let title = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| format!("Auth · {}", entry.title))
+            .unwrap_or_else(|| "API Auth".to_string());
+
+        if let Some(idx) = self.tabs.iter().position(|tab| {
+            matches!(
+                &tab.kind,
+                crate::app::EditorTabKind::ApiClient(meta, state)
+                    if meta.spec_id == id && state.auth_view
+            )
+        }) {
+            self.switch_to_tab(idx);
+            return;
+        }
+
+        let api_state = ApiClientTabState {
+            auth_view: true,
+            ..Default::default()
+        };
+        let tab = crate::app::EditorTab {
+            editor: Editor::new(16),
+            file_path: None,
+            base_title: title.clone(),
+            file_extension: String::new(),
+            scroll_y: ScrollState::new(7.0),
+            scroll_x: ScrollState::new(7.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            syntax_errors: Vec::new(),
+            last_sent_version: u64::MAX,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: true,
+            is_highlight_complete: true,
+            icon_key: "api",
+            kind: crate::app::EditorTabKind::ApiClient(
+                ApiClientTabMeta { spec_id: id, title },
+                api_state,
+            ),
+        };
+
+        if self.tabs.is_empty() {
+            self.editor = Editor::new(16);
+            self.file_path = None;
+            self.base_title = tab.base_title.clone();
+            self.file_extension.clear();
+            self.scroll_y = ScrollState::new(7.0);
+            self.scroll_x = ScrollState::new(7.0);
+            self.tabs.push(tab);
+            self.active_tab = 0;
+        } else {
+            self.sync_active_tab();
+            self.tabs.push(tab);
+            self.active_tab = self.tabs.len().saturating_sub(1);
+            self.sync_active_tab();
+        }
+        self.autocomplete_active = false;
+        self.show_welcome = false;
+        self.reveal_tab_now(self.active_tab);
+        if let Some(window) = self.window.as_ref() {
+            crate::app::App::update_window_title(window, &self.base_title, false);
+            window.request_redraw();
+        }
+        self.save_tabs_state();
+    }
+
     pub fn open_api_route(&mut self, spec_id: ApiSpecId, route_idx: usize) {
         self.open_api_spec_tab(spec_id);
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+            state.auth_view = false;
             state.route_idx = Some(route_idx);
             state.response = None;
             state.response_view = ApiResponseView::Body;
@@ -2554,6 +3354,33 @@ impl crate::app::App {
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
         match focus {
             ApiFocus::ImportUrl => self.ide_panel.api.input_editor.get_full_text(),
+            ApiFocus::AuthValue { spec_id, scheme } => self
+                .ide_panel
+                .api
+                .auth
+                .entry(*spec_id, scheme)
+                .map(|entry| {
+                    if !entry.access_token.is_empty() {
+                        entry.access_token.clone()
+                    } else {
+                        entry.value.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            ApiFocus::AuthUsername { spec_id, scheme } => self
+                .ide_panel
+                .api
+                .auth
+                .entry(*spec_id, scheme)
+                .map(|entry| entry.username.clone())
+                .unwrap_or_default(),
+            ApiFocus::AuthPassword { spec_id, scheme } => self
+                .ide_panel
+                .api
+                .auth
+                .entry(*spec_id, scheme)
+                .map(|entry| entry.password.clone())
+                .unwrap_or_default(),
             ApiFocus::PathParam {
                 spec_id,
                 route_idx,
@@ -2641,6 +3468,33 @@ impl crate::app::App {
         let text = self.ide_panel.api.input_editor.get_full_text();
         match focus {
             ApiFocus::ImportUrl => {}
+            ApiFocus::AuthValue { spec_id, scheme } => {
+                let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
+                entry.value = text.clone();
+                if !entry.access_token.is_empty() || !text.is_empty() {
+                    entry.access_token = text;
+                    if entry.token_type.is_empty() {
+                        entry.token_type = "Bearer".to_string();
+                    }
+                }
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::AuthUsername { spec_id, scheme } => {
+                self.ide_panel
+                    .api
+                    .auth
+                    .entry_mut(spec_id, &scheme)
+                    .username = text;
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::AuthPassword { spec_id, scheme } => {
+                self.ide_panel
+                    .api
+                    .auth
+                    .entry_mut(spec_id, &scheme)
+                    .password = text;
+                self.ide_panel.api.persist();
+            }
             ApiFocus::PathParam {
                 spec_id,
                 route_idx,
@@ -2753,6 +3607,11 @@ impl crate::app::App {
                     }
                 }
             }
+            crate::ui_system::UiId::ApiAuthRoot => {
+                if let Some(spec_id) = self.ide_panel.api.selected_spec {
+                    self.open_api_auth_tab(spec_id);
+                }
+            }
             crate::ui_system::UiId::ApiRouteTag(group_idx) => {
                 if let Some(spec_id) = self.ide_panel.api.selected_spec {
                     if let Some(model) = self.ide_panel.api.models.get(&spec_id) {
@@ -2793,6 +3652,60 @@ impl crate::app::App {
                 let spec_id = meta.spec_id;
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.server_idx = idx;
+                }
+            }
+            crate::ui_system::UiId::ApiAuthValue(scheme_idx)
+            | crate::ui_system::UiId::ApiAuthUsername(scheme_idx)
+            | crate::ui_system::UiId::ApiAuthPassword(scheme_idx) => {
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                let scheme = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.security_schemes.get(scheme_idx))
+                    .map(|scheme| scheme.name.clone())
+                    .unwrap_or_default();
+                if scheme.is_empty() {
+                    return true;
+                }
+                let focus = match id {
+                    crate::ui_system::UiId::ApiAuthUsername(_) => {
+                        ApiFocus::AuthUsername { spec_id, scheme }
+                    }
+                    crate::ui_system::UiId::ApiAuthPassword(_) => {
+                        ApiFocus::AuthPassword { spec_id, scheme }
+                    }
+                    _ => ApiFocus::AuthValue { spec_id, scheme },
+                };
+                self.focus_api_input(focus);
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiAuthSave(_) => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiAuthClear(scheme_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                if let Some(scheme) = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.security_schemes.get(scheme_idx))
+                    .map(|scheme| scheme.name.clone())
+                {
+                    self.ide_panel.api.auth.remove(spec_id, &scheme);
+                    self.ide_panel.api.focused = None;
+                    self.ide_panel.api.persist();
                 }
             }
             crate::ui_system::UiId::ApiTryRequest => {
@@ -3207,11 +4120,15 @@ impl crate::app::App {
         let is_json_body = route
             .request_body
             .as_ref()
-            .is_some_and(|body| !body.is_multipart);
+            .is_some_and(|body| !body.is_multipart && !body.is_form_urlencoded);
         let is_multipart_body = route
             .request_body
             .as_ref()
             .is_some_and(|body| body.is_multipart);
+        let is_form_body = route
+            .request_body
+            .as_ref()
+            .is_some_and(|body| body.is_form_urlencoded);
         let path_values = state.path_values.clone();
         let query_values = state.query_values.clone();
         let body_values = state.body_values.clone();
@@ -3240,7 +4157,7 @@ impl crate::app::App {
             }
             return;
         }
-        let url = match build_request_url(&server, &path, &path_values, &query_values) {
+        let mut url = match build_request_url(&server, &path, &path_values, &query_values) {
             Ok(url) => url,
             Err(err) => {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
@@ -3263,9 +4180,12 @@ impl crate::app::App {
                 return;
             }
         };
+        let auth_parts = prepared_auth_for_route(model, route, &self.ide_panel.api.auth);
+        append_auth_query(&mut url, &auth_parts);
         let body_multipart = (method.can_send_body() && is_multipart_body)
             .then(|| api_multipart_parts_for_route(route, model, &body_values));
-        let body_json = (method.can_send_body() && !is_multipart_body)
+        let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
+        let body_json = (method.can_send_body() && is_json_body)
             .then_some(body_json_text)
             .filter(|body| !body.trim().is_empty());
         let request_id = self.ide_panel.api.next_request_id.max(1);
@@ -3277,7 +4197,9 @@ impl crate::app::App {
             method,
             resolved_host: resolve_api_url_host(&url),
             url,
+            auth_parts,
             body_json,
+            body_form,
             body_multipart,
         };
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
@@ -3405,6 +4327,19 @@ impl crate::app::App {
 
     fn apply_api_job_response(&mut self, result: ApiJobResponse) {
         let resolved = result.resolved_host.clone();
+        let security_schemes = self
+            .ide_panel
+            .api
+            .models
+            .get(&result.spec_id)
+            .map(|model| model.security_schemes.clone())
+            .unwrap_or_default();
+        let auth_changed = capture_response_auth(
+            &mut self.ide_panel.api.auth,
+            result.spec_id,
+            &security_schemes,
+            &result,
+        );
         let focused_response = matches!(
             self.ide_panel.api.focused,
             Some(ApiFocus::Response { spec_id, route_idx })
@@ -3434,8 +4369,10 @@ impl crate::app::App {
         if !applied {
             return;
         }
-        if resolved.is_some() {
-            self.ide_panel.api.last_resolved_host = resolved;
+        if let Some(resolved) = resolved {
+            self.ide_panel.api.last_resolved_host = Some(resolved);
+            self.ide_panel.api.persist();
+        } else if auth_changed {
             self.ide_panel.api.persist();
         }
         if let Some(text) = focused_text {
@@ -3488,7 +4425,11 @@ fn fill_api_tab_inputs(state: &mut ApiClientTabState, route: &ApiRouteRow, model
 }
 
 fn default_body_values_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> Vec<ApiInputValue> {
-    let Some(body) = route.request_body.as_ref().filter(|body| body.is_multipart) else {
+    let Some(body) = route
+        .request_body
+        .as_ref()
+        .filter(|body| body.is_multipart || body.is_form_urlencoded)
+    else {
         return Vec::new();
     };
     body.schema
@@ -3558,6 +4499,9 @@ fn default_body_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> String {
     let Some(body) = &route.request_body else {
         return String::new();
     };
+    if body.is_form_urlencoded {
+        return String::new();
+    }
     let Some(schema_ref) = body.schema else {
         return "{\n  \n}".to_string();
     };
@@ -3617,8 +4561,52 @@ fn api_specs_path() -> PathBuf {
     api_config_dir().join("api_specs.json")
 }
 
+fn api_auth_path() -> PathBuf {
+    api_config_dir().join("api_auth.json")
+}
+
 fn api_cache_dir() -> PathBuf {
     api_config_dir().join("api_cache")
+}
+
+fn load_api_auth() -> ApiAuthStore {
+    std::fs::read_to_string(api_auth_path())
+        .ok()
+        .and_then(|content| serde_json::from_str::<ApiAuthStore>(&content).ok())
+        .unwrap_or_default()
+}
+
+fn save_api_auth(auth: &ApiAuthStore) {
+    let Ok(content) = serde_json::to_string_pretty(auth) else {
+        return;
+    };
+    if let Some(dir) = api_auth_path().parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    write_secret_file(&api_auth_path(), content.as_bytes());
+}
+
+fn write_secret_file(path: &Path, bytes: &[u8]) {
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+        {
+            let _ = file.write_all(bytes);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = std::fs::write(path, bytes);
+    }
 }
 
 fn save_url_cache(id: ApiSpecId, raw: &str) {
@@ -3679,6 +4667,94 @@ mod tests {
                             }
                         },
                         "responses": {"201": {"description": "created"}}
+                    }
+                }
+            }
+        })
+    }
+
+    fn form_spec() -> Value {
+        serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Form API", "version": "1.0.0"},
+            "paths": {
+                "/token": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["username"],
+                                        "properties": {
+                                            "username": {"type": "string", "maxLength": 500},
+                                            "password": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        })
+    }
+
+    fn auth_spec() -> Value {
+        serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Auth API", "version": "1.0.0"},
+            "components": {
+                "securitySchemes": {
+                    "HeaderKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                    "QueryKey": {"type": "apiKey", "in": "query", "name": "api_key"},
+                    "CookieKey": {"type": "apiKey", "in": "cookie", "name": "session"},
+                    "BasicAuth": {"type": "http", "scheme": "basic"},
+                    "BearerJwt": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+                    "DigestAuth": {"type": "http", "scheme": "digest"},
+                    "OAuthAll": {
+                        "type": "oauth2",
+                        "flows": {
+                            "implicit": {"authorizationUrl": "/oauth/authorize", "scopes": {}},
+                            "password": {"tokenUrl": "/oauth/token", "scopes": {}},
+                            "clientCredentials": {"tokenUrl": "/oauth/token", "scopes": {}},
+                            "authorizationCode": {
+                                "authorizationUrl": "/oauth/authorize",
+                                "tokenUrl": "/oauth/token",
+                                "scopes": {}
+                            }
+                        }
+                    },
+                    "Oidc": {
+                        "type": "openIdConnect",
+                        "openIdConnectUrl": "/.well-known/openid-configuration"
+                    }
+                }
+            },
+            "security": [
+                {"HeaderKey": [], "BearerJwt": []},
+                {"QueryKey": []}
+            ],
+            "paths": {
+                "/items": {
+                    "get": {
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                },
+                "/basic": {
+                    "get": {
+                        "security": [{"BasicAuth": []}],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                },
+                "/public": {
+                    "get": {
+                        "security": [],
+                        "responses": {"200": {"description": "ok"}}
                     }
                 }
             }
@@ -3791,6 +4867,226 @@ mod tests {
     }
 
     #[test]
+    fn parse_openapi_security_schemes_and_operation_security() {
+        let model = parse_openapi_model(ApiSpecId(11), &auth_spec()).expect("parse");
+        assert_eq!(model.security_schemes.len(), 8);
+        assert_eq!(model.root_security.len(), 2);
+        let names = model
+            .security_schemes
+            .iter()
+            .map(|scheme| scheme.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"HeaderKey"));
+        assert!(names.contains(&"QueryKey"));
+        assert!(names.contains(&"CookieKey"));
+        assert!(names.contains(&"BasicAuth"));
+        assert!(names.contains(&"BearerJwt"));
+        assert!(names.contains(&"DigestAuth"));
+        assert!(names.contains(&"OAuthAll"));
+        assert!(names.contains(&"Oidc"));
+        assert!(model.security_schemes.iter().any(|scheme| matches!(
+            scheme.kind,
+            ApiSecuritySchemeKind::Http { ref scheme, ref bearer_format }
+                if scheme == "bearer" && bearer_format == "JWT"
+        )));
+        assert!(model.security_schemes.iter().any(|scheme| matches!(
+            scheme.kind,
+            ApiSecuritySchemeKind::OAuth2 { ref flows }
+                if flows == &vec![
+                    ApiOAuthFlow::Implicit,
+                    ApiOAuthFlow::Password,
+                    ApiOAuthFlow::ClientCredentials,
+                    ApiOAuthFlow::AuthorizationCode,
+                ]
+        )));
+        let public = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/public")
+            .expect("public route");
+        assert_eq!(public.security, Some(Vec::new()));
+    }
+
+    #[test]
+    fn auth_selection_respects_or_and_and_security_empty() {
+        let model = parse_openapi_model(ApiSpecId(12), &auth_spec()).expect("parse");
+        let items = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/items")
+            .expect("items route");
+        let public = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/public")
+            .expect("public route");
+        let mut auth = ApiAuthStore::default();
+        assert_eq!(
+            api_route_auth_scheme_indices(&model, items)
+                .iter()
+                .filter_map(|idx| model.security_schemes.get(*idx))
+                .map(|scheme| scheme.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["BearerJwt", "HeaderKey", "QueryKey"]
+        );
+        assert!(api_route_auth_scheme_indices(&model, public).is_empty());
+        assert!(api_route_auth_missing(&model, items, &auth));
+        assert!(!api_route_auth_missing(&model, public, &auth));
+
+        auth.entry_mut(model.id, "HeaderKey").value = "header-secret".to_string();
+        auth.entry_mut(model.id, "QueryKey").value = "query-secret".to_string();
+        assert!(!api_route_auth_missing(&model, items, &auth));
+
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert_eq!(
+            parts,
+            vec![ApiPreparedAuthPart::Query {
+                name: "api_key".to_string(),
+                value: "query-secret".to_string(),
+            }]
+        );
+
+        auth.entry_mut(model.id, "BearerJwt").access_token = "jwt".to_string();
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert_eq!(parts.len(), 2);
+        assert!(parts.contains(&ApiPreparedAuthPart::Header {
+            name: "X-API-Key".to_string(),
+            value: "header-secret".to_string(),
+        }));
+        assert!(parts.contains(&ApiPreparedAuthPart::Bearer {
+            token: "jwt".to_string(),
+        }));
+
+        assert!(prepared_auth_for_route(&model, public, &auth).is_empty());
+    }
+
+    #[test]
+    fn auth_request_assembly_sets_headers_cookies_query_and_basic() {
+        let mut url = "https://api.example.com/items".to_string();
+        append_auth_query(
+            &mut url,
+            &[ApiPreparedAuthPart::Query {
+                name: "api_key".to_string(),
+                value: "q v".to_string(),
+            }],
+        );
+        assert_eq!(url, "https://api.example.com/items?api_key=q+v");
+
+        let client = reqwest::blocking::Client::new();
+        let request = apply_auth_to_builder(
+            client.get("https://api.example.com/items"),
+            &[
+                ApiPreparedAuthPart::Header {
+                    name: "X-API-Key".to_string(),
+                    value: "secret".to_string(),
+                },
+                ApiPreparedAuthPart::Cookie {
+                    name: "session".to_string(),
+                    value: "abc".to_string(),
+                },
+                ApiPreparedAuthPart::Bearer {
+                    token: "jwt".to_string(),
+                },
+            ],
+        )
+        .build()
+        .expect("request");
+        assert_eq!(request.headers()["X-API-Key"], "secret");
+        assert_eq!(request.headers()["Cookie"], "session=abc");
+        assert_eq!(request.headers()["Authorization"], "Bearer jwt");
+
+        let basic = apply_auth_to_builder(
+            client.get("https://api.example.com/basic"),
+            &[ApiPreparedAuthPart::Basic {
+                username: "user".to_string(),
+                password: "pass".to_string(),
+            }],
+        )
+        .build()
+        .expect("request");
+        assert_eq!(basic.headers()["Authorization"], "Basic dXNlcjpwYXNz");
+    }
+
+    #[test]
+    fn auth_capture_saves_tokens_refresh_and_cookie_keys() {
+        let model = parse_openapi_model(ApiSpecId(13), &auth_spec()).expect("parse");
+        let mut auth = ApiAuthStore::default();
+        let response = ApiJobResponse {
+            request_id: 1,
+            spec_id: model.id,
+            route_idx: 0,
+            status: Some(200),
+            elapsed_ms: 1,
+            server_reach_ms: None,
+            timing_text: String::new(),
+            headers: vec![(
+                "set-cookie".to_string(),
+                "session=cookie-secret; HttpOnly; Path=/".to_string(),
+            )],
+            headers_text: String::new(),
+            body: serde_json::json!({
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "token_type": "Bearer",
+                "expires_in": 60,
+                "scope": "read write"
+            })
+            .to_string(),
+            truncated: false,
+            error: None,
+            resolved_host: None,
+        };
+
+        assert!(capture_response_auth(
+            &mut auth,
+            model.id,
+            &model.security_schemes,
+            &response
+        ));
+        let bearer = auth.entry(model.id, "BearerJwt").expect("bearer auth");
+        assert_eq!(bearer.access_token, "access");
+        assert_eq!(bearer.refresh_token, "refresh");
+        assert_eq!(bearer.value, "access");
+        assert_eq!(bearer.scopes, vec!["read".to_string(), "write".to_string()]);
+        assert!(bearer.expires_at.is_some());
+        assert_eq!(
+            auth.entry(model.id, "CookieKey").expect("cookie auth").value,
+            "cookie-secret"
+        );
+    }
+
+    #[test]
+    fn api_auth_persist_roundtrip_uses_separate_file() {
+        let _guard = persist_test_lock().lock().expect("lock");
+        let _ = std::fs::remove_dir_all(api_config_dir());
+
+        let mut auth = ApiAuthStore::default();
+        auth.entry_mut(ApiSpecId(7), "BearerJwt").access_token = "access".to_string();
+        auth.entry_mut(ApiSpecId(7), "BearerJwt").refresh_token = "refresh".to_string();
+        auth.entry_mut(ApiSpecId(7), "BasicAuth").username = "user".to_string();
+        auth.entry_mut(ApiSpecId(7), "BasicAuth").password = "pass".to_string();
+        save_api_auth(&auth);
+
+        let loaded = load_api_auth();
+        assert_eq!(
+            loaded.entry(ApiSpecId(7), "BearerJwt").map(|entry| (
+                entry.access_token.as_str(),
+                entry.refresh_token.as_str()
+            )),
+            Some(("access", "refresh"))
+        );
+        assert_eq!(
+            loaded
+                .entry(ApiSpecId(7), "BasicAuth")
+                .map(|entry| (entry.username.as_str(), entry.password.as_str())),
+            Some(("user", "pass"))
+        );
+
+        let _ = std::fs::remove_dir_all(api_config_dir());
+    }
+
+
+    #[test]
     fn api_method_display_and_sort_order_match_client_rows() {
         assert_eq!(ApiMethod::Get.chip_str(), "GET");
         assert_eq!(ApiMethod::Post.chip_str(), "POS");
@@ -3876,6 +5172,46 @@ mod tests {
         )
         .expect("url");
         assert_eq!(url, "https://api.example.com/v1/pets/a%20b?verbose=true");
+    }
+
+    #[test]
+    fn form_urlencoded_body_prefers_fields_over_json() {
+        let model = parse_openapi_model(ApiSpecId(21), &form_spec()).expect("parse");
+        let route = &model.routes[0];
+        let body = route.request_body.as_ref().expect("body");
+        assert_eq!(body.content_type, "application/x-www-form-urlencoded");
+        assert!(body.is_form_urlencoded);
+        assert!(!body.is_multipart);
+
+        let mut state = ApiClientTabState::default();
+        fill_api_tab_inputs(&mut state, route, &model);
+        assert_eq!(state.body_json, "");
+        assert_eq!(
+            state.body_values,
+            vec![
+                ApiInputValue {
+                    name: "password".to_string(),
+                    value: String::new(),
+                },
+                ApiInputValue {
+                    name: "username".to_string(),
+                    value: String::new(),
+                },
+            ]
+        );
+
+        let fields = [
+            ApiInputValue {
+                name: "username".to_string(),
+                value: "alice".to_string(),
+            },
+            ApiInputValue {
+                name: "password".to_string(),
+                value: String::new(),
+            },
+        ];
+        let pairs = api_form_pairs(&fields);
+        assert_eq!(pairs, vec![("username", "alice")]);
     }
 
     #[test]

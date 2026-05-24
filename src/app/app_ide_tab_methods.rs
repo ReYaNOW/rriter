@@ -97,7 +97,11 @@ impl App {
                         self.open_new_tab();
                         loaded_any = true;
                     }
-                    crate::OpenTabSnapshot::Api { spec_id, route_idx } => {
+                    crate::OpenTabSnapshot::Api {
+                        spec_id,
+                        route_idx,
+                        auth_view,
+                    } => {
                         if self
                             .ide_panel
                             .api
@@ -105,12 +109,16 @@ impl App {
                             .iter()
                             .any(|entry| entry.id == spec_id)
                         {
-                            self.open_api_spec_tab(spec_id);
-                            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                                state.route_idx = route_idx;
-                            }
-                            if let Some(route_idx) = route_idx {
-                                self.sync_api_tab_inputs(spec_id, route_idx);
+                            if auth_view {
+                                self.open_api_auth_tab(spec_id);
+                            } else {
+                                self.open_api_spec_tab(spec_id);
+                                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                                    state.route_idx = route_idx;
+                                }
+                                if let Some(route_idx) = route_idx {
+                                    self.sync_api_tab_inputs(spec_id, route_idx);
+                                }
                             }
                             loaded_any = true;
                         }

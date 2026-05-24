@@ -63,10 +63,16 @@ impl App {
             | UiId::ApiSpecOpen(_)
             | UiId::ApiSpecRefresh(_)
             | UiId::ApiSpecRemove(_)
+            | UiId::ApiAuthRoot
             | UiId::ApiRoutesRoot
             | UiId::ApiRouteTag(_)
             | UiId::ApiRouteRow(_)
             | UiId::ApiServerSelect(_)
+            | UiId::ApiAuthValue(_)
+            | UiId::ApiAuthUsername(_)
+            | UiId::ApiAuthPassword(_)
+            | UiId::ApiAuthSave(_)
+            | UiId::ApiAuthClear(_)
             | UiId::ApiTryRequest
             | UiId::ApiPathParamInput(_, _)
             | UiId::ApiQueryParamInput(_, _)

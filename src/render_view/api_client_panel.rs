@@ -423,6 +423,27 @@ impl Renderer {
                 .filter(|(spec_id, _)| *spec_id == model.id)
                 .map(|(_, route_idx)| route_idx);
             let root_collapsed = api.collapsed_route_roots.contains(&model.id);
+            let auth_hovered = hover_settled
+                && ui_registry.register_rect(
+                    crate::ui_system::UiId::ApiAuthRoot,
+                    x,
+                    cy,
+                    w,
+                    TREE_ROW_H * s,
+                    mx,
+                    my,
+                );
+            if auth_hovered {
+                self.push_rect(x, cy, w, TREE_ROW_H * s, [1.0, 1.0, 1.0, 0.055]);
+            }
+            self.draw_string_scaled_stable(
+                "Auth",
+                x + pad + 18.0 * s,
+                tree_text_y(cy),
+                self.theme.fg,
+                TREE_TEXT_SCALE,
+            );
+            cy += TREE_ROW_H * s;
             ui_registry.register_rect(
                 crate::ui_system::UiId::ApiRoutesRoot,
                 x,
