@@ -95,6 +95,7 @@ fn test_app() -> Option<App> {
         open_file_rx: None,
         save_file_rx: None,
         api_import_file_rx: None,
+        api_body_file_rx: None,
         api_load_rx: Vec::new(),
         api_request_rx: Vec::new(),
         show_welcome: true,

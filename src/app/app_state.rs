@@ -790,8 +790,13 @@ pub struct App {
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    pub api_body_file_rx:
+        Option<std::sync::mpsc::Receiver<crate::app::api_client::ApiBodyFilePickResult>>,
     pub api_load_rx: Vec<std::sync::mpsc::Receiver<crate::app::api_client::ApiLoadResult>>,
-    pub api_request_rx: Vec<std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>>,
+    pub api_request_rx: Vec<(
+        u64,
+        std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>,
+    )>,
 
     pub show_welcome: bool,
     pub recent_files: Vec<PathBuf>,

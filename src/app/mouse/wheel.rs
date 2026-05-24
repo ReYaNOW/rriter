@@ -632,6 +632,75 @@ impl App {
         }
 
         if self.active_tab_is_api_client() {
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let hovered_id = self.ui_registry.find_at(mx, my);
+            let api_inner_scroll = hovered_id.and_then(|id| {
+                let rect = self.ui_registry.rect_for(id)?;
+                let (meta, state) = self.active_api_tab()?;
+                let visible_h = (rect.3 - 16.0 * s).max(18.0 * s);
+                match id {
+                    crate::ui_system::UiId::ApiBodyInput(route_idx)
+                        if state.route_idx == Some(route_idx) =>
+                    {
+                        let text = if matches!(
+                            self.ide_panel.api.focused,
+                            Some(crate::app::api_client::ApiFocus::Body {
+                                spec_id,
+                                route_idx: focused_route,
+                            }) if spec_id == meta.spec_id && focused_route == route_idx
+                        ) {
+                            self.ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            state.body_json.clone()
+                        };
+                        let max_scroll =
+                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
+                        Some((meta.spec_id, route_idx, true, max_scroll))
+                    }
+                    crate::ui_system::UiId::ApiResponseBody(route_idx)
+                        if state.route_idx == Some(route_idx) =>
+                    {
+                        let text = if matches!(
+                            self.ide_panel.api.focused,
+                            Some(crate::app::api_client::ApiFocus::Response {
+                                spec_id,
+                                route_idx: focused_route,
+                            }) if spec_id == meta.spec_id && focused_route == route_idx
+                        ) {
+                            self.ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            state
+                                .response
+                                .as_ref()
+                                .map(|response| response.body.clone())
+                                .unwrap_or_default()
+                        };
+                        let max_scroll =
+                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
+                        Some((meta.spec_id, route_idx, false, max_scroll))
+                    }
+                    _ => None,
+                }
+            });
+            if let Some((spec_id, route_idx, body, max_scroll)) = api_inner_scroll {
+                if max_scroll > 0.0 {
+                    if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                        && state.route_idx == Some(route_idx)
+                    {
+                        let scroll = if body {
+                            &mut state.body_scroll
+                        } else {
+                            &mut state.response_scroll
+                        };
+                        scroll.anim_speed = 7.0;
+                        scroll.scroll_by(dy);
+                        scroll.clamp_target(0.0, max_scroll);
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
             let model = self
                 .tabs
                 .get(self.active_tab)

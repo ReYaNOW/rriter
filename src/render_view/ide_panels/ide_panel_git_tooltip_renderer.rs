@@ -458,10 +458,12 @@ impl Renderer {
 
     fn git_graph_tooltip_char_advance(&mut self, c: char, scale: f32, mono: bool) -> f32 {
         if mono {
-            self.get_glyph(c).map(|g| g.advance * scale).unwrap_or(0.0)
+            self.get_glyph(c)
+                .map(|g| Self::snapped_text_advance(g.advance, scale))
+                .unwrap_or(0.0)
         } else {
             self.get_ui_glyph(c)
-                .map(|g| g.advance * scale)
+                .map(|g| Self::snapped_text_advance(g.advance, scale))
                 .unwrap_or(0.0)
         }
     }
@@ -612,8 +614,8 @@ impl Renderer {
                 self.get_ui_glyph(c)
             };
             if let Some(g) = glyph {
-                let adv = g.advance * scale;
-                let glyph_x = draw_x.round();
+                let adv = Self::snapped_text_advance(g.advance, scale);
+                let glyph_x = draw_x;
                 if let Some((sel_start, sel_end)) = selected {
                     let offset = byte_start + idx;
                     if offset >= sel_start && offset < sel_end {

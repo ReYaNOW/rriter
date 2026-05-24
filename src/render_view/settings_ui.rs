@@ -390,8 +390,10 @@ impl Renderer {
                 let mut cursor_total_x = 0.0;
                 let mut total_text_width = 0.0;
                 for (byte_idx, c) in full_text.char_indices() {
-                    let adv =
-                        self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * text_scale_input;
+                    let adv = self
+                        .get_ui_glyph(c)
+                        .map(|g| Self::snapped_text_advance(g.advance, text_scale_input))
+                        .unwrap_or(10.0);
                     if byte_idx < settings_ignore_editor.cursor {
                         cursor_total_x += adv;
                     }

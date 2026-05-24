@@ -256,6 +256,11 @@ impl App {
 
         let editor_text_selecting =
             self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings;
+        if editor_text_selecting && self.drag_api_text_cursor_from_last_mouse() {
+            clear_hover_popup(self.renderer.as_mut());
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if editor_text_selecting {
             clear_hover_popup(self.renderer.as_mut());
             if let Some(r) = self.renderer.as_mut() {

@@ -33,6 +33,7 @@ impl Renderer {
         let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
         let workspace_h = 30.0 * s;
         let scroll = ide_panel.git.scroll.current.round();
+        let hover_settled = (ide_panel.git.scroll.current - ide_panel.git.scroll.target).abs() < 0.5;
         let mut y = list_y - scroll;
         let text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
         let mut label_scratch = String::new();
@@ -829,7 +830,8 @@ impl Renderer {
                         let check_y = file_layout.check_y;
                         let stage_interaction_disabled =
                             git_stage_controls_disabled(workspace_disabled, ide_panel.git.pending);
-                        let hovered = git_row_visual_hovered(
+                        let hovered = hover_settled
+                            && git_row_visual_hovered(
                             mx,
                             my,
                             panel_x,

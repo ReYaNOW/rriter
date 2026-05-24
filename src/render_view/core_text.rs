@@ -124,6 +124,12 @@ mod tests {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    #[inline]
+    pub(crate) fn snapped_text_advance(advance: f32, scale: f32) -> f32 {
+        let px = (advance * scale).round();
+        if px <= 0.0 && advance > 0.0 { 1.0 } else { px }
+    }
+
     pub fn update_cache(
         &mut self,
         editor: &Editor,
@@ -775,26 +781,17 @@ impl Renderer {
         }
     }
 
+    /// UI text restriction: draw on integer baselines and move by integer advances.
+    /// Fractional UI text placement makes glyphs shimmer/thin during blink, scroll and hover redraws.
     pub fn draw_string_scaled(
         &mut self,
         text: &str,
-        mut x: f32,
+        x: f32,
         y: f32,
         color: [f32; 4],
         scale: f32,
     ) {
-        x = x.round();
-        let y = y.round();
-        for c in text.chars() {
-            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                continue;
-            }
-            if let Some(g) = self.get_ui_glyph(c) {
-                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                x += g.advance * scale;
-            }
-        }
+        self.draw_string_scaled_stable(text, x, y, color, scale);
     }
 
     pub fn draw_string_scaled_stable(
@@ -812,9 +809,9 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
-                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(draw_x.round(), y, g, scale);
+                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(draw_x, y, g, scale);
                 self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                draw_x += g.advance * scale;
+                draw_x += Self::snapped_text_advance(g.advance, scale);
             }
         }
     }

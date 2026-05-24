@@ -65,6 +65,7 @@ impl Renderer {
         let icon_size = 26.0 * s;
         let toolbar_h = 40.0 * s;
         let mut cy = y + pad - api.panel_scroll.current.round();
+        let hover_settled = (api.panel_scroll.current - api.panel_scroll.target).abs() < 0.5;
 
         let add = IconButton {
             x: x + pad,
@@ -223,7 +224,7 @@ impl Renderer {
             }
             self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
             if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl))
-                && blink_alpha > 0.15
+                && blink_alpha > 0.5
             {
                 let text_w = self
                     .api_editor_cursor_x_one_line(&api.input_editor, 0.76)
@@ -460,7 +461,8 @@ impl Renderer {
             let mut group_idx = 0usize;
             let mut path_scratch = String::new();
             for (tag, start, len, collapsed) in groups {
-                ui_registry.register_rect(
+                let tag_hovered = hover_settled
+                    && ui_registry.register_rect(
                     crate::ui_system::UiId::ApiRouteTag(group_idx),
                     x,
                     cy,
@@ -469,6 +471,9 @@ impl Renderer {
                     mx,
                     my,
                 );
+                if tag_hovered {
+                    self.push_rect(x, cy, w, tag_h, [1.0, 1.0, 1.0, 0.055]);
+                }
                 let tag_x = x + pad + indent_w;
                 self.draw_tree_disclosure_icon(
                     !collapsed,
@@ -497,7 +502,7 @@ impl Renderer {
                             mx,
                             my,
                         );
-                        let hovered = ui_registry.hovered()
+                        let hovered = hover_settled && ui_registry.hovered()
                             == Some(crate::ui_system::UiId::ApiRouteRow(route_idx));
                         let active = active_route_idx == Some(route_idx);
                         if active {

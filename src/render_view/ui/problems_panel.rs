@@ -127,6 +127,8 @@ impl Renderer {
         }
 
         let scroll_y = ide_panel.problems_scroll.current.round();
+        let hover_settled =
+            (ide_panel.problems_scroll.current - ide_panel.problems_scroll.target).abs() < 0.5;
 
         if ide_panel.flat_diags.is_empty() {
             let hint = "Нет ляпов";
@@ -154,7 +156,8 @@ impl Renderer {
                             self.last_mouse_x,
                             self.last_mouse_y,
                         );
-                        if ui_registry.hovered()
+                        if hover_settled
+                            && ui_registry.hovered()
                             == Some(crate::ui_system::UiId::ProblemFileToggle(idx))
                         {
                             self.push_rect(
@@ -278,7 +281,9 @@ impl Renderer {
                         self.last_mouse_x,
                         self.last_mouse_y,
                     );
-                    if ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx)) {
+                    if hover_settled
+                        && ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx))
+                    {
                         self.push_rect(
                             content_x,
                             current_y,
@@ -388,7 +393,8 @@ impl Renderer {
                                 self.last_mouse_x,
                                 self.last_mouse_y,
                             );
-                            if ui_registry.hovered()
+                            if hover_settled
+                                && ui_registry.hovered()
                                 == Some(crate::ui_system::UiId::ProblemUrl(idx))
                             {
                                 self.push_rect(

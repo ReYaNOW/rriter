@@ -924,6 +924,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         open_file_rx: None,
         save_file_rx: None,
         api_import_file_rx: None,
+        api_body_file_rx: None,
         api_load_rx: Vec::new(),
         api_request_rx: Vec::new(),
 

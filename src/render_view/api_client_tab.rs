@@ -1,10 +1,18 @@
 use crate::app::api_client::{
-    ApiFocus, ApiPrimitiveType, json_body_is_valid, write_api_path_display,
+    API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiSchema, ApiSchemaKind,
+    api_body_prop_row_height, api_param_row_height, api_schema_is_file_input,
+    api_schema_is_multi_file_input, api_text_area_line_height, json_body_is_valid,
+    write_api_path_display,
 };
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconType};
 use glow::HasContext;
-use tree_sitter::StreamingIterator;
+
+const API_SECTION_TITLE_SCALE: f32 = 0.92;
+const API_FIELD_NAME_SCALE: f32 = 0.94;
+const API_FIELD_TYPE_SCALE: f32 = 0.84;
+const API_FIELD_VALUE_SCALE: f32 = 0.88;
+const API_FIELD_META_SCALE: f32 = 0.78;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
@@ -64,13 +72,14 @@ impl Renderer {
             );
         }
 
+        let tab_clip = (x, y, w, h);
         let pad = 28.0 * s;
         let content_w = (w - pad * 2.0).max(1.0);
         let scroll = tab_state.tab_scroll.current.round();
         let mut cy = y + pad - scroll;
 
-        let method_w = 50.0 * s;
-        self.draw_api_method_chip(route.method, x + pad, cy, method_w, 30.0 * s, s, 0.78);
+        let method_w = 58.0 * s;
+        self.draw_api_method_chip(route.method, x + pad, cy, method_w, 34.0 * s, s, 0.88);
         let mut display_path = String::new();
         write_api_path_display(&route.path, &mut display_path);
         self.draw_string_scaled_stable(
@@ -78,18 +87,18 @@ impl Renderer {
             x + pad + method_w + 12.0 * s,
             cy + 23.0 * s,
             self.theme.fg,
-            1.06,
+            1.14,
         );
-        cy += 38.0 * s;
+        cy += 42.0 * s;
         if !route.summary.is_empty() {
             self.draw_string_scaled_stable(
                 &route.summary,
                 x + pad,
                 cy + 18.0 * s,
                 [0.68, 0.70, 0.78, 1.0],
-                0.84,
+                0.92,
             );
-            cy += 28.0 * s;
+            cy += 30.0 * s;
         }
 
         self.draw_api_section_title("Server", x + pad, cy + 18.0 * s, s);
@@ -97,20 +106,20 @@ impl Renderer {
         let mut sx = x + pad;
         for (idx, server) in model.servers.iter().enumerate() {
             let label = server.url.as_str();
-            let server_text_scale = 0.82;
+            let server_text_scale = 0.92;
             let chip_w = (self.measure_ui_width(label, server_text_scale) + 20.0 * s)
                 .max(72.0 * s)
                 .min(content_w);
             if sx + chip_w > x + pad + content_w {
                 sx = x + pad;
-                cy += 30.0 * s;
+                cy += 34.0 * s;
             }
             let active = idx == tab_state.server_idx;
             self.push_rounded_rect(
                 sx,
                 cy,
                 chip_w,
-                28.0 * s,
+                32.0 * s,
                 5.0 * s,
                 if active {
                     [0.35, 0.26, 0.48, 1.0]
@@ -123,14 +132,14 @@ impl Renderer {
                 sx,
                 cy,
                 chip_w,
-                28.0 * s,
+                32.0 * s,
                 mx,
                 my,
             );
             self.draw_string_scaled_stable(
                 label,
                 sx + 10.0 * s,
-                cy + 20.0 * s,
+                cy + 23.0 * s,
                 self.theme.fg,
                 server_text_scale,
             );
@@ -141,6 +150,12 @@ impl Renderer {
         if !route.path_params.is_empty() {
             self.draw_api_section_title("Path params", x + pad, cy + 18.0 * s, s);
             cy += 28.0 * s;
+            let table_h = route
+                .path_params
+                .iter()
+                .map(|param| api_param_row_height(param, s))
+                .sum::<f32>();
+            self.draw_api_dynamic_table_frame(x + pad, cy, content_w, table_h, s);
             for (param_idx, param) in route.path_params.iter().enumerate() {
                 cy = self.draw_api_param_input(
                     x + pad,
@@ -149,9 +164,7 @@ impl Renderer {
                     s,
                     route_idx,
                     param_idx,
-                    &param.name,
-                    param.required,
-                    param.primitive_type,
+                    param,
                     tab_state
                         .path_values
                         .iter()
@@ -177,6 +190,12 @@ impl Renderer {
         if !route.query_params.is_empty() {
             self.draw_api_section_title("Query params", x + pad, cy + 18.0 * s, s);
             cy += 28.0 * s;
+            let table_h = route
+                .query_params
+                .iter()
+                .map(|param| api_param_row_height(param, s))
+                .sum::<f32>();
+            self.draw_api_dynamic_table_frame(x + pad, cy, content_w, table_h, s);
             for (param_idx, param) in route.query_params.iter().enumerate() {
                 cy = self.draw_api_param_input(
                     x + pad,
@@ -185,9 +204,7 @@ impl Renderer {
                     s,
                     route_idx,
                     param_idx,
-                    &param.name,
-                    param.required,
-                    param.primitive_type,
+                    param,
                     tab_state
                         .query_values
                         .iter()
@@ -212,7 +229,24 @@ impl Renderer {
 
         if let Some(body) = &route.request_body {
             self.draw_api_section_title("Body", x + pad, cy + 18.0 * s, s);
-            let valid = body.is_multipart || json_body_is_valid(&tab_state.body_json);
+            let body_focused = matches!(
+                ide_panel.api.focused,
+                Some(ApiFocus::Body { spec_id, route_idx: f_route })
+                    if spec_id == tab_meta.spec_id && f_route == route_idx
+            );
+            let valid = body.is_multipart
+                || if body_focused {
+                    ide_panel
+                        .api
+                        .body_json_valid_for(
+                            tab_meta.spec_id,
+                            route_idx,
+                            ide_panel.api.input_editor.version,
+                        )
+                        .unwrap_or_else(|| json_body_is_valid(&tab_state.body_json))
+                } else {
+                    json_body_is_valid(&tab_state.body_json)
+                };
             self.draw_string_scaled_stable(
                 if valid { "valid" } else { "invalid JSON" },
                 x + pad + 58.0 * s,
@@ -222,34 +256,60 @@ impl Renderer {
                 } else {
                     [1.0, 0.42, 0.42, 1.0]
                 },
-                0.70,
+                0.92,
             );
             cy += 28.0 * s;
             if body.is_multipart {
-                self.draw_string_scaled_stable(
-                    "multipart/form-data fields",
-                    x + pad,
-                    cy + 18.0 * s,
-                    [0.68, 0.70, 0.78, 1.0],
-                    0.74,
-                );
-                cy += 28.0 * s;
                 if let Some(schema_ref) = body.schema
                     && let Some(schema) = model.schema_arena.get(schema_ref.0)
                 {
-                    for prop in &schema.properties {
-                        self.draw_string_scaled_stable(
-                            &prop.name,
-                            x + pad + 10.0 * s,
-                            cy + 19.0 * s,
-                            self.theme.fg,
-                            0.74,
-                        );
-                        cy += 26.0 * s;
+                    let table_h = schema
+                        .properties
+                        .iter()
+                        .filter_map(|prop| model.schema_arena.get(prop.schema.0))
+                        .map(|schema| api_body_prop_row_height(schema, s))
+                        .sum::<f32>();
+                    self.draw_api_dynamic_table_frame(x + pad, cy, content_w, table_h, s);
+                    for (prop_idx, prop) in schema.properties.iter().enumerate() {
+                        if let Some(prop_schema) = model.schema_arena.get(prop.schema.0) {
+                            let focused = matches!(
+                                ide_panel.api.focused,
+                                Some(ApiFocus::BodyField { spec_id, route_idx: f_route, ref name })
+                                    if spec_id == tab_meta.spec_id
+                                        && f_route == route_idx
+                                        && name == &prop.name
+                            );
+                            let value = tab_state
+                                .body_values
+                                .iter()
+                                .find(|item| item.name == prop.name)
+                                .map(|item| item.value.as_str())
+                                .unwrap_or("");
+                            let row_h = self.draw_api_body_prop_row(
+                                x + pad,
+                                cy,
+                                content_w,
+                                s,
+                                route_idx,
+                                prop_idx,
+                                &prop.name,
+                                prop.required,
+                                prop_schema,
+                                model,
+                                value,
+                                focused,
+                                &ide_panel.api.input_editor,
+                                blink_alpha,
+                                ui_registry,
+                                mx,
+                                my,
+                            );
+                            cy += row_h;
+                        }
                     }
                 }
             } else {
-                let body_h = 220.0 * s;
+                let body_h = 300.0 * s;
                 self.push_rounded_rect_border(
                     x + pad,
                     cy,
@@ -277,51 +337,58 @@ impl Renderer {
                     mx,
                     my,
                 );
-                let body_text = if matches!(
-                    ide_panel.api.focused,
-                    Some(ApiFocus::Body { spec_id, route_idx: f_route })
-                        if spec_id == tab_meta.spec_id && f_route == route_idx
-                ) {
+                let body_text = if body_focused {
                     ide_panel.api.input_editor.get_full_text()
                 } else {
                     tab_state.body_json.clone()
                 };
-                if matches!(
-                    ide_panel.api.focused,
-                    Some(ApiFocus::Body { spec_id, route_idx: f_route })
-                        if spec_id == tab_meta.spec_id && f_route == route_idx
-                ) {
-                    self.draw_api_editor_selection_multiline(
-                        &ide_panel.api.input_editor,
-                        x + pad + 10.0 * s,
-                        cy + 8.0 * s,
-                        content_w - 20.0 * s,
-                        body_h - 16.0 * s,
-                        s,
-                    );
-                }
-                self.draw_json_text_area(
-                    &body_text,
-                    x + pad + 10.0 * s,
-                    cy + 22.0 * s,
-                    content_w - 20.0 * s,
-                    body_h - 16.0 * s,
-                    s,
+                let body_clip = (
+                    x + pad + 2.0 * s,
+                    cy + 2.0 * s,
+                    content_w - 4.0 * s,
+                    body_h - 4.0 * s,
                 );
-                if matches!(
-                    ide_panel.api.focused,
-                    Some(ApiFocus::Body { spec_id, route_idx: f_route })
-                        if spec_id == tab_meta.spec_id && f_route == route_idx
-                ) && blink_alpha > 0.15
-                {
-                    self.draw_api_editor_cursor_multiline(
-                        &ide_panel.api.input_editor,
+                if self.begin_api_text_clip(body_clip, tab_clip) {
+                    if body_focused {
+                        self.draw_api_editor_selection_multiline(
+                            &ide_panel.api.input_editor,
+                            x + pad + 10.0 * s,
+                            cy + 10.0 * s,
+                            content_w - 20.0 * s,
+                            body_h - 16.0 * s,
+                            s,
+                            tab_state.body_scroll.current,
+                        );
+                    }
+                    self.draw_json_text_area(
+                        &body_text,
                         x + pad + 10.0 * s,
-                        cy + 8.0 * s,
+                        cy + 29.0 * s,
                         content_w - 20.0 * s,
                         body_h - 16.0 * s,
                         s,
+                        tab_state.body_scroll.current,
                     );
+                    self.draw_api_text_scrollbar(
+                        &body_text,
+                        x + pad + content_w - 8.0 * s,
+                        cy + 8.0 * s,
+                        body_h - 16.0 * s,
+                        s,
+                        tab_state.body_scroll.current,
+                    );
+                    if body_focused && blink_alpha > 0.5 {
+                        self.draw_api_editor_cursor_multiline(
+                            &ide_panel.api.input_editor,
+                            x + pad + 10.0 * s,
+                            cy + 10.0 * s,
+                            content_w - 20.0 * s,
+                            body_h - 16.0 * s,
+                            s,
+                            tab_state.body_scroll.current,
+                        );
+                    }
+                    self.restore_api_tab_clip(tab_clip);
                 }
                 cy += body_h + 16.0 * s;
             }
@@ -364,7 +431,7 @@ impl Renderer {
                     x + pad,
                     cy + 18.0 * s,
                     [1.0, 0.42, 0.42, 1.0],
-                    0.78,
+                    0.88,
                 );
                 cy += 28.0 * s;
             }
@@ -378,14 +445,14 @@ impl Renderer {
                     x + pad,
                     cy + 18.0 * s,
                     api_status_color(response.status),
-                    0.82,
+                    0.92,
                 );
                 self.draw_string_scaled_stable(
                     "ms",
                     x + pad + 62.0 * s,
                     cy + 18.0 * s,
                     [0.68, 0.70, 0.78, 1.0],
-                    0.70,
+                    0.80,
                 );
                 let elapsed = response.elapsed_ms.to_string();
                 self.draw_string_scaled_stable(
@@ -393,7 +460,7 @@ impl Renderer {
                     x + pad + 84.0 * s,
                     cy + 18.0 * s,
                     self.theme.fg,
-                    0.78,
+                    0.88,
                 );
                 cy += 28.0 * s;
                 let resp_h = 180.0 * s;
@@ -414,42 +481,63 @@ impl Renderer {
                     mx,
                     my,
                 );
-                if matches!(
+                let response_focused = matches!(
                     ide_panel.api.focused,
                     Some(ApiFocus::Response { spec_id, route_idx: f_route })
                         if spec_id == tab_meta.spec_id && f_route == route_idx
-                ) {
-                    self.draw_api_editor_selection_multiline(
-                        &ide_panel.api.input_editor,
-                        x + pad + 10.0 * s,
-                        cy + 8.0 * s,
-                        content_w - 20.0 * s,
-                        resp_h - 16.0 * s,
-                        s,
-                    );
-                }
-                self.draw_json_text_area(
-                    &response.body,
-                    x + pad + 10.0 * s,
-                    cy + 22.0 * s,
-                    content_w - 20.0 * s,
-                    resp_h - 16.0 * s,
-                    s,
                 );
-                if matches!(
-                    ide_panel.api.focused,
-                    Some(ApiFocus::Response { spec_id, route_idx: f_route })
-                        if spec_id == tab_meta.spec_id && f_route == route_idx
-                ) && blink_alpha > 0.15
-                {
-                    self.draw_api_editor_cursor_multiline(
-                        &ide_panel.api.input_editor,
+                let response_text = if response_focused {
+                    ide_panel.api.input_editor.get_full_text()
+                } else {
+                    response.body.clone()
+                };
+                let resp_clip = (
+                    x + pad + 2.0 * s,
+                    cy + 2.0 * s,
+                    content_w - 4.0 * s,
+                    resp_h - 4.0 * s,
+                );
+                if self.begin_api_text_clip(resp_clip, tab_clip) {
+                    if response_focused {
+                        self.draw_api_editor_selection_multiline(
+                            &ide_panel.api.input_editor,
+                            x + pad + 10.0 * s,
+                            cy + 10.0 * s,
+                            content_w - 20.0 * s,
+                            resp_h - 16.0 * s,
+                            s,
+                            tab_state.response_scroll.current,
+                        );
+                    }
+                    self.draw_json_text_area(
+                        &response_text,
                         x + pad + 10.0 * s,
-                        cy + 8.0 * s,
+                        cy + 29.0 * s,
                         content_w - 20.0 * s,
                         resp_h - 16.0 * s,
                         s,
+                        tab_state.response_scroll.current,
                     );
+                    self.draw_api_text_scrollbar(
+                        &response_text,
+                        x + pad + content_w - 8.0 * s,
+                        cy + 8.0 * s,
+                        resp_h - 16.0 * s,
+                        s,
+                        tab_state.response_scroll.current,
+                    );
+                    if response_focused && blink_alpha > 0.5 {
+                        self.draw_api_editor_cursor_multiline(
+                            &ide_panel.api.input_editor,
+                            x + pad + 10.0 * s,
+                            cy + 10.0 * s,
+                            content_w - 20.0 * s,
+                            resp_h - 16.0 * s,
+                            s,
+                            tab_state.response_scroll.current,
+                        );
+                    }
+                    self.restore_api_tab_clip(tab_clip);
                 }
                 if response.truncated {
                     self.draw_string_scaled_stable(
@@ -457,7 +545,7 @@ impl Renderer {
                         x + pad + content_w - 86.0 * s,
                         cy + 18.0 * s,
                         [1.0, 0.76, 0.32, 1.0],
-                        0.68,
+                        0.78,
                     );
                 }
             }
@@ -467,7 +555,7 @@ impl Renderer {
                 x + pad,
                 cy + 18.0 * s,
                 [0.68, 0.70, 0.78, 1.0],
-                0.78,
+                0.88,
             );
         }
 
@@ -477,9 +565,233 @@ impl Renderer {
         }
     }
 
-    fn draw_api_section_title(&mut self, text: &str, x: f32, y: f32, s: f32) {
-        self.draw_string_scaled_stable(text, x, y, [0.74, 0.76, 0.84, 1.0], 0.80);
-        self.push_rect(x, y + 6.0 * s, 120.0 * s, 1.0, [1.0, 1.0, 1.0, 0.10]);
+    fn draw_api_section_title(&mut self, text: &str, x: f32, y: f32, _s: f32) {
+        self.draw_string_scaled_stable(
+            text,
+            x,
+            y,
+            [0.74, 0.76, 0.84, 1.0],
+            API_SECTION_TITLE_SCALE,
+        );
+    }
+
+    fn draw_api_dynamic_table_frame(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
+        if h <= 0.0 {
+            return;
+        }
+        let line = [1.0, 1.0, 1.0, 0.13];
+        self.push_rect(x, y, w, h, [0.12, 0.13, 0.17, 1.0]);
+        self.push_rect(x, y, w, (1.0 * s).max(1.0), line);
+        self.push_rect(x, y + h, w, (1.0 * s).max(1.0), line);
+        self.push_rect(x, y, (1.0 * s).max(1.0), h, line);
+        self.push_rect(x + w, y, (1.0 * s).max(1.0), h, line);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_body_prop_row(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        s: f32,
+        route_idx: usize,
+        prop_idx: usize,
+        name: &str,
+        required: bool,
+        schema: &ApiSchema,
+        model: &crate::app::api_client::ApiSpecModel,
+        value: &str,
+        focused: bool,
+        editor: &crate::editor::Editor,
+        blink_alpha: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) -> f32 {
+        let row_h = api_body_prop_row_height(schema, s);
+        let input_w = (w * 0.60).max(120.0 * s);
+        let input_x = x + (w - input_w) * 0.5;
+        let input_h = 36.0 * s;
+        let input_y =
+            y + (row_h - input_h) * 0.5 - schema.examples.len().min(3) as f32 * 8.0 * s;
+        let left_x = (input_x - 150.0 * s).max(x + 12.0 * s);
+        let text_y = input_y + 24.0 * s;
+        self.draw_string_scaled_stable(name, left_x, text_y, self.theme.fg, API_FIELD_NAME_SCALE);
+        if required {
+            let text_w = self.measure_ui_width(name, API_FIELD_NAME_SCALE);
+            self.draw_string_scaled_stable(
+                "*",
+                left_x + text_w + 5.0 * s,
+                text_y,
+                [1.0, 0.42, 0.42, 1.0],
+                API_FIELD_NAME_SCALE,
+            );
+        }
+        self.draw_string_scaled_stable(
+            api_body_schema_type_text(schema, model),
+            left_x,
+            text_y + 20.0 * s,
+            [0.35, 0.75, 1.0, 1.0],
+            API_FIELD_TYPE_SCALE,
+        );
+        self.push_rounded_rect_border(
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            5.0 * s,
+            (1.0 * s).max(1.0),
+            if focused {
+                [0.60, 0.35, 0.85, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 0.12]
+            },
+            [0.13, 0.14, 0.18, 1.0],
+        );
+        let is_file = api_schema_is_file_input(schema, model);
+        let pick_w = if is_file { 64.0 * s } else { 0.0 };
+        let text_w = (input_w - 16.0 * s - pick_w).max(24.0 * s);
+        ui_registry.register_text_input(
+            crate::ui_system::UiId::ApiBodyFieldInput(route_idx, prop_idx),
+            input_x,
+            input_y,
+            input_w - pick_w,
+            input_h,
+            mx,
+            my,
+        );
+        let shown = if focused {
+            editor.get_full_text()
+        } else {
+            value.to_string()
+        };
+        if focused {
+            self.draw_api_editor_selection_one_line(
+                editor,
+                input_x + 8.0 * s,
+                input_y + 6.0 * s,
+                text_w,
+                24.0 * s,
+                API_FIELD_VALUE_SCALE,
+            );
+        }
+        self.draw_string_scaled_stable(
+            &shown,
+            input_x + 8.0 * s,
+            input_y + 25.0 * s,
+            self.theme.fg,
+            API_FIELD_VALUE_SCALE,
+        );
+        if focused && blink_alpha > 0.5 {
+            let cursor_w = self
+                .api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE)
+                .min(text_w);
+            self.push_rect(
+                input_x + 8.0 * s + cursor_w,
+                input_y + 8.0 * s,
+                1.5 * s,
+                22.0 * s,
+                self.theme.fg,
+            );
+        }
+        if is_file {
+            let btn = Button {
+                x: input_x + input_w - pick_w,
+                y: input_y,
+                w: pick_w,
+                h: input_h,
+                text: if api_schema_is_multi_file_input(schema, model) {
+                    "Files".to_string()
+                } else {
+                    "File".to_string()
+                },
+                icon: None,
+                text_scale: API_FIELD_META_SCALE,
+                icon_size: 0.0,
+            };
+            ui_registry.register_button(
+                crate::ui_system::UiId::ApiBodyFilePick(route_idx, prop_idx),
+                &btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
+        let mut right_y = input_y + 13.0 * s;
+        let right_x = input_x + input_w + 10.0 * s;
+        if let Some(max) = schema.max_chars {
+            let text = format!("max {}", max);
+            self.draw_string_scaled_stable(
+                &text,
+                right_x,
+                right_y,
+                [0.68, 0.70, 0.78, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 20.0 * s;
+        }
+        if let Some(default) = &schema.default_value {
+            self.draw_string_scaled_stable(
+                "default",
+                right_x,
+                right_y,
+                [0.68, 0.70, 0.78, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 17.0 * s;
+            self.draw_string_scaled_stable(
+                default,
+                right_x,
+                right_y,
+                [0.82, 0.83, 0.88, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 20.0 * s;
+        }
+        for (idx, allowed) in schema.enum_values.iter().take(5).enumerate() {
+            let line_h = 18.0 * s;
+            if ui_registry.register_rect(
+                crate::ui_system::UiId::ApiBodyAllowedValue(route_idx, prop_idx, idx),
+                right_x - 2.0 * s,
+                right_y - 12.0 * s,
+                (x + w - right_x - 8.0 * s).max(24.0 * s),
+                line_h,
+                mx,
+                my,
+            ) {
+                self.push_rect(
+                    right_x - 2.0 * s,
+                    right_y - 12.0 * s,
+                    (x + w - right_x - 8.0 * s).max(24.0 * s),
+                    line_h,
+                    [1.0, 1.0, 1.0, 0.08],
+                );
+            }
+            self.draw_string_scaled_stable(
+                allowed,
+                right_x,
+                right_y,
+                [0.50, 0.80, 1.0, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 20.0 * s;
+        }
+        let mut example_y = input_y + input_h + 19.0 * s;
+        for example in schema.examples.iter().take(3) {
+            self.draw_string_scaled_stable(
+                example,
+                input_x + 8.0 * s,
+                example_y,
+                [0.62, 0.64, 0.72, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            example_y += 20.0 * s;
+        }
+        self.push_rect(x, y + row_h, w, 1.0, [1.0, 1.0, 1.0, 0.08]);
+        row_h
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -491,9 +803,7 @@ impl Renderer {
         s: f32,
         _route_idx: usize,
         _param_idx: usize,
-        name: &str,
-        required: bool,
-        ty: ApiPrimitiveType,
+        param: &ApiParam,
         value: &str,
         focused: bool,
         editor: &crate::editor::Editor,
@@ -503,41 +813,42 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) -> f32 {
-        let row_h = 40.0 * s;
-        let name_w = (w * 0.32).clamp(80.0 * s, 180.0 * s);
-        self.draw_string_scaled_stable(name, x, y + 24.0 * s, self.theme.fg, 0.80);
-        if required {
+        let row_h = api_param_row_height(param, s);
+        let input_w = (w * 0.60).max(120.0 * s);
+        let input_x = x + (w - input_w) * 0.5;
+        let input_h = 36.0 * s;
+        let input_y = y + (row_h - input_h) * 0.5;
+        let name_x = (input_x - 150.0 * s).max(x + 12.0 * s);
+        let text_y = input_y + 24.0 * s;
+        self.draw_string_scaled_stable(
+            &param.name,
+            name_x,
+            text_y,
+            self.theme.fg,
+            API_FIELD_NAME_SCALE,
+        );
+        if param.required {
+            let text_w = self.measure_ui_width(&param.name, API_FIELD_NAME_SCALE);
             self.draw_string_scaled_stable(
                 "*",
-                x + name_w - 18.0 * s,
-                y + 22.0 * s,
+                name_x + text_w + 5.0 * s,
+                text_y,
                 [1.0, 0.42, 0.42, 1.0],
-                0.78,
+                API_FIELD_NAME_SCALE,
             );
         }
-        let type_text = match ty {
-            ApiPrimitiveType::String => "string",
-            ApiPrimitiveType::Integer => "int",
-            ApiPrimitiveType::Number => "number",
-            ApiPrimitiveType::Boolean => "bool",
-            ApiPrimitiveType::Array => "array",
-            ApiPrimitiveType::Object => "object",
-            ApiPrimitiveType::Unknown => "any",
-        };
         self.draw_string_scaled_stable(
-            type_text,
-            x + name_w - 64.0 * s,
-            y + 24.0 * s,
-            [0.58, 0.61, 0.70, 1.0],
-            0.74,
+            api_param_type_text(param),
+            name_x,
+            text_y + 20.0 * s,
+            [0.35, 0.75, 1.0, 1.0],
+            API_FIELD_TYPE_SCALE,
         );
-        let input_x = x + name_w;
-        let input_w = (w - name_w).max(80.0 * s);
         self.push_rounded_rect_border(
             input_x,
-            y + 5.0 * s,
+            input_y,
             input_w,
-            30.0 * s,
+            input_h,
             5.0 * s,
             (1.0 * s).max(1.0),
             if focused {
@@ -547,7 +858,7 @@ impl Renderer {
             },
             [0.13, 0.14, 0.18, 1.0],
         );
-        ui_registry.register_text_input(id, input_x, y + 5.0 * s, input_w, 30.0 * s, mx, my);
+        ui_registry.register_text_input(id, input_x, input_y, input_w, input_h, mx, my);
         let shown = if focused {
             editor.get_full_text()
         } else {
@@ -557,29 +868,66 @@ impl Renderer {
             self.draw_api_editor_selection_one_line(
                 editor,
                 input_x + 8.0 * s,
-                y + 9.0 * s,
+                input_y + 6.0 * s,
                 input_w - 16.0 * s,
-                22.0 * s,
-                0.76,
+                24.0 * s,
+                API_FIELD_VALUE_SCALE,
             );
         }
         self.draw_string_scaled_stable(
             &shown,
             input_x + 8.0 * s,
-            y + 25.0 * s,
+            input_y + 25.0 * s,
             self.theme.fg,
-            0.76,
+            API_FIELD_VALUE_SCALE,
         );
-        if focused && blink_alpha > 0.15 {
+        if focused && blink_alpha > 0.5 {
             let cursor_w = self
-                .api_editor_cursor_x_one_line(editor, 0.76)
+                .api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE)
                 .min(input_w - 16.0 * s);
             self.push_rect(
                 input_x + 8.0 * s + cursor_w,
-                y + 10.0 * s,
+                input_y + 8.0 * s,
                 1.5 * s,
-                20.0 * s,
+                22.0 * s,
                 self.theme.fg,
+            );
+        }
+        let right_x = input_x + input_w + 10.0 * s;
+        let mut right_y = input_y + 15.0 * s;
+        if let Some(default) = &param.default_value {
+            self.draw_string_scaled_stable(
+                "default",
+                right_x,
+                right_y,
+                [0.68, 0.70, 0.78, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 17.0 * s;
+            self.draw_string_scaled_stable(
+                default,
+                right_x,
+                right_y,
+                [0.82, 0.83, 0.88, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 20.0 * s;
+        }
+        if let Some(example) = &param.example {
+            self.draw_string_scaled_stable(
+                "example",
+                right_x,
+                right_y,
+                [0.68, 0.70, 0.78, 1.0],
+                API_FIELD_META_SCALE,
+            );
+            right_y += 17.0 * s;
+            self.draw_string_scaled_stable(
+                example,
+                right_x,
+                right_y,
+                [0.82, 0.83, 0.88, 1.0],
+                API_FIELD_META_SCALE,
             );
         }
         y + row_h
@@ -620,6 +968,44 @@ impl Renderer {
         self.measure_ui_width(&text[..cursor], text_scale)
     }
 
+    fn begin_api_text_clip(
+        &mut self,
+        rect: (f32, f32, f32, f32),
+        parent: (f32, f32, f32, f32),
+    ) -> bool {
+        let Some((x, y, w, h)) = api_rect_intersection(rect, parent) else {
+            return false;
+        };
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                x.round() as i32,
+                (self.height - (y + h)).round() as i32,
+                w.round() as i32,
+                h.round() as i32,
+            );
+        }
+        true
+    }
+
+    fn restore_api_tab_clip(&mut self, rect: (f32, f32, f32, f32)) {
+        let (x, y, w, h) = rect;
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                x.round() as i32,
+                (self.height - (y + h)).round() as i32,
+                w.round() as i32,
+                h.round() as i32,
+            );
+        }
+    }
+
     fn draw_api_editor_selection_multiline(
         &mut self,
         editor: &crate::editor::Editor,
@@ -628,6 +1014,7 @@ impl Renderer {
         w: f32,
         h: f32,
         s: f32,
+        scroll_y: f32,
     ) {
         let Some(anchor) = editor.selection_anchor else {
             return;
@@ -638,28 +1025,43 @@ impl Renderer {
         let text = editor.get_full_text();
         let start = anchor.min(editor.cursor).min(text.len());
         let end = anchor.max(editor.cursor).min(text.len());
-        let line_h = 18.0 * s;
-        let max_lines = (h / line_h).floor().max(1.0) as usize;
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(&text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
         let mut line_start = 0usize;
-        for (line_idx, line) in text.lines().take(max_lines).enumerate() {
+        for (line_idx, line) in text.split('\n').enumerate() {
             let line_end = line_start + line.len();
+            if line_idx < first_line {
+                line_start = line_end.saturating_add(1);
+                continue;
+            }
+            let visible_idx = line_idx - first_line;
+            if visible_idx >= max_lines {
+                break;
+            }
             let sel_start = start.max(line_start).min(line_end);
             let sel_end = end.max(line_start).min(line_end);
-            if sel_start < sel_end {
+            let newline_selected =
+                line_end < text.len() && start <= line_end && end > line_end;
+            if sel_start < sel_end || newline_selected {
                 let prefix = self
-                    .measure_ui_width(&text[line_start..sel_start], 0.76)
+                    .measure_ui_width(&text[line_start..sel_start], API_BODY_TEXT_SCALE)
                     .min(w);
-                let sel_w = self
-                    .measure_ui_width(&text[sel_start..sel_end], 0.76)
+                let text_w = if sel_start < sel_end {
+                    self.measure_ui_width(&text[sel_start..sel_end], API_BODY_TEXT_SCALE)
+                } else {
+                    0.0
+                };
+                let sel_w = (text_w + if newline_selected { 10.0 * s } else { 0.0 })
                     .min(w - prefix);
                 if sel_w > 0.0 {
-                    self.push_rect(
-                        x + prefix,
-                        y + 5.0 * s + line_idx as f32 * line_h,
-                        sel_w,
-                        line_h,
-                        [0.55, 0.36, 0.90, 0.36],
-                    );
+                    let sel_y = y - line_offset + visible_idx as f32 * line_h;
+                    self.push_rect(x + prefix, sel_y, sel_w, line_h, self.theme.sel);
                 }
             }
             if end <= line_end {
@@ -677,23 +1079,37 @@ impl Renderer {
         w: f32,
         h: f32,
         s: f32,
+        scroll_y: f32,
     ) {
         let text = editor.get_full_text();
         let cursor = editor.cursor.min(text.len());
-        let line_h = 18.0 * s;
-        let max_lines = (h / line_h).floor().max(1.0) as usize;
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(&text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
         let mut line_start = 0usize;
-        for (line_idx, line) in text.lines().take(max_lines).enumerate() {
+        for (line_idx, line) in text.split('\n').enumerate() {
             let line_end = line_start + line.len();
             if cursor <= line_end {
+                if line_idx < first_line {
+                    return;
+                }
+                let visible_idx = line_idx - first_line;
+                if visible_idx >= max_lines {
+                    return;
+                }
                 let cursor_x = self
-                    .measure_ui_width(&text[line_start..cursor], 0.76)
+                    .measure_ui_width(&text[line_start..cursor], API_BODY_TEXT_SCALE)
                     .min(w);
                 self.push_rect(
                     x + cursor_x,
-                    y + 1.0 * s + line_idx as f32 * line_h,
+                    y - line_offset + visible_idx as f32 * line_h,
                     1.5 * s,
-                    18.0 * s,
+                    line_h,
                     self.theme.fg,
                 );
                 return;
@@ -701,126 +1117,252 @@ impl Renderer {
             line_start = line_end + 1;
         }
         if max_lines > 0 {
-            self.push_rect(x, y + 1.0 * s, 1.5 * s, 18.0 * s, self.theme.fg);
+            self.push_rect(x, y, 1.5 * s, line_h, self.theme.fg);
         }
     }
 
-    fn draw_json_text_area(&mut self, text: &str, x: f32, y: f32, w: f32, h: f32, s: f32) {
-        let line_h = 18.0 * s;
-        let max_lines = (h / line_h).floor().max(1.0) as usize;
-        let mut visible = String::new();
-        for (idx, line) in text.lines().take(max_lines).enumerate() {
-            if idx > 0 {
-                visible.push('\n');
-            }
-            visible.push_str(line);
-        }
-        let spans = json_tree_sitter_spans(&visible);
-        let mut span_idx = 0usize;
-        let mut byte_idx = 0usize;
-        for (line_idx, line) in visible.lines().enumerate() {
-            self.draw_json_colored_line(
-                line,
-                byte_idx,
-                &spans,
-                &mut span_idx,
-                x,
-                y + line_idx as f32 * line_h,
-                w,
-            );
-            byte_idx += line.len() + 1;
-        }
-    }
-
-    fn draw_json_colored_line(
+    fn draw_json_text_area(
         &mut self,
-        line: &str,
-        line_start: usize,
-        spans: &[crate::highlighter::ColorSpan],
-        span_idx: &mut usize,
+        text: &str,
         x: f32,
         y: f32,
         w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
     ) {
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let mut byte_idx = 0usize;
+        for (line_idx, line) in text.split('\n').enumerate() {
+            let line_start = byte_idx;
+            let line_end = line_start + line.len();
+            if line_idx < first_line {
+                byte_idx = line_end.saturating_add(1);
+                continue;
+            }
+            let visible_idx = line_idx - first_line;
+            if visible_idx >= max_lines {
+                break;
+            }
+            self.draw_json_lexed_line(line, x, y - line_offset + visible_idx as f32 * line_h, w);
+            byte_idx = line_end.saturating_add(1);
+        }
+    }
+
+    fn draw_api_text_scrollbar(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+    ) {
+        let max_scroll = crate::app::api_client::api_text_area_max_scroll(text, h, s);
+        if max_scroll <= 0.5 {
+            return;
+        }
+        let track_w = (3.0 * s).max(2.0);
+        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.22]);
+        let content_h = h + max_scroll;
+        let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
+        let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
+        self.push_rect(x, thumb_y, track_w, thumb_h, [0.64, 0.66, 0.72, 0.70]);
+    }
+
+    fn draw_json_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
         let mut draw_x = x;
-        for (local_byte, ch) in line.char_indices() {
+        let bytes = line.as_bytes();
+        let mut idx = 0usize;
+        while idx < line.len() {
             if draw_x > x + w {
                 break;
             }
-            let byte = line_start + local_byte;
-            while *span_idx < spans.len() && spans[*span_idx].end <= byte {
-                *span_idx += 1;
+            let b = bytes[idx];
+            if b == b'"' {
+                let end = json_string_end(line, idx);
+                let color = if json_string_is_property(line, end) {
+                    crate::highlighter::DRACULA_CYAN
+                } else {
+                    crate::highlighter::DRACULA_YELLOW
+                };
+                self.draw_json_colored_segment(&line[idx..end], color, x, y, w, &mut draw_x);
+                idx = end;
+                continue;
             }
-            let color = spans
-                .get(*span_idx)
-                .filter(|span| span.start <= byte && byte < span.end)
-                .map(|span| span.color)
-                .unwrap_or(self.theme.fg);
+            if b == b'-' || b.is_ascii_digit() {
+                let end = json_number_end(line, idx);
+                self.draw_json_colored_segment(
+                    &line[idx..end],
+                    crate::highlighter::DRACULA_PURPLE,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx = end;
+                continue;
+            }
+            if let Some(end) = json_keyword_end(line, idx) {
+                self.draw_json_colored_segment(
+                    &line[idx..end],
+                    crate::highlighter::DRACULA_PINK,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx = end;
+                continue;
+            }
+            let ch = line[idx..].chars().next().unwrap_or(' ');
+            let end = idx + ch.len_utf8();
+            self.draw_json_colored_segment(&line[idx..end], self.theme.fg, x, y, w, &mut draw_x);
+            idx = end;
+        }
+    }
+
+    fn draw_json_colored_segment(
+        &mut self,
+        segment: &str,
+        color: [f32; 4],
+        x: f32,
+        y: f32,
+        w: f32,
+        draw_x: &mut f32,
+    ) {
+        for ch in segment.chars() {
+            if *draw_x > x + w {
+                break;
+            }
             let mut buf = [0u8; 4];
-            let s_ch = ch.encode_utf8(&mut buf);
-            self.draw_string_scaled_stable(s_ch, draw_x, y, color, 0.76);
-            draw_x += self
+            self.draw_string_scaled_stable(
+                ch.encode_utf8(&mut buf),
+                *draw_x,
+                y,
+                color,
+                API_BODY_TEXT_SCALE,
+            );
+            *draw_x += self
                 .get_ui_glyph(ch)
-                .map(|g| g.advance * 0.76)
+                .map(|g| Self::snapped_text_advance(g.advance, API_BODY_TEXT_SCALE))
                 .unwrap_or(8.0);
         }
     }
 }
 
-fn json_tree_sitter_spans(text: &str) -> Vec<crate::highlighter::ColorSpan> {
-    let lang = tree_sitter_json::LANGUAGE.into();
-    let mut parser = tree_sitter::Parser::new();
-    if parser.set_language(&lang).is_err() {
-        return Vec::new();
+fn api_rect_intersection(
+    a: (f32, f32, f32, f32),
+    b: (f32, f32, f32, f32),
+) -> Option<(f32, f32, f32, f32)> {
+    let x1 = a.0.max(b.0);
+    let y1 = a.1.max(b.1);
+    let x2 = (a.0 + a.2).min(b.0 + b.2);
+    let y2 = (a.1 + a.3).min(b.1 + b.3);
+    (x2 > x1 && y2 > y1).then_some((x1, y1, x2 - x1, y2 - y1))
+}
+
+fn json_string_end(line: &str, start: usize) -> usize {
+    let bytes = line.as_bytes();
+    let mut idx = start.saturating_add(1);
+    let mut escaped = false;
+    while idx < bytes.len() {
+        let b = bytes[idx];
+        if escaped {
+            escaped = false;
+        } else if b == b'\\' {
+            escaped = true;
+        } else if b == b'"' {
+            return idx + 1;
+        }
+        idx += 1;
     }
-    let Some(tree) = parser.parse(text, None) else {
-        return Vec::new();
-    };
-    let query_src = r#"
-        (pair key: (_) @property)
-        (string) @string
-        (number) @number
-        (null) @keyword.control
-        (true) @boolean
-        (false) @boolean
-        (escape_sequence) @keyword.control
-        (comment) @comment
-    "#;
-    let Ok(query) = tree_sitter::Query::new(&lang, query_src) else {
-        return Vec::new();
-    };
-    let mut cursor = tree_sitter::QueryCursor::new();
-    let mut matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
-    let mut spans = Vec::new();
-    while let Some(m) = matches.next() {
-        for cap in m.captures {
-            let name = query.capture_names()[cap.index as usize];
-            if name == "string"
-                && cap
-                    .node
-                    .parent()
-                    .is_some_and(|parent| parent.kind() == "pair")
-            {
-                continue;
-            }
-            let color = match name {
-                "property" => crate::highlighter::DRACULA_FG,
-                "string" => crate::highlighter::DRACULA_YELLOW,
-                "number" => crate::highlighter::DRACULA_PURPLE,
-                "keyword.control" | "boolean" => crate::highlighter::DRACULA_PINK,
-                "comment" => crate::highlighter::DRACULA_COMMENT,
-                _ => crate::highlighter::DRACULA_FG,
-            };
-            if color != crate::highlighter::DRACULA_FG {
-                spans.push(crate::highlighter::ColorSpan {
-                    start: cap.node.start_byte(),
-                    end: cap.node.end_byte(),
-                    color,
-                });
-            }
+    line.len()
+}
+
+fn json_string_is_property(line: &str, string_end: usize) -> bool {
+    let bytes = line.as_bytes();
+    let mut idx = string_end;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    bytes.get(idx).is_some_and(|b| *b == b':')
+}
+
+fn json_number_end(line: &str, start: usize) -> usize {
+    let bytes = line.as_bytes();
+    let mut idx = start;
+    while idx < bytes.len()
+        && (bytes[idx].is_ascii_digit()
+            || matches!(bytes[idx], b'-' | b'+' | b'.' | b'e' | b'E'))
+    {
+        idx += 1;
+    }
+    idx.max(start + 1)
+}
+
+fn json_keyword_end(line: &str, start: usize) -> Option<usize> {
+    for kw in ["true", "false", "null"] {
+        let end = start + kw.len();
+        if line.get(start..end) == Some(kw) && json_token_boundary(line, end) {
+            return Some(end);
         }
     }
-    crate::highlighter::flatten_color_spans_prefer_specific(spans, text.len())
+    None
+}
+
+fn json_token_boundary(line: &str, idx: usize) -> bool {
+    line.as_bytes()
+        .get(idx)
+        .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+}
+
+fn api_param_type_text(param: &ApiParam) -> &'static str {
+    api_schema_type_text(match param.primitive_type {
+        crate::app::api_client::ApiPrimitiveType::String => ApiSchemaKind::String,
+        crate::app::api_client::ApiPrimitiveType::Integer => ApiSchemaKind::Integer,
+        crate::app::api_client::ApiPrimitiveType::Number => ApiSchemaKind::Number,
+        crate::app::api_client::ApiPrimitiveType::Boolean => ApiSchemaKind::Boolean,
+        crate::app::api_client::ApiPrimitiveType::Array => ApiSchemaKind::Array,
+        crate::app::api_client::ApiPrimitiveType::Object => ApiSchemaKind::Object,
+        crate::app::api_client::ApiPrimitiveType::Bytes => ApiSchemaKind::Bytes,
+        crate::app::api_client::ApiPrimitiveType::Unknown => ApiSchemaKind::Unknown,
+    })
+}
+
+fn api_schema_type_text(kind: ApiSchemaKind) -> &'static str {
+    match kind {
+        ApiSchemaKind::Object => "object",
+        ApiSchemaKind::Array => "array",
+        ApiSchemaKind::String => "string",
+        ApiSchemaKind::Integer => "int",
+        ApiSchemaKind::Number => "number",
+        ApiSchemaKind::Boolean => "bool",
+        ApiSchemaKind::Bytes => "bytes",
+        ApiSchemaKind::Unknown => "any",
+    }
+}
+
+fn api_body_schema_type_text(
+    schema: &ApiSchema,
+    model: &crate::app::api_client::ApiSpecModel,
+) -> &'static str {
+    if api_schema_is_multi_file_input(schema, model) {
+        "files"
+    } else if matches!(schema.kind, ApiSchemaKind::Bytes) {
+        "file"
+    } else if !schema.enum_values.is_empty() {
+        "enum"
+    } else {
+        api_schema_type_text(schema.kind)
+    }
 }
 
 fn api_status_color(status: Option<u16>) -> [f32; 4] {

@@ -125,6 +125,7 @@ impl App {
                     saved_active.min(self.tabs.len().saturating_sub(1))
                 };
                 self.switch_to_tab(target);
+                self.save_tabs_state();
                 if !self.is_highlighted_once {
                     self.wait_for_current_highlight();
                 }

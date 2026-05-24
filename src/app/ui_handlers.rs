@@ -71,6 +71,9 @@ impl App {
             | UiId::ApiPathParamInput(_, _)
             | UiId::ApiQueryParamInput(_, _)
             | UiId::ApiBodyInput(_)
+            | UiId::ApiBodyFieldInput(_, _)
+            | UiId::ApiBodyAllowedValue(_, _, _)
+            | UiId::ApiBodyFilePick(_, _)
             | UiId::ApiResponseBody(_)
             | UiId::ApiTabBody => {
                 self.handle_api_client_click(id);

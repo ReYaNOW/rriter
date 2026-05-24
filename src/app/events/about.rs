@@ -195,6 +195,7 @@ fn compute_about_wait_plan(
     idle_blink_enabled: bool,
     hover_wake_at: Option<Instant>,
     hover_poll_pending: bool,
+    api_poll_pending: bool,
 ) -> AboutWaitPlan {
     if needs_redraw || (show_welcome && is_ide_mode) {
         return AboutWaitPlan::Wait;
@@ -202,17 +203,21 @@ fn compute_about_wait_plan(
 
     let hover_poll_wake_at =
         hover_poll_pending.then_some(now + std::time::Duration::from_millis(16));
+    let api_poll_wake_at = api_poll_pending.then_some(now + std::time::Duration::from_millis(16));
 
     if is_highlighting {
         return AboutWaitPlan::WaitUntil(earliest_wake(
             now + std::time::Duration::from_millis(5),
             hover_wake_at,
-            hover_poll_wake_at,
+            earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
         ));
     }
 
     if !idle_blink_enabled {
-        return if let Some(wake_at) = earliest_optional_wake(hover_wake_at, hover_poll_wake_at) {
+        return if let Some(wake_at) = earliest_optional_wake(
+            hover_wake_at,
+            earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
+        ) {
             AboutWaitPlan::WaitUntil(wake_at)
         } else {
             AboutWaitPlan::Wait
@@ -224,7 +229,11 @@ fn compute_about_wait_plan(
             (now.duration_since(last_action).as_millis() / 500 + 1) as u64 * 500,
         );
 
-    AboutWaitPlan::WaitUntil(earliest_wake(next_blink, hover_wake_at, hover_poll_wake_at))
+    AboutWaitPlan::WaitUntil(earliest_wake(
+        next_blink,
+        hover_wake_at,
+        earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
+    ))
 }
 
 fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
@@ -506,10 +515,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
     for tab in &mut app.tabs {
-        if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
-            && state.tab_scroll.update(dt)
-        {
-            needs_redraw = true;
+        if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
+            if state.tab_scroll.update(dt) {
+                needs_redraw = true;
+            }
+            if state.body_scroll.update(dt) {
+                needs_redraw = true;
+            }
+            if state.response_scroll.update(dt) {
+                needs_redraw = true;
+            }
         }
     }
     for scroll in app.ide_panel.lsp_logs_scroll_y.values_mut() {
@@ -1365,6 +1380,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         idle_blink_enabled,
         hover_wake_at,
         hover_poll_pending,
+        !app.api_request_rx.is_empty(),
     ) {
         AboutWaitPlan::Wait => {
             if let Some(w) = app.window.as_ref() {
@@ -1479,6 +1495,7 @@ mod tests {
                 true,
                 None,
                 false,
+                false,
             ),
             AboutWaitPlan::Wait,
         );
@@ -1493,6 +1510,7 @@ mod tests {
                 true,
                 None,
                 false,
+                false,
             ),
             AboutWaitPlan::Wait,
         );
@@ -1506,6 +1524,7 @@ mod tests {
                 true,
                 true,
                 None,
+                false,
                 false,
             ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(5)),
@@ -1521,6 +1540,7 @@ mod tests {
                 true,
                 Some(now + std::time::Duration::from_millis(2)),
                 true,
+                false,
             ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(2)),
         );
@@ -1534,6 +1554,7 @@ mod tests {
                 false,
                 true,
                 None,
+                false,
                 false,
             ),
             AboutWaitPlan::WaitUntil(last_action + std::time::Duration::from_millis(1500)),
@@ -1549,6 +1570,7 @@ mod tests {
                 false,
                 None,
                 false,
+                false,
             ),
             AboutWaitPlan::Wait,
         );
@@ -1563,6 +1585,7 @@ mod tests {
                 false,
                 Some(now + std::time::Duration::from_millis(20)),
                 true,
+                false,
             ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(16)),
         );

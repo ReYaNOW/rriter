@@ -18,7 +18,8 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
-                w += g.advance * scale;
+                let px = (g.advance * scale).round();
+                w += if px <= 0.0 && g.advance > 0.0 { 1.0 } else { px };
             }
         }
         w

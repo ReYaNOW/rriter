@@ -13,10 +13,12 @@ use url::{Host, Url};
 pub const API_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
 pub const API_MAX_SPEC_BYTES: usize = 8 * 1024 * 1024;
 pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const API_MAX_MULTIPART_BODY_BYTES: usize = 64 * 1024 * 1024;
 const API_SCHEMA_MAX_DEPTH: usize = 12;
 const API_SCHEMA_MAX_COUNT: usize = 768;
 const API_SCHEMA_MAX_PROPERTIES: usize = 160;
 const API_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const API_UNTAGGED_GROUP: &str = "Без тэга";
 
 static API_HTTP_CLIENTS: std::sync::LazyLock<
     std::sync::Mutex<FxHashMap<ApiHttpClientKey, reqwest::blocking::Client>>,
@@ -201,6 +203,7 @@ pub enum ApiPrimitiveType {
     Boolean,
     Array,
     Object,
+    Bytes,
     Unknown,
 }
 
@@ -209,6 +212,13 @@ impl ApiPrimitiveType {
         let Some(schema) = schema else {
             return Self::Unknown;
         };
+        if schema
+            .get("format")
+            .and_then(Value::as_str)
+            .is_some_and(|fmt| matches!(fmt, "binary" | "byte"))
+        {
+            return Self::Bytes;
+        }
         match schema.get("type").and_then(Value::as_str) {
             Some("string") => Self::String,
             Some("integer") => Self::Integer,
@@ -238,6 +248,10 @@ pub struct ApiSchema {
     pub kind: ApiSchemaKind,
     pub properties: Vec<ApiSchemaProperty>,
     pub item: Option<ApiSchemaRef>,
+    pub enum_values: Vec<String>,
+    pub default_value: Option<String>,
+    pub examples: Vec<String>,
+    pub max_chars: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,6 +262,7 @@ pub enum ApiSchemaKind {
     Integer,
     Number,
     Boolean,
+    Bytes,
     Unknown,
 }
 
@@ -256,6 +271,14 @@ pub struct ApiSchemaProperty {
     pub name: String,
     pub required: bool,
     pub schema: ApiSchemaRef,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiBodyFilePickResult {
+    pub spec_id: ApiSpecId,
+    pub route_idx: usize,
+    pub name: String,
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -329,10 +352,14 @@ pub struct ApiClientTabState {
     pub server_idx: usize,
     pub path_values: Vec<ApiInputValue>,
     pub query_values: Vec<ApiInputValue>,
+    pub body_values: Vec<ApiInputValue>,
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
     pub pending: bool,
+    pub pending_request_id: Option<u64>,
     pub tab_scroll: ScrollState,
+    pub body_scroll: ScrollState,
+    pub response_scroll: ScrollState,
 }
 
 impl Default for ApiClientTabState {
@@ -342,10 +369,14 @@ impl Default for ApiClientTabState {
             server_idx: 0,
             path_values: Vec::new(),
             query_values: Vec::new(),
+            body_values: Vec::new(),
             body_json: "{\n  \n}".to_string(),
             response: None,
             pending: false,
+            pending_request_id: None,
             tab_scroll: ScrollState::new(7.0),
+            body_scroll: ScrollState::new(7.0),
+            response_scroll: ScrollState::new(7.0),
         }
     }
 }
@@ -356,9 +387,11 @@ impl PartialEq for ApiClientTabState {
             && self.server_idx == other.server_idx
             && self.path_values == other.path_values
             && self.query_values == other.query_values
+            && self.body_values == other.body_values
             && self.body_json == other.body_json
             && self.response == other.response
             && self.pending == other.pending
+            && self.pending_request_id == other.pending_request_id
     }
 }
 
@@ -373,6 +406,11 @@ pub enum ApiFocus {
         name: String,
     },
     QueryParam {
+        spec_id: ApiSpecId,
+        route_idx: usize,
+        name: String,
+    },
+    BodyField {
         spec_id: ApiSpecId,
         route_idx: usize,
         name: String,
@@ -401,9 +439,28 @@ pub struct ApiClientState {
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
     pub panel_scroll: ScrollState,
     pub route_scroll: ScrollState,
+    pub next_request_id: u64,
     pub input_editor: Editor,
     pub focused: Option<ApiFocus>,
     pub last_resolved_host: Option<ApiResolvedHost>,
+    body_json_validation: Option<ApiJsonValidationState>,
+    body_json_validation_pending: Option<(ApiSpecId, usize, u64)>,
+    body_json_validation_rx: Option<Receiver<ApiJsonValidationResult>>,
+}
+
+#[derive(Clone, Copy)]
+struct ApiJsonValidationState {
+    spec_id: ApiSpecId,
+    route_idx: usize,
+    version: u64,
+    valid: bool,
+}
+
+struct ApiJsonValidationResult {
+    spec_id: ApiSpecId,
+    route_idx: usize,
+    version: u64,
+    valid: bool,
 }
 
 impl Default for ApiClientState {
@@ -422,9 +479,13 @@ impl Default for ApiClientState {
             collapsed_route_roots: FxHashSet::default(),
             panel_scroll: ScrollState::new(7.0),
             route_scroll: ScrollState::new(7.0),
+            next_request_id: 1,
             input_editor: Editor::new(512),
             focused: None,
             last_resolved_host: None,
+            body_json_validation: None,
+            body_json_validation_pending: None,
+            body_json_validation_rx: None,
         }
     }
 }
@@ -482,6 +543,19 @@ impl ApiClientState {
             }
             let _ = std::fs::write(api_specs_path(), content);
         }
+    }
+
+    pub fn body_json_valid_for(
+        &self,
+        spec_id: ApiSpecId,
+        route_idx: usize,
+        version: u64,
+    ) -> Option<bool> {
+        self.body_json_validation
+            .filter(|state| {
+                state.spec_id == spec_id && state.route_idx == route_idx && state.version == version
+            })
+            .map(|state| state.valid)
     }
 
     pub fn alloc_spec_id(&mut self) -> ApiSpecId {
@@ -593,6 +667,9 @@ fn api_focus_targets_active_tab(
             spec_id, route_idx, ..
         }
         | ApiFocus::QueryParam {
+            spec_id, route_idx, ..
+        }
+        | ApiFocus::BodyField {
             spec_id, route_idx, ..
         }
         | ApiFocus::Body { spec_id, route_idx }
@@ -948,6 +1025,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         .and_then(|v| v.get("schemas"))
         .and_then(Value::as_object);
 
+    let tag_order = parse_tag_order(root.get("tags"));
     if let Some(paths) = root.get("paths").and_then(Value::as_object) {
         for (path, path_item) in paths {
             let path_params = parse_parameters(path_item.get("parameters"), root);
@@ -975,7 +1053,8 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         .and_then(Value::as_array)
                         .and_then(|tags| tags.first())
                         .and_then(Value::as_str)
-                        .unwrap_or("default")
+                        .filter(|tag| !tag.is_empty())
+                        .unwrap_or(API_UNTAGGED_GROUP)
                         .to_string();
                     let summary = op
                         .get("summary")
@@ -1013,9 +1092,8 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         }
     }
     model.routes.sort_unstable_by(|a, b| {
-        a.tag
-            .to_lowercase()
-            .cmp(&b.tag.to_lowercase())
+        api_route_tag_rank(&a.tag, &tag_order)
+            .cmp(&api_route_tag_rank(&b.tag, &tag_order))
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.method.sort_rank().cmp(&b.method.sort_rank()))
     });
@@ -1023,6 +1101,35 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         .routes
         .dedup_by(|a, b| a.tag == b.tag && a.path == b.path && a.method == b.method);
     Ok(model)
+}
+
+fn parse_tag_order(value: Option<&Value>) -> FxHashMap<String, usize> {
+    let mut out = FxHashMap::default();
+    if let Some(tags) = value.and_then(Value::as_array) {
+        for tag in tags {
+            let Some(name) = tag.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !name.is_empty() && !out.contains_key(name) {
+                out.insert(name.to_string(), out.len());
+            }
+        }
+    }
+    out
+}
+
+fn api_route_tag_rank<'a>(
+    tag: &'a str,
+    tag_order: &FxHashMap<String, usize>,
+) -> (u8, usize, &'a str) {
+    if tag == API_UNTAGGED_GROUP {
+        return (2, usize::MAX, tag);
+    }
+    if let Some(rank) = tag_order.get(tag) {
+        (0, *rank, tag)
+    } else {
+        (1, usize::MAX, tag)
+    }
 }
 
 fn parse_servers(value: Option<&Value>) -> Vec<ApiServer> {
@@ -1175,6 +1282,17 @@ fn normalize_schema_named(
         kind: schema_kind(schema),
         properties: Vec::new(),
         item: None,
+        enum_values: schema
+            .get("enum")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(value_to_string).collect())
+            .unwrap_or_default(),
+        default_value: schema.get("default").and_then(value_to_string),
+        examples: schema_examples(schema),
+        max_chars: schema
+            .get("maxLength")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok()),
     });
     if matches!(arena[idx].kind, ApiSchemaKind::Object) {
         let required = schema
@@ -1217,6 +1335,13 @@ fn normalize_schema_named(
 }
 
 fn schema_kind(schema: &Value) -> ApiSchemaKind {
+    if schema
+        .get("format")
+        .and_then(Value::as_str)
+        .is_some_and(|fmt| matches!(fmt, "binary" | "byte"))
+    {
+        return ApiSchemaKind::Bytes;
+    }
     match schema.get("type").and_then(Value::as_str) {
         Some("object") => ApiSchemaKind::Object,
         Some("array") => ApiSchemaKind::Array,
@@ -1227,6 +1352,33 @@ fn schema_kind(schema: &Value) -> ApiSchemaKind {
         _ if schema.get("properties").is_some() => ApiSchemaKind::Object,
         _ => ApiSchemaKind::Unknown,
     }
+}
+
+fn schema_examples(schema: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(example) = schema.get("example").and_then(value_to_string) {
+        out.push(example);
+    }
+    if let Some(items) = schema.get("examples").and_then(Value::as_array) {
+        for item in items {
+            if let Some(value) = value_to_string(item) {
+                out.push(value);
+            }
+        }
+    } else if let Some(items) = schema.get("examples").and_then(Value::as_object) {
+        for item in items.values() {
+            let value = item
+                .get("value")
+                .and_then(value_to_string)
+                .or_else(|| value_to_string(item));
+            if let Some(value) = value {
+                out.push(value);
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 fn parse_responses(value: Option<&Value>) -> Vec<ApiResponseSummary> {
@@ -1328,29 +1480,47 @@ pub fn api_tab_max_scroll(
         return 0.0;
     };
     let pad = 28.0 * scale;
-    let mut content_h = pad + 38.0 * scale;
+    let mut content_h = pad + 42.0 * scale;
     if !route.summary.is_empty() {
-        content_h += 28.0 * scale;
+        content_h += 30.0 * scale;
     }
     content_h += 28.0 * scale;
-    content_h += model.servers.len().max(1) as f32 * 30.0 * scale + 42.0 * scale;
+    content_h += model.servers.len().max(1) as f32 * 34.0 * scale + 42.0 * scale;
     if !route.path_params.is_empty() {
-        content_h += 28.0 * scale + route.path_params.len() as f32 * 40.0 * scale + 8.0 * scale;
+        content_h += 28.0 * scale
+            + route
+                .path_params
+                .iter()
+                .map(|param| api_param_row_height(param, scale))
+                .sum::<f32>()
+            + 8.0 * scale;
     }
     if !route.query_params.is_empty() {
-        content_h += 28.0 * scale + route.query_params.len() as f32 * 40.0 * scale + 8.0 * scale;
+        content_h += 28.0 * scale
+            + route
+                .query_params
+                .iter()
+                .map(|param| api_param_row_height(param, scale))
+                .sum::<f32>()
+            + 8.0 * scale;
     }
     if let Some(body) = &route.request_body {
         content_h += 28.0 * scale;
         if body.is_multipart {
-            let prop_count = body
+            content_h += body
                 .schema
                 .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
-                .map(|schema| schema.properties.len())
-                .unwrap_or(0);
-            content_h += 28.0 * scale + prop_count as f32 * 26.0 * scale;
+                .map(|schema| {
+                    schema
+                        .properties
+                        .iter()
+                        .filter_map(|prop| model.schema_arena.get(prop.schema.0))
+                        .map(|schema| api_body_prop_row_height(schema, scale))
+                        .sum::<f32>()
+                })
+                .unwrap_or(0.0);
         } else {
-            content_h += 236.0 * scale;
+            content_h += 316.0 * scale;
         }
     }
     content_h += 84.0 * scale;
@@ -1360,6 +1530,35 @@ pub fn api_tab_max_scroll(
         content_h += 24.0 * scale;
     }
     (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
+pub fn api_param_row_height(param: &ApiParam, scale: f32) -> f32 {
+    let mut meta_lines = 0usize;
+    if param.default_value.is_some() {
+        meta_lines += 2;
+    }
+    if param.example.is_some() {
+        meta_lines += 2;
+    }
+    (68.0 * scale).max((30.0 + meta_lines as f32 * 20.0) * scale)
+}
+
+pub fn api_body_prop_row_height(schema: &ApiSchema, scale: f32) -> f32 {
+    let examples_h = schema.examples.len().min(3) as f32 * 20.0 * scale;
+    let allowed_h = schema.enum_values.len().min(5) as f32 * 20.0 * scale;
+    (68.0 * scale + examples_h).max(68.0 * scale + allowed_h)
+}
+
+pub fn api_schema_is_file_input(schema: &ApiSchema, model: &ApiSpecModel) -> bool {
+    matches!(schema.kind, ApiSchemaKind::Bytes) || api_schema_is_multi_file_input(schema, model)
+}
+
+pub fn api_schema_is_multi_file_input(schema: &ApiSchema, model: &ApiSpecModel) -> bool {
+    matches!(schema.kind, ApiSchemaKind::Array)
+        && schema
+            .item
+            .and_then(|item| model.schema_arena.get(item.0))
+            .is_some_and(|item| matches!(item.kind, ApiSchemaKind::Bytes))
 }
 
 pub fn build_request_url(
@@ -1418,18 +1617,39 @@ pub fn json_body_is_valid(text: &str) -> bool {
     serde_json::from_str::<Value>(text).is_ok()
 }
 
+pub const API_BODY_TEXT_SCALE: f32 = 1.0;
+
+pub fn api_text_area_line_height(scale: f32) -> f32 {
+    26.0 * scale
+}
+
+pub fn api_text_area_max_scroll(text: &str, visible_h: f32, scale: f32) -> f32 {
+    let line_h = api_text_area_line_height(scale);
+    let lines = text.split('\n').count().max(1) as f32;
+    (lines * line_h - visible_h.max(line_h)).max(0.0)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiJobRequest {
+    pub request_id: u64,
     pub spec_id: ApiSpecId,
     pub route_idx: usize,
     pub method: ApiMethod,
     pub url: String,
     pub body_json: Option<String>,
+    pub body_multipart: Option<Vec<ApiMultipartPart>>,
     pub resolved_host: Option<ApiResolvedHost>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiMultipartPart {
+    Text { name: String, value: String },
+    File { name: String, path: PathBuf },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiJobResponse {
+    pub request_id: u64,
     pub spec_id: ApiSpecId,
     pub route_idx: usize,
     pub status: Option<u16>,
@@ -1450,9 +1670,96 @@ pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
     rx
 }
 
+fn send_api_request_body(
+    request: reqwest::blocking::RequestBuilder,
+    body_json: Option<&str>,
+    multipart_body: Option<(String, Vec<u8>)>,
+) -> Result<reqwest::blocking::Response, reqwest::Error> {
+    if let Some((content_type, body)) = multipart_body {
+        request.header("Content-Type", content_type).body(body).send()
+    } else {
+        request
+            .header("Content-Type", "application/json")
+            .body(body_json.unwrap_or_default().to_string())
+            .send()
+    }
+}
+
+fn build_multipart_body(
+    parts: &[ApiMultipartPart],
+    request_id: u64,
+) -> Result<(String, Vec<u8>), ApiLoadError> {
+    let boundary = format!("rriter-api-{}-{}", request_id, now_epoch_secs());
+    let mut body = Vec::new();
+    for part in parts {
+        match part {
+            ApiMultipartPart::Text { name, value } => {
+                push_multipart_field(&mut body, &boundary, name, None, value.as_bytes());
+            }
+            ApiMultipartPart::File { name, path } => {
+                let size = std::fs::metadata(path)
+                    .ok()
+                    .and_then(|meta| usize::try_from(meta.len()).ok())
+                    .unwrap_or(0);
+                if body.len().saturating_add(size) > API_MAX_MULTIPART_BODY_BYTES {
+                    return Err(ApiLoadError::new(
+                        ApiLoadErrorKind::TooLarge,
+                        "multipart body больше лимита",
+                    ));
+                }
+                let bytes = std::fs::read(path).map_err(|err| {
+                    ApiLoadError::new(
+                        ApiLoadErrorKind::Io,
+                        format!("файл не прочитан: {}", err),
+                    )
+                })?;
+                let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+                push_multipart_field(&mut body, &boundary, name, Some(file_name), &bytes);
+            }
+        }
+    }
+    body.extend_from_slice(b"--");
+    body.extend_from_slice(boundary.as_bytes());
+    body.extend_from_slice(b"--\r\n");
+    Ok((format!("multipart/form-data; boundary={boundary}"), body))
+}
+
+fn push_multipart_field(
+    body: &mut Vec<u8>,
+    boundary: &str,
+    name: &str,
+    file_name: Option<&str>,
+    bytes: &[u8],
+) {
+    body.extend_from_slice(b"--");
+    body.extend_from_slice(boundary.as_bytes());
+    body.extend_from_slice(b"\r\nContent-Disposition: form-data; name=\"");
+    push_multipart_quoted(body, name);
+    body.extend_from_slice(b"\"");
+    if let Some(file_name) = file_name {
+        body.extend_from_slice(b"; filename=\"");
+        push_multipart_quoted(body, file_name);
+        body.extend_from_slice(b"\"\r\nContent-Type: application/octet-stream");
+    }
+    body.extend_from_slice(b"\r\n\r\n");
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(b"\r\n");
+}
+
+fn push_multipart_quoted(out: &mut Vec<u8>, value: &str) {
+    for b in value.bytes() {
+        if matches!(b, b'"' | b'\\' | b'\r' | b'\n') {
+            out.push(b'_');
+        } else {
+            out.push(b);
+        }
+    }
+}
+
 fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
     let started = std::time::Instant::now();
     let mut response = ApiJobResponse {
+        request_id: job.request_id,
         spec_id: job.spec_id,
         route_idx: job.route_idx,
         status: None,
@@ -1464,27 +1771,36 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         resolved_host: job.resolved_host.clone(),
     };
     let client = api_http_client(job.resolved_host.as_ref());
-    let result = match job.method {
-        ApiMethod::Get => client.get(&job.url).send(),
-        ApiMethod::Delete => client.delete(&job.url).send(),
-        ApiMethod::Head => client.head(&job.url).send(),
-        ApiMethod::Options => client.request(reqwest::Method::OPTIONS, &job.url).send(),
-        ApiMethod::Trace => client.request(reqwest::Method::TRACE, &job.url).send(),
-        ApiMethod::Post => client
-            .post(&job.url)
-            .header("Content-Type", "application/json")
-            .body(job.body_json.clone().unwrap_or_default())
-            .send(),
-        ApiMethod::Put => client
-            .put(&job.url)
-            .header("Content-Type", "application/json")
-            .body(job.body_json.clone().unwrap_or_default())
-            .send(),
-        ApiMethod::Patch => client
-            .patch(&job.url)
-            .header("Content-Type", "application/json")
-            .body(job.body_json.clone().unwrap_or_default())
-            .send(),
+    let multipart_body = job
+        .body_multipart
+        .as_ref()
+        .map(|parts| build_multipart_body(parts, job.request_id))
+        .transpose();
+    let result = match multipart_body {
+        Ok(multipart_body) => match job.method {
+            ApiMethod::Get => client.get(&job.url).send(),
+            ApiMethod::Delete => client.delete(&job.url).send(),
+            ApiMethod::Head => client.head(&job.url).send(),
+            ApiMethod::Options => client.request(reqwest::Method::OPTIONS, &job.url).send(),
+            ApiMethod::Trace => client.request(reqwest::Method::TRACE, &job.url).send(),
+            ApiMethod::Post => {
+                let req = client.post(&job.url);
+                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+            }
+            ApiMethod::Put => {
+                let req = client.put(&job.url);
+                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+            }
+            ApiMethod::Patch => {
+                let req = client.patch(&job.url);
+                send_api_request_body(req, job.body_json.as_deref(), multipart_body)
+            }
+        },
+        Err(err) => {
+            response.elapsed_ms = started.elapsed().as_millis();
+            response.error = Some(err);
+            return response;
+        }
     };
     response.elapsed_ms = started.elapsed().as_millis();
     match result {
@@ -1636,7 +1952,7 @@ fn api_line_byte_at_x(
     for (byte_idx, ch) in line.char_indices() {
         let adv = renderer
             .get_ui_glyph(ch)
-            .map(|glyph| glyph.advance * scale)
+            .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, scale))
             .unwrap_or(8.0);
         if target_x <= x + adv * 0.5 {
             return byte_idx;
@@ -1653,18 +1969,21 @@ fn api_multiline_byte_at_pointer(
     mx: f32,
     my: f32,
     scale: f32,
+    scroll_y: f32,
 ) -> usize {
     let (x, y, w, h) = rect;
     let text_x = x + 10.0 * scale;
-    let text_y = y + 22.0 * scale;
-    let line_h = 18.0 * scale;
-    let max_lines = ((h - 16.0 * scale).max(line_h) / line_h).floor() as usize;
-    let target_line = ((my - text_y).max(0.0) / line_h).floor() as usize;
+    let text_y = y + 10.0 * scale;
+    let line_h = api_text_area_line_height(scale);
+    let visible_h = (h - 16.0 * scale).max(line_h);
+    let max_scroll = api_text_area_max_scroll(text, visible_h, scale);
+    let scroll_y = scroll_y.clamp(0.0, max_scroll);
+    let target_line = ((my - text_y + scroll_y).max(0.0) / line_h).floor() as usize;
     let target_x = (mx - text_x).clamp(0.0, (w - 20.0 * scale).max(0.0));
     let mut line_start = 0usize;
-    for (line_idx, line) in text.split('\n').take(max_lines.max(1)).enumerate() {
+    for (line_idx, line) in text.split('\n').enumerate() {
         if line_idx == target_line {
-            return line_start + api_line_byte_at_x(renderer, line, target_x, 0.76);
+            return line_start + api_line_byte_at_x(renderer, line, target_x, API_BODY_TEXT_SCALE);
         }
         line_start = line_start.saturating_add(line.len()).saturating_add(1);
     }
@@ -1672,11 +1991,72 @@ fn api_multiline_byte_at_pointer(
 }
 
 impl crate::app::App {
+    fn pulse_api_cursor_blink(&mut self) {
+        self.last_action = std::time::Instant::now();
+        self.last_blink_state = true;
+    }
+
+    fn queue_api_body_json_validation(&mut self) {
+        let Some(ApiFocus::Body { spec_id, route_idx }) = self.ide_panel.api.focused else {
+            return;
+        };
+        let version = self.ide_panel.api.input_editor.version;
+        if self
+            .ide_panel
+            .api
+            .body_json_validation
+            .is_some_and(|state| {
+                state.spec_id == spec_id && state.route_idx == route_idx && state.version == version
+            })
+            || self.ide_panel.api.body_json_validation_pending
+                == Some((spec_id, route_idx, version))
+        {
+            return;
+        }
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let (tx, rx) = mpsc::channel();
+        self.ide_panel.api.body_json_validation_pending = Some((spec_id, route_idx, version));
+        self.ide_panel.api.body_json_validation_rx = Some(rx);
+        std::thread::spawn(move || {
+            let valid = json_body_is_valid(&text);
+            let _ = tx.send(ApiJsonValidationResult {
+                spec_id,
+                route_idx,
+                version,
+                valid,
+            });
+        });
+    }
+
+    fn api_text_scroll_for_ui(&self, id: crate::ui_system::UiId) -> f32 {
+        let Some((_, state)) = self.active_api_tab() else {
+            return 0.0;
+        };
+        match id {
+            crate::ui_system::UiId::ApiBodyInput(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                state.body_scroll.current
+            }
+            crate::ui_system::UiId::ApiResponseBody(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                state.response_scroll.current
+            }
+            _ => 0.0,
+        }
+    }
+
     fn place_api_cursor_from_last_click(&mut self, id: crate::ui_system::UiId, multiline: bool) {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return;
         };
         let text = self.ide_panel.api.input_editor.get_full_text();
+        let scroll_y = if multiline {
+            self.api_text_scroll_for_ui(id)
+        } else {
+            0.0
+        };
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -1684,14 +2064,48 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale)
+            api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale, scroll_y)
         } else {
             let target_x =
                 (mx - (rect.0 + 8.0 * scale)).clamp(0.0, (rect.2 - 16.0 * scale).max(0.0));
-            api_line_byte_at_x(renderer, &text, target_x, 0.76)
+            api_line_byte_at_x(renderer, &text, target_x, 0.88)
         };
         self.ide_panel.api.input_editor.cursor = cursor;
         self.ide_panel.api.input_editor.selection_anchor = Some(cursor);
+        self.pulse_api_cursor_blink();
+        self.queue_api_body_json_validation();
+    }
+
+    pub(crate) fn drag_api_text_cursor_from_last_mouse(&mut self) -> bool {
+        let id = match self.ide_panel.api.focused {
+            Some(ApiFocus::Body { route_idx, .. }) => {
+                crate::ui_system::UiId::ApiBodyInput(route_idx)
+            }
+            Some(ApiFocus::Response { route_idx, .. }) => {
+                crate::ui_system::UiId::ApiResponseBody(route_idx)
+            }
+            _ => return false,
+        };
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let scroll_y = self.api_text_scroll_for_ui(id);
+        let Some(renderer) = self.renderer.as_mut() else {
+            return false;
+        };
+        let mx = renderer.last_mouse_x;
+        let my = renderer.last_mouse_y;
+        let scale = renderer.scale_factor;
+        let cursor = api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale, scroll_y);
+        if self.ide_panel.api.input_editor.selection_anchor.is_none() {
+            self.ide_panel.api.input_editor.selection_anchor =
+                Some(self.ide_panel.api.input_editor.cursor);
+        }
+        self.ide_panel.api.input_editor.cursor = cursor;
+        self.pulse_api_cursor_blink();
+        self.queue_api_body_json_validation();
+        true
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1705,6 +2119,64 @@ impl crate::app::App {
                 .pick_file();
             let _ = tx.send(file);
         });
+    }
+
+    fn trigger_api_body_file_picker(
+        &mut self,
+        spec_id: ApiSpecId,
+        route_idx: usize,
+        name: String,
+        multi: bool,
+    ) {
+        let (tx, rx) = mpsc::channel();
+        self.api_body_file_rx = Some(rx);
+        std::thread::spawn(move || {
+            let dialog = rfd::FileDialog::new().set_title("Выбрать файл");
+            let paths = if multi {
+                dialog.pick_files().unwrap_or_default()
+            } else {
+                dialog.pick_file().into_iter().collect()
+            };
+            let _ = tx.send(ApiBodyFilePickResult {
+                spec_id,
+                route_idx,
+                name,
+                paths,
+            });
+        });
+    }
+
+    fn apply_api_body_file_pick(&mut self, result: ApiBodyFilePickResult) {
+        if result.paths.is_empty() {
+            return;
+        }
+        let new_value = result
+            .paths
+            .iter()
+            .map(|path| path.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Some((_, state)) = self.active_api_tab_mut_for(result.spec_id)
+            && state.route_idx == Some(result.route_idx)
+            && let Some(value) = state
+                .body_values
+                .iter_mut()
+                .find(|value| value.name == result.name)
+        {
+            value.value = new_value.clone();
+        }
+        if matches!(
+            self.ide_panel.api.focused,
+            Some(ApiFocus::BodyField {
+                spec_id,
+                route_idx,
+                ref name,
+            }) if spec_id == result.spec_id && route_idx == result.route_idx && name == &result.name
+        ) {
+            let old_version = self.ide_panel.api.input_editor.version;
+            self.ide_panel.api.input_editor.set_text_clean(&new_value);
+            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+        }
     }
 
     pub fn start_api_local_import(&mut self, path: PathBuf) {
@@ -1867,6 +2339,12 @@ impl crate::app::App {
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.route_idx = Some(route_idx);
             state.response = None;
+            state.pending = false;
+            state.pending_request_id = None;
+            state.body_scroll.current = 0.0;
+            state.body_scroll.target = 0.0;
+            state.response_scroll.current = 0.0;
+            state.response_scroll.target = 0.0;
             self.sync_api_tab_inputs(spec_id, route_idx);
         }
         self.save_tabs_state();
@@ -1933,11 +2411,17 @@ impl crate::app::App {
                     .unwrap_or_default(),
             })
             .collect::<Vec<_>>();
+        let body_values = default_body_values_for_route(route, model);
         let body_json = default_body_for_route(route, model);
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.path_values = path_values;
             state.query_values = query_values;
+            state.body_values = body_values;
             state.body_json = body_json;
+            state.body_scroll.current = 0.0;
+            state.body_scroll.target = 0.0;
+            state.response_scroll.current = 0.0;
+            state.response_scroll.target = 0.0;
         }
     }
 
@@ -1957,6 +2441,8 @@ impl crate::app::App {
         self.ide_panel.git.message_focused = false;
         self.ide_panel.lsp_log_filter_focused = false;
         self.ide_panel.file_tree_focused = false;
+        self.pulse_api_cursor_blink();
+        self.queue_api_body_json_validation();
     }
 
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
@@ -1991,6 +2477,23 @@ impl crate::app::App {
                         if meta.spec_id == *spec_id && state.route_idx == Some(*route_idx) =>
                     {
                         state.query_values.iter().find(|v| v.name == *name)
+                    }
+                    _ => None,
+                })
+                .map(|v| v.value.clone())
+                .unwrap_or_default(),
+            ApiFocus::BodyField {
+                spec_id,
+                route_idx,
+                name,
+            } => self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::ApiClient(meta, state)
+                        if meta.spec_id == *spec_id && state.route_idx == Some(*route_idx) =>
+                    {
+                        state.body_values.iter().find(|v| v.name == *name)
                     }
                     _ => None,
                 })
@@ -2053,6 +2556,18 @@ impl crate::app::App {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                     && state.route_idx == Some(route_idx)
                     && let Some(value) = state.query_values.iter_mut().find(|v| v.name == name)
+                {
+                    value.value = text;
+                }
+            }
+            ApiFocus::BodyField {
+                spec_id,
+                route_idx,
+                name,
+            } => {
+                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    && state.route_idx == Some(route_idx)
+                    && let Some(value) = state.body_values.iter_mut().find(|v| v.name == name)
                 {
                     value.value = text;
                 }
@@ -2121,8 +2636,16 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiSpecSelect(idx) => {
                 if let Some(id) = self.ide_panel.api.specs.get(idx).map(|entry| entry.id) {
+                    let already_selected = self.ide_panel.api.selected_spec == Some(id);
                     self.ide_panel.api.select_spec(id);
                     self.ensure_api_model_loaded(id);
+                    if already_selected {
+                        if self.ide_panel.api.collapsed_route_roots.contains(&id) {
+                            self.ide_panel.api.collapsed_route_roots.remove(&id);
+                        } else {
+                            self.ide_panel.api.collapsed_route_roots.insert(id);
+                        }
+                    }
                 }
             }
             crate::ui_system::UiId::ApiRouteTag(group_idx) => {
@@ -2217,14 +2740,117 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
+                self.is_dragging = true;
+                self.ide_panel.is_dragging_terminal = false;
                 self.focus_api_input(ApiFocus::Body { spec_id, route_idx });
                 self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiBodyFieldInput(route_idx, prop_idx) => {
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                let name = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.routes.get(route_idx))
+                    .and_then(|route| route.request_body.as_ref())
+                    .and_then(|body| body.schema)
+                    .and_then(|schema_ref| {
+                        self.ide_panel
+                            .api
+                            .models
+                            .get(&spec_id)
+                            .and_then(|model| model.schema_arena.get(schema_ref.0))
+                    })
+                    .and_then(|schema| schema.properties.get(prop_idx))
+                    .map(|prop| prop.name.clone())
+                    .unwrap_or_default();
+                self.focus_api_input(ApiFocus::BodyField {
+                    spec_id,
+                    route_idx,
+                    name,
+                });
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiBodyAllowedValue(route_idx, prop_idx, value_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                let picked = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.routes.get(route_idx).map(|route| (model, route)))
+                    .and_then(|(model, route)| {
+                        let root = route.request_body.as_ref()?.schema?;
+                        let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
+                        let schema = model.schema_arena.get(prop.schema.0)?;
+                        Some((prop.name.clone(), schema.enum_values.get(value_idx)?.clone()))
+                    });
+                let mut applied = None;
+                if let Some((name, value)) = picked
+                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    && let Some(field) = state
+                        .body_values
+                        .iter_mut()
+                        .find(|field| field.name == name)
+                {
+                    field.value = value.clone();
+                    applied = Some((field.name.clone(), value));
+                }
+                if let Some((field_name, value)) = applied
+                    && matches!(
+                        self.ide_panel.api.focused,
+                        Some(ApiFocus::BodyField {
+                            spec_id: f_spec,
+                            route_idx: f_route,
+                            ref name,
+                        }) if f_spec == spec_id && f_route == route_idx && name == &field_name
+                    )
+                {
+                    let old_version = self.ide_panel.api.input_editor.version;
+                    self.ide_panel.api.input_editor.set_text_clean(&value);
+                    self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                }
+            }
+            crate::ui_system::UiId::ApiBodyFilePick(route_idx, prop_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                let picked = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.routes.get(route_idx).map(|route| (model, route)))
+                    .and_then(|(model, route)| {
+                        let root = route.request_body.as_ref()?.schema?;
+                        let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
+                        let schema = model.schema_arena.get(prop.schema.0)?;
+                        Some((
+                            prop.name.clone(),
+                            api_schema_is_multi_file_input(schema, model),
+                        ))
+                    });
+                if let Some((name, multi)) = picked {
+                    self.trigger_api_body_file_picker(spec_id, route_idx, name, multi);
+                }
             }
             crate::ui_system::UiId::ApiResponseBody(route_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
                 };
                 let spec_id = meta.spec_id;
+                self.is_dragging = true;
+                self.ide_panel.is_dragging_terminal = false;
                 self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
                 self.place_api_cursor_from_last_click(id, true);
             }
@@ -2237,6 +2863,7 @@ impl crate::app::App {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+        self.pulse_api_cursor_blink();
         true
     }
 
@@ -2299,13 +2926,19 @@ impl crate::app::App {
                     let _ = self.ide_panel.api.input_editor.insert_str(&clean);
                 }
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl && shift => {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
+                if ctrl && shift && !is_response =>
+            {
                 let _ = self.ide_panel.api.input_editor.redo();
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl => {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
+                if ctrl && !is_response =>
+            {
                 let _ = self.ide_panel.api.input_editor.undo();
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY) if ctrl => {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY)
+                if ctrl && !is_response =>
+            {
                 let _ = self.ide_panel.api.input_editor.redo();
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
@@ -2374,6 +3007,8 @@ impl crate::app::App {
             }
             _ => {}
         }
+        self.pulse_api_cursor_blink();
+        self.queue_api_body_json_validation();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -2385,7 +3020,7 @@ impl crate::app::App {
         let Some((meta, state)) = self.active_api_tab() else {
             return;
         };
-        if state.pending {
+        if state.pending_request_id.is_some() || state.pending {
             return;
         }
         let spec_id = meta.spec_id;
@@ -2393,6 +3028,7 @@ impl crate::app::App {
         let needs_input_sync = requested_route_idx.is_none()
             || (state.path_values.is_empty()
                 && state.query_values.is_empty()
+                && state.body_values.is_empty()
                 && state.body_json == ApiClientTabState::default().body_json);
         let route_idx = {
             let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
@@ -2413,7 +3049,7 @@ impl crate::app::App {
         let Some((_, state)) = self.active_api_tab() else {
             return;
         };
-        if state.pending {
+        if state.pending_request_id.is_some() || state.pending {
             return;
         }
         let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
@@ -2435,13 +3071,19 @@ impl crate::app::App {
             .request_body
             .as_ref()
             .is_some_and(|body| !body.is_multipart);
+        let is_multipart_body = route
+            .request_body
+            .as_ref()
+            .is_some_and(|body| body.is_multipart);
         let path_values = state.path_values.clone();
         let query_values = state.query_values.clone();
+        let body_values = state.body_values.clone();
         let body_json_text = state.body_json.clone();
         let server = server.clone();
         if route.method.can_send_body() && is_json_body && !json_body_is_valid(&body_json_text) {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                 state.response = Some(ApiJobResponse {
+                    request_id: 0,
                     spec_id,
                     route_idx,
                     status: None,
@@ -2463,6 +3105,7 @@ impl crate::app::App {
             Err(err) => {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.response = Some(ApiJobResponse {
+                        request_id: 0,
                         spec_id,
                         route_idx,
                         status: None,
@@ -2477,22 +3120,29 @@ impl crate::app::App {
                 return;
             }
         };
-        let body_json = method
-            .can_send_body()
+        let body_multipart = (method.can_send_body() && is_multipart_body)
+            .then(|| api_multipart_parts_for_route(route, model, &body_values));
+        let body_json = (method.can_send_body() && !is_multipart_body)
             .then_some(body_json_text)
             .filter(|body| !body.trim().is_empty());
+        let request_id = self.ide_panel.api.next_request_id.max(1);
+        self.ide_panel.api.next_request_id = request_id.saturating_add(1).max(1);
         let job = ApiJobRequest {
+            request_id,
             spec_id,
             route_idx,
             method,
             resolved_host: resolve_api_url_host(&url),
             url,
             body_json,
+            body_multipart,
         };
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.pending = true;
+            state.pending_request_id = Some(request_id);
         }
-        self.api_request_rx.push(spawn_api_request(job));
+        self.api_request_rx
+            .push((request_id, spawn_api_request(job)));
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -2500,12 +3150,43 @@ impl crate::app::App {
 
     pub fn poll_api_client(&mut self) -> bool {
         let mut changed = false;
+        if let Some(rx) = self.ide_panel.api.body_json_validation_rx.take() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    if self.ide_panel.api.body_json_validation_pending
+                        == Some((result.spec_id, result.route_idx, result.version))
+                    {
+                        self.ide_panel.api.body_json_validation_pending = None;
+                    }
+                    self.ide_panel.api.body_json_validation = Some(ApiJsonValidationState {
+                        spec_id: result.spec_id,
+                        route_idx: result.route_idx,
+                        version: result.version,
+                        valid: result.valid,
+                    });
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ide_panel.api.body_json_validation_pending = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.ide_panel.api.body_json_validation_rx = Some(rx);
+                }
+            }
+        }
         if let Some(rx) = &self.api_import_file_rx {
             if let Ok(result) = rx.try_recv() {
                 self.api_import_file_rx = None;
                 if let Some(path) = result {
                     self.start_api_local_import(path);
                 }
+                changed = true;
+            }
+        }
+        if let Some(rx) = &self.api_body_file_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.api_body_file_rx = None;
+                self.apply_api_body_file_pick(result);
                 changed = true;
             }
         }
@@ -2535,7 +3216,8 @@ impl crate::app::App {
 
         let mut idx = 0usize;
         while idx < self.api_request_rx.len() {
-            match self.api_request_rx[idx].try_recv() {
+            let request_id = self.api_request_rx[idx].0;
+            match self.api_request_rx[idx].1.try_recv() {
                 Ok(result) => {
                     self.api_request_rx.remove(idx);
                     self.apply_api_job_response(result);
@@ -2544,6 +3226,7 @@ impl crate::app::App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => idx += 1,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.api_request_rx.remove(idx);
+                    self.clear_api_pending_request(request_id);
                     changed = true;
                 }
             }
@@ -2567,6 +3250,7 @@ impl crate::app::App {
                     state.route_idx = Some(route_idx);
                     if state.path_values.is_empty()
                         && state.query_values.is_empty()
+                        && state.body_values.is_empty()
                         && state.body_json == ApiClientTabState::default().body_json
                     {
                         fill_api_tab_inputs(state, &model.routes[route_idx], model);
@@ -2584,15 +3268,24 @@ impl crate::app::App {
                 if spec_id == result.spec_id && route_idx == result.route_idx
         );
         let focused_body = focused_response.then(|| result.body.clone());
+        let mut applied = false;
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
                 && meta.spec_id == result.spec_id
                 && state.route_idx == Some(result.route_idx)
+                && state.pending_request_id == Some(result.request_id)
             {
                 state.pending = false;
+                state.pending_request_id = None;
+                state.response_scroll.current = 0.0;
+                state.response_scroll.target = 0.0;
                 state.response = Some(result);
+                applied = true;
                 break;
             }
+        }
+        if !applied {
+            return;
         }
         if resolved.is_some() {
             self.ide_panel.api.last_resolved_host = resolved;
@@ -2602,6 +3295,18 @@ impl crate::app::App {
             let old_version = self.ide_panel.api.input_editor.version;
             self.ide_panel.api.input_editor.set_text_clean(&body);
             self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+        }
+    }
+
+    fn clear_api_pending_request(&mut self, request_id: u64) {
+        for tab in &mut self.tabs {
+            if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
+                && state.pending_request_id == Some(request_id)
+            {
+                state.pending = false;
+                state.pending_request_id = None;
+                break;
+            }
         }
     }
 }
@@ -2631,7 +3336,73 @@ fn fill_api_tab_inputs(state: &mut ApiClientTabState, route: &ApiRouteRow, model
                 .unwrap_or_default(),
         })
         .collect();
+    state.body_values = default_body_values_for_route(route, model);
     state.body_json = default_body_for_route(route, model);
+}
+
+fn default_body_values_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> Vec<ApiInputValue> {
+    let Some(body) = route.request_body.as_ref().filter(|body| body.is_multipart) else {
+        return Vec::new();
+    };
+    body.schema
+        .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+        .map(|schema| {
+            schema
+                .properties
+                .iter()
+                .filter_map(|prop| {
+                    let prop_schema = model.schema_arena.get(prop.schema.0)?;
+                    Some(ApiInputValue {
+                        name: prop.name.clone(),
+                        value: prop_schema
+                            .default_value
+                            .clone()
+                            .or_else(|| prop_schema.examples.first().cloned())
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn api_multipart_parts_for_route(
+    route: &ApiRouteRow,
+    model: &ApiSpecModel,
+    values: &[ApiInputValue],
+) -> Vec<ApiMultipartPart> {
+    let Some(body) = route.request_body.as_ref().filter(|body| body.is_multipart) else {
+        return Vec::new();
+    };
+    let Some(schema) = body.schema.and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for prop in &schema.properties {
+        let Some(prop_schema) = model.schema_arena.get(prop.schema.0) else {
+            continue;
+        };
+        let value = values
+            .iter()
+            .find(|item| item.name == prop.name)
+            .map(|item| item.value.as_str())
+            .unwrap_or("");
+        if api_schema_is_file_input(prop_schema, model) {
+            for path in value.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                out.push(ApiMultipartPart::File {
+                    name: prop.name.clone(),
+                    path: PathBuf::from(path),
+                });
+            }
+        } else {
+            out.push(ApiMultipartPart::Text {
+                name: prop.name.clone(),
+                value: value.to_string(),
+            });
+        }
+    }
+    out
 }
 
 fn default_body_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> String {
@@ -2674,6 +3445,7 @@ fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: us
         ApiSchemaKind::String => "\"\"".to_string(),
         ApiSchemaKind::Integer | ApiSchemaKind::Number => "0".to_string(),
         ApiSchemaKind::Boolean => "false".to_string(),
+        ApiSchemaKind::Bytes => "\"\"".to_string(),
         ApiSchemaKind::Unknown => "null".to_string(),
     }
 }
@@ -3111,6 +3883,7 @@ mod tests {
         let tab_state = ApiClientTabState {
             route_idx: Some(0),
             response: Some(ApiJobResponse {
+                request_id: 0,
                 spec_id: model.id,
                 route_idx: 0,
                 status: Some(200),

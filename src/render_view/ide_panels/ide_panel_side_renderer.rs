@@ -44,10 +44,10 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = self.get_ui_glyph(c) {
-                let glyph_x = draw_x.round();
-                let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(glyph_x, y, g, scale);
+                let (q_x, q_y, q_w, q_h) =
+                    crate::renderer::glyph_quad_rect(draw_x, y, g, scale);
                 self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                draw_x += g.advance * scale;
+                draw_x += Self::snapped_text_advance(g.advance, scale);
             }
         }
     }
@@ -513,6 +513,9 @@ impl Renderer {
                 let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
                 let indent_w = crate::render_view::tree_ui::TREE_INDENT_W * s;
                 let scroll = ide_panel.explorer_scroll.current.round();
+                let hover_settled =
+                    (ide_panel.explorer_scroll.current - ide_panel.explorer_scroll.target).abs()
+                        < 0.5;
                 let content_h = real_height - title_h;
                 let total_nodes = ide_panel.file_tree_nodes.len();
 
@@ -550,10 +553,10 @@ impl Renderer {
                             );
                         }
 
-                        let is_hovered = !file_tree_overlay_open
-                            && (ide_panel.file_tree_hovered_idx == Some(i)
-                                || ui_registry.hovered()
-                                    == Some(crate::ui_system::UiId::FileTreeNode(i)));
+                        let is_hovered = hover_settled
+                            && !file_tree_overlay_open
+                            && ui_registry.hovered()
+                                == Some(crate::ui_system::UiId::FileTreeNode(i));
                         let is_selected = ide_panel.file_tree_selection.contains(&node.path);
 
                         if is_selected {
