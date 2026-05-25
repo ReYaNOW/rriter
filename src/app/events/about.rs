@@ -514,6 +514,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.api.route_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.ide_panel.api.input_scroll_x.update(dt) {
+        needs_redraw = true;
+    }
     for tab in &mut app.tabs {
         if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
             if state.tab_scroll.update(dt) {
@@ -522,7 +525,13 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if state.body_scroll.update(dt) {
                 needs_redraw = true;
             }
+            if state.body_scroll_x.update(dt) {
+                needs_redraw = true;
+            }
             if state.response_scroll.update(dt) {
+                needs_redraw = true;
+            }
+            if state.response_scroll_x.update(dt) {
                 needs_redraw = true;
             }
         }

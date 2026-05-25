@@ -220,6 +220,7 @@ impl Renderer {
                     input_w - 16.0 * s,
                     input_h - 12.0 * s,
                     0.76,
+                    0.0,
                 );
             }
             self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);

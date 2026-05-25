@@ -690,6 +690,31 @@ impl App {
                 }
             });
             if let Some((spec_id, route_idx, body, max_scroll)) = api_inner_scroll {
+                let horizontal_delta = if shift { dy } else { dx };
+                let prefer_horizontal = shift || dx.abs() > dy.abs();
+                if prefer_horizontal && horizontal_delta.abs() > 0.0 {
+                    let scroll_id = if body {
+                        crate::ui_system::UiId::ApiBodyScrollX(route_idx)
+                    } else {
+                        crate::ui_system::UiId::ApiResponseScrollX(route_idx)
+                    };
+                    let max_scroll_x = self.api_text_max_scroll_x_for_ui(scroll_id);
+                    if max_scroll_x > 0.0
+                        && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                        && state.route_idx == Some(route_idx)
+                    {
+                        let scroll = if body {
+                            &mut state.body_scroll_x
+                        } else {
+                            &mut state.response_scroll_x
+                        };
+                        scroll.anim_speed = 7.0;
+                        scroll.scroll_by(horizontal_delta);
+                        scroll.clamp_target(0.0, max_scroll_x);
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                }
                 if max_scroll > 0.0 {
                     if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                         && state.route_idx == Some(route_idx)

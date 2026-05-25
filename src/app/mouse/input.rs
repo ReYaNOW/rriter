@@ -1185,6 +1185,12 @@ impl App {
                 popup.scroll.is_dragging = false;
             }
             self.scroll_x.is_dragging = false;
+            for tab in &mut self.tabs {
+                if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
+                    state.body_scroll_x.is_dragging = false;
+                    state.response_scroll_x.is_dragging = false;
+                }
+            }
             for term in &mut self.ide_panel.terminals {
                 term.scroll_y.is_dragging = false;
             }

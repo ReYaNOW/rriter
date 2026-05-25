@@ -163,7 +163,7 @@ pub enum ApiOAuthFlow {
 }
 
 impl ApiSecurityScheme {
-    fn token_capable(&self) -> bool {
+    pub(crate) fn token_capable(&self) -> bool {
         match &self.kind {
             ApiSecuritySchemeKind::Http { scheme, .. } => scheme.eq_ignore_ascii_case("bearer"),
             ApiSecuritySchemeKind::OAuth2 { .. } | ApiSecuritySchemeKind::OpenIdConnect { .. } => {
@@ -285,8 +285,11 @@ pub struct ApiParam {
     pub location: ApiParamLocation,
     pub required: bool,
     pub primitive_type: ApiPrimitiveType,
+    pub item_type: Option<ApiPrimitiveType>,
+    pub enum_values: Vec<String>,
     pub default_value: Option<String>,
     pub example: Option<String>,
+    pub examples: Vec<String>,
     pub description: String,
 }
 
@@ -299,6 +302,8 @@ pub enum ApiParamLocation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApiPrimitiveType {
     String,
+    Date,
+    DateTime,
     Integer,
     Number,
     Boolean,
@@ -320,8 +325,14 @@ impl ApiPrimitiveType {
         {
             return Self::Bytes;
         }
+        if schema.get("type").and_then(Value::as_str) == Some("string") {
+            return match schema.get("format").and_then(Value::as_str) {
+                Some("date") => Self::Date,
+                Some("date-time") => Self::DateTime,
+                _ => Self::String,
+            };
+        }
         match schema.get("type").and_then(Value::as_str) {
-            Some("string") => Self::String,
             Some("integer") => Self::Integer,
             Some("number") => Self::Number,
             Some("boolean") => Self::Boolean,
@@ -361,6 +372,8 @@ pub enum ApiSchemaKind {
     Object,
     Array,
     String,
+    Date,
+    DateTime,
     Integer,
     Number,
     Boolean,
@@ -470,7 +483,32 @@ pub struct ApiClientTabState {
     pub pending_request_id: Option<u64>,
     pub tab_scroll: ScrollState,
     pub body_scroll: ScrollState,
+    pub body_scroll_x: ScrollState,
     pub response_scroll: ScrollState,
+    pub response_scroll_x: ScrollState,
+    pub view_scrolls: Vec<ApiViewScrollMemory>,
+    pub route_states: Vec<ApiRouteStateMemory>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiViewScrollMemory {
+    pub auth_view: bool,
+    pub route_idx: Option<usize>,
+    pub current: f32,
+    pub target: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiRouteStateMemory {
+    pub route_idx: usize,
+    pub path_values: Vec<ApiInputValue>,
+    pub query_values: Vec<ApiInputValue>,
+    pub body_values: Vec<ApiInputValue>,
+    pub body_json: String,
+    pub response: Option<ApiJobResponse>,
+    pub response_view: ApiResponseView,
+    pub pending: bool,
+    pub pending_request_id: Option<u64>,
 }
 
 impl Default for ApiClientTabState {
@@ -489,8 +527,103 @@ impl Default for ApiClientTabState {
             pending_request_id: None,
             tab_scroll: ScrollState::new(7.0),
             body_scroll: ScrollState::new(7.0),
+            body_scroll_x: ScrollState::new(7.0),
             response_scroll: ScrollState::new(7.0),
+            response_scroll_x: ScrollState::new(7.0),
+            view_scrolls: Vec::new(),
+            route_states: Vec::new(),
         }
+    }
+}
+
+impl ApiClientTabState {
+    pub fn remember_route_state(&mut self) {
+        let Some(route_idx) = self.route_idx else {
+            return;
+        };
+        let saved = ApiRouteStateMemory {
+            route_idx,
+            path_values: self.path_values.clone(),
+            query_values: self.query_values.clone(),
+            body_values: self.body_values.clone(),
+            body_json: self.body_json.clone(),
+            response: self.response.clone(),
+            response_view: self.response_view,
+            pending: self.pending,
+            pending_request_id: self.pending_request_id,
+        };
+        if let Some(slot) = self
+            .route_states
+            .iter_mut()
+            .find(|saved| saved.route_idx == route_idx)
+        {
+            *slot = saved;
+        } else {
+            self.route_states.push(saved);
+        }
+    }
+
+    pub fn restore_route_state(&mut self, route_idx: usize) -> bool {
+        let Some(saved) = self
+            .route_states
+            .iter()
+            .find(|saved| saved.route_idx == route_idx)
+            .cloned()
+        else {
+            return false;
+        };
+        self.route_idx = Some(route_idx);
+        self.path_values = saved.path_values;
+        self.query_values = saved.query_values;
+        self.body_values = saved.body_values;
+        self.body_json = saved.body_json;
+        self.response = saved.response;
+        self.response_view = saved.response_view;
+        self.pending = saved.pending;
+        self.pending_request_id = saved.pending_request_id;
+        self.body_scroll.current = 0.0;
+        self.body_scroll.target = 0.0;
+        self.body_scroll_x.current = 0.0;
+        self.body_scroll_x.target = 0.0;
+        self.response_scroll.current = 0.0;
+        self.response_scroll.target = 0.0;
+        self.response_scroll_x.current = 0.0;
+        self.response_scroll_x.target = 0.0;
+        true
+    }
+
+    pub fn remember_view_scroll(&mut self) {
+        let key = (self.auth_view, self.route_idx);
+        if let Some(saved) = self
+            .view_scrolls
+            .iter_mut()
+            .find(|saved| (saved.auth_view, saved.route_idx) == key)
+        {
+            saved.current = self.tab_scroll.current;
+            saved.target = self.tab_scroll.target;
+        } else {
+            self.view_scrolls.push(ApiViewScrollMemory {
+                auth_view: self.auth_view,
+                route_idx: self.route_idx,
+                current: self.tab_scroll.current,
+                target: self.tab_scroll.target,
+            });
+        }
+    }
+
+    pub fn restore_view_scroll(&mut self, auth_view: bool, route_idx: Option<usize>) {
+        if let Some(saved) = self
+            .view_scrolls
+            .iter()
+            .find(|saved| saved.auth_view == auth_view && saved.route_idx == route_idx)
+        {
+            self.tab_scroll.current = saved.current;
+            self.tab_scroll.target = saved.target;
+        } else {
+            self.tab_scroll.current = 0.0;
+            self.tab_scroll.target = 0.0;
+        }
+        self.tab_scroll.is_dragging = false;
     }
 }
 
@@ -507,6 +640,7 @@ impl PartialEq for ApiClientTabState {
             && self.response_view == other.response_view
             && self.pending == other.pending
             && self.pending_request_id == other.pending_request_id
+            && self.route_states == other.route_states
     }
 }
 
@@ -516,6 +650,10 @@ impl Eq for ApiClientTabState {}
 pub enum ApiFocus {
     ImportUrl,
     AuthValue {
+        spec_id: ApiSpecId,
+        scheme: String,
+    },
+    AuthRefreshToken {
         spec_id: ApiSpecId,
         scheme: String,
     },
@@ -631,6 +769,7 @@ pub struct ApiClientState {
     pub route_scroll: ScrollState,
     pub next_request_id: u64,
     pub input_editor: Editor,
+    pub input_scroll_x: ScrollState,
     pub focused: Option<ApiFocus>,
     pub last_resolved_host: Option<ApiResolvedHost>,
     body_json_validation: Option<ApiJsonValidationState>,
@@ -672,6 +811,7 @@ impl Default for ApiClientState {
             route_scroll: ScrollState::new(7.0),
             next_request_id: 1,
             input_editor: Editor::new(512),
+            input_scroll_x: ScrollState::new(7.0),
             focused: None,
             last_resolved_host: None,
             body_json_validation: None,
@@ -858,6 +998,7 @@ fn api_focus_targets_active_tab(
     match focus {
         ApiFocus::ImportUrl => true,
         ApiFocus::AuthValue { spec_id, .. }
+        | ApiFocus::AuthRefreshToken { spec_id, .. }
         | ApiFocus::AuthUsername { spec_id, .. }
         | ApiFocus::AuthPassword { spec_id, .. } => {
             active.is_some_and(|(active_spec, _)| active_spec == *spec_id)
@@ -878,6 +1019,80 @@ fn api_focus_targets_active_tab(
             })
         }
     }
+}
+
+fn api_focus_order_for_view(
+    spec_id: ApiSpecId,
+    model: &ApiSpecModel,
+    state: &ApiClientTabState,
+) -> Vec<ApiFocus> {
+    let mut out = Vec::new();
+    if state.auth_view {
+        for scheme in &model.security_schemes {
+            if matches!(
+                scheme.kind,
+                ApiSecuritySchemeKind::Http { ref scheme, .. } if scheme.eq_ignore_ascii_case("basic")
+            ) {
+                out.push(ApiFocus::AuthUsername {
+                    spec_id,
+                    scheme: scheme.name.clone(),
+                });
+                out.push(ApiFocus::AuthPassword {
+                    spec_id,
+                    scheme: scheme.name.clone(),
+                });
+            } else {
+                out.push(ApiFocus::AuthValue {
+                    spec_id,
+                    scheme: scheme.name.clone(),
+                });
+            }
+        }
+        return out;
+    }
+
+    let Some(route_idx) = state
+        .route_idx
+        .or_else(|| (!model.routes.is_empty()).then_some(0))
+    else {
+        return out;
+    };
+    let Some(route) = model.routes.get(route_idx) else {
+        return out;
+    };
+    for param in &route.path_params {
+        out.push(ApiFocus::PathParam {
+            spec_id,
+            route_idx,
+            name: param.name.clone(),
+        });
+    }
+    for param in &route.query_params {
+        out.push(ApiFocus::QueryParam {
+            spec_id,
+            route_idx,
+            name: param.name.clone(),
+        });
+    }
+    if let Some(body) = &route.request_body {
+        if body.is_multipart || body.is_form_urlencoded {
+            if let Some(schema) = body
+                .schema
+                .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+            {
+                for prop in &schema.properties {
+                    out.push(ApiFocus::BodyField {
+                        spec_id,
+                        route_idx,
+                        name: prop.name.clone(),
+                    });
+                }
+            }
+        } else {
+            out.push(ApiFocus::Body { spec_id, route_idx });
+        }
+    }
+    out
 }
 
 pub fn validate_api_url(input: &str) -> Result<Url, ApiLoadError> {
@@ -1495,14 +1710,20 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
                 continue;
             };
             let schema = item.get("schema");
+            let item_schema = schema.and_then(|schema| schema.get("items"));
+            let resolved_schema = schema.and_then(|schema| resolve_schema_ref(schema, root).or(Some(schema)));
+            let resolved_item_schema =
+                item_schema.and_then(|schema| resolve_schema_ref(schema, root).or(Some(schema)));
+            let enum_values = schema_enum_values(resolved_schema)
+                .or_else(|| schema_enum_values(resolved_item_schema))
+                .unwrap_or_default();
             let default_value = schema
                 .and_then(|schema| schema.get("default"))
+                .or_else(|| resolved_schema.and_then(|schema| schema.get("default")))
+                .or_else(|| resolved_item_schema.and_then(|schema| schema.get("default")))
                 .and_then(value_to_string);
-            let example = item.get("example").and_then(value_to_string).or_else(|| {
-                schema
-                    .and_then(|schema| schema.get("example"))
-                    .and_then(value_to_string)
-            });
+            let examples = parameter_examples(item, resolved_schema, resolved_item_schema);
+            let example = examples.first().cloned();
             out.push(ApiParam {
                 name: name.to_string(),
                 location,
@@ -1510,9 +1731,14 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
                     .get("required")
                     .and_then(Value::as_bool)
                     .unwrap_or(matches!(location, ApiParamLocation::Path)),
-                primitive_type: ApiPrimitiveType::from_schema(schema),
+                primitive_type: ApiPrimitiveType::from_schema(resolved_schema.or(schema)),
+                item_type: resolved_item_schema
+                    .or(item_schema)
+                    .map(|schema| ApiPrimitiveType::from_schema(Some(schema))),
+                enum_values,
                 default_value,
                 example,
+                examples,
                 description: item
                     .get("description")
                     .and_then(Value::as_str)
@@ -1522,6 +1748,49 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
         }
     }
     out
+}
+
+fn resolve_schema_ref<'a>(schema: &'a Value, root: &'a Value) -> Option<&'a Value> {
+    let ref_s = schema.get("$ref").and_then(Value::as_str)?;
+    root.pointer(ref_s.strip_prefix('#')?)
+}
+
+fn parameter_examples(
+    item: &Value,
+    schema: Option<&Value>,
+    item_schema: Option<&Value>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(example) = item.get("example").and_then(value_to_string) {
+        out.push(example);
+    }
+    if let Some(items) = item.get("examples").and_then(Value::as_object) {
+        for item in items.values() {
+            let value = item
+                .get("value")
+                .and_then(value_to_string)
+                .or_else(|| value_to_string(item));
+            if let Some(value) = value {
+                out.push(value);
+            }
+        }
+    }
+    if let Some(schema) = schema {
+        out.extend(schema_examples(schema));
+    }
+    if let Some(item_schema) = item_schema {
+        out.extend(schema_examples(item_schema));
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn schema_enum_values(schema: Option<&Value>) -> Option<Vec<String>> {
+    schema?
+        .get("enum")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(value_to_string).collect())
 }
 
 fn resolve_parameter_ref<'a>(item: &'a Value, root: &'a Value) -> Option<&'a Value> {
@@ -1597,11 +1866,7 @@ fn normalize_schema_named(
         kind: schema_kind(schema),
         properties: Vec::new(),
         item: None,
-        enum_values: schema
-            .get("enum")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(value_to_string).collect())
-            .unwrap_or_default(),
+        enum_values: schema_enum_values(Some(schema)).unwrap_or_default(),
         default_value: schema.get("default").and_then(value_to_string),
         examples: schema_examples(schema),
         max_chars: schema
@@ -1637,9 +1902,6 @@ fn normalize_schema_named(
                     count += 1;
                 }
             }
-            arena[idx]
-                .properties
-                .sort_unstable_by(|a, b| a.name.cmp(&b.name));
         }
     } else if matches!(arena[idx].kind, ApiSchemaKind::Array)
         && let Some(items) = schema.get("items")
@@ -1660,7 +1922,11 @@ fn schema_kind(schema: &Value) -> ApiSchemaKind {
     match schema.get("type").and_then(Value::as_str) {
         Some("object") => ApiSchemaKind::Object,
         Some("array") => ApiSchemaKind::Array,
-        Some("string") => ApiSchemaKind::String,
+        Some("string") => match schema.get("format").and_then(Value::as_str) {
+            Some("date") => ApiSchemaKind::Date,
+            Some("date-time") => ApiSchemaKind::DateTime,
+            _ => ApiSchemaKind::String,
+        },
         Some("integer") => ApiSchemaKind::Integer,
         Some("number") => ApiSchemaKind::Number,
         Some("boolean") => ApiSchemaKind::Boolean,
@@ -1691,9 +1957,13 @@ fn schema_examples(schema: &Value) -> Vec<String> {
             }
         }
     }
-    out.sort_unstable();
-    out.dedup();
-    out
+    let mut deduped = Vec::with_capacity(out.len());
+    for value in out {
+        if !deduped.contains(&value) {
+            deduped.push(value);
+        }
+    }
+    deduped
 }
 
 fn parse_responses(value: Option<&Value>) -> Vec<ApiResponseSummary> {
@@ -1798,6 +2068,14 @@ pub fn api_tab_max_scroll(
                     .iter()
                     .map(|scheme| api_auth_scheme_row_height(scheme, scale))
                     .sum::<f32>()
+            }
+            + {
+                let route_count = api_auth_related_route_count(model).min(12);
+                if route_count == 0 {
+                    0.0
+                } else {
+                    44.0 * scale + route_count as f32 * 34.0 * scale
+                }
             };
         return (content_h + pad + 36.0 * scale - visible_h).max(0.0);
     }
@@ -1856,17 +2134,27 @@ pub fn api_tab_max_scroll(
                         .properties
                         .iter()
                         .filter_map(|prop| model.schema_arena.get(prop.schema.0))
-                        .map(|schema| api_body_prop_row_height(schema, scale))
+                        .map(|schema| api_body_prop_row_height(schema, model, scale))
                         .sum::<f32>()
                 })
                 .unwrap_or(0.0);
         } else {
-            content_h += 316.0 * scale;
+            content_h += api_body_text_area_height(&tab_state.body_json, scale) + 16.0 * scale;
         }
     }
     content_h += 84.0 * scale;
-    if tab_state.response.is_some() {
-        content_h += 242.0 * scale;
+    if let Some(response) = &tab_state.response {
+        let response_text = api_response_text(response, tab_state.response_view);
+        content_h += 62.0 * scale + api_response_text_area_height(response_text, scale);
+        if api_response_has_auth_tokens(response) {
+            content_h += model
+                .security_schemes
+                .iter()
+                .filter(|scheme| scheme.token_capable())
+                .count() as f32
+                * 30.0
+                * scale;
+        }
     } else if tab_state.pending {
         content_h += 24.0 * scale;
     }
@@ -1879,6 +2167,8 @@ pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32
         ApiSecuritySchemeKind::Http { ref scheme, .. } if scheme.eq_ignore_ascii_case("basic")
     ) {
         92.0 * scale
+    } else if scheme.token_capable() {
+        72.0 * scale
     } else {
         58.0 * scale
     }
@@ -1887,18 +2177,194 @@ pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32
 pub fn api_param_row_height(param: &ApiParam, scale: f32) -> f32 {
     let mut meta_lines = 0usize;
     if param.default_value.is_some() {
-        meta_lines += 2;
+        meta_lines += 1;
     }
-    if param.example.is_some() {
-        meta_lines += 2;
+    if !param.enum_values.is_empty() || !param.examples.is_empty() {
+        meta_lines += 1;
+    } else if param.example.is_some() {
+        meta_lines += 1;
     }
-    (68.0 * scale).max((30.0 + meta_lines as f32 * 20.0) * scale)
+    let meta_h = if meta_lines == 0 {
+        0.0
+    } else {
+        32.0 + meta_lines.saturating_sub(1) as f32 * 20.0
+    };
+    (46.0 * scale).max((meta_h + 14.0) * scale)
 }
 
-pub fn api_body_prop_row_height(schema: &ApiSchema, scale: f32) -> f32 {
-    let examples_h = schema.examples.len().min(3) as f32 * 20.0 * scale;
-    let allowed_h = schema.enum_values.len().min(5) as f32 * 20.0 * scale;
-    (68.0 * scale + examples_h).max(68.0 * scale + allowed_h)
+pub fn api_body_prop_row_height(schema: &ApiSchema, model: &ApiSpecModel, scale: f32) -> f32 {
+    let mut meta_lines = usize::from(schema.max_chars.is_some());
+    if schema.default_value.is_some() {
+        meta_lines += 1;
+    }
+    if !api_schema_allowed_values(schema, model).is_empty() || !schema.examples.is_empty() {
+        meta_lines += 1;
+    }
+    if !api_schema_allowed_values(schema, model).is_empty() {
+        meta_lines += schema.examples.len().min(3);
+    }
+    let meta_h = if meta_lines == 0 {
+        0.0
+    } else {
+        32.0 + meta_lines.saturating_sub(1) as f32 * 20.0
+    };
+    (46.0 * scale).max((meta_h + 14.0) * scale)
+}
+
+pub fn api_auth_route_rank(route: &ApiRouteRow) -> Option<u8> {
+    if api_route_has_auth_word(route, "login")
+        || api_route_has_auth_word(route, "signin")
+        || api_route_has_auth_word(route, "sign-in")
+        || api_route_has_auth_word(route, "token")
+    {
+        Some(0)
+    } else if api_route_has_auth_word(route, "refresh") {
+        Some(1)
+    } else if api_route_has_auth_word(route, "logout")
+        || api_route_has_auth_word(route, "session")
+        || api_route_has_auth_word(route, "oauth")
+        || api_route_has_auth_word(route, "jwt")
+        || api_route_has_auth_word(route, "auth")
+    {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+pub fn api_auth_related_route_count(model: &ApiSpecModel) -> usize {
+    model
+        .routes
+        .iter()
+        .filter(|route| api_auth_route_rank(route).is_some())
+        .count()
+}
+
+pub fn api_response_has_auth_tokens(response: &ApiJobResponse) -> bool {
+    serde_json::from_str::<Value>(&response.body)
+        .ok()
+        .is_some_and(|json| {
+            json.get("access_token").and_then(Value::as_str).is_some()
+                || json.get("refresh_token").and_then(Value::as_str).is_some()
+        })
+}
+
+fn api_route_has_auth_word(route: &ApiRouteRow, needle: &str) -> bool {
+    contains_ascii_ci(&route.path, needle)
+        || contains_ascii_ci(&route.operation_id, needle)
+        || contains_ascii_ci(&route.summary, needle)
+        || contains_ascii_ci(&route.tag, needle)
+}
+
+fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() || n.len() > h.len() {
+        return false;
+    }
+    h.windows(n.len()).any(|window| {
+        window
+            .iter()
+            .zip(n)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    })
+}
+
+pub fn api_schema_allowed_values<'a>(
+    schema: &'a ApiSchema,
+    model: &'a ApiSpecModel,
+) -> &'a [String] {
+    if !schema.enum_values.is_empty() {
+        &schema.enum_values
+    } else if matches!(schema.kind, ApiSchemaKind::Array) {
+        schema
+            .item
+            .and_then(|item| model.schema_arena.get(item.0))
+            .map(|item| item.enum_values.as_slice())
+            .unwrap_or(&[])
+    } else {
+        &[]
+    }
+}
+
+pub fn api_schema_is_array_input(schema: &ApiSchema) -> bool {
+    matches!(schema.kind, ApiSchemaKind::Array)
+}
+
+pub fn split_api_array_values(value: &str) -> Vec<String> {
+    api_array_value_parts(value).map(ToString::to_string).collect()
+}
+
+pub fn api_array_value_parts(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(['\n', ','])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+}
+
+pub fn api_array_edit_parts(value: &str) -> (Vec<&str>, &str) {
+    if let Some(split_idx) = value.rfind(['\n', ',']) {
+        let draft_start = split_idx.saturating_add(1);
+        (
+            api_array_value_parts(&value[..split_idx]).collect(),
+            value[draft_start..].trim_start(),
+        )
+    } else {
+        (Vec::new(), value.trim_start())
+    }
+}
+
+fn api_array_editor_text(value: &str) -> String {
+    let mut out = split_api_array_values(value).join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+fn finish_api_array_editor_draft(editor: &mut Editor) {
+    let text = api_array_editor_text(&editor.get_full_text());
+    editor.set_text_clean(&text);
+    editor.cursor = editor.len();
+    editor.selection_anchor = Some(editor.cursor);
+}
+
+fn backspace_api_array_editor(editor: &mut Editor) {
+    if editor.selection_anchor.is_some() && editor.selection_anchor != Some(editor.cursor) {
+        editor.delete_selection();
+        return;
+    }
+    let text = editor.get_full_text();
+    if editor.cursor == text.len() && (text.ends_with('\n') || text.ends_with(',')) {
+        let trimmed = text.trim_end_matches(['\n', ',']);
+        if let Some(prev_split) = trimmed.rfind(['\n', ',']) {
+            let mut next = trimmed[..prev_split].to_string();
+            if !next.trim().is_empty() {
+                next.push('\n');
+            }
+            editor.set_text_clean(&next);
+        } else {
+            editor.set_text_clean("");
+        }
+        editor.cursor = editor.len();
+        editor.selection_anchor = Some(editor.cursor);
+    } else {
+        editor.backspace();
+    }
+}
+
+fn push_api_array_value(value: &mut String, item: &str) {
+    let item = item.trim();
+    if item.is_empty() {
+        return;
+    }
+    if api_array_value_parts(value).any(|part| part == item) {
+        return;
+    }
+    if !value.trim().is_empty() {
+        value.push('\n');
+    }
+    value.push_str(item);
 }
 
 pub fn api_schema_is_file_input(schema: &ApiSchema, model: &ApiSpecModel) -> bool {
@@ -1942,7 +2408,11 @@ pub fn build_request_url(
     {
         let mut pairs = url.query_pairs_mut();
         for item in query_values {
-            if !item.value.is_empty() {
+            if item.value.contains('\n') {
+                for value in item.value.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                    pairs.append_pair(&item.name, value);
+                }
+            } else if !item.value.is_empty() {
                 pairs.append_pair(&item.name, &item.value);
             }
         }
@@ -2096,10 +2566,10 @@ fn non_empty_auth_value(entry: &ApiAuthEntry) -> Option<String> {
 }
 
 fn bearer_token(entry: &ApiAuthEntry) -> Option<String> {
-    if !entry.access_token.is_empty() {
-        Some(entry.access_token.clone())
-    } else if !entry.value.is_empty() {
+    if !entry.value.is_empty() {
         Some(entry.value.clone())
+    } else if !entry.access_token.is_empty() {
+        Some(entry.access_token.clone())
     } else {
         None
     }
@@ -2151,10 +2621,30 @@ pub fn api_text_area_line_height(scale: f32) -> f32 {
     26.0 * scale
 }
 
+pub fn api_body_text_area_height(text: &str, scale: f32) -> f32 {
+    let line_h = api_text_area_line_height(scale);
+    let lines = text.split('\n').count().max(1) as f32;
+    (lines * line_h + line_h * 3.0 + 16.0 * scale).clamp(260.0 * scale, 620.0 * scale)
+}
+
+pub fn api_response_text_area_height(text: &str, scale: f32) -> f32 {
+    let line_h = api_text_area_line_height(scale);
+    let lines = text.split('\n').count().max(1) as f32;
+    (lines * line_h + 16.0 * scale).clamp(300.0 * scale, 620.0 * scale)
+}
+
 pub fn api_text_area_max_scroll(text: &str, visible_h: f32, scale: f32) -> f32 {
     let line_h = api_text_area_line_height(scale);
     let lines = text.split('\n').count().max(1) as f32;
     (lines * line_h - visible_h.max(line_h)).max(0.0)
+}
+
+pub fn api_text_area_max_scroll_x<F>(text: &str, visible_w: f32, mut measure: F) -> f32
+where
+    F: FnMut(&str) -> f32,
+{
+    let longest = text.split('\n').map(&mut measure).fold(0.0, f32::max);
+    (longest - visible_w.max(1.0) + 20.0).max(0.0)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2242,11 +2732,22 @@ fn send_api_request_body(
 }
 
 fn api_form_pairs(fields: &[ApiInputValue]) -> Vec<(&str, &str)> {
-    fields
-        .iter()
-        .filter(|field| !field.value.is_empty())
-        .map(|field| (field.name.as_str(), field.value.as_str()))
-        .collect()
+    let mut out = Vec::new();
+    for field in fields {
+        if field.value.contains('\n') {
+            for value in field
+                .value
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+            {
+                out.push((field.name.as_str(), value));
+            }
+        } else if !field.value.is_empty() {
+            out.push((field.name.as_str(), field.value.as_str()));
+        }
+    }
+    out
 }
 
 fn apply_auth_to_builder(
@@ -2482,6 +2983,7 @@ fn format_api_response_headers(headers: &[(String, String)]) -> String {
     out
 }
 
+#[cfg(test)]
 fn capture_response_auth(
     auth: &mut ApiAuthStore,
     spec_id: ApiSpecId,
@@ -2500,6 +3002,7 @@ fn capture_response_auth(
     changed
 }
 
+#[cfg(test)]
 fn capture_token_json(
     auth: &mut ApiAuthStore,
     spec_id: ApiSpecId,
@@ -2571,6 +3074,7 @@ fn capture_token_json(
     changed
 }
 
+#[cfg(test)]
 fn capture_set_cookie(
     auth: &mut ApiAuthStore,
     spec_id: ApiSpecId,
@@ -2875,15 +3379,298 @@ impl crate::app::App {
         }
     }
 
+    fn api_text_scroll_x_for_ui(&self, id: crate::ui_system::UiId) -> f32 {
+        let Some((_, state)) = self.active_api_tab() else {
+            return 0.0;
+        };
+        match id {
+            crate::ui_system::UiId::ApiBodyInput(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                state.body_scroll_x.current
+            }
+            crate::ui_system::UiId::ApiResponseBody(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                state.response_scroll_x.current
+            }
+            _ => 0.0,
+        }
+    }
+
+    pub(crate) fn api_text_max_scroll_x_for_ui(&mut self, id: crate::ui_system::UiId) -> f32 {
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return 0.0;
+        };
+        let Some((meta, state)) = self.active_api_tab() else {
+            return 0.0;
+        };
+        let text = match id {
+            crate::ui_system::UiId::ApiBodyScrollX(route_idx)
+            | crate::ui_system::UiId::ApiBodyInput(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                if matches!(
+                    self.ide_panel.api.focused,
+                    Some(ApiFocus::Body { spec_id, route_idx: focused_route })
+                        if spec_id == meta.spec_id && focused_route == route_idx
+                ) {
+                    self.ide_panel.api.input_editor.get_full_text()
+                } else {
+                    state.body_json.clone()
+                }
+            }
+            crate::ui_system::UiId::ApiResponseScrollX(route_idx)
+            | crate::ui_system::UiId::ApiResponseBody(route_idx)
+                if state.route_idx == Some(route_idx) =>
+            {
+                if matches!(
+                    self.ide_panel.api.focused,
+                    Some(ApiFocus::Response { spec_id, route_idx: focused_route })
+                        if spec_id == meta.spec_id && focused_route == route_idx
+                ) {
+                    self.ide_panel.api.input_editor.get_full_text()
+                } else {
+                    state
+                        .response
+                        .as_ref()
+                        .map(|response| api_response_text(response, state.response_view).to_string())
+                        .unwrap_or_default()
+                }
+            }
+            _ => return 0.0,
+        };
+        let visible_w = (rect.2 - 20.0 * self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0))
+            .max(1.0);
+        let Some(renderer) = self.renderer.as_mut() else {
+            return 0.0;
+        };
+        api_text_area_max_scroll_x(&text, visible_w, |line| {
+            renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+        })
+    }
+
+    fn api_one_line_max_scroll_x_for_ui(&mut self, id: crate::ui_system::UiId) -> f32 {
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return 0.0;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let visible_w = (rect.2 - 16.0 * scale).max(1.0);
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let Some(renderer) = self.renderer.as_mut() else {
+            return 0.0;
+        };
+        let text_w = renderer.measure_ui_width(&text, 0.88);
+        (text_w - visible_w + 20.0 * scale).max(0.0)
+    }
+
+    fn sync_api_one_line_scroll_target(&mut self, immediate: bool) {
+        let Some(focus) = self.ide_panel.api.focused.clone() else {
+            return;
+        };
+        if self.api_focus_is_array_input(&focus) {
+            return;
+        }
+        let Some((id, false)) = self.api_focus_ui_target(&focus) else {
+            return;
+        };
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let visible_w = (rect.2 - 16.0 * scale).max(1.0);
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let cursor = self.ide_panel.api.input_editor.cursor.min(text.len());
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let cursor_x = renderer.measure_ui_width(&text[..cursor], 0.88);
+        let max_scroll = self.api_one_line_max_scroll_x_for_ui(id);
+        let scroll = &mut self.ide_panel.api.input_scroll_x;
+        let mut target = scroll.target;
+        if cursor_x - target > visible_w {
+            target = cursor_x - visible_w + 10.0 * scale;
+        } else if cursor_x < target {
+            target = cursor_x;
+        }
+        scroll.target = target.clamp(0.0, max_scroll);
+        if immediate {
+            scroll.current = scroll.target;
+            scroll.velocity = 0.0;
+        }
+    }
+
+    pub(crate) fn drag_api_text_scrollbar_x_from_last_mouse(&mut self) -> bool {
+        let Some((id, body)) = self.active_api_tab().and_then(|(_, state)| {
+            let route_idx = state.route_idx?;
+            if state.body_scroll_x.is_dragging {
+                Some((crate::ui_system::UiId::ApiBodyScrollX(route_idx), true))
+            } else if state.response_scroll_x.is_dragging {
+                Some((crate::ui_system::UiId::ApiResponseScrollX(route_idx), false))
+            } else {
+                None
+            }
+        }) else {
+            return false;
+        };
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let max_scroll = self.api_text_max_scroll_x_for_ui(id);
+        let Some((meta, _)) = self.active_api_tab() else {
+            return false;
+        };
+        let spec_id = meta.spec_id;
+        let mx = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.last_mouse_x)
+            .unwrap_or(0.0);
+        if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+            let scroll = if body {
+                &mut state.body_scroll_x
+            } else {
+                &mut state.response_scroll_x
+            };
+            let ratio = (mx - rect.0 - scroll.drag_offset) / rect.2.max(0.0001);
+            scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+            scroll.current = scroll.target;
+        }
+        true
+    }
+
+    fn api_focus_ui_target(&self, focus: &ApiFocus) -> Option<(crate::ui_system::UiId, bool)> {
+        match focus {
+            ApiFocus::ImportUrl => Some((crate::ui_system::UiId::ApiImportUrlInput, false)),
+            ApiFocus::Body { route_idx, .. } => {
+                Some((crate::ui_system::UiId::ApiBodyInput(*route_idx), true))
+            }
+            ApiFocus::Response { route_idx, .. } => {
+                Some((crate::ui_system::UiId::ApiResponseBody(*route_idx), true))
+            }
+            ApiFocus::AuthValue { spec_id, scheme }
+            | ApiFocus::AuthRefreshToken { spec_id, scheme }
+            | ApiFocus::AuthUsername { spec_id, scheme }
+            | ApiFocus::AuthPassword { spec_id, scheme } => {
+                let idx = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(spec_id)?
+                    .security_schemes
+                    .iter()
+                    .position(|item| item.name == *scheme)?;
+                let id = match focus {
+                    ApiFocus::AuthUsername { .. } => {
+                        crate::ui_system::UiId::ApiAuthUsername(idx)
+                    }
+                    ApiFocus::AuthPassword { .. } => {
+                        crate::ui_system::UiId::ApiAuthPassword(idx)
+                    }
+                    ApiFocus::AuthRefreshToken { .. } => {
+                        crate::ui_system::UiId::ApiAuthRefreshToken(idx)
+                    }
+                    _ => crate::ui_system::UiId::ApiAuthValue(idx),
+                };
+                Some((id, false))
+            }
+            ApiFocus::PathParam {
+                spec_id,
+                route_idx,
+                name,
+            } => {
+                let idx = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(spec_id)?
+                    .routes
+                    .get(*route_idx)?
+                    .path_params
+                    .iter()
+                    .position(|param| param.name == *name)?;
+                Some((
+                    crate::ui_system::UiId::ApiPathParamInput(*route_idx, idx),
+                    false,
+                ))
+            }
+            ApiFocus::QueryParam {
+                spec_id,
+                route_idx,
+                name,
+            } => {
+                let idx = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(spec_id)?
+                    .routes
+                    .get(*route_idx)?
+                    .query_params
+                    .iter()
+                    .position(|param| param.name == *name)?;
+                Some((
+                    crate::ui_system::UiId::ApiQueryParamInput(*route_idx, idx),
+                    false,
+                ))
+            }
+            ApiFocus::BodyField {
+                spec_id,
+                route_idx,
+                name,
+            } => {
+                let model = self.ide_panel.api.models.get(spec_id)?;
+                let route = model.routes.get(*route_idx)?;
+                let root = route.request_body.as_ref()?.schema?;
+                let idx = model
+                    .schema_arena
+                    .get(root.0)?
+                    .properties
+                    .iter()
+                    .position(|prop| prop.name == *name)?;
+                Some((
+                    crate::ui_system::UiId::ApiBodyFieldInput(*route_idx, idx),
+                    false,
+                ))
+            }
+        }
+    }
+
     fn place_api_cursor_from_last_click(&mut self, id: crate::ui_system::UiId, multiline: bool) {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return;
         };
+        if self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .is_some_and(|focus| self.api_focus_is_array_input(focus))
+        {
+            self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
+            self.ide_panel.api.input_editor.selection_anchor =
+                Some(self.ide_panel.api.input_editor.cursor);
+            self.pulse_api_cursor_blink();
+            return;
+        }
         let text = self.ide_panel.api.input_editor.get_full_text();
         let scroll_y = if multiline {
             self.api_text_scroll_for_ui(id)
         } else {
             0.0
+        };
+        let scroll_x = if multiline {
+            self.api_text_scroll_x_for_ui(id)
+        } else {
+            self.ide_panel.api.input_scroll_x.current
         };
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -2892,45 +3679,118 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale, scroll_y)
+            api_multiline_byte_at_pointer(
+                renderer,
+                &text,
+                rect,
+                mx + scroll_x,
+                my,
+                scale,
+                scroll_y,
+            )
         } else {
-            let target_x =
-                (mx - (rect.0 + 8.0 * scale)).clamp(0.0, (rect.2 - 16.0 * scale).max(0.0));
+            let visible_w = (rect.2 - 16.0 * scale).max(0.0);
+            let target_x = if mx <= rect.0 {
+                scroll_x
+            } else if mx >= rect.0 + rect.2 {
+                scroll_x + visible_w
+            } else {
+                scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
+            };
             api_line_byte_at_x(renderer, &text, target_x, 0.88)
         };
         self.ide_panel.api.input_editor.cursor = cursor;
         self.ide_panel.api.input_editor.selection_anchor = Some(cursor);
+        if !multiline {
+            self.sync_api_one_line_scroll_target(true);
+        }
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
     }
 
     pub(crate) fn drag_api_text_cursor_from_last_mouse(&mut self) -> bool {
-        let id = match self.ide_panel.api.focused {
-            Some(ApiFocus::Body { route_idx, .. }) => {
-                crate::ui_system::UiId::ApiBodyInput(route_idx)
-            }
-            Some(ApiFocus::Response { route_idx, .. }) => {
-                crate::ui_system::UiId::ApiResponseBody(route_idx)
-            }
-            _ => return false,
+        let Some(focus) = self.ide_panel.api.focused.clone() else {
+            return false;
+        };
+        let Some((id, multiline)) = self.api_focus_ui_target(&focus) else {
+            return false;
         };
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return false;
         };
         let text = self.ide_panel.api.input_editor.get_full_text();
         let scroll_y = self.api_text_scroll_for_ui(id);
+        let scroll_x = if multiline {
+            self.api_text_scroll_x_for_ui(id)
+        } else {
+            self.ide_panel.api.input_scroll_x.current
+        };
         let Some(renderer) = self.renderer.as_mut() else {
             return false;
         };
         let mx = renderer.last_mouse_x;
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
-        let cursor = api_multiline_byte_at_pointer(renderer, &text, rect, mx, my, scale, scroll_y);
+        let cursor = if multiline {
+            api_multiline_byte_at_pointer(
+                renderer,
+                &text,
+                rect,
+                mx + scroll_x,
+                my,
+                scale,
+                scroll_y,
+            )
+        } else {
+            let visible_w = (rect.2 - 16.0 * scale).max(0.0);
+            let target_x = if mx <= rect.0 {
+                scroll_x
+            } else if mx >= rect.0 + rect.2 {
+                scroll_x + visible_w
+            } else {
+                scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
+            };
+            api_line_byte_at_x(renderer, &text, target_x, 0.88)
+        };
         if self.ide_panel.api.input_editor.selection_anchor.is_none() {
             self.ide_panel.api.input_editor.selection_anchor =
                 Some(self.ide_panel.api.input_editor.cursor);
         }
         self.ide_panel.api.input_editor.cursor = cursor;
+        if multiline {
+            let Some((meta, _)) = self.active_api_tab() else {
+                return true;
+            };
+            let spec_id = meta.spec_id;
+            let max_scroll = self.api_text_max_scroll_x_for_ui(id);
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                let scroll = match id {
+                    crate::ui_system::UiId::ApiBodyInput(_) => &mut state.body_scroll_x,
+                    crate::ui_system::UiId::ApiResponseBody(_) => &mut state.response_scroll_x,
+                    _ => return true,
+                };
+                let edge = 18.0 * scale;
+                if mx < rect.0 + edge {
+                    scroll.scroll_by(-edge);
+                    scroll.clamp_target(0.0, max_scroll);
+                } else if mx > rect.0 + rect.2 - edge {
+                    scroll.scroll_by(edge);
+                    scroll.clamp_target(0.0, max_scroll);
+                }
+            }
+        } else {
+            let max_scroll = self.api_one_line_max_scroll_x_for_ui(id);
+            let edge = 18.0 * scale;
+            let scroll = &mut self.ide_panel.api.input_scroll_x;
+            scroll.anim_speed = 7.0;
+            if mx < rect.0 + edge {
+                scroll.scroll_by(-edge);
+                scroll.clamp_target(0.0, max_scroll);
+            } else if mx > rect.0 + rect.2 - edge {
+                scroll.scroll_by(edge);
+                scroll.clamp_target(0.0, max_scroll);
+            }
+        }
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
         true
@@ -3240,17 +4100,30 @@ impl crate::app::App {
 
     pub fn open_api_route(&mut self, spec_id: ApiSpecId, route_idx: usize) {
         self.open_api_spec_tab(spec_id);
+        let mut needs_input_sync = false;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+            state.remember_view_scroll();
+            state.remember_route_state();
             state.auth_view = false;
-            state.route_idx = Some(route_idx);
-            state.response = None;
-            state.response_view = ApiResponseView::Body;
-            state.pending = false;
-            state.pending_request_id = None;
-            state.body_scroll.current = 0.0;
-            state.body_scroll.target = 0.0;
-            state.response_scroll.current = 0.0;
-            state.response_scroll.target = 0.0;
+            if !state.restore_route_state(route_idx) {
+                state.route_idx = Some(route_idx);
+                state.response = None;
+                state.response_view = ApiResponseView::Body;
+                state.pending = false;
+                state.pending_request_id = None;
+                state.body_scroll.current = 0.0;
+                state.body_scroll.target = 0.0;
+                state.body_scroll_x.current = 0.0;
+                state.body_scroll_x.target = 0.0;
+                state.response_scroll.current = 0.0;
+                state.response_scroll.target = 0.0;
+                state.response_scroll_x.current = 0.0;
+                state.response_scroll_x.target = 0.0;
+                needs_input_sync = true;
+            }
+            state.restore_view_scroll(false, Some(route_idx));
+        }
+        if needs_input_sync {
             self.sync_api_tab_inputs(spec_id, route_idx);
         }
         self.save_tabs_state();
@@ -3326,20 +4199,34 @@ impl crate::app::App {
             state.body_json = body_json;
             state.body_scroll.current = 0.0;
             state.body_scroll.target = 0.0;
+            state.body_scroll_x.current = 0.0;
+            state.body_scroll_x.target = 0.0;
             state.response_scroll.current = 0.0;
             state.response_scroll.target = 0.0;
+            state.response_scroll_x.current = 0.0;
+            state.response_scroll_x.target = 0.0;
         }
     }
 
     pub fn focus_api_input(&mut self, focus: ApiFocus) {
+        let focus_changed = self.ide_panel.api.focused.as_ref() != Some(&focus);
         self.commit_api_focus();
-        let text = self.api_focus_text(&focus);
+        let is_array = self.api_focus_is_array_input(&focus);
+        let mut text = self.api_focus_text(&focus);
+        if is_array {
+            text = api_array_editor_text(&text);
+        }
         let old_version = self.ide_panel.api.input_editor.version;
         self.ide_panel.api.input_editor.set_text_clean(&text);
         self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
         self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
         self.ide_panel.api.input_editor.selection_anchor =
             Some(self.ide_panel.api.input_editor.cursor);
+        if focus_changed {
+            self.ide_panel.api.input_scroll_x.current = 0.0;
+            self.ide_panel.api.input_scroll_x.target = 0.0;
+            self.ide_panel.api.input_scroll_x.velocity = 0.0;
+        }
         self.ide_panel.api.focused = Some(focus);
         self.search_focused = false;
         self.settings_ignore_focused = false;
@@ -3349,6 +4236,33 @@ impl crate::app::App {
         self.ide_panel.file_tree_focused = false;
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
+    }
+
+    fn focus_next_api_input(&mut self, reverse: bool) -> bool {
+        let Some((meta, state)) = self.active_api_tab() else {
+            return false;
+        };
+        let spec_id = meta.spec_id;
+        let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
+            return false;
+        };
+        let order = api_focus_order_for_view(spec_id, model, state);
+        if order.is_empty() {
+            return false;
+        }
+        let current = self.ide_panel.api.focused.clone();
+        let current_idx = current
+            .as_ref()
+            .and_then(|focus| order.iter().position(|item| item == focus));
+        let next_idx = if reverse {
+            current_idx.unwrap_or(0).checked_sub(1).unwrap_or(order.len() - 1)
+        } else {
+            current_idx.map(|idx| (idx + 1) % order.len()).unwrap_or(0)
+        };
+        let next = order[next_idx].clone();
+        self.focus_api_input(next);
+        self.sync_api_one_line_scroll_target(true);
+        true
     }
 
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
@@ -3366,6 +4280,13 @@ impl crate::app::App {
                         entry.value.clone()
                     }
                 })
+                .unwrap_or_default(),
+            ApiFocus::AuthRefreshToken { spec_id, scheme } => self
+                .ide_panel
+                .api
+                .auth
+                .entry(*spec_id, scheme)
+                .map(|entry| entry.refresh_token.clone())
                 .unwrap_or_default(),
             ApiFocus::AuthUsername { spec_id, scheme } => self
                 .ide_panel
@@ -3461,22 +4382,89 @@ impl crate::app::App {
         }
     }
 
+    fn apply_response_token_to_auth(
+        &mut self,
+        route_idx: usize,
+        scheme_idx: usize,
+        save_access: bool,
+        save_refresh: bool,
+    ) {
+        let Some((meta, state)) = self.active_api_tab() else {
+            return;
+        };
+        if state.route_idx != Some(route_idx) {
+            return;
+        }
+        let spec_id = meta.spec_id;
+        let Some(response) = state.response.as_ref() else {
+            return;
+        };
+        let Ok(json) = serde_json::from_str::<Value>(&response.body) else {
+            return;
+        };
+        let access_token = json.get("access_token").and_then(Value::as_str);
+        let refresh_token = json.get("refresh_token").and_then(Value::as_str);
+        if (!save_access || access_token.is_none()) && (!save_refresh || refresh_token.is_none()) {
+            return;
+        }
+        let token_type = json
+            .get("token_type")
+            .and_then(Value::as_str)
+            .unwrap_or("Bearer")
+            .to_string();
+        let expires_at = json
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .map(|secs| now_epoch_secs().saturating_add(secs));
+        let Some(scheme_name) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.security_schemes.get(scheme_idx))
+            .filter(|scheme| scheme.token_capable())
+            .map(|scheme| scheme.name.clone())
+        else {
+            return;
+        };
+        let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme_name);
+        if save_access && let Some(token) = access_token {
+            entry.access_token = token.to_string();
+            entry.value = token.to_string();
+        }
+        if save_refresh && let Some(token) = refresh_token {
+            entry.refresh_token = token.to_string();
+            entry.value = token.to_string();
+        }
+        entry.token_type = token_type;
+        entry.expires_at = expires_at;
+        self.ide_panel.api.persist();
+    }
+
     pub fn commit_api_focus(&mut self) {
         let Some(focus) = self.ide_panel.api.focused.clone() else {
             return;
         };
-        let text = self.ide_panel.api.input_editor.get_full_text();
+        let mut text = self.ide_panel.api.input_editor.get_full_text();
+        if self.api_focus_is_array_input(&focus) {
+            text = split_api_array_values(&text).join("\n");
+        }
         match focus {
             ApiFocus::ImportUrl => {}
             ApiFocus::AuthValue { spec_id, scheme } => {
                 let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
                 entry.value = text.clone();
-                if !entry.access_token.is_empty() || !text.is_empty() {
-                    entry.access_token = text;
-                    if entry.token_type.is_empty() {
-                        entry.token_type = "Bearer".to_string();
-                    }
+                if !text.is_empty() && entry.token_type.is_empty() {
+                    entry.token_type = "Bearer".to_string();
                 }
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::AuthRefreshToken { spec_id, scheme } => {
+                self.ide_panel
+                    .api
+                    .auth
+                    .entry_mut(spec_id, &scheme)
+                    .refresh_token = text;
                 self.ide_panel.api.persist();
             }
             ApiFocus::AuthUsername { spec_id, scheme } => {
@@ -3542,7 +4530,74 @@ impl crate::app::App {
         }
     }
 
+    fn api_focus_is_array_input(&self, focus: &ApiFocus) -> bool {
+        match focus {
+            ApiFocus::PathParam {
+                spec_id,
+                route_idx,
+                name,
+            } => self
+                .ide_panel
+                .api
+                .models
+                .get(spec_id)
+                .and_then(|model| model.routes.get(*route_idx))
+                .and_then(|route| route.path_params.iter().find(|param| param.name == *name))
+                .is_some_and(|param| matches!(param.primitive_type, ApiPrimitiveType::Array)),
+            ApiFocus::QueryParam {
+                spec_id,
+                route_idx,
+                name,
+            } => self
+                .ide_panel
+                .api
+                .models
+                .get(spec_id)
+                .and_then(|model| model.routes.get(*route_idx))
+                .and_then(|route| route.query_params.iter().find(|param| param.name == *name))
+                .is_some_and(|param| matches!(param.primitive_type, ApiPrimitiveType::Array)),
+            ApiFocus::BodyField {
+                spec_id,
+                route_idx,
+                name,
+            } => self
+                .ide_panel
+                .api
+                .models
+                .get(spec_id)
+                .and_then(|model| model.routes.get(*route_idx).map(|route| (model, route)))
+                .and_then(|(model, route)| {
+                    let root = route.request_body.as_ref()?.schema?;
+                    let prop = model
+                        .schema_arena
+                        .get(root.0)?
+                        .properties
+                        .iter()
+                        .find(|prop| prop.name == *name)?;
+                    model.schema_arena.get(prop.schema.0)
+                })
+                .is_some_and(api_schema_is_array_input),
+            _ => false,
+        }
+    }
+
     pub fn handle_api_client_click(&mut self, id: crate::ui_system::UiId) -> bool {
+        if matches!(
+            id,
+            crate::ui_system::UiId::ApiImportUrlInput
+                | crate::ui_system::UiId::ApiAuthValue(_)
+                | crate::ui_system::UiId::ApiAuthRefreshToken(_)
+                | crate::ui_system::UiId::ApiAuthUsername(_)
+                | crate::ui_system::UiId::ApiAuthPassword(_)
+                | crate::ui_system::UiId::ApiPathParamInput(_, _)
+                | crate::ui_system::UiId::ApiQueryParamInput(_, _)
+                | crate::ui_system::UiId::ApiBodyInput(_)
+                | crate::ui_system::UiId::ApiBodyFieldInput(_, _)
+                | crate::ui_system::UiId::ApiResponseBody(_)
+        ) {
+            self.is_dragging = true;
+            self.ide_panel.is_dragging_terminal = false;
+        }
         match id {
             crate::ui_system::UiId::ApiImportAdd => {
                 self.ide_panel.api.import_menu_open = !self.ide_panel.api.import_menu_open;
@@ -3655,6 +4710,7 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiAuthValue(scheme_idx)
+            | crate::ui_system::UiId::ApiAuthRefreshToken(scheme_idx)
             | crate::ui_system::UiId::ApiAuthUsername(scheme_idx)
             | crate::ui_system::UiId::ApiAuthPassword(scheme_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -3679,6 +4735,9 @@ impl crate::app::App {
                     crate::ui_system::UiId::ApiAuthPassword(_) => {
                         ApiFocus::AuthPassword { spec_id, scheme }
                     }
+                    crate::ui_system::UiId::ApiAuthRefreshToken(_) => {
+                        ApiFocus::AuthRefreshToken { spec_id, scheme }
+                    }
                     _ => ApiFocus::AuthValue { spec_id, scheme },
                 };
                 self.focus_api_input(focus);
@@ -3688,6 +4747,57 @@ impl crate::app::App {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
                 self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiAuthAccessSave(_)
+            | crate::ui_system::UiId::ApiAuthRefreshSave(_) => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiAuthAccessClear(scheme_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                if let Some(scheme) = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.security_schemes.get(scheme_idx))
+                    .map(|scheme| scheme.name.clone())
+                {
+                    let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
+                    entry.access_token.clear();
+                    entry.value.clear();
+                    self.ide_panel.api.focused = None;
+                    self.ide_panel.api.persist();
+                }
+            }
+            crate::ui_system::UiId::ApiAuthRefreshClear(scheme_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                if let Some(scheme) = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.security_schemes.get(scheme_idx))
+                    .map(|scheme| scheme.name.clone())
+                {
+                    self.ide_panel
+                        .api
+                        .auth
+                        .entry_mut(spec_id, &scheme)
+                        .refresh_token
+                        .clear();
+                    self.ide_panel.api.focused = None;
+                    self.ide_panel.api.persist();
+                }
             }
             crate::ui_system::UiId::ApiAuthClear(scheme_idx) => {
                 self.commit_api_focus();
@@ -3711,6 +4821,61 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiTryRequest => {
                 self.start_active_api_request();
             }
+            crate::ui_system::UiId::ApiPathParamAllowedValue(route_idx, param_idx, value_idx)
+            | crate::ui_system::UiId::ApiQueryParamAllowedValue(route_idx, param_idx, value_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let spec_id = meta.spec_id;
+                let picked = self
+                    .ide_panel
+                    .api
+                    .models
+                    .get(&spec_id)
+                    .and_then(|model| model.routes.get(route_idx))
+                    .and_then(|route| match id {
+                        crate::ui_system::UiId::ApiPathParamAllowedValue(_, _, _) => route
+                            .path_params
+                            .get(param_idx)
+                            .map(|param| (true, param)),
+                        _ => route
+                            .query_params
+                            .get(param_idx)
+                            .map(|param| (false, param)),
+                    })
+                    .and_then(|(path, param)| {
+                        let values = if param.enum_values.is_empty() {
+                            &param.examples
+                        } else {
+                            &param.enum_values
+                        };
+                        Some((
+                            path,
+                            param.name.clone(),
+                            matches!(param.primitive_type, ApiPrimitiveType::Array),
+                            values.get(value_idx)?.clone(),
+                        ))
+                    });
+                if let Some((path, name, is_array, value)) = picked
+                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    && state.route_idx == Some(route_idx)
+                {
+                    let values = if path {
+                        &mut state.path_values
+                    } else {
+                        &mut state.query_values
+                    };
+                    if let Some(field) = values.iter_mut().find(|field| field.name == name) {
+                        if is_array {
+                            push_api_array_value(&mut field.value, &value);
+                        } else {
+                            field.value = value;
+                        }
+                    }
+                    self.ide_panel.api.focused = None;
+                }
+            }
             crate::ui_system::UiId::ApiResponseBodyTab(route_idx)
             | crate::ui_system::UiId::ApiResponseHeadersTab(route_idx) => {
                 let Some((meta, state)) = self.active_api_tab() else {
@@ -3729,6 +4894,8 @@ impl crate::app::App {
                     state.response_view = view;
                     state.response_scroll.current = 0.0;
                     state.response_scroll.target = 0.0;
+                    state.response_scroll_x.current = 0.0;
+                    state.response_scroll_x.target = 0.0;
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -3739,6 +4906,12 @@ impl crate::app::App {
                 ) {
                     self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
                 }
+            }
+            crate::ui_system::UiId::ApiResponseUseAccessToken(route_idx, scheme_idx) => {
+                self.apply_response_token_to_auth(route_idx, scheme_idx, true, false);
+            }
+            crate::ui_system::UiId::ApiResponseSaveRefreshToken(route_idx, scheme_idx) => {
+                self.apply_response_token_to_auth(route_idx, scheme_idx, false, true);
             }
             crate::ui_system::UiId::ApiPathParamInput(route_idx, param_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -3792,6 +4965,30 @@ impl crate::app::App {
                 self.focus_api_input(ApiFocus::Body { spec_id, route_idx });
                 self.place_api_cursor_from_last_click(id, true);
             }
+            crate::ui_system::UiId::ApiBodyScrollX(route_idx) => {
+                let Some((meta, state)) = self.active_api_tab() else {
+                    return true;
+                };
+                if state.route_idx != Some(route_idx) {
+                    return true;
+                }
+                let spec_id = meta.spec_id;
+                let max_scroll = self.api_text_max_scroll_x_for_ui(id);
+                let mx = self
+                    .renderer
+                    .as_ref()
+                    .map(|renderer| renderer.last_mouse_x)
+                    .unwrap_or(0.0);
+                if let Some(rect) = self.ui_registry.rect_for(id)
+                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                {
+                    state.body_scroll_x.is_dragging = true;
+                    state.body_scroll_x.drag_offset = 0.0;
+                    let ratio = (mx - rect.0) / rect.2.max(0.0001);
+                    state.body_scroll_x.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                    state.body_scroll_x.current = state.body_scroll_x.target;
+                }
+            }
             crate::ui_system::UiId::ApiBodyFieldInput(route_idx, prop_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
@@ -3838,35 +5035,49 @@ impl crate::app::App {
                         let root = route.request_body.as_ref()?.schema?;
                         let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
                         let schema = model.schema_arena.get(prop.schema.0)?;
+                        let allowed = api_schema_allowed_values(schema, model);
+                        let values = if allowed.is_empty() {
+                            schema.examples.as_slice()
+                        } else {
+                            allowed
+                        };
                         Some((
                             prop.name.clone(),
-                            schema.enum_values.get(value_idx)?.clone(),
+                            api_schema_is_array_input(schema),
+                            values.get(value_idx)?.clone(),
                         ))
                     });
                 let mut applied = None;
-                if let Some((name, value)) = picked
+                if let Some((name, is_array, value)) = picked
                     && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                     && let Some(field) = state
                         .body_values
                         .iter_mut()
                         .find(|field| field.name == name)
                 {
-                    field.value = value.clone();
-                    applied = Some((field.name.clone(), value));
+                    if is_array {
+                        push_api_array_value(&mut field.value, &value);
+                    } else {
+                        field.value = value.clone();
+                    }
+                    applied = Some((field.name.clone(), field.value.clone(), is_array));
                 }
-                if let Some((field_name, value)) = applied
+                if let Some((field_name, value, _)) = &applied
                     && matches!(
                         self.ide_panel.api.focused,
                         Some(ApiFocus::BodyField {
                             spec_id: f_spec,
                             route_idx: f_route,
                             ref name,
-                        }) if f_spec == spec_id && f_route == route_idx && name == &field_name
+                        }) if f_spec == spec_id && f_route == route_idx && name == field_name
                     )
                 {
                     let old_version = self.ide_panel.api.input_editor.version;
-                    self.ide_panel.api.input_editor.set_text_clean(&value);
+                    self.ide_panel.api.input_editor.set_text_clean(value);
                     self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                }
+                if applied.is_some_and(|(_, _, is_array)| is_array) {
+                    self.ide_panel.api.focused = None;
                 }
             }
             crate::ui_system::UiId::ApiBodyFilePick(route_idx, prop_idx) => {
@@ -3904,6 +5115,30 @@ impl crate::app::App {
                 self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
                 self.place_api_cursor_from_last_click(id, true);
             }
+            crate::ui_system::UiId::ApiResponseScrollX(route_idx) => {
+                let Some((meta, state)) = self.active_api_tab() else {
+                    return true;
+                };
+                if state.route_idx != Some(route_idx) {
+                    return true;
+                }
+                let spec_id = meta.spec_id;
+                let max_scroll = self.api_text_max_scroll_x_for_ui(id);
+                let mx = self
+                    .renderer
+                    .as_ref()
+                    .map(|renderer| renderer.last_mouse_x)
+                    .unwrap_or(0.0);
+                if let Some(rect) = self.ui_registry.rect_for(id)
+                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                {
+                    state.response_scroll_x.is_dragging = true;
+                    state.response_scroll_x.drag_offset = 0.0;
+                    let ratio = (mx - rect.0) / rect.2.max(0.0001);
+                    state.response_scroll_x.target = (ratio * max_scroll).clamp(0.0, max_scroll);
+                    state.response_scroll_x.current = state.response_scroll_x.target;
+                }
+            }
             crate::ui_system::UiId::ApiTabBody => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
@@ -3934,16 +5169,27 @@ impl crate::app::App {
         let shift = self.modifiers.shift_key();
         let is_body = matches!(self.ide_panel.api.focused, Some(ApiFocus::Body { .. }));
         let is_response = matches!(self.ide_panel.api.focused, Some(ApiFocus::Response { .. }));
+        let is_array = self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .is_some_and(|focus| self.api_focus_is_array_input(focus));
         match key_event.physical_key {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab) => {
+                self.focus_next_api_input(shift);
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
             | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
                 if matches!(self.ide_panel.api.focused, Some(ApiFocus::ImportUrl)) {
                     self.commit_api_focus();
                     self.start_api_url_import_from_input();
+                } else if is_array {
+                    finish_api_array_editor_draft(&mut self.ide_panel.api.input_editor);
                 } else if is_body && shift {
                     let _ = self.ide_panel.api.input_editor.insert_str("\n");
                 } else {
@@ -3970,6 +5216,8 @@ impl crate::app::App {
                 if !is_response && let Some(text) = self.get_clipboard_text() {
                     let clean = if is_body {
                         text
+                    } else if is_array {
+                        text.replace('\r', "")
                     } else {
                         text.replace('\n', "").replace('\r', "")
                     };
@@ -3993,6 +5241,8 @@ impl crate::app::App {
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
                 if is_response {
+                } else if is_array && !ctrl {
+                    backspace_api_array_editor(&mut self.ide_panel.api.input_editor);
                 } else if ctrl {
                     self.ide_panel.api.input_editor.delete_word_backward();
                 } else {
@@ -4049,6 +5299,8 @@ impl crate::app::App {
                 {
                     let clean = if is_body {
                         text.to_string()
+                    } else if is_array {
+                        text.replace('\r', "")
                     } else {
                         text.replace('\n', "").replace('\r', "")
                     };
@@ -4056,6 +5308,9 @@ impl crate::app::App {
                 }
             }
             _ => {}
+        }
+        if !is_body && !is_response && !is_array {
+            self.sync_api_one_line_scroll_target(false);
         }
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
@@ -4327,19 +5582,6 @@ impl crate::app::App {
 
     fn apply_api_job_response(&mut self, result: ApiJobResponse) {
         let resolved = result.resolved_host.clone();
-        let security_schemes = self
-            .ide_panel
-            .api
-            .models
-            .get(&result.spec_id)
-            .map(|model| model.security_schemes.clone())
-            .unwrap_or_default();
-        let auth_changed = capture_response_auth(
-            &mut self.ide_panel.api.auth,
-            result.spec_id,
-            &security_schemes,
-            &result,
-        );
         let focused_response = matches!(
             self.ide_panel.api.focused,
             Some(ApiFocus::Response { spec_id, route_idx })
@@ -4350,20 +5592,34 @@ impl crate::app::App {
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
                 && meta.spec_id == result.spec_id
-                && state.route_idx == Some(result.route_idx)
-                && state.pending_request_id == Some(result.request_id)
             {
-                state.pending = false;
-                state.pending_request_id = None;
-                state.response_scroll.current = 0.0;
-                state.response_scroll.target = 0.0;
-                if focused_response {
-                    focused_text =
-                        Some(api_response_text(&result, state.response_view).to_string());
+                if state.route_idx == Some(result.route_idx)
+                    && state.pending_request_id == Some(result.request_id)
+                {
+                    state.pending = false;
+                    state.pending_request_id = None;
+                    state.response_scroll.current = 0.0;
+                    state.response_scroll.target = 0.0;
+                    state.response_scroll_x.current = 0.0;
+                    state.response_scroll_x.target = 0.0;
+                    if focused_response {
+                        focused_text =
+                            Some(api_response_text(&result, state.response_view).to_string());
+                    }
+                    state.response = Some(result.clone());
+                    applied = true;
+                    break;
                 }
-                state.response = Some(result);
-                applied = true;
-                break;
+                if let Some(saved) = state.route_states.iter_mut().find(|saved| {
+                    saved.route_idx == result.route_idx
+                        && saved.pending_request_id == Some(result.request_id)
+                }) {
+                    saved.pending = false;
+                    saved.pending_request_id = None;
+                    saved.response = Some(result.clone());
+                    applied = true;
+                    break;
+                }
             }
         }
         if !applied {
@@ -4371,8 +5627,6 @@ impl crate::app::App {
         }
         if let Some(resolved) = resolved {
             self.ide_panel.api.last_resolved_host = Some(resolved);
-            self.ide_panel.api.persist();
-        } else if auth_changed {
             self.ide_panel.api.persist();
         }
         if let Some(text) = focused_text {
@@ -4389,6 +5643,16 @@ impl crate::app::App {
             {
                 state.pending = false;
                 state.pending_request_id = None;
+                break;
+            }
+            if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
+                && let Some(saved) = state
+                    .route_states
+                    .iter_mut()
+                    .find(|saved| saved.pending_request_id == Some(request_id))
+            {
+                saved.pending = false;
+                saved.pending_request_id = None;
                 break;
             }
         }
@@ -4485,6 +5749,13 @@ fn api_multipart_parts_for_route(
                     path: PathBuf::from(path),
                 });
             }
+        } else if api_schema_is_array_input(prop_schema) {
+            for item in split_api_array_values(value) {
+                out.push(ApiMultipartPart::Text {
+                    name: prop.name.clone(),
+                    value: item,
+                });
+            }
         } else {
             out.push(ApiMultipartPart::Text {
                 name: prop.name.clone(),
@@ -4515,6 +5786,21 @@ fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: us
     let Some(schema) = model.schema_arena.get(schema_ref.0) else {
         return "null".to_string();
     };
+    if let Some(value) = schema.examples.first() {
+        return match schema.kind {
+            ApiSchemaKind::Object | ApiSchemaKind::Array | ApiSchemaKind::Unknown => {
+                if serde_json::from_str::<Value>(value).is_ok() {
+                    value.clone()
+                } else {
+                    "null".to_string()
+                }
+            }
+            _ => schema_json_literal(schema.kind, value),
+        };
+    }
+    if let Some(value) = schema.default_value.as_ref().or_else(|| schema.enum_values.first()) {
+        return schema_json_literal(schema.kind, value);
+    }
     match schema.kind {
         ApiSchemaKind::Object => {
             let mut lines = Vec::new();
@@ -4535,11 +5821,35 @@ fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: us
                 .unwrap_or_else(|| "null".to_string());
             format!("[{}]", item)
         }
-        ApiSchemaKind::String => "\"\"".to_string(),
+        ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime => "\"\"".to_string(),
         ApiSchemaKind::Integer | ApiSchemaKind::Number => "0".to_string(),
         ApiSchemaKind::Boolean => "false".to_string(),
         ApiSchemaKind::Bytes => "\"\"".to_string(),
         ApiSchemaKind::Unknown => "null".to_string(),
+    }
+}
+
+fn schema_json_literal(kind: ApiSchemaKind, value: &str) -> String {
+    match kind {
+        ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime | ApiSchemaKind::Bytes => {
+            serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+        }
+        ApiSchemaKind::Integer | ApiSchemaKind::Number => {
+            if value.parse::<f64>().is_ok() {
+                value.to_string()
+            } else {
+                "0".to_string()
+            }
+        }
+        ApiSchemaKind::Boolean => match value {
+            "true" | "false" => value.to_string(),
+            _ => "false".to_string(),
+        },
+        ApiSchemaKind::Object | ApiSchemaKind::Array | ApiSchemaKind::Unknown => {
+            serde_json::from_str::<Value>(value)
+                .map(|json| json.to_string())
+                .unwrap_or_else(|_| "null".to_string())
+        }
     }
 }
 
@@ -4803,6 +6113,41 @@ mod tests {
     }
 
     #[test]
+    fn api_array_editor_uses_blocks_plus_draft() {
+        assert_eq!(api_array_editor_text("alpha\nbeta"), "alpha\nbeta\n");
+        assert_eq!(
+            api_array_edit_parts("alpha\nbeta\ngam"),
+            (vec!["alpha", "beta"], "gam")
+        );
+
+        let mut editor = Editor::new(64);
+        editor.set_text_clean(&api_array_editor_text("alpha\nbeta"));
+        editor.cursor = editor.len();
+        editor.selection_anchor = Some(editor.cursor);
+        editor.insert_str("gam");
+        finish_api_array_editor_draft(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\ngam\n");
+
+        backspace_api_array_editor(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+        editor.insert_str("x");
+        backspace_api_array_editor(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+    }
+
+    #[test]
+    fn api_text_area_horizontal_scroll_uses_longest_line() {
+        let max = api_text_area_max_scroll_x("short\nvery-long-line", 40.0, |line| {
+            line.len() as f32 * 10.0
+        });
+        assert_eq!(max, 120.0);
+        assert_eq!(
+            api_text_area_max_scroll_x("tiny", 100.0, |line| line.len() as f32 * 10.0),
+            0.0
+        );
+    }
+
+    #[test]
     fn api_tab_prefill_uses_selected_restored_route() {
         let model = parse_openapi_model(ApiSpecId(9), &sample_spec()).expect("parse");
         let post_idx = model
@@ -4864,6 +6209,99 @@ mod tests {
         assert_eq!(model.routes[0].path_params[0].name, "id");
         assert_eq!(model.routes[0].query_params[0].name, "verbose");
         assert!(!model.schema_arena.is_empty());
+    }
+
+    #[test]
+    fn parse_openapi_parameter_array_item_ref_keeps_enum() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Bookings", "version": "1.0.0"},
+            "components": {
+                "schemas": {
+                    "StateEnum": {
+                        "type": "string",
+                        "enum": ["CREATED", "ACCEPTED"],
+                        "default": "CREATED"
+                    }
+                }
+            },
+            "paths": {
+                "/car_washes/bookings": {
+                    "get": {
+                        "parameters": [
+                            {
+                                "name": "state_in",
+                                "in": "query",
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/StateEnum"}
+                                }
+                            }
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(12), &spec).expect("parse");
+        let param = &model.routes[0].query_params[0];
+        assert_eq!(param.name, "state_in");
+        assert_eq!(param.primitive_type, ApiPrimitiveType::Array);
+        assert_eq!(param.item_type, Some(ApiPrimitiveType::String));
+        assert_eq!(param.default_value.as_deref(), Some("CREATED"));
+        assert_eq!(param.enum_values, vec!["CREATED", "ACCEPTED"]);
+    }
+
+    #[test]
+    fn parse_openapi_date_and_datetime_types_keep_examples() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Dates", "version": "1.0.0"},
+            "paths": {
+                "/events": {
+                    "get": {
+                        "parameters": [
+                            {
+                                "name": "day",
+                                "in": "query",
+                                "schema": {"type": "string", "format": "date", "example": "2026-05-25"}
+                            }
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    },
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "starts_at": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "examples": ["2026-05-25T12:30:00Z"]
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(30), &spec).expect("parse");
+        let param = &model.routes[0].query_params[0];
+        assert_eq!(param.primitive_type, ApiPrimitiveType::Date);
+        assert_eq!(param.examples, vec!["2026-05-25"]);
+
+        let body = model.routes[1].request_body.as_ref().expect("body");
+        let root = body.schema.expect("schema");
+        let prop = model.schema_arena[root.0].properties[0].schema;
+        let schema = &model.schema_arena[prop.0];
+        assert_eq!(schema.kind, ApiSchemaKind::DateTime);
+        assert_eq!(schema.examples, vec!["2026-05-25T12:30:00Z"]);
     }
 
     #[test]
@@ -4955,6 +6393,12 @@ mod tests {
         }));
         assert!(parts.contains(&ApiPreparedAuthPart::Bearer {
             token: "jwt".to_string(),
+        }));
+
+        auth.entry_mut(model.id, "BearerJwt").value = "refresh".to_string();
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert!(parts.contains(&ApiPreparedAuthPart::Bearer {
+            token: "refresh".to_string(),
         }));
 
         assert!(prepared_auth_for_route(&model, public, &auth).is_empty());
@@ -5190,11 +6634,11 @@ mod tests {
             state.body_values,
             vec![
                 ApiInputValue {
-                    name: "password".to_string(),
+                    name: "username".to_string(),
                     value: String::new(),
                 },
                 ApiInputValue {
-                    name: "username".to_string(),
+                    name: "password".to_string(),
                     value: String::new(),
                 },
             ]
@@ -5212,6 +6656,270 @@ mod tests {
         ];
         let pairs = api_form_pairs(&fields);
         assert_eq!(pairs, vec![("username", "alice")]);
+    }
+
+    #[test]
+    fn json_body_uses_first_schema_example() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Body Example", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "examples": [
+                                            {"name": "Ada", "age": 37},
+                                            {"name": "Grace", "age": 85}
+                                        ],
+                                        "properties": {
+                                            "name": {"type": "string"},
+                                            "age": {"type": "integer"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(44), &spec).expect("parse");
+        let route = &model.routes[0];
+        assert_eq!(
+            default_body_for_route(route, &model),
+            "{\"name\":\"Ada\",\"age\":37}"
+        );
+    }
+
+    #[test]
+    fn form_urlencoded_ref_body_uses_schema_property_order() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Auth", "version": "1.0.0"},
+            "components": {
+                "schemas": {
+                    "Login": {
+                        "type": "object",
+                        "required": ["username", "password"],
+                        "properties": {
+                            "password": {"type": "string"},
+                            "username": {"type": "string"}
+                        }
+                    }
+                }
+            },
+            "paths": {
+                "/jwt/login": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {"$ref": "#/components/schemas/Login"}
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(22), &spec).expect("parse");
+        let mut state = ApiClientTabState::default();
+        fill_api_tab_inputs(&mut state, &model.routes[0], &model);
+
+        assert_eq!(state.body_values[0].name, "password");
+        assert_eq!(state.body_values[1].name, "username");
+    }
+
+    #[test]
+    fn form_and_multipart_field_rows_stay_compact() {
+        let model = parse_openapi_model(ApiSpecId(24), &form_spec()).expect("parse");
+        let route = &model.routes[0];
+        let schema = route
+            .request_body
+            .as_ref()
+            .and_then(|body| body.schema)
+            .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+            .expect("schema");
+        let username = schema
+            .properties
+            .iter()
+            .find(|prop| prop.name == "username")
+            .and_then(|prop| model.schema_arena.get(prop.schema.0))
+            .expect("username");
+        assert_eq!(api_body_prop_row_height(username, &model, 1.0), 46.0);
+
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Upload", "version": "1.0.0"},
+            "paths": {
+                "/upload": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": {
+                                                "type": "string",
+                                                "enum": ["avatar", "cover", "doc"]
+                                            },
+                                            "file": {
+                                                "type": "string",
+                                                "format": "binary"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(25), &spec).expect("parse");
+        let route = &model.routes[0];
+        let schema = route
+            .request_body
+            .as_ref()
+            .and_then(|body| body.schema)
+            .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+            .expect("schema");
+        for prop in &schema.properties {
+            let prop_schema = model.schema_arena.get(prop.schema.0).expect("prop");
+            let expected = 46.0;
+            assert_eq!(api_body_prop_row_height(prop_schema, &model, 1.0), expected);
+        }
+    }
+
+    #[test]
+    fn auth_view_focus_uses_single_token_field_and_routes_include_refresh_flow() {
+        let model = parse_openapi_model(ApiSpecId(26), &auth_spec()).expect("parse");
+        let state = ApiClientTabState {
+            auth_view: true,
+            ..Default::default()
+        };
+        let order = api_focus_order_for_view(model.id, &model, &state);
+        assert!(order.contains(&ApiFocus::AuthValue {
+            spec_id: model.id,
+            scheme: "BearerJwt".to_string(),
+        }));
+        assert!(!order.contains(&ApiFocus::AuthRefreshToken {
+            spec_id: model.id,
+            scheme: "BearerJwt".to_string(),
+        }));
+
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "JWT", "version": "1.0.0"},
+            "paths": {
+                "/jwt/login": {"post": {"responses": {"200": {"description": "ok"}}}},
+                "/jwt/refresh": {"post": {"responses": {"200": {"description": "ok"}}}},
+                "/users": {"get": {"responses": {"200": {"description": "ok"}}}}
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(27), &spec).expect("parse");
+        assert_eq!(api_auth_related_route_count(&model), 2);
+        assert_eq!(api_auth_route_rank(&model.routes[0]), Some(0));
+        assert_eq!(api_auth_route_rank(&model.routes[1]), Some(1));
+        assert_eq!(api_auth_route_rank(&model.routes[2]), None);
+    }
+
+    #[test]
+    fn api_response_auth_token_detection_handles_access_or_refresh() {
+        let response = ApiJobResponse {
+            request_id: 1,
+            spec_id: ApiSpecId(28),
+            route_idx: 0,
+            status: Some(200),
+            elapsed_ms: 1,
+            server_reach_ms: None,
+            timing_text: String::new(),
+            headers: Vec::new(),
+            headers_text: String::new(),
+            body: r#"{"access_token":"a"}"#.to_string(),
+            truncated: false,
+            resolved_host: None,
+            error: None,
+        };
+        assert!(api_response_has_auth_tokens(&response));
+
+        let response = ApiJobResponse {
+            body: r#"{"refresh_token":"r"}"#.to_string(),
+            ..response
+        };
+        assert!(api_response_has_auth_tokens(&response));
+    }
+
+    #[test]
+    fn api_tab_keeps_response_when_switching_routes() {
+        let mut state = ApiClientTabState {
+            route_idx: Some(0),
+            path_values: vec![ApiInputValue {
+                name: "id".to_string(),
+                value: "first".to_string(),
+            }],
+            response: Some(ApiJobResponse {
+                request_id: 7,
+                spec_id: ApiSpecId(29),
+                route_idx: 0,
+                status: Some(200),
+                elapsed_ms: 3,
+                server_reach_ms: None,
+                timing_text: "3ms".to_string(),
+                headers: Vec::new(),
+                headers_text: String::new(),
+                body: "{\"ok\":true}".to_string(),
+                truncated: false,
+                error: None,
+                resolved_host: None,
+            }),
+            ..Default::default()
+        };
+        state.remember_route_state();
+        state.route_idx = Some(1);
+        state.path_values.clear();
+        state.response = None;
+
+        assert!(state.restore_route_state(0));
+        assert_eq!(state.path_values[0].value, "first");
+        assert_eq!(
+            state.response.as_ref().map(|response| response.body.as_str()),
+            Some("{\"ok\":true}")
+        );
+    }
+
+    #[test]
+    fn api_focus_order_tabs_through_form_fields() {
+        let model = parse_openapi_model(ApiSpecId(23), &form_spec()).expect("parse");
+        let state = ApiClientTabState {
+            route_idx: Some(0),
+            ..Default::default()
+        };
+        let order = api_focus_order_for_view(model.id, &model, &state);
+
+        assert_eq!(
+            order,
+            vec![
+                ApiFocus::BodyField {
+                    spec_id: model.id,
+                    route_idx: 0,
+                    name: "username".to_string(),
+                },
+                ApiFocus::BodyField {
+                    spec_id: model.id,
+                    route_idx: 0,
+                    name: "password".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]
