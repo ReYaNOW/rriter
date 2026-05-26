@@ -98,6 +98,7 @@ fn test_app() -> Option<App> {
         api_body_file_rx: None,
         api_load_rx: Vec::new(),
         api_request_rx: Vec::new(),
+        api_mock_ty_rx: None,
         show_welcome: true,
         recent_files: Vec::new(),
         is_ide_mode: false,
@@ -918,7 +919,11 @@ fn autocomplete_detail_popup_follows_reexported_class_to_definition_module() {
     let root = std::env::temp_dir().join(format!("rriter_litestar_reexport_detail_test_{stamp}"));
     let package_dir = root.join("litestar");
     std::fs::create_dir_all(&package_dir).unwrap();
-    std::fs::write(package_dir.join("__init__.py"), "from .app import Litestar\n").unwrap();
+    std::fs::write(
+        package_dir.join("__init__.py"),
+        "from .app import Litestar\n",
+    )
+    .unwrap();
     std::fs::write(
         package_dir.join("app.py"),
         "class Router:\n    pass\n\nclass Litestar(Router):\n    \"\"\"The Litestar application.\n\n    Root level docs.\n    \"\"\"\n",
@@ -1096,10 +1101,16 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
 
     app.refresh_autocomplete_detail_popup();
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
-    assert!(popup.text.contains(
-        "def max(*args: Any, key: Any = None, default: Any = ...) -> Any"
-    ));
-    assert!(popup.text.contains("max(iterable, *[, default=obj, key=func])"));
+    assert!(
+        popup
+            .text
+            .contains("def max(*args: Any, key: Any = None, default: Any = ...) -> Any")
+    );
+    assert!(
+        popup
+            .text
+            .contains("max(iterable, *[, default=obj, key=func])")
+    );
     assert!(popup.text.contains("return its biggest item"));
     assert_eq!(popup.text.matches("def max").count(), 1);
     assert!(!popup.text.contains("Overload["));
@@ -1121,7 +1132,11 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
         .as_nanos();
     let root = std::env::temp_dir().join(format!("rriter_builtin_map_detail_test_{stamp}"));
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("builtins.pyi"), "class map(Generic[_S]):\n    pass\n").unwrap();
+    std::fs::write(
+        root.join("builtins.pyi"),
+        "class map(Generic[_S]):\n    pass\n",
+    )
+    .unwrap();
     app.ide_workspaces = vec![root];
 
     app.autocomplete_options[0].0 = AutocompleteItem {
@@ -1141,7 +1156,11 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert!(popup.text.contains("[[MODULE]] builtins"));
     assert!(popup.text.contains("class map(Generic[_S])"));
-    assert!(popup.text.contains("Stops when the shortest iterable is exhausted"));
+    assert!(
+        popup
+            .text
+            .contains("Stops when the shortest iterable is exhausted")
+    );
 
     app.autocomplete_options[0].0 = AutocompleteItem {
         word: "map".to_string(),

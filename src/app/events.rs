@@ -307,6 +307,7 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
         app.ide_panel.api.persist();
         crate::save_panel_state(&app.ide_panel);
     }
+    crate::app::api_mock::server::stop_api_mock_server();
     event_loop.exit();
 }
 

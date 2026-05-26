@@ -1389,7 +1389,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         idle_blink_enabled,
         hover_wake_at,
         hover_poll_pending,
-        !app.api_request_rx.is_empty(),
+        !app.api_request_rx.is_empty() || app.api_mock_ty_rx.is_some(),
     ) {
         AboutWaitPlan::Wait => {
             if let Some(w) = app.window.as_ref() {

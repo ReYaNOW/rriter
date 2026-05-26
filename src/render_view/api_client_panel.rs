@@ -1,10 +1,11 @@
 use crate::app::api_client::{
-    api_timing_visible_at, format_api_secs, format_last_loaded_at, grouped_route_ranges,
-    now_epoch_secs, write_api_path_display, ApiMethod, ApiSpecSource,
+    ApiMethod, ApiSpecSource, api_timing_visible_at, format_api_secs, format_last_loaded_at,
+    grouped_route_ranges, now_epoch_secs, write_api_path_display,
 };
-use crate::renderer::Renderer;
+use crate::app::api_mock::types::{ApiMockMode, ApiMockServerStatus};
 use crate::render_view::tree_ui::{TREE_INDENT_W, TREE_ROW_H, TREE_TEXT_SCALE};
-use crate::widgets::{IconButton, IconType};
+use crate::renderer::Renderer;
+use crate::widgets::{Button, IconButton, IconType};
 use glow::HasContext;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -185,7 +186,10 @@ impl Renderer {
                 input_h,
                 5.0 * s,
                 (1.0 * s).max(1.0),
-                if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl)) {
+                if matches!(
+                    api.focused,
+                    Some(crate::app::api_client::ApiFocus::ImportUrl)
+                ) {
                     [0.60, 0.35, 0.85, 1.0]
                 } else {
                     [1.0, 1.0, 1.0, 0.12]
@@ -212,7 +216,10 @@ impl Renderer {
             } else {
                 self.theme.fg
             };
-            if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl)) {
+            if matches!(
+                api.focused,
+                Some(crate::app::api_client::ApiFocus::ImportUrl)
+            ) {
                 self.draw_api_editor_selection_one_line(
                     &api.input_editor,
                     input_x + 8.0 * s,
@@ -224,8 +231,10 @@ impl Renderer {
                 );
             }
             self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
-            if matches!(api.focused, Some(crate::app::api_client::ApiFocus::ImportUrl))
-                && blink_alpha > 0.5
+            if matches!(
+                api.focused,
+                Some(crate::app::api_client::ApiFocus::ImportUrl)
+            ) && blink_alpha > 0.5
             {
                 let text_w = self
                     .api_editor_cursor_x_one_line(&api.input_editor, 0.76)
@@ -274,6 +283,365 @@ impl Renderer {
                 [1.0, 0.38, 0.38, 1.0],
                 0.72,
             );
+        }
+
+        cy += 10.0 * s;
+        self.draw_string_scaled_stable("Mock server", x + pad, cy + 18.0 * s, self.theme.fg, 0.88);
+        cy += 28.0 * s;
+        let btn_h = 28.0 * s;
+        let server_running = matches!(
+            api.mock.server_status,
+            ApiMockServerStatus::Running { .. } | ApiMockServerStatus::Starting
+        );
+        let toggle = Button {
+            x: x + pad,
+            y: cy,
+            w: 98.0 * s,
+            h: btn_h,
+            text: if server_running { "Stop" } else { "Start" }.to_string(),
+            icon: Some(if server_running {
+                IconType::Close
+            } else {
+                IconType::Api
+            }),
+            text_scale: 0.76,
+            icon_size: 15.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockServerToggle,
+            &toggle,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        let lan = Button {
+            x: x + pad + 106.0 * s,
+            y: cy,
+            w: 82.0 * s,
+            h: btn_h,
+            text: if api.mock.bind_host == "0.0.0.0" {
+                "Bind LAN"
+            } else {
+                "Bind local"
+            }
+            .to_string(),
+            icon: None,
+            text_scale: 0.76,
+            icon_size: 0.0,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockBindLanToggle,
+            &lan,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 8.0 * s;
+        self.draw_string_scaled_stable(
+            if api.mock.bind_host == "0.0.0.0" {
+                "LAN = доступно в сети"
+            } else {
+                "Local = только этот ПК"
+            },
+            x + pad,
+            cy + 16.0 * s,
+            [0.58, 0.61, 0.70, 1.0],
+            0.70,
+        );
+        cy += 22.0 * s;
+        let status = match &api.mock.server_status {
+            ApiMockServerStatus::Stopped => "stopped".to_string(),
+            ApiMockServerStatus::Starting => "starting".to_string(),
+            ApiMockServerStatus::Stopping => "stopping".to_string(),
+            ApiMockServerStatus::Running { url } => url.clone(),
+            ApiMockServerStatus::Failed(err) => format!("failed: {}", err),
+        };
+        self.draw_string_scaled_stable(
+            &status,
+            x + pad,
+            cy + 18.0 * s,
+            [0.62, 0.66, 0.74, 1.0],
+            0.74,
+        );
+        cy += 26.0 * s;
+        let mode_label = match api.mock.mode {
+            ApiMockMode::MockAll => "Mock all",
+            ApiMockMode::MockSelectedOnly => "Selected only",
+            ApiMockMode::MockSelectedProxyRest => "Selected + proxy",
+        };
+        let mode = Button {
+            x: x + pad,
+            y: cy,
+            w: (w - pad * 2.0).max(80.0 * s),
+            h: btn_h,
+            text: mode_label.to_string(),
+            icon: Some(IconType::Reload),
+            text_scale: 0.76,
+            icon_size: 15.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockModeSelect,
+            &mode,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 8.0 * s;
+        let proxy_x = x + pad;
+        let proxy_w = (w - pad * 2.0).max(80.0 * s);
+        let proxy_h = 30.0 * s;
+        let proxy_focused = matches!(
+            api.focused,
+            Some(crate::app::api_client::ApiFocus::MockProxyBase)
+        );
+        self.push_rounded_rect_border(
+            proxy_x,
+            cy,
+            proxy_w,
+            proxy_h,
+            5.0 * s,
+            (1.0 * s).max(1.0),
+            if proxy_focused {
+                [0.60, 0.35, 0.85, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 0.12]
+            },
+            [0.16, 0.17, 0.21, 1.0],
+        );
+        ui_registry.register_text_input(
+            crate::ui_system::UiId::ApiMockProxyBaseInput,
+            proxy_x,
+            cy,
+            proxy_w,
+            proxy_h,
+            mx,
+            my,
+        );
+        let proxy_text = if proxy_focused {
+            api.input_editor.get_full_text()
+        } else {
+            api.mock.proxy_base_url.clone()
+        };
+        let shown = if proxy_text.is_empty() {
+            "https://backend.local"
+        } else {
+            proxy_text.as_str()
+        };
+        self.draw_string_scaled_stable(
+            shown,
+            proxy_x + 8.0 * s,
+            cy + 20.0 * s,
+            if proxy_text.is_empty() {
+                [0.55, 0.57, 0.64, 1.0]
+            } else {
+                self.theme.fg
+            },
+            0.76,
+        );
+        cy += proxy_h + 18.0 * s;
+        let uv_status = format!("uv: {:?}", api.mock.uv.status);
+        self.draw_string_scaled_stable(
+            &uv_status,
+            x + pad,
+            cy + 18.0 * s,
+            [0.62, 0.66, 0.74, 1.0],
+            0.74,
+        );
+        cy += 24.0 * s;
+        if !api.mock.uv.last_error.is_empty() {
+            self.draw_string_scaled_stable(
+                &api.mock.uv.last_error,
+                x + pad,
+                cy + 16.0 * s,
+                [1.0, 0.70, 0.42, 1.0],
+                0.66,
+            );
+            cy += 22.0 * s;
+        }
+        let choose_uv = Button {
+            x: x + pad,
+            y: cy,
+            w: 98.0 * s,
+            h: btn_h,
+            text: "Find uv".to_string(),
+            icon: Some(IconType::Check),
+            text_scale: 0.74,
+            icon_size: 14.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockChooseUv,
+            &choose_uv,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        let download_uv = Button {
+            x: x + pad + 106.0 * s,
+            y: cy,
+            w: 112.0 * s,
+            h: btn_h,
+            text: "Download".to_string(),
+            icon: Some(IconType::Reload),
+            text_scale: 0.74,
+            icon_size: 14.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockDownloadUv,
+            &download_uv,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 14.0 * s;
+        let manual = Button {
+            x: x + pad,
+            y: cy,
+            w: (w - pad * 2.0).max(80.0 * s),
+            h: btn_h,
+            text: "Add manual route".to_string(),
+            icon: Some(IconType::Plus),
+            text_scale: 0.74,
+            icon_size: 14.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockAddManualRoute,
+            &manual,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 14.0 * s;
+        for (manual_idx, route) in api.mock.manual_routes.iter().enumerate().take(8) {
+            let method_x = x + pad;
+            let method_y = cy + 3.0 * s;
+            let method_w = 44.0 * s;
+            let method_h = 22.0 * s;
+            self.draw_api_method_chip(
+                route.method,
+                method_x,
+                method_y,
+                method_w,
+                method_h,
+                s,
+                0.58,
+            );
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ApiMockManualRouteMethod(manual_idx),
+                method_x,
+                method_y,
+                method_w,
+                method_h,
+                mx,
+                my,
+            );
+            let remove_size = 22.0 * s;
+            let path_x = x + pad + 54.0 * s;
+            let path_y = cy;
+            let path_w = (w - pad * 2.0 - 54.0 * s - remove_size - 8.0 * s).max(48.0 * s);
+            let path_h = 28.0 * s;
+            let path_focused = matches!(
+                api.focused,
+                Some(crate::app::api_client::ApiFocus::MockManualPath { manual_idx: f_idx })
+                    if f_idx == manual_idx
+            );
+            self.push_rounded_rect_border(
+                path_x,
+                path_y,
+                path_w,
+                path_h,
+                5.0 * s,
+                (1.0 * s).max(1.0),
+                if path_focused {
+                    [0.60, 0.35, 0.85, 1.0]
+                } else {
+                    [1.0, 1.0, 1.0, 0.12]
+                },
+                [0.16, 0.17, 0.21, 1.0],
+            );
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx),
+                path_x,
+                path_y,
+                path_w,
+                path_h,
+                mx,
+                my,
+            );
+            let path_text = if path_focused {
+                api.input_editor.get_full_text()
+            } else {
+                route.path.clone()
+            };
+            if path_focused {
+                self.draw_api_editor_selection_one_line(
+                    &api.input_editor,
+                    path_x + 8.0 * s,
+                    path_y + 5.0 * s,
+                    path_w - 16.0 * s,
+                    path_h - 10.0 * s,
+                    0.72,
+                    0.0,
+                );
+                if blink_alpha > 0.5 {
+                    let text_w = self
+                        .api_editor_cursor_x_one_line(&api.input_editor, 0.72)
+                        .min(path_w - 16.0 * s);
+                    self.push_rect(
+                        path_x + 8.0 * s + text_w,
+                        path_y + 6.0 * s,
+                        1.5 * s,
+                        path_h - 12.0 * s,
+                        self.theme.fg,
+                    );
+                }
+            }
+            self.draw_string_scaled_stable(
+                if path_text.is_empty() {
+                    "/mock"
+                } else {
+                    path_text.as_str()
+                },
+                path_x + 8.0 * s,
+                path_y + 19.0 * s,
+                if path_text.is_empty() {
+                    [0.55, 0.57, 0.64, 1.0]
+                } else {
+                    self.theme.fg
+                },
+                0.72,
+            );
+            let remove = IconButton {
+                x: x + w - pad - remove_size,
+                y: cy + 3.0 * s,
+                size: remove_size,
+                icon: Some(IconType::Close),
+                is_active: false,
+                icon_size: Some(14.0 * s),
+                active_square_width: None,
+                custom_color: Some([1.0, 0.48, 0.48, 1.0]),
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::ApiMockManualRouteRemove(manual_idx),
+                &remove,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            cy += 34.0 * s;
         }
 
         if api.specs.is_empty() {
@@ -485,25 +853,19 @@ impl Renderer {
             for (tag, start, len, collapsed) in groups {
                 let tag_hovered = hover_settled
                     && ui_registry.register_rect(
-                    crate::ui_system::UiId::ApiRouteTag(group_idx),
-                    x,
-                    cy,
-                    w,
-                    tag_h,
-                    mx,
-                    my,
-                );
+                        crate::ui_system::UiId::ApiRouteTag(group_idx),
+                        x,
+                        cy,
+                        w,
+                        tag_h,
+                        mx,
+                        my,
+                    );
                 if tag_hovered {
                     self.push_rect(x, cy, w, tag_h, [1.0, 1.0, 1.0, 0.055]);
                 }
                 let tag_x = x + pad + indent_w;
-                self.draw_tree_disclosure_icon(
-                    !collapsed,
-                    tag_x,
-                    cy,
-                    tag_h,
-                    self.theme.line_num,
-                );
+                self.draw_tree_disclosure_icon(!collapsed, tag_x, cy, tag_h, self.theme.line_num);
                 self.draw_string_scaled_stable(
                     &tag,
                     tag_x + 18.0 * s,
@@ -524,8 +886,9 @@ impl Renderer {
                             mx,
                             my,
                         );
-                        let hovered = hover_settled && ui_registry.hovered()
-                            == Some(crate::ui_system::UiId::ApiRouteRow(route_idx));
+                        let hovered = hover_settled
+                            && ui_registry.hovered()
+                                == Some(crate::ui_system::UiId::ApiRouteRow(route_idx));
                         let active = active_route_idx == Some(route_idx);
                         if active {
                             self.push_rect(x, cy, w, row_h, [0.60, 0.35, 0.85, 0.14]);

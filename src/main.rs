@@ -961,6 +961,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         api_body_file_rx: None,
         api_load_rx: Vec::new(),
         api_request_rx: Vec::new(),
+        api_mock_ty_rx: None,
 
         show_welcome,
         recent_files,

@@ -94,6 +94,24 @@ impl App {
             | UiId::ApiResponseScrollX(_)
             | UiId::ApiResponseUseAccessToken(_, _)
             | UiId::ApiResponseSaveRefreshToken(_, _)
+            | UiId::ApiMockServerToggle
+            | UiId::ApiMockBindLanToggle
+            | UiId::ApiMockModeSelect
+            | UiId::ApiMockProxyBaseInput
+            | UiId::ApiMockChooseUv
+            | UiId::ApiMockDownloadUv
+            | UiId::ApiMockRouteEnable(_)
+            | UiId::ApiMockRoutePythonToggle(_)
+            | UiId::ApiMockRouteTyCheck(_)
+            | UiId::ApiMockStaticResponseInput(_)
+            | UiId::ApiMockPreludeInput(_)
+            | UiId::ApiMockBodyInput(_)
+            | UiId::ApiMockAddInputField(_)
+            | UiId::ApiMockAddOutputField(_)
+            | UiId::ApiMockAddManualRoute
+            | UiId::ApiMockManualRouteMethod(_)
+            | UiId::ApiMockManualRoutePath(_)
+            | UiId::ApiMockManualRouteRemove(_)
             | UiId::ApiTabBody => {
                 self.handle_api_client_click(id);
             }

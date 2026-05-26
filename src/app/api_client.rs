@@ -1,3 +1,11 @@
+use crate::app::api_mock::persist::{load_api_mocks, save_api_mocks};
+use crate::app::api_mock::server::{
+    apply_api_mock_server_event, drain_api_mock_server_events, start_api_mock_server,
+    stop_api_mock_server,
+};
+use crate::app::api_mock::ty_check::spawn_api_mock_ty_check;
+use crate::app::api_mock::types::ApiMockState;
+use crate::app::api_mock::{merge::build_api_mock_routes, types::ApiMockServerSnapshot};
 use crate::editor::Editor;
 use crate::scroll::ScrollState;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -649,6 +657,19 @@ impl Eq for ApiClientTabState {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiFocus {
     ImportUrl,
+    MockProxyBase,
+    MockManualPath {
+        manual_idx: usize,
+    },
+    MockPrelude {
+        route_idx: usize,
+    },
+    MockBody {
+        route_idx: usize,
+    },
+    MockStaticResponse {
+        route_idx: usize,
+    },
     AuthValue {
         spec_id: ApiSpecId,
         scheme: String,
@@ -756,6 +777,7 @@ pub struct ApiClientState {
     pub specs: Vec<ApiSpecEntry>,
     pub models: FxHashMap<ApiSpecId, ApiSpecModel>,
     pub auth: ApiAuthStore,
+    pub mock: ApiMockState,
     pub selected_spec: Option<ApiSpecId>,
     pub next_id: u64,
     pub import_menu_open: bool,
@@ -798,6 +820,7 @@ impl Default for ApiClientState {
             specs: Vec::new(),
             models: FxHashMap::default(),
             auth: ApiAuthStore::default(),
+            mock: ApiMockState::default(),
             selected_spec: None,
             next_id: 1,
             import_menu_open: false,
@@ -825,6 +848,7 @@ impl ApiClientState {
     pub fn load_persisted() -> Self {
         let mut state = Self::default();
         state.auth = load_api_auth();
+        state.mock = load_api_mocks();
         if let Ok(content) = std::fs::read_to_string(api_specs_path()) {
             if let Ok(saved) = serde_json::from_str::<ApiSpecsPersist>(&content) {
                 state.specs = saved.specs;
@@ -876,6 +900,7 @@ impl ApiClientState {
             let _ = std::fs::write(api_specs_path(), content);
         }
         save_api_auth(&self.auth);
+        save_api_mocks(&self.mock);
     }
 
     pub fn body_json_valid_for(
@@ -905,6 +930,26 @@ impl ApiClientState {
     pub fn selected_entry(&self) -> Option<&ApiSpecEntry> {
         let id = self.selected_spec?;
         self.specs.iter().find(|entry| entry.id == id)
+    }
+
+    pub fn mock_server_snapshot(&self) -> ApiMockServerSnapshot {
+        let specs = self.specs.iter().filter_map(|entry| {
+            let model = self.models.get(&entry.id)?;
+            Some((entry, model))
+        });
+        ApiMockServerSnapshot {
+            bind_host: self.mock.bind_host.clone(),
+            port: self.mock.port,
+            mode: self.mock.mode,
+            proxy_base_url: self.mock.proxy_base_url.clone(),
+            uv_path: self
+                .mock
+                .uv
+                .configured_path
+                .clone()
+                .or_else(|| self.mock.uv.detected_path.clone()),
+            routes: build_api_mock_routes(specs, &self.mock),
+        }
     }
 
     pub fn select_spec(&mut self, id: ApiSpecId) {
@@ -997,6 +1042,11 @@ fn api_focus_targets_active_tab(
 ) -> bool {
     match focus {
         ApiFocus::ImportUrl => true,
+        ApiFocus::MockProxyBase => true,
+        ApiFocus::MockManualPath { .. } => true,
+        ApiFocus::MockPrelude { .. }
+        | ApiFocus::MockBody { .. }
+        | ApiFocus::MockStaticResponse { .. } => true,
         ApiFocus::AuthValue { spec_id, .. }
         | ApiFocus::AuthRefreshToken { spec_id, .. }
         | ApiFocus::AuthUsername { spec_id, .. }
@@ -1711,7 +1761,8 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
             };
             let schema = item.get("schema");
             let item_schema = schema.and_then(|schema| schema.get("items"));
-            let resolved_schema = schema.and_then(|schema| resolve_schema_ref(schema, root).or(Some(schema)));
+            let resolved_schema =
+                schema.and_then(|schema| resolve_schema_ref(schema, root).or(Some(schema)));
             let resolved_item_schema =
                 item_schema.and_then(|schema| resolve_schema_ref(schema, root).or(Some(schema)));
             let enum_values = schema_enum_values(resolved_schema)
@@ -2026,6 +2077,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     if api.import_error.is_some() {
         content_h += 24.0 * scale;
     }
+    content_h += 320.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 28.0 * scale;
     if api.specs.is_empty() {
         content_h += 34.0 * scale;
     }
@@ -2093,6 +2145,7 @@ pub fn api_tab_max_scroll(
     if !route.summary.is_empty() {
         content_h += 30.0 * scale;
     }
+    content_h += 314.0 * scale;
     content_h += 28.0 * scale;
     content_h += model.servers.len().max(1) as f32 * 34.0 * scale + 42.0 * scale;
     let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
@@ -2262,12 +2315,8 @@ fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
     if n.is_empty() || n.len() > h.len() {
         return false;
     }
-    h.windows(n.len()).any(|window| {
-        window
-            .iter()
-            .zip(n)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b))
-    })
+    h.windows(n.len())
+        .any(|window| window.iter().zip(n).all(|(a, b)| a.eq_ignore_ascii_case(b)))
 }
 
 pub fn api_schema_allowed_values<'a>(
@@ -2292,7 +2341,9 @@ pub fn api_schema_is_array_input(schema: &ApiSchema) -> bool {
 }
 
 pub fn split_api_array_values(value: &str) -> Vec<String> {
-    api_array_value_parts(value).map(ToString::to_string).collect()
+    api_array_value_parts(value)
+        .map(ToString::to_string)
+        .collect()
 }
 
 pub fn api_array_value_parts(value: &str) -> impl Iterator<Item = &str> {
@@ -2409,7 +2460,12 @@ pub fn build_request_url(
         let mut pairs = url.query_pairs_mut();
         for item in query_values {
             if item.value.contains('\n') {
-                for value in item.value.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                for value in item
+                    .value
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                {
                     pairs.append_pair(&item.name, value);
                 }
             } else if !item.value.is_empty() {
@@ -2552,12 +2608,12 @@ fn prepared_auth_part(
         ApiSecuritySchemeKind::OAuth2 { .. } | ApiSecuritySchemeKind::OpenIdConnect { .. } => {
             bearer_token(entry).map(|token| ApiPreparedAuthPart::Bearer { token })
         }
-        ApiSecuritySchemeKind::Http { scheme, .. } => non_empty_auth_value(entry).map(|value| {
-            ApiPreparedAuthPart::Header {
+        ApiSecuritySchemeKind::Http { scheme, .. } => {
+            non_empty_auth_value(entry).map(|value| ApiPreparedAuthPart::Header {
                 name: "Authorization".to_string(),
                 value: format!("{scheme} {value}"),
-            }
-        }),
+            })
+        }
     }
 }
 
@@ -2887,9 +2943,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
             ApiMethod::Delete => {
                 apply_auth_to_builder(client.delete(&job.url), &job.auth_parts).send()
             }
-            ApiMethod::Head => {
-                apply_auth_to_builder(client.head(&job.url), &job.auth_parts).send()
-            }
+            ApiMethod::Head => apply_auth_to_builder(client.head(&job.url), &job.auth_parts).send(),
             ApiMethod::Options => apply_auth_to_builder(
                 client.request(reqwest::Method::OPTIONS, &job.url),
                 &job.auth_parts,
@@ -3434,14 +3488,22 @@ impl crate::app::App {
                     state
                         .response
                         .as_ref()
-                        .map(|response| api_response_text(response, state.response_view).to_string())
+                        .map(|response| {
+                            api_response_text(response, state.response_view).to_string()
+                        })
                         .unwrap_or_default()
                 }
             }
             _ => return 0.0,
         };
-        let visible_w = (rect.2 - 20.0 * self.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0))
-            .max(1.0);
+        let visible_w = (rect.2
+            - 20.0
+                * self
+                    .renderer
+                    .as_ref()
+                    .map(|r| r.scale_factor)
+                    .unwrap_or(1.0))
+        .max(1.0);
         let Some(renderer) = self.renderer.as_mut() else {
             return 0.0;
         };
@@ -3550,6 +3612,22 @@ impl crate::app::App {
     fn api_focus_ui_target(&self, focus: &ApiFocus) -> Option<(crate::ui_system::UiId, bool)> {
         match focus {
             ApiFocus::ImportUrl => Some((crate::ui_system::UiId::ApiImportUrlInput, false)),
+            ApiFocus::MockProxyBase => Some((crate::ui_system::UiId::ApiMockProxyBaseInput, false)),
+            ApiFocus::MockManualPath { manual_idx } => Some((
+                crate::ui_system::UiId::ApiMockManualRoutePath(*manual_idx),
+                false,
+            )),
+            ApiFocus::MockPrelude { route_idx } => Some((
+                crate::ui_system::UiId::ApiMockPreludeInput(*route_idx),
+                true,
+            )),
+            ApiFocus::MockBody { route_idx } => {
+                Some((crate::ui_system::UiId::ApiMockBodyInput(*route_idx), true))
+            }
+            ApiFocus::MockStaticResponse { route_idx } => Some((
+                crate::ui_system::UiId::ApiMockStaticResponseInput(*route_idx),
+                true,
+            )),
             ApiFocus::Body { route_idx, .. } => {
                 Some((crate::ui_system::UiId::ApiBodyInput(*route_idx), true))
             }
@@ -3569,12 +3647,8 @@ impl crate::app::App {
                     .iter()
                     .position(|item| item.name == *scheme)?;
                 let id = match focus {
-                    ApiFocus::AuthUsername { .. } => {
-                        crate::ui_system::UiId::ApiAuthUsername(idx)
-                    }
-                    ApiFocus::AuthPassword { .. } => {
-                        crate::ui_system::UiId::ApiAuthPassword(idx)
-                    }
+                    ApiFocus::AuthUsername { .. } => crate::ui_system::UiId::ApiAuthUsername(idx),
+                    ApiFocus::AuthPassword { .. } => crate::ui_system::UiId::ApiAuthPassword(idx),
                     ApiFocus::AuthRefreshToken { .. } => {
                         crate::ui_system::UiId::ApiAuthRefreshToken(idx)
                     }
@@ -3679,15 +3753,7 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(
-                renderer,
-                &text,
-                rect,
-                mx + scroll_x,
-                my,
-                scale,
-                scroll_y,
-            )
+            api_multiline_byte_at_pointer(renderer, &text, rect, mx + scroll_x, my, scale, scroll_y)
         } else {
             let visible_w = (rect.2 - 16.0 * scale).max(0.0);
             let target_x = if mx <= rect.0 {
@@ -3732,15 +3798,7 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(
-                renderer,
-                &text,
-                rect,
-                mx + scroll_x,
-                my,
-                scale,
-                scroll_y,
-            )
+            api_multiline_byte_at_pointer(renderer, &text, rect, mx + scroll_x, my, scale, scroll_y)
         } else {
             let visible_w = (rect.2 - 16.0 * scale).max(0.0);
             let target_x = if mx <= rect.0 {
@@ -4255,7 +4313,10 @@ impl crate::app::App {
             .as_ref()
             .and_then(|focus| order.iter().position(|item| item == focus));
         let next_idx = if reverse {
-            current_idx.unwrap_or(0).checked_sub(1).unwrap_or(order.len() - 1)
+            current_idx
+                .unwrap_or(0)
+                .checked_sub(1)
+                .unwrap_or(order.len() - 1)
         } else {
             current_idx.map(|idx| (idx + 1) % order.len()).unwrap_or(0)
         };
@@ -4268,6 +4329,33 @@ impl crate::app::App {
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
         match focus {
             ApiFocus::ImportUrl => self.ide_panel.api.input_editor.get_full_text(),
+            ApiFocus::MockProxyBase => self.ide_panel.api.mock.proxy_base_url.clone(),
+            ApiFocus::MockManualPath { manual_idx } => self
+                .ide_panel
+                .api
+                .mock
+                .manual_routes
+                .get(*manual_idx)
+                .map(|route| route.path.clone())
+                .unwrap_or_default(),
+            ApiFocus::MockPrelude { route_idx } => self
+                .api_route_python_script(*route_idx)
+                .map(|script| script.prelude.clone())
+                .unwrap_or_default(),
+            ApiFocus::MockBody { route_idx } => self
+                .api_route_python_script(*route_idx)
+                .map(|script| script.body.clone())
+                .unwrap_or_default(),
+            ApiFocus::MockStaticResponse { route_idx } => self
+                .api_route_override(*route_idx)
+                .map(|override_route| match &override_route.response {
+                    crate::app::api_mock::types::ApiMockResponse::Generated => {
+                        "{\"mock\":true}".to_string()
+                    }
+                    crate::app::api_mock::types::ApiMockResponse::Json(text)
+                    | crate::app::api_mock::types::ApiMockResponse::Text(text) => text.clone(),
+                })
+                .unwrap_or_else(|| "{\"mock\":true}".to_string()),
             ApiFocus::AuthValue { spec_id, scheme } => self
                 .ide_panel
                 .api
@@ -4451,6 +4539,45 @@ impl crate::app::App {
         }
         match focus {
             ApiFocus::ImportUrl => {}
+            ApiFocus::MockProxyBase => {
+                self.ide_panel.api.mock.proxy_base_url = text.trim().to_string();
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::MockManualPath { manual_idx } => {
+                let mut path = text.trim().to_string();
+                if !path.starts_with('/') {
+                    path.insert(0, '/');
+                }
+                if let Some(route) = self.ide_panel.api.mock.manual_routes.get_mut(manual_idx) {
+                    route.path = if path == "/" {
+                        format!("/mock-{}", manual_idx.saturating_add(1))
+                    } else {
+                        path
+                    };
+                    self.ide_panel.api.persist();
+                }
+            }
+            ApiFocus::MockPrelude { route_idx } => {
+                if let Some(script) = self.api_route_python_script_mut(route_idx) {
+                    script.prelude = text;
+                    self.ide_panel.api.persist();
+                }
+            }
+            ApiFocus::MockBody { route_idx } => {
+                if let Some(script) = self.api_route_python_script_mut(route_idx) {
+                    script.body = text;
+                    self.ide_panel.api.persist();
+                }
+            }
+            ApiFocus::MockStaticResponse { route_idx } => {
+                self.ensure_api_route_override(route_idx);
+                if let Some(override_route) = self.api_route_override_mut(route_idx) {
+                    override_route.response =
+                        crate::app::api_mock::types::ApiMockResponse::Json(text);
+                    override_route.enabled = true;
+                    self.ide_panel.api.persist();
+                }
+            }
             ApiFocus::AuthValue { spec_id, scheme } => {
                 let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
                 entry.value = text.clone();
@@ -4468,19 +4595,11 @@ impl crate::app::App {
                 self.ide_panel.api.persist();
             }
             ApiFocus::AuthUsername { spec_id, scheme } => {
-                self.ide_panel
-                    .api
-                    .auth
-                    .entry_mut(spec_id, &scheme)
-                    .username = text;
+                self.ide_panel.api.auth.entry_mut(spec_id, &scheme).username = text;
                 self.ide_panel.api.persist();
             }
             ApiFocus::AuthPassword { spec_id, scheme } => {
-                self.ide_panel
-                    .api
-                    .auth
-                    .entry_mut(spec_id, &scheme)
-                    .password = text;
+                self.ide_panel.api.auth.entry_mut(spec_id, &scheme).password = text;
                 self.ide_panel.api.persist();
             }
             ApiFocus::PathParam {
@@ -4585,6 +4704,8 @@ impl crate::app::App {
         if matches!(
             id,
             crate::ui_system::UiId::ApiImportUrlInput
+                | crate::ui_system::UiId::ApiMockProxyBaseInput
+                | crate::ui_system::UiId::ApiMockManualRoutePath(_)
                 | crate::ui_system::UiId::ApiAuthValue(_)
                 | crate::ui_system::UiId::ApiAuthRefreshToken(_)
                 | crate::ui_system::UiId::ApiAuthUsername(_)
@@ -4594,6 +4715,9 @@ impl crate::app::App {
                 | crate::ui_system::UiId::ApiBodyInput(_)
                 | crate::ui_system::UiId::ApiBodyFieldInput(_, _)
                 | crate::ui_system::UiId::ApiResponseBody(_)
+                | crate::ui_system::UiId::ApiMockStaticResponseInput(_)
+                | crate::ui_system::UiId::ApiMockPreludeInput(_)
+                | crate::ui_system::UiId::ApiMockBodyInput(_)
         ) {
             self.is_dragging = true;
             self.ide_panel.is_dragging_terminal = false;
@@ -4619,6 +4743,103 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiImportUrlConfirm => {
                 self.commit_api_focus();
                 self.start_api_url_import_from_input();
+            }
+            crate::ui_system::UiId::ApiMockServerToggle => {
+                self.toggle_api_mock_server();
+            }
+            crate::ui_system::UiId::ApiMockBindLanToggle => {
+                self.commit_api_focus();
+                self.ide_panel.api.mock.bind_host =
+                    if self.ide_panel.api.mock.bind_host == "127.0.0.1" {
+                        "0.0.0.0".to_string()
+                    } else {
+                        "127.0.0.1".to_string()
+                    };
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockModeSelect => {
+                self.commit_api_focus();
+                self.ide_panel.api.mock.mode = match self.ide_panel.api.mock.mode {
+                    crate::app::api_mock::types::ApiMockMode::MockAll => {
+                        crate::app::api_mock::types::ApiMockMode::MockSelectedOnly
+                    }
+                    crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
+                        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+                    }
+                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => {
+                        crate::app::api_mock::types::ApiMockMode::MockAll
+                    }
+                };
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockProxyBaseInput => {
+                self.focus_api_input(ApiFocus::MockProxyBase);
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx) => {
+                self.focus_api_input(ApiFocus::MockManualPath { manual_idx });
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiMockChooseUv => {
+                crate::app::api_mock::python_bootstrap::refresh_uv_status(
+                    &mut self.ide_panel.api.mock.uv,
+                );
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockDownloadUv => {
+                self.ide_panel.api.mock.uv.last_error = if cfg!(windows) {
+                    "Run: powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+                } else {
+                    "Run: curl -LsSf https://astral.sh/uv/install.sh | sh"
+                }
+                .to_string();
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockRouteEnable(route_idx) => {
+                self.toggle_api_route_mock(route_idx);
+            }
+            crate::ui_system::UiId::ApiMockRoutePythonToggle(route_idx) => {
+                self.toggle_api_route_python(route_idx);
+            }
+            crate::ui_system::UiId::ApiMockRouteTyCheck(route_idx) => {
+                self.start_api_mock_ty_check(route_idx);
+            }
+            crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx) => {
+                self.focus_api_input(ApiFocus::MockStaticResponse { route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiMockAddManualRoute => {
+                self.add_api_manual_route();
+            }
+            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
+                self.focus_api_input(ApiFocus::MockPrelude { route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
+                self.focus_api_input(ApiFocus::MockBody { route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiMockManualRouteMethod(manual_idx) => {
+                self.commit_api_focus();
+                if let Some(route) = self.ide_panel.api.mock.manual_routes.get_mut(manual_idx) {
+                    route.method = match route.method {
+                        ApiMethod::Get => ApiMethod::Post,
+                        ApiMethod::Post => ApiMethod::Put,
+                        ApiMethod::Put => ApiMethod::Patch,
+                        ApiMethod::Patch => ApiMethod::Delete,
+                        ApiMethod::Delete => ApiMethod::Get,
+                        ApiMethod::Head | ApiMethod::Options | ApiMethod::Trace => ApiMethod::Get,
+                    };
+                    self.ide_panel.api.persist();
+                }
+            }
+            crate::ui_system::UiId::ApiMockAddInputField(_)
+            | crate::ui_system::UiId::ApiMockAddOutputField(_) => {}
+            crate::ui_system::UiId::ApiMockManualRouteRemove(idx) => {
+                if idx < self.ide_panel.api.mock.manual_routes.len() {
+                    self.ide_panel.api.mock.manual_routes.remove(idx);
+                    self.ide_panel.api.persist();
+                }
             }
             crate::ui_system::UiId::ApiSpecOpen(idx) => {
                 if let Some(id) = self.ide_panel.api.specs.get(idx).map(|entry| entry.id) {
@@ -4835,10 +5056,9 @@ impl crate::app::App {
                     .get(&spec_id)
                     .and_then(|model| model.routes.get(route_idx))
                     .and_then(|route| match id {
-                        crate::ui_system::UiId::ApiPathParamAllowedValue(_, _, _) => route
-                            .path_params
-                            .get(param_idx)
-                            .map(|param| (true, param)),
+                        crate::ui_system::UiId::ApiPathParamAllowedValue(_, _, _) => {
+                            route.path_params.get(param_idx).map(|param| (true, param))
+                        }
                         _ => route
                             .query_params
                             .get(param_idx)
@@ -5152,6 +5372,408 @@ impl crate::app::App {
         true
     }
 
+    pub fn toggle_api_mock_server(&mut self) {
+        self.commit_api_focus();
+        if matches!(
+            self.ide_panel.api.mock.server_status,
+            crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
+                | crate::app::api_mock::types::ApiMockServerStatus::Starting
+        ) {
+            self.ide_panel.api.mock.server_status =
+                crate::app::api_mock::types::ApiMockServerStatus::Stopping;
+            stop_api_mock_server();
+            return;
+        }
+        let snapshot = self.ide_panel.api.mock_server_snapshot();
+        self.ide_panel.api.mock.server_status =
+            crate::app::api_mock::types::ApiMockServerStatus::Starting;
+        if let Err(err) = start_api_mock_server(snapshot) {
+            self.ide_panel.api.mock.server_status =
+                crate::app::api_mock::types::ApiMockServerStatus::Failed(err);
+        }
+    }
+
+    fn api_route_override(
+        &self,
+        route_idx: usize,
+    ) -> Option<&crate::app::api_mock::types::ApiMockRouteOverride> {
+        let (meta, _) = self.active_api_tab()?;
+        let spec_id = meta.spec_id;
+        let entry = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)?;
+        let route = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)?
+            .routes
+            .get(route_idx)?;
+        let source_key = crate::app::api_mock::types::api_mock_source_key(entry);
+        self.ide_panel.api.mock.route_overrides.iter().find(|item| {
+            item.source_key == source_key && item.method == route.method && item.path == route.path
+        })
+    }
+
+    fn api_route_override_mut(
+        &mut self,
+        route_idx: usize,
+    ) -> Option<&mut crate::app::api_mock::types::ApiMockRouteOverride> {
+        let (meta, _) = self.active_api_tab()?;
+        let spec_id = meta.spec_id;
+        let entry = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)
+            .cloned()?;
+        let route = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)?
+            .routes
+            .get(route_idx)
+            .cloned()?;
+        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
+        self.ide_panel
+            .api
+            .mock
+            .route_overrides
+            .iter_mut()
+            .find(|item| {
+                item.source_key == source_key
+                    && item.method == route.method
+                    && item.path == route.path
+            })
+    }
+
+    fn ensure_api_route_override(&mut self, route_idx: usize) {
+        if self.api_route_override(route_idx).is_some() {
+            return;
+        }
+        self.add_api_route_override(route_idx, true);
+    }
+
+    fn add_api_route_override(&mut self, route_idx: usize, enabled: bool) {
+        let Some((meta, _)) = self.active_api_tab() else {
+            return;
+        };
+        let spec_id = meta.spec_id;
+        let Some(entry) = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(route) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .cloned()
+        else {
+            return;
+        };
+        self.ide_panel.api.mock.route_overrides.push(
+            crate::app::api_mock::types::ApiMockRouteOverride {
+                source_key: crate::app::api_mock::types::api_mock_source_key(&entry),
+                method: route.method,
+                path: route.path,
+                enabled,
+                response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                python: None,
+                extra_input_fields: Vec::new(),
+                extra_output_fields: Vec::new(),
+            },
+        );
+    }
+
+    fn api_route_python_script(
+        &self,
+        route_idx: usize,
+    ) -> Option<&crate::app::api_mock::types::ApiMockPythonScript> {
+        let (meta, _) = self.active_api_tab()?;
+        let spec_id = meta.spec_id;
+        let entry = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)?;
+        let route = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)?
+            .routes
+            .get(route_idx)?;
+        let source_key = crate::app::api_mock::types::api_mock_source_key(entry);
+        self.ide_panel
+            .api
+            .mock
+            .route_overrides
+            .iter()
+            .find_map(|item| {
+                (item.source_key == source_key
+                    && item.method == route.method
+                    && item.path == route.path)
+                    .then_some(item.python.as_ref())
+                    .flatten()
+            })
+    }
+
+    fn api_route_python_script_mut(
+        &mut self,
+        route_idx: usize,
+    ) -> Option<&mut crate::app::api_mock::types::ApiMockPythonScript> {
+        let (meta, _) = self.active_api_tab()?;
+        let spec_id = meta.spec_id;
+        let entry = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)
+            .cloned()?;
+        let route = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)?
+            .routes
+            .get(route_idx)
+            .cloned()?;
+        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
+        self.ide_panel
+            .api
+            .mock
+            .route_overrides
+            .iter_mut()
+            .find_map(|item| {
+                (item.source_key == source_key
+                    && item.method == route.method
+                    && item.path == route.path)
+                    .then_some(item.python.as_mut())
+                    .flatten()
+            })
+    }
+
+    pub fn toggle_api_route_mock(&mut self, route_idx: usize) {
+        self.commit_api_focus();
+        let Some((meta, _)) = self.active_api_tab() else {
+            return;
+        };
+        let spec_id = meta.spec_id;
+        let Some(entry) = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(route) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .cloned()
+        else {
+            return;
+        };
+        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
+        if let Some(override_route) =
+            self.ide_panel
+                .api
+                .mock
+                .route_overrides
+                .iter_mut()
+                .find(|item| {
+                    item.source_key == source_key
+                        && item.method == route.method
+                        && item.path == route.path
+                })
+        {
+            override_route.enabled = !override_route.enabled;
+        } else {
+            self.ide_panel.api.mock.route_overrides.push(
+                crate::app::api_mock::types::ApiMockRouteOverride {
+                    source_key,
+                    method: route.method,
+                    path: route.path,
+                    enabled: true,
+                    response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                    python: None,
+                    extra_input_fields: Vec::new(),
+                    extra_output_fields: Vec::new(),
+                },
+            );
+        }
+        self.ide_panel.api.persist();
+    }
+
+    pub fn toggle_api_route_python(&mut self, route_idx: usize) {
+        self.commit_api_focus();
+        let Some((meta, _)) = self.active_api_tab() else {
+            return;
+        };
+        let spec_id = meta.spec_id;
+        let Some(entry) = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == spec_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(route) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .cloned()
+        else {
+            return;
+        };
+        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
+        let idx = if let Some(idx) =
+            self.ide_panel
+                .api
+                .mock
+                .route_overrides
+                .iter()
+                .position(|item| {
+                    item.source_key == source_key
+                        && item.method == route.method
+                        && item.path == route.path
+                }) {
+            idx
+        } else {
+            self.ide_panel.api.mock.route_overrides.push(
+                crate::app::api_mock::types::ApiMockRouteOverride {
+                    source_key,
+                    method: route.method,
+                    path: route.path,
+                    enabled: true,
+                    response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                    python: None,
+                    extra_input_fields: Vec::new(),
+                    extra_output_fields: Vec::new(),
+                },
+            );
+            self.ide_panel
+                .api
+                .mock
+                .route_overrides
+                .len()
+                .saturating_sub(1)
+        };
+        if let Some(override_route) = self.ide_panel.api.mock.route_overrides.get_mut(idx) {
+            if override_route.python.is_some() {
+                override_route.python = None;
+            } else {
+                override_route.python = Some(crate::app::api_mock::types::ApiMockPythonScript {
+                    prelude: String::new(),
+                    body: "return json_response({\"ok\": True})".to_string(),
+                    timeout_ms: 1000,
+                });
+                override_route.enabled = true;
+            }
+        }
+        self.ide_panel.api.persist();
+    }
+
+    pub fn add_api_manual_route(&mut self) {
+        self.commit_api_focus();
+        let next = self
+            .ide_panel
+            .api
+            .mock
+            .manual_routes
+            .len()
+            .saturating_add(1);
+        self.ide_panel
+            .api
+            .mock
+            .manual_routes
+            .push(crate::app::api_mock::types::ApiManualRoute {
+                stable_id: format!("manual-{}-{}", now_epoch_secs(), next),
+                method: ApiMethod::Get,
+                path: format!("/mock-{}", next),
+                enabled: true,
+                response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                python: None,
+                input_fields: Vec::new(),
+                output_fields: Vec::new(),
+            });
+        self.ide_panel.api.persist();
+    }
+
+    pub fn start_api_mock_ty_check(&mut self, route_idx: usize) {
+        self.commit_api_focus();
+        let Some((meta, _)) = self.active_api_tab() else {
+            return;
+        };
+        let spec_id = meta.spec_id;
+        let Some(route) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(model) = self.ide_panel.api.models.get(&spec_id).cloned() else {
+            return;
+        };
+        self.ensure_api_route_override(route_idx);
+        let Some(script) = self.api_route_python_script(route_idx).cloned() else {
+            self.toggle_api_route_python(route_idx);
+            let Some(script) = self.api_route_python_script(route_idx).cloned() else {
+                return;
+            };
+            self.ide_panel.api.mock.check_status =
+                crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx };
+            self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
+                route_idx,
+                route.method,
+                route.path.clone(),
+                route,
+                model,
+                script,
+            ));
+            return;
+        };
+        self.ide_panel.api.mock.check_status =
+            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx };
+        self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
+            route_idx,
+            route.method,
+            route.path.clone(),
+            route,
+            model,
+            script,
+        ));
+    }
+
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
         if self.ide_panel.api.focused.is_none() {
             return self.active_tab_is_api_client();
@@ -5167,7 +5789,15 @@ impl crate::app::App {
         }
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
-        let is_body = matches!(self.ide_panel.api.focused, Some(ApiFocus::Body { .. }));
+        let is_body = matches!(
+            self.ide_panel.api.focused,
+            Some(
+                ApiFocus::Body { .. }
+                    | ApiFocus::MockPrelude { .. }
+                    | ApiFocus::MockBody { .. }
+                    | ApiFocus::MockStaticResponse { .. }
+            )
+        );
         let is_response = matches!(self.ide_panel.api.focused, Some(ApiFocus::Response { .. }));
         let is_array = self
             .ide_panel
@@ -5470,6 +6100,42 @@ impl crate::app::App {
 
     pub fn poll_api_client(&mut self) -> bool {
         let mut changed = false;
+        let events = drain_api_mock_server_events();
+        if !events.is_empty() {
+            for event in events {
+                apply_api_mock_server_event(&mut self.ide_panel.api.mock.server_status, event);
+            }
+            changed = true;
+        }
+        if let Some(rx) = self.api_mock_ty_rx.take() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.ide_panel.api.mock.check_status = if result.ok {
+                        crate::app::api_mock::types::ApiMockCheckStatus::Ok {
+                            route_idx: result.route_idx,
+                            message: result.message,
+                        }
+                    } else {
+                        crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+                            route_idx: result.route_idx,
+                            message: result.message,
+                        }
+                    };
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.api_mock_ty_rx = Some(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ide_panel.api.mock.check_status =
+                        crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+                            route_idx: 0,
+                            message: "Ty check worker stopped".to_string(),
+                        };
+                    changed = true;
+                }
+            }
+        }
         if let Some(rx) = self.ide_panel.api.body_json_validation_rx.take() {
             match rx.try_recv() {
                 Ok(result) => {
@@ -5798,7 +6464,11 @@ fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: us
             _ => schema_json_literal(schema.kind, value),
         };
     }
-    if let Some(value) = schema.default_value.as_ref().or_else(|| schema.enum_values.first()) {
+    if let Some(value) = schema
+        .default_value
+        .as_ref()
+        .or_else(|| schema.enum_values.first())
+    {
         return schema_json_literal(schema.kind, value);
     }
     match schema.kind {
@@ -5831,7 +6501,10 @@ fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: us
 
 fn schema_json_literal(kind: ApiSchemaKind, value: &str) -> String {
     match kind {
-        ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime | ApiSchemaKind::Bytes => {
+        ApiSchemaKind::String
+        | ApiSchemaKind::Date
+        | ApiSchemaKind::DateTime
+        | ApiSchemaKind::Bytes => {
             serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
         }
         ApiSchemaKind::Integer | ApiSchemaKind::Number => {
@@ -6494,7 +7167,9 @@ mod tests {
         assert_eq!(bearer.scopes, vec!["read".to_string(), "write".to_string()]);
         assert!(bearer.expires_at.is_some());
         assert_eq!(
-            auth.entry(model.id, "CookieKey").expect("cookie auth").value,
+            auth.entry(model.id, "CookieKey")
+                .expect("cookie auth")
+                .value,
             "cookie-secret"
         );
     }
@@ -6513,10 +7188,9 @@ mod tests {
 
         let loaded = load_api_auth();
         assert_eq!(
-            loaded.entry(ApiSpecId(7), "BearerJwt").map(|entry| (
-                entry.access_token.as_str(),
-                entry.refresh_token.as_str()
-            )),
+            loaded
+                .entry(ApiSpecId(7), "BearerJwt")
+                .map(|entry| (entry.access_token.as_str(), entry.refresh_token.as_str())),
             Some(("access", "refresh"))
         );
         assert_eq!(
@@ -6528,7 +7202,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(api_config_dir());
     }
-
 
     #[test]
     fn api_method_display_and_sort_order_match_client_rows() {
@@ -6891,7 +7564,10 @@ mod tests {
         assert!(state.restore_route_state(0));
         assert_eq!(state.path_values[0].value, "first");
         assert_eq!(
-            state.response.as_ref().map(|response| response.body.as_str()),
+            state
+                .response
+                .as_ref()
+                .map(|response| response.body.as_str()),
             Some("{\"ok\":true}")
         );
     }

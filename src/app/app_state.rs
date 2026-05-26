@@ -797,6 +797,8 @@ pub struct App {
         u64,
         std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>,
     )>,
+    pub api_mock_ty_rx:
+        Option<std::sync::mpsc::Receiver<crate::app::api_mock::ty_check::ApiMockTyCheckResult>>,
 
     pub show_welcome: bool,
     pub recent_files: Vec<PathBuf>,

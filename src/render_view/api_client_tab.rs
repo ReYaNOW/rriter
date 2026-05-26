@@ -1,12 +1,12 @@
 use crate::app::api_client::{
     API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiResponseView, ApiSchema, ApiSchemaKind,
-    api_array_edit_parts, api_array_value_parts,
-    ApiSecuritySchemeKind, api_auth_related_route_count, api_auth_route_rank,
-    api_auth_scheme_row_height, api_response_text, api_route_auth_missing, api_schema_allowed_values,
-    api_body_text_area_height, api_response_text_area_height, api_route_auth_scheme_indices,
-    api_schema_is_file_input,
-    api_schema_is_array_input, api_schema_is_multi_file_input, api_text_area_line_height,
-    api_text_area_max_scroll_x, json_body_is_valid, write_api_path_display,
+    ApiSecuritySchemeKind, api_array_edit_parts, api_array_value_parts,
+    api_auth_related_route_count, api_auth_route_rank, api_auth_scheme_row_height,
+    api_body_text_area_height, api_response_text, api_response_text_area_height,
+    api_route_auth_missing, api_route_auth_scheme_indices, api_schema_allowed_values,
+    api_schema_is_array_input, api_schema_is_file_input, api_schema_is_multi_file_input,
+    api_text_area_line_height, api_text_area_max_scroll_x, json_body_is_valid,
+    write_api_path_display,
 };
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconType};
@@ -174,7 +174,13 @@ impl Renderer {
                             mx,
                             my,
                         );
-                        self.push_rect(x + pad, row_y + 34.0 * s, content_w, 1.0, [1.0, 1.0, 1.0, 0.08]);
+                        self.push_rect(
+                            x + pad,
+                            row_y + 34.0 * s,
+                            content_w,
+                            1.0,
+                            [1.0, 1.0, 1.0, 0.08],
+                        );
                         drawn += 1;
                     }
                 }
@@ -241,6 +247,345 @@ impl Renderer {
                 0.92,
             );
             cy += 30.0 * s;
+        }
+
+        self.draw_api_section_title("Mock", x + pad, cy + 18.0 * s, s);
+        cy += 30.0 * s;
+        let mock_override = ide_panel
+            .api
+            .mock
+            .route_overrides
+            .iter()
+            .find(|item| item.method == route.method && item.path == route.path);
+        let mock_enabled = mock_override.is_some_and(|item| item.enabled);
+        let python_enabled = mock_override.is_some_and(|item| item.python.is_some());
+        let btn_h = 30.0 * s;
+        let enable_btn = Button {
+            x: x + pad,
+            y: cy,
+            w: 128.0 * s,
+            h: btn_h,
+            text: if mock_enabled { "Mock on" } else { "Mock off" }.to_string(),
+            icon: Some(if mock_enabled {
+                IconType::Check
+            } else {
+                IconType::Close
+            }),
+            text_scale: 0.78,
+            icon_size: 15.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockRouteEnable(route_idx),
+            &enable_btn,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        let python_btn = Button {
+            x: x + pad + 140.0 * s,
+            y: cy,
+            w: 138.0 * s,
+            h: btn_h,
+            text: if python_enabled {
+                "Python on"
+            } else {
+                "Python off"
+            }
+            .to_string(),
+            icon: Some(IconType::Api),
+            text_scale: 0.78,
+            icon_size: 15.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockRoutePythonToggle(route_idx),
+            &python_btn,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        let ty_btn = Button {
+            x: x + pad + 290.0 * s,
+            y: cy,
+            w: 112.0 * s,
+            h: btn_h,
+            text: "Ty check".to_string(),
+            icon: Some(IconType::Check),
+            text_scale: 0.78,
+            icon_size: 15.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockRouteTyCheck(route_idx),
+            &ty_btn,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 18.0 * s;
+        match &ide_panel.api.mock.check_status {
+            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx: checked }
+                if *checked == route_idx =>
+            {
+                self.draw_string_scaled_stable(
+                    "Ty check running...",
+                    x + pad,
+                    cy + 16.0 * s,
+                    [0.68, 0.70, 0.78, 1.0],
+                    0.76,
+                );
+                cy += 22.0 * s;
+            }
+            crate::app::api_mock::types::ApiMockCheckStatus::Ok {
+                route_idx: checked,
+                message,
+            } if *checked == route_idx => {
+                self.draw_string_scaled_stable(
+                    message.lines().next().unwrap_or("Ty check passed"),
+                    x + pad,
+                    cy + 16.0 * s,
+                    [0.50, 0.90, 0.55, 1.0],
+                    0.76,
+                );
+                cy += 22.0 * s;
+            }
+            crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+                route_idx: checked,
+                message,
+            } if *checked == route_idx => {
+                self.draw_string_scaled_stable(
+                    message.lines().next().unwrap_or("Ty check failed"),
+                    x + pad,
+                    cy + 16.0 * s,
+                    [1.0, 0.48, 0.48, 1.0],
+                    0.76,
+                );
+                cy += 22.0 * s;
+            }
+            _ => {}
+        }
+        if !python_enabled {
+            let static_focused = matches!(
+                ide_panel.api.focused,
+                Some(ApiFocus::MockStaticResponse { route_idx: f_route }) if f_route == route_idx
+            );
+            let static_text = if static_focused {
+                ide_panel.api.input_editor.get_full_text()
+            } else {
+                mock_override
+                    .map(|item| match &item.response {
+                        crate::app::api_mock::types::ApiMockResponse::Generated => {
+                            "{\"mock\":true}".to_string()
+                        }
+                        crate::app::api_mock::types::ApiMockResponse::Json(text)
+                        | crate::app::api_mock::types::ApiMockResponse::Text(text) => text.clone(),
+                    })
+                    .unwrap_or_else(|| "{\"mock\":true}".to_string())
+            };
+            let editor_h = 82.0 * s;
+            self.push_rounded_rect_border(
+                x + pad,
+                cy,
+                content_w,
+                editor_h,
+                6.0 * s,
+                (1.0 * s).max(1.0),
+                if static_focused {
+                    [0.60, 0.35, 0.85, 1.0]
+                } else {
+                    [1.0, 1.0, 1.0, 0.12]
+                },
+                [0.13, 0.14, 0.18, 1.0],
+            );
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx),
+                x + pad,
+                cy,
+                content_w,
+                editor_h,
+                mx,
+                my,
+            );
+            let clip = (
+                x + pad + 10.0 * s,
+                cy + 8.0 * s,
+                content_w - 20.0 * s,
+                editor_h - 16.0 * s,
+            );
+            if self.begin_api_text_clip(clip, tab_clip) {
+                if static_focused {
+                    self.draw_api_editor_selection_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 10.0 * s,
+                        content_w - 20.0 * s,
+                        editor_h - 16.0 * s,
+                        s,
+                        0.0,
+                        0.0,
+                    );
+                }
+                self.draw_json_text_area(
+                    &static_text,
+                    x + pad + 10.0 * s,
+                    cy + 29.0 * s,
+                    content_w - 20.0 * s,
+                    editor_h - 16.0 * s,
+                    s,
+                    0.0,
+                    0.0,
+                    false,
+                );
+                if static_focused && blink_alpha > 0.5 {
+                    self.draw_api_editor_cursor_multiline(
+                        &ide_panel.api.input_editor,
+                        x + pad + 10.0 * s,
+                        cy + 10.0 * s,
+                        content_w - 20.0 * s,
+                        editor_h - 16.0 * s,
+                        s,
+                        0.0,
+                        0.0,
+                    );
+                }
+                self.restore_api_tab_clip(tab_clip);
+            }
+            cy += editor_h + 14.0 * s;
+        } else {
+            if let Some(script) = mock_override.and_then(|item| item.python.as_ref()) {
+                for (label, id, focused, text) in [
+                    (
+                        "Prelude: imports/state",
+                        crate::ui_system::UiId::ApiMockPreludeInput(route_idx),
+                        matches!(
+                            ide_panel.api.focused,
+                            Some(ApiFocus::MockPrelude { route_idx: f_route }) if f_route == route_idx
+                        ),
+                        if matches!(
+                            ide_panel.api.focused,
+                            Some(ApiFocus::MockPrelude { route_idx: f_route }) if f_route == route_idx
+                        ) {
+                            ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            script.prelude.clone()
+                        },
+                    ),
+                    (
+                        "Route body",
+                        crate::ui_system::UiId::ApiMockBodyInput(route_idx),
+                        matches!(
+                            ide_panel.api.focused,
+                            Some(ApiFocus::MockBody { route_idx: f_route }) if f_route == route_idx
+                        ),
+                        if matches!(
+                            ide_panel.api.focused,
+                            Some(ApiFocus::MockBody { route_idx: f_route }) if f_route == route_idx
+                        ) {
+                            ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            script.body.clone()
+                        },
+                    ),
+                ] {
+                    if label == "Route body" {
+                        self.draw_string_scaled_stable(
+                            "Generated locked models: Request, Query, Body, Fields, Output",
+                            x + pad,
+                            cy + 16.0 * s,
+                            [0.58, 0.61, 0.70, 1.0],
+                            0.72,
+                        );
+                        cy += 20.0 * s;
+                        let mut signature = String::from("def handler(req");
+                        for name in path_param_names(&route.path) {
+                            signature.push_str(", ");
+                            signature.push_str(&sanitize_python_param(&name));
+                        }
+                        signature.push_str(", query, body, fields):");
+                        self.draw_string_scaled_stable(
+                            &signature,
+                            x + pad,
+                            cy + 16.0 * s,
+                            [0.78, 0.82, 0.90, 1.0],
+                            0.76,
+                        );
+                        cy += 22.0 * s;
+                    }
+                    self.draw_string_scaled_stable(
+                        label,
+                        x + pad,
+                        cy + 16.0 * s,
+                        [0.68, 0.70, 0.78, 1.0],
+                        0.78,
+                    );
+                    cy += 22.0 * s;
+                    let editor_h = 74.0 * s;
+                    self.push_rounded_rect_border(
+                        x + pad,
+                        cy,
+                        content_w,
+                        editor_h,
+                        6.0 * s,
+                        (1.0 * s).max(1.0),
+                        if focused {
+                            [0.60, 0.35, 0.85, 1.0]
+                        } else {
+                            [1.0, 1.0, 1.0, 0.12]
+                        },
+                        [0.13, 0.14, 0.18, 1.0],
+                    );
+                    ui_registry.register_text_input(id, x + pad, cy, content_w, editor_h, mx, my);
+                    let clip = (
+                        x + pad + 10.0 * s,
+                        cy + 8.0 * s,
+                        content_w - 20.0 * s,
+                        editor_h - 16.0 * s,
+                    );
+                    if self.begin_api_text_clip(clip, tab_clip) {
+                        if focused {
+                            self.draw_api_editor_selection_multiline(
+                                &ide_panel.api.input_editor,
+                                x + pad + 10.0 * s,
+                                cy + 10.0 * s,
+                                content_w - 20.0 * s,
+                                editor_h - 16.0 * s,
+                                s,
+                                0.0,
+                                0.0,
+                            );
+                        }
+                        self.draw_json_text_area(
+                            &text,
+                            x + pad + 10.0 * s,
+                            cy + 29.0 * s,
+                            content_w - 20.0 * s,
+                            editor_h - 16.0 * s,
+                            s,
+                            0.0,
+                            0.0,
+                            false,
+                        );
+                        if focused && blink_alpha > 0.5 {
+                            self.draw_api_editor_cursor_multiline(
+                                &ide_panel.api.input_editor,
+                                x + pad + 10.0 * s,
+                                cy + 10.0 * s,
+                                content_w - 20.0 * s,
+                                editor_h - 16.0 * s,
+                                s,
+                                0.0,
+                                0.0,
+                            );
+                        }
+                        self.restore_api_tab_clip(tab_clip);
+                    }
+                    cy += editor_h + 14.0 * s;
+                }
+            }
         }
 
         self.draw_api_section_title("Server", x + pad, cy + 18.0 * s, s);
@@ -756,8 +1101,7 @@ impl Renderer {
                             };
                             ui_registry.register_button(
                                 crate::ui_system::UiId::ApiResponseUseAccessToken(
-                                    route_idx,
-                                    scheme_idx,
+                                    route_idx, scheme_idx,
                                 ),
                                 &use_btn,
                                 self,
@@ -781,8 +1125,7 @@ impl Renderer {
                             };
                             ui_registry.register_button(
                                 crate::ui_system::UiId::ApiResponseSaveRefreshToken(
-                                    route_idx,
-                                    scheme_idx,
+                                    route_idx, scheme_idx,
                                 ),
                                 &save_btn,
                                 self,
@@ -1164,11 +1507,7 @@ impl Renderer {
                 s,
                 false,
             );
-            let status = entry
-                .map(|entry| {
-                    entry.token_type.as_str()
-                })
-                .unwrap_or("");
+            let status = entry.map(|entry| entry.token_type.as_str()).unwrap_or("");
             if !status.is_empty() {
                 self.draw_string_scaled_stable(
                     status,
@@ -1291,11 +1630,7 @@ impl Renderer {
         );
         ui_registry.register_text_input(id, x, y, w, h, mx, my);
         let text_w = w - 16.0 * s;
-        let scroll_x = if focused {
-            input_scroll_x
-        } else {
-            0.0
-        };
+        let scroll_x = if focused { input_scroll_x } else { 0.0 };
         if focused {
             let sel_y = y + (h - 22.0 * s) * 0.5;
             self.draw_api_editor_selection_one_line(
@@ -1323,9 +1658,8 @@ impl Renderer {
             API_FIELD_VALUE_SCALE,
         );
         if focused && blink_alpha > 0.5 {
-            let cursor_w = self
-                .api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE)
-                - scroll_x;
+            let cursor_w =
+                self.api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE) - scroll_x;
             self.push_rect(
                 x + 8.0 * s + cursor_w.clamp(0.0, text_w),
                 y + (h - 20.0 * s) * 0.5,
@@ -1550,7 +1884,12 @@ impl Renderer {
             );
         }
         let mut example_y = input_y + input_h + 19.0 * s;
-        for example in schema.examples.iter().take(3).filter(|_| !allowed.is_empty()) {
+        for example in schema
+            .examples
+            .iter()
+            .take(3)
+            .filter(|_| !allowed.is_empty())
+        {
             self.draw_string_scaled_stable(
                 example,
                 input_x + 8.0 * s,
@@ -1767,13 +2106,7 @@ impl Renderer {
     }
 
     fn draw_api_meta_inline(&mut self, label: &str, value: &str, x: f32, y: f32, s: f32) {
-        self.draw_string_scaled_stable(
-            label,
-            x,
-            y,
-            [0.68, 0.70, 0.78, 1.0],
-            API_FIELD_META_SCALE,
-        );
+        self.draw_string_scaled_stable(label, x, y, [0.68, 0.70, 0.78, 1.0], API_FIELD_META_SCALE);
         let label_w = self.measure_ui_width(label, API_FIELD_META_SCALE);
         self.draw_string_scaled_stable(
             value,
@@ -1805,11 +2138,19 @@ impl Renderer {
             s,
             value,
             api_schema_is_array_input(schema),
-            if api_schema_is_file_input(schema, model) { 64.0 * s } else { 0.0 },
+            if api_schema_is_file_input(schema, model) {
+                64.0 * s
+            } else {
+                0.0
+            },
             choice_label,
             choices,
             usize::from(schema.max_chars.is_some()) + usize::from(schema.default_value.is_some()),
-            if allowed.is_empty() { 0 } else { schema.examples.len().min(3) },
+            if allowed.is_empty() {
+                0
+            } else {
+                schema.examples.len().min(3)
+            },
         )
     }
 
@@ -1879,9 +2220,7 @@ impl Renderer {
             0.0
         };
         let one_line_right_w = if has_choices {
-            choice_full_w
-                .max(compact_right_w)
-                .min(max_right_w)
+            choice_full_w.max(compact_right_w).min(max_right_w)
         } else {
             compact_right_w
         };
@@ -1893,8 +2232,8 @@ impl Renderer {
         };
         let max_input_one_line = (w - left_w - right_w - gap).max(min_input_w);
         if has_choices && is_array && array_content_input_w > max_input_one_line + 1.0 {
-            right_w = (w - left_w - gap - array_content_input_w)
-                .clamp(compact_right_w, one_line_right_w);
+            right_w =
+                (w - left_w - gap - array_content_input_w).clamp(compact_right_w, one_line_right_w);
             choice_rows = self.api_choice_rows_for_width(choice_label, choices, right_w, s);
         }
         let max_input_w = (w - left_w - right_w - gap).max(min_input_w);
@@ -1909,7 +2248,9 @@ impl Renderer {
         let meta_lines = pre_choice_lines
             + choice_rows
             + bottom_lines
-            + usize::from(!has_choices && pre_choice_lines == 0 && bottom_lines == 0 && right_w > 0.0);
+            + usize::from(
+                !has_choices && pre_choice_lines == 0 && bottom_lines == 0 && right_w > 0.0,
+            );
         let meta_h = if meta_lines == 0 {
             0.0
         } else {
@@ -1990,13 +2331,7 @@ impl Renderer {
     ) where
         F: Fn(usize) -> crate::ui_system::UiId,
     {
-        self.draw_string_scaled_stable(
-            label,
-            x,
-            y,
-            [0.68, 0.70, 0.78, 1.0],
-            API_FIELD_META_SCALE,
-        );
+        self.draw_string_scaled_stable(label, x, y, [0.68, 0.70, 0.78, 1.0], API_FIELD_META_SCALE);
         let label_w = self.measure_ui_width(label, API_FIELD_META_SCALE) + 5.0 * s;
         let sep = "┃";
         let sep_w = self.measure_ui_width(sep, API_FIELD_META_SCALE) + 6.0 * s;
@@ -2176,8 +2511,7 @@ impl Renderer {
         let (items, draft) = api_array_edit_parts(value);
         let mut width = 0.0;
         for item in items {
-            width += (self.measure_ui_width(item, API_FIELD_META_SCALE) + 16.0 * s)
-                .max(24.0 * s)
+            width += (self.measure_ui_width(item, API_FIELD_META_SCALE) + 16.0 * s).max(24.0 * s)
                 + 5.0 * s;
         }
         if !draft.is_empty() {
@@ -2332,9 +2666,9 @@ impl Renderer {
             let sel_end = end.max(line_start).min(line_end);
             let newline_selected = line_end < text.len() && start <= line_end && end > line_end;
             if sel_start < sel_end || newline_selected {
-                let prefix =
-                    self.measure_ui_width(&text[line_start..sel_start], API_BODY_TEXT_SCALE)
-                        - scroll_x;
+                let prefix = self
+                    .measure_ui_width(&text[line_start..sel_start], API_BODY_TEXT_SCALE)
+                    - scroll_x;
                 let text_w = if sel_start < sel_end {
                     self.measure_ui_width(&text[sel_start..sel_end], API_BODY_TEXT_SCALE)
                 } else {
@@ -2387,9 +2721,9 @@ impl Renderer {
                 if visible_idx >= max_lines {
                     return;
                 }
-                let cursor_x =
-                    self.measure_ui_width(&text[line_start..cursor], API_BODY_TEXT_SCALE)
-                        - scroll_x;
+                let cursor_x = self
+                    .measure_ui_width(&text[line_start..cursor], API_BODY_TEXT_SCALE)
+                    - scroll_x;
                 if cursor_x < -2.0 * s || cursor_x > w + 2.0 * s {
                     return;
                 }
@@ -2653,6 +2987,34 @@ fn response_auth_token_flags(response: &crate::app::api_client::ApiJobResponse) 
             .and_then(serde_json::Value::as_str)
             .is_some(),
     )
+}
+
+fn path_param_names(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter_map(|part| {
+            part.strip_prefix('{')
+                .and_then(|part| part.strip_suffix('}'))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn sanitize_python_param(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        out.insert(0, '_');
+    }
+    if matches!(out.as_str(), "req" | "query" | "body" | "fields") {
+        out.push_str("_param");
+    }
+    out
 }
 
 fn json_string_end(line: &str, start: usize) -> usize {
