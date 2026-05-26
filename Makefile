@@ -20,7 +20,7 @@ TEST ?=
 TEST_THREADS ?= 1
 BUILD_STD_TEST = -Z build-std=core,alloc,std,panic_abort,test
 
-.PHONY: all fast max test test-one test-list test-hunt test-time clean
+.PHONY: all fast max bloat-max test test-one test-list test-hunt test-time clean
 
 all: max
 
@@ -53,6 +53,19 @@ max:
 	--release
 	@echo "✅ Собрано: target/$(TARGET)/release/$(BINARY_NAME)"
 
+bloat-max:
+	@echo "📦 Анализ размера MAX-сборки..."
+	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
+	RUSTFLAGS="$(MAX_RUSTFLAGS)" \
+	cargo +nightly bloat \
+	$(BUILD_STD) \
+	--target $(TARGET) \
+	--release \
+	--bin $(BINARY_NAME) \
+	--crates \
+	-n 40
+	
 # 3. Команда TEST
 # Главное: флаги идентичны команде 'fast', поэтому пересборки не будет.
 # RUST_BACKTRACE=full для детального отчета при ошибках.

@@ -13,7 +13,7 @@ pub struct ApiMockState {
     pub server_status: ApiMockServerStatus,
     #[serde(skip)]
     pub check_status: ApiMockCheckStatus,
-    pub uv: ApiUvState,
+    pub uv: ApiPythonRuntimeState,
     pub route_overrides: Vec<ApiMockRouteOverride>,
     pub manual_routes: Vec<ApiManualRoute>,
 }
@@ -22,13 +22,13 @@ impl Default for ApiMockState {
     fn default() -> Self {
         Self {
             enabled: false,
-            bind_host: "127.0.0.1".to_string(),
+            bind_host: "0.0.0.0".to_string(),
             port: 4010,
             mode: ApiMockMode::MockAll,
             proxy_base_url: String::new(),
             server_status: ApiMockServerStatus::Stopped,
             check_status: ApiMockCheckStatus::Idle,
-            uv: ApiUvState::default(),
+            uv: ApiPythonRuntimeState::default(),
             route_overrides: Vec::new(),
             manual_routes: Vec::new(),
         }
@@ -58,13 +58,16 @@ pub enum ApiMockCheckStatus {
     Idle,
     Pending {
         route_idx: usize,
+        version: u64,
     },
     Ok {
         route_idx: usize,
+        version: u64,
         message: String,
     },
     Failed {
         route_idx: usize,
+        version: u64,
         message: String,
     },
 }
@@ -95,9 +98,28 @@ pub struct ApiManualRoute {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiMockPythonScript {
+    #[serde(default = "default_mock_python_enabled")]
+    pub enabled: bool,
     pub prelude: String,
     pub body: String,
     pub timeout_ms: u64,
+}
+
+pub fn default_api_mock_python_body() -> String {
+    "    \n    \n    return json_response({\"ok\": True})".to_string()
+}
+
+pub fn default_api_mock_python_script() -> ApiMockPythonScript {
+    ApiMockPythonScript {
+        enabled: true,
+        prelude: String::new(),
+        body: default_api_mock_python_body(),
+        timeout_ms: 1000,
+    }
+}
+
+fn default_mock_python_enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,21 +138,93 @@ pub enum ApiMockResponse {
     Text(String),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ApiUvState {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiPythonRuntimeState {
+    #[serde(default)]
+    pub mode: ApiPythonRuntimeMode,
     pub configured_path: Option<PathBuf>,
     pub detected_path: Option<PathBuf>,
-    pub status: ApiUvStatus,
+    #[serde(default)]
+    pub custom_python_path: Option<PathBuf>,
+    #[serde(default = "default_mock_python_version")]
+    pub python_version: String,
+    #[serde(default)]
+    pub status: ApiPythonRuntimeStatus,
+    #[serde(default)]
     pub last_error: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ApiUvStatus {
+pub enum ApiPythonRuntimeMode {
+    #[default]
+    UvManaged,
+    CustomPython,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApiPythonRuntimeStatus {
     #[default]
     Unknown,
     Missing,
     Ready,
     Invalid,
+}
+
+impl Default for ApiPythonRuntimeState {
+    fn default() -> Self {
+        Self {
+            mode: ApiPythonRuntimeMode::UvManaged,
+            configured_path: None,
+            detected_path: None,
+            custom_python_path: None,
+            python_version: default_mock_python_version(),
+            status: ApiPythonRuntimeStatus::Unknown,
+            last_error: String::new(),
+        }
+    }
+}
+
+impl ApiPythonRuntimeState {
+    pub fn selected_uv_path(&self) -> Option<PathBuf> {
+        self.configured_path
+            .clone()
+            .or_else(|| self.detected_path.clone())
+    }
+
+    pub fn runtime_config(&self) -> ApiPythonRuntimeConfig {
+        ApiPythonRuntimeConfig {
+            mode: self.mode,
+            uv_path: self.selected_uv_path(),
+            custom_python_path: self.custom_python_path.clone(),
+            python_version: self.python_version.trim().to_string(),
+        }
+    }
+}
+
+pub type ApiUvState = ApiPythonRuntimeState;
+pub type ApiUvStatus = ApiPythonRuntimeStatus;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiPythonRuntimeConfig {
+    pub mode: ApiPythonRuntimeMode,
+    pub uv_path: Option<PathBuf>,
+    pub custom_python_path: Option<PathBuf>,
+    pub python_version: String,
+}
+
+impl Default for ApiPythonRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            mode: ApiPythonRuntimeMode::UvManaged,
+            uv_path: None,
+            custom_python_path: None,
+            python_version: default_mock_python_version(),
+        }
+    }
+}
+
+fn default_mock_python_version() -> String {
+    "3.13".to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +235,9 @@ pub struct ApiMockRuntimeRoute {
     pub path: String,
     pub enabled: bool,
     pub response: ApiMockResponse,
+    pub generated_status: u16,
+    pub generated_content_type: &'static str,
+    pub generated_body: String,
     pub python: Option<ApiMockPythonScript>,
     pub input_fields: Vec<ApiMockField>,
     pub output_fields: Vec<ApiMockField>,
@@ -151,13 +248,9 @@ impl ApiMockRuntimeRoute {
     pub fn static_response_text(&self) -> (u16, &'static str, String) {
         match &self.response {
             ApiMockResponse::Generated => (
-                200,
-                "application/json",
-                format!(
-                    "{{\"mock\":true,\"source\":\"RRiter generated mock\",\"method\":\"{}\",\"path\":\"{}\"}}",
-                    self.method.as_str(),
-                    self.path
-                ),
+                self.generated_status,
+                self.generated_content_type,
+                self.generated_body.clone(),
             ),
             ApiMockResponse::Json(text) => (200, "application/json", text.clone()),
             ApiMockResponse::Text(text) => (200, "text/plain; charset=utf-8", text.clone()),
@@ -171,15 +264,22 @@ pub struct ApiMockServerSnapshot {
     pub port: u16,
     pub mode: ApiMockMode,
     pub proxy_base_url: String,
-    pub uv_path: Option<PathBuf>,
+    pub python_runtime: ApiPythonRuntimeConfig,
     pub routes: Vec<ApiMockRuntimeRoute>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiMockServerEvent {
+    Log { text: String },
     Running { url: String },
     Stopped,
     Failed(String),
+    Request {
+        method: String,
+        path: String,
+        status: u16,
+        action: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

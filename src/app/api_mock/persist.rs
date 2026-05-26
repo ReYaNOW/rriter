@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const API_MOCK_PERSIST_VERSION: u32 = 1;
+const API_MOCK_LAN_BIND_HOST: &str = "0.0.0.0";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ApiMockPersist {
@@ -23,7 +24,7 @@ impl From<&ApiMockState> for ApiMockPersist {
     fn from(state: &ApiMockState) -> Self {
         Self {
             version: API_MOCK_PERSIST_VERSION,
-            bind_host: state.bind_host.clone(),
+            bind_host: lan_bind_host(&state.bind_host).to_string(),
             port: state.port,
             mode: state.mode,
             proxy_base_url: state.proxy_base_url.clone(),
@@ -38,11 +39,7 @@ impl From<ApiMockPersist> for ApiMockState {
     fn from(saved: ApiMockPersist) -> Self {
         Self {
             enabled: false,
-            bind_host: if saved.bind_host.is_empty() {
-                "127.0.0.1".to_string()
-            } else {
-                saved.bind_host
-            },
+            bind_host: lan_bind_host(&saved.bind_host).to_string(),
             port: saved.port.max(1),
             mode: saved.mode,
             proxy_base_url: saved.proxy_base_url,
@@ -53,6 +50,10 @@ impl From<ApiMockPersist> for ApiMockState {
             manual_routes: saved.manual_routes,
         }
     }
+}
+
+fn lan_bind_host(_bind_host: &str) -> &'static str {
+    API_MOCK_LAN_BIND_HOST
 }
 
 pub fn load_api_mocks() -> ApiMockState {
@@ -99,7 +100,7 @@ fn api_mock_data_dir() -> PathBuf {
 mod tests {
     use super::*;
     use crate::app::api_client::ApiMethod;
-    use crate::app::api_mock::types::{ApiMockResponse, ApiUvStatus};
+    use crate::app::api_mock::types::{ApiMockResponse, ApiPythonRuntimeMode, ApiUvStatus};
 
     #[test]
     fn persist_roundtrip_keeps_routes_and_uv_settings() {
@@ -143,9 +144,59 @@ mod tests {
         assert_eq!(loaded.mode, ApiMockMode::MockSelectedProxyRest);
         assert_eq!(loaded.proxy_base_url, "https://backend.test");
         assert_eq!(loaded.uv.status, ApiUvStatus::Ready);
+        assert_eq!(loaded.uv.python_version, "3.13");
         assert_eq!(loaded.route_overrides.len(), 1);
         assert_eq!(loaded.manual_routes.len(), 1);
 
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+    }
+
+    #[test]
+    fn custom_python_runtime_config_persists() {
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let mut state = ApiMockState::default();
+        state.uv.mode = ApiPythonRuntimeMode::CustomPython;
+        state.uv.custom_python_path = Some(PathBuf::from("/opt/python/bin/python"));
+        state.uv.python_version = "3.12".to_string();
+
+        save_api_mocks(&state);
+        let loaded = load_api_mocks();
+
+        assert_eq!(loaded.uv.mode, ApiPythonRuntimeMode::CustomPython);
+        assert_eq!(
+            loaded.uv.custom_python_path,
+            Some(PathBuf::from("/opt/python/bin/python"))
+        );
+        assert_eq!(loaded.uv.python_version, "3.12");
+
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+    }
+
+    #[test]
+    fn persisted_local_bind_migrates_to_lan() {
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let saved = ApiMockPersist {
+            version: API_MOCK_PERSIST_VERSION,
+            bind_host: "127.0.0.1".to_string(),
+            port: 4010,
+            mode: ApiMockMode::MockAll,
+            proxy_base_url: String::new(),
+            uv: ApiUvState::default(),
+            route_overrides: Vec::new(),
+            manual_routes: Vec::new(),
+        };
+        if let Some(dir) = api_mocks_path().parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(
+            api_mocks_path(),
+            serde_json::to_string_pretty(&saved).expect("serialize"),
+        )
+        .expect("write mock persist");
+
+        let loaded = load_api_mocks();
+
+        assert_eq!(loaded.bind_host, "0.0.0.0");
         let _ = std::fs::remove_dir_all(api_mock_data_dir());
     }
 }

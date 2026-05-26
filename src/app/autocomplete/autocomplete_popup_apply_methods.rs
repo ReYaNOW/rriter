@@ -319,6 +319,9 @@ impl App {
     }
 
     pub fn apply_autocomplete(&mut self) {
+        if self.api_mock_completion_focus().is_some() && self.apply_api_mock_autocomplete() {
+            return;
+        }
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return;
         }

@@ -255,6 +255,27 @@ impl Renderer {
         } else {
             0.0
         };
+        let modal_overlay_open = is_ide_mode
+            && (ide_panel.api.mock_python_runtime_open
+                || ide_panel.api.mock_guide_open
+                || ide_panel.api.mock_server_detail_open
+                || crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel));
+        let (ui_mx, ui_my) = if modal_overlay_open {
+            (-1.0, -1.0)
+        } else {
+            (mx, my)
+        };
+        let (status_progress_label, status_progress_elapsed, status_progress_value) =
+            match ide_panel.api.mock.server_status {
+                crate::app::api_mock::types::ApiMockServerStatus::Starting => {
+                    (Some("Мок-сервер"), None, Some(0.55))
+                }
+                _ => (
+                    ide_panel.git.pending_label,
+                    ide_panel.git.pending_elapsed_secs(frame_now),
+                    None,
+                ),
+            };
         let editor_bottom_h = if is_ide_mode {
             ide_panel.editor_reserved_bottom_height(s)
         } else {
@@ -370,8 +391,8 @@ impl Renderer {
                 ui_registry,
                 has_lsp_diagnostics,
                 s,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 real_height,
                 panel_left_w,
                 is_ui_disabled,
@@ -398,8 +419,8 @@ impl Renderer {
                 tab_w,
                 tab_bar_h,
                 s,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
@@ -411,12 +432,13 @@ impl Renderer {
                 tab_w,
                 editor_height,
                 s,
+                editor,
                 ide_panel,
                 tab_meta,
                 tab_state,
                 ui_registry,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 blink_alpha,
             );
             if is_ide_mode {
@@ -426,11 +448,12 @@ impl Renderer {
                     lsp,
                     ui_registry,
                     s,
-                    mx,
-                    my,
+                    ui_mx,
+                    ui_my,
                     panel_bottom_h,
-                    ide_panel.git.pending_label,
-                    ide_panel.git.pending_elapsed_secs(frame_now),
+                    status_progress_label,
+                    status_progress_elapsed,
+                    status_progress_value,
                 );
             }
             if panel_bottom_h > 0.0 {
@@ -440,8 +463,8 @@ impl Renderer {
                     ui_registry,
                     has_lsp_diagnostics,
                     s,
-                    mx,
-                    my,
+                    ui_mx,
+                    ui_my,
                     panel_bottom_h,
                     is_ui_disabled,
                 );
@@ -449,8 +472,44 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
+            if ide_panel.api.mock_python_runtime_open {
+                self.draw_api_mock_python_overlay(
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                    blink_alpha,
+                );
+            }
+            if ide_panel.api.mock_guide_open {
+                self.draw_api_mock_guide_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+            }
+            if ide_panel.api.mock_server_detail_open {
+                self.draw_api_mock_server_detail_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+            }
             self.flush();
-            if panel_left_w > 0.0 && !is_ui_disabled {
+            if panel_left_w > 0.0 && !is_ui_disabled && !modal_overlay_open {
                 let resize_x = 48.0 * s + panel_left_w;
                 let resize_h =
                     if panel_bottom_h > 0.0 && ide_panel.bottom_panel_blocks_editor_hover() {
@@ -468,7 +527,7 @@ impl Renderer {
                     my,
                 );
             }
-            if panel_bottom_h > 0.0 && !is_ui_disabled {
+            if panel_bottom_h > 0.0 && !is_ui_disabled && !modal_overlay_open {
                 let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
                 ui_registry.register_blocker(
                     crate::ui_system::UiId::ResizeBottom,
@@ -485,6 +544,48 @@ impl Renderer {
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
         if is_ide_mode && tabs.is_empty() {
             self.draw_empty_ide(panel_left_w);
+            if ide_panel.api.mock_python_runtime_open {
+                self.draw_api_mock_python_overlay(
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                    blink_alpha,
+                );
+                self.flush();
+                return (ui_registry.wants_pointer(), Vec::new());
+            }
+            if ide_panel.api.mock_guide_open {
+                self.draw_api_mock_guide_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                self.flush();
+                return (ui_registry.wants_pointer(), Vec::new());
+            }
+            if ide_panel.api.mock_server_detail_open {
+                self.draw_api_mock_server_detail_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                self.flush();
+                return (ui_registry.wants_pointer(), Vec::new());
+            }
             if should_draw_empty_ide_file_tree_overlay(
                 is_ide_mode,
                 tabs.is_empty(),
@@ -739,8 +840,8 @@ impl Renderer {
             tab_bar_h,
             scrollbar_x - self.left_padding,
             editor_scroll_height,
-            mx,
-            my,
+            ui_mx,
+            ui_my,
         );
 
         let solid_minimap_bg = [
@@ -837,8 +938,8 @@ impl Renderer {
             is_ide_mode,
             is_ui_disabled,
             ide_panel,
-            mx,
-            my,
+            ui_mx,
+            ui_my,
             mouse_in_popup,
         );
 
@@ -930,29 +1031,18 @@ impl Renderer {
                 );
             }
 
-            let mut n = v_line.physical_line;
-            let mut buf = [0u8; 20];
-            let mut idx = 20;
-            if n == 0 {
-                idx -= 1;
-                buf[idx] = b'0';
+            let num_right_pad = if active_git_diff_state.is_some() {
+                28.0 * s
             } else {
-                while n > 0 {
-                    idx -= 1;
-                    buf[idx] = b'0' + (n % 10) as u8;
-                    n /= 10;
-                }
-            }
-            if let Ok(num_str) = std::str::from_utf8(&buf[idx..]) {
-                let num_w = self.measure_mono_width(num_str, 1.0);
-                let num_right_pad = if active_git_diff_state.is_some() {
-                    28.0 * s
-                } else {
-                    24.0 * s
-                };
-                let draw_x = self.left_padding - num_right_pad - num_w;
-                self.draw_string_mono_scaled(num_str, draw_x, y, self.theme.line_num, 1.0);
-            }
+                24.0 * s
+            };
+            self.draw_editor_line_number(
+                v_line.physical_line,
+                self.left_padding,
+                num_right_pad,
+                y,
+                1.0,
+            );
         }
 
         let git_line_mod_color =
@@ -1035,8 +1125,8 @@ impl Renderer {
             tab_bar_h,
             minimap_w,
             editor_scroll_height,
-            mx,
-            my,
+            ui_mx,
+            ui_my,
         );
 
         if self.max_scroll_x > 0.0 {
@@ -1140,8 +1230,8 @@ impl Renderer {
                 tab_w,
                 tab_bar_h,
                 s,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
@@ -1293,8 +1383,8 @@ impl Renderer {
             tab_bar_h,
             scrollbar_x,
             ui_registry,
-            mx,
-            my,
+            ui_mx,
+            ui_my,
             s,
         );
 
@@ -1308,8 +1398,8 @@ impl Renderer {
             render_scroll_y,
             editor_scroll_height,
             ui_registry,
-            mx,
-            my,
+            ui_mx,
+            ui_my,
             s,
         );
 
@@ -1337,11 +1427,12 @@ impl Renderer {
                 lsp,
                 ui_registry,
                 s,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 panel_bottom_h,
-                ide_panel.git.pending_label,
-                ide_panel.git.pending_elapsed_secs(frame_now),
+                status_progress_label,
+                status_progress_elapsed,
+                status_progress_value,
             );
         }
 
@@ -1352,8 +1443,8 @@ impl Renderer {
                 ui_registry,
                 has_lsp_diagnostics,
                 s,
-                mx,
-                my,
+                ui_mx,
+                ui_my,
                 panel_bottom_h,
                 is_ui_disabled,
             );
@@ -1394,6 +1485,10 @@ impl Renderer {
         } else if hover_blocked_by_inline_git {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if ide_panel.api.mock_guide_open || ide_panel.api.mock_server_detail_open {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if ide_panel.api.mock_python_runtime_open {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if !is_ui_disabled {
             self.draw_hover_overlays(
@@ -1438,10 +1533,46 @@ impl Renderer {
                 overlay_my,
                 blink_alpha,
             );
+            if ide_panel.api.mock_python_runtime_open {
+                self.draw_api_mock_python_overlay(
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                    blink_alpha,
+                );
+            }
+            if ide_panel.api.mock_guide_open {
+                self.draw_api_mock_guide_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+            }
+            if ide_panel.api.mock_server_detail_open {
+                self.draw_api_mock_server_detail_overlay(
+                    0.0,
+                    0.0,
+                    self.width,
+                    self.height,
+                    s,
+                    &ide_panel.api,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+            }
         }
 
         if is_ide_mode {
-            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, mx, my);
+            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
         } else {
             self.reset_git_file_tooltip_overlay();
         }
@@ -1472,7 +1603,7 @@ impl Renderer {
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
         // Блокируем resize, когда терминал в фокусе
-        if is_ide_mode && panel_left_w > 0.0 && !is_ui_disabled {
+        if is_ide_mode && panel_left_w > 0.0 && !is_ui_disabled && !modal_overlay_open {
             let resize_x = 48.0 * s + panel_left_w;
             let resize_h = if panel_bottom_h > 0.0 && ide_panel.bottom_panel_blocks_editor_hover() {
                 ide_bottom_panel_y(self.height, panel_bottom_h, s)
@@ -1489,7 +1620,7 @@ impl Renderer {
                 my,
             );
         }
-        if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled {
+        if is_ide_mode && panel_bottom_h > 0.0 && !is_ui_disabled && !modal_overlay_open {
             let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeBottom,

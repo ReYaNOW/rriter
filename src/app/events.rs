@@ -1130,6 +1130,23 @@ impl ApplicationHandler for App {
                     winit::window::CursorIcon::EwResize
                 } else if self.ide_panel.is_resizing_bottom || self.ide_panel.git.graph_resizing {
                     winit::window::CursorIcon::NsResize
+                } else if self.api_python_runtime_overlay_active() {
+                    let (mx, my) = {
+                        let r = self.renderer.as_ref().unwrap();
+                        (r.last_mouse_x, r.last_mouse_y)
+                    };
+                    match self
+                        .ui_registry
+                        .find_overlay_at(mx, my)
+                        .filter(|id| crate::app::App::ui_id_is_api_python_runtime_overlay(*id))
+                    {
+                        Some(crate::ui_system::UiId::ApiMockPythonUvPathInput)
+                        | Some(crate::ui_system::UiId::ApiMockPythonCustomPathInput) => {
+                            winit::window::CursorIcon::Text
+                        }
+                        Some(_) => winit::window::CursorIcon::Pointer,
+                        None => winit::window::CursorIcon::Default,
+                    }
                 } else if self.file_tree_overlay_active() {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();

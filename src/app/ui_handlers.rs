@@ -95,20 +95,40 @@ impl App {
             | UiId::ApiResponseUseAccessToken(_, _)
             | UiId::ApiResponseSaveRefreshToken(_, _)
             | UiId::ApiMockServerToggle
-            | UiId::ApiMockBindLanToggle
+            | UiId::ApiMockServerDetails
+            | UiId::ApiMockServerDetailsClose
+            | UiId::ApiMockServerLogArea
+            | UiId::ApiMockServerLogScrollY
             | UiId::ApiMockModeSelect
             | UiId::ApiMockProxyBaseInput
-            | UiId::ApiMockChooseUv
-            | UiId::ApiMockDownloadUv
+            | UiId::ApiMockGuideOpen
+            | UiId::ApiMockGuideClose
+            | UiId::ApiMockGuideBody
+            | UiId::ApiMockGuideScrollY
+            | UiId::ApiMockPythonManage
+            | UiId::ApiMockPythonManageClose
+            | UiId::ApiMockPythonModeToggle
+            | UiId::ApiMockPythonCheckRuntime
+            | UiId::ApiMockPythonPrepareVersion
+            | UiId::ApiMockPythonPickUvPath
+            | UiId::ApiMockPythonPickCustomPath
+            | UiId::ApiMockPythonVersionOption(_)
+            | UiId::ApiMockPythonUvPathInput
+            | UiId::ApiMockPythonVersionInput
+            | UiId::ApiMockPythonCustomPathInput
             | UiId::ApiMockRouteEnable(_)
+            | UiId::ApiMockRouteDetailsToggle(_)
             | UiId::ApiMockRoutePythonToggle(_)
-            | UiId::ApiMockRouteTyCheck(_)
             | UiId::ApiMockStaticResponseInput(_)
+            | UiId::ApiMockSignatureInput(_)
             | UiId::ApiMockPreludeInput(_)
             | UiId::ApiMockBodyInput(_)
+            | UiId::ApiMockPreludeReset(_)
+            | UiId::ApiMockBodyReset(_)
             | UiId::ApiMockAddInputField(_)
             | UiId::ApiMockAddOutputField(_)
             | UiId::ApiMockAddManualRoute
+            | UiId::ApiMockManualRouteOpen(_)
             | UiId::ApiMockManualRouteMethod(_)
             | UiId::ApiMockManualRoutePath(_)
             | UiId::ApiMockManualRouteRemove(_)

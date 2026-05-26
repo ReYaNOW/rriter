@@ -166,6 +166,35 @@ impl App {
             }
         }
 
+        if state == ElementState::Pressed && self.api_python_runtime_overlay_active() {
+            if button == winit::event::MouseButton::Left {
+                let clicked_id = self.ui_registry.find_overlay_at(mx, my);
+                if let Some(clicked_id) = clicked_id
+                    && crate::app::App::ui_id_is_api_python_runtime_overlay(clicked_id)
+                {
+                    self.handle_ui_click(clicked_id);
+                }
+                if !matches!(
+                    clicked_id,
+                    Some(
+                        crate::ui_system::UiId::ApiMockPythonUvPathInput
+                            | crate::ui_system::UiId::ApiMockPythonCustomPathInput
+                    )
+                ) && self.ide_panel.api.focused.as_ref().is_some_and(|focus| {
+                    matches!(
+                        focus,
+                        crate::app::api_client::ApiFocus::MockPythonUvPath
+                            | crate::app::api_client::ApiFocus::MockPythonCustomPath
+                    )
+                }) {
+                    self.commit_api_focus();
+                    self.ide_panel.api.focused = None;
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if state == ElementState::Pressed && self.file_tree_overlay_active() {
             match button {
                 winit::event::MouseButton::Left => {

@@ -167,8 +167,9 @@ impl Renderer {
         mx: f32,
         my: f32,
         panel_bottom_h: f32,
-        git_progress_label: Option<&str>,
-        git_progress_elapsed_secs: Option<f32>,
+        progress_label: Option<&str>,
+        progress_elapsed_secs: Option<f32>,
+        progress_value: Option<f32>,
     ) {
         let bar_h = ide_status_bar_height(s).round();
         let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
@@ -322,7 +323,7 @@ impl Renderer {
             group_w += item_gap + selected_block_w;
         }
         let line_x = lang_x - 22.0 * s - group_w;
-        if let Some(label) = git_progress_label {
+        if let Some(label) = progress_label {
             let label_w = self.measure_ui_width(label, 0.82).round();
             let progress_gap = 8.0 * s;
             let track_w = 74.0 * s;
@@ -347,18 +348,27 @@ impl Renderer {
                     track_h / 2.0,
                     [1.0, 1.0, 1.0, 0.10],
                 );
-                let thumb_w = (28.0 * s).min(track_w);
-                let phase = git_progress_elapsed_secs
-                    .map(git_progress_thumb_phase)
-                    .unwrap_or(1.0);
-                self.push_rounded_rect(
-                    track_x + (track_w - thumb_w) * phase,
-                    track_y,
-                    thumb_w,
-                    track_h,
-                    track_h / 2.0,
-                    [0.60, 0.35, 0.85, 0.88],
-                );
+                if let Some(value) = progress_value {
+                    self.push_rounded_rect(
+                        track_x,
+                        track_y,
+                        (track_w * value.clamp(0.0, 1.0)).max(track_h),
+                        track_h,
+                        track_h / 2.0,
+                        [0.60, 0.35, 0.85, 0.88],
+                    );
+                } else {
+                    let thumb_w = (28.0 * s).min(track_w);
+                    let phase = progress_elapsed_secs.map(git_progress_thumb_phase).unwrap_or(1.0);
+                    self.push_rounded_rect(
+                        track_x + (track_w - thumb_w) * phase,
+                        track_y,
+                        thumb_w,
+                        track_h,
+                        track_h / 2.0,
+                        [0.60, 0.35, 0.85, 0.88],
+                    );
+                }
             }
         }
         if line_x > diag_x + diagnostics_w + 8.0 * s {

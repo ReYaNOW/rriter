@@ -1,10 +1,10 @@
 use super::python_env::write_api_mock_worker;
-use super::types::ApiMockPythonScript;
+use super::types::{ApiMockPythonScript, ApiPythonRuntimeConfig, ApiPythonRuntimeMode};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{LazyLock, Mutex};
@@ -34,7 +34,7 @@ struct PythonWorker {
     stdin: ChildStdin,
     rx: Receiver<String>,
     next_id: u64,
-    uv_path: PathBuf,
+    runtime: ApiPythonRuntimeConfig,
 }
 
 #[derive(Deserialize)]
@@ -47,19 +47,18 @@ struct WorkerOutput {
 }
 
 pub fn call_python_route(
-    uv_path: Option<&Path>,
+    runtime: &ApiPythonRuntimeConfig,
     script: &ApiMockPythonScript,
     request: PythonMockRequest,
 ) -> Result<PythonMockResponse, String> {
-    let uv_path = uv_path.ok_or_else(|| "uv path is not configured".to_string())?;
     let mut guard = WORKER
         .lock()
         .map_err(|_| "Python worker lock failed".to_string())?;
     let needs_start = guard
         .as_ref()
-        .is_none_or(|worker| worker.uv_path.as_path() != uv_path);
+        .is_none_or(|worker| worker.runtime != *runtime);
     if needs_start {
-        *guard = Some(start_worker(uv_path)?);
+        *guard = Some(start_worker(runtime)?);
     }
     let worker = guard
         .as_mut()
@@ -74,14 +73,10 @@ pub fn call_python_route(
     }
 }
 
-fn start_worker(uv_path: &Path) -> Result<PythonWorker, String> {
+fn start_worker(runtime: &ApiPythonRuntimeConfig) -> Result<PythonWorker, String> {
     let worker_path = write_api_mock_worker().map_err(|err| err.to_string())?;
-    let mut child = Command::new(uv_path)
-        .arg("run")
-        .arg("--no-project")
-        .arg("--python")
-        .arg("3.13")
-        .arg(worker_path)
+    let mut command = python_worker_command(runtime, worker_path)?;
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -110,8 +105,45 @@ fn start_worker(uv_path: &Path) -> Result<PythonWorker, String> {
         stdin,
         rx,
         next_id: 1,
-        uv_path: uv_path.to_path_buf(),
+        runtime: runtime.clone(),
     })
+}
+
+fn python_worker_command(
+    runtime: &ApiPythonRuntimeConfig,
+    worker_path: PathBuf,
+) -> Result<Command, String> {
+    match runtime.mode {
+        ApiPythonRuntimeMode::UvManaged => {
+            let uv_path = runtime
+                .uv_path
+                .as_ref()
+                .ok_or_else(|| "uv path is not configured".to_string())?;
+            let version = if runtime.python_version.trim().is_empty() {
+                "3.13"
+            } else {
+                runtime.python_version.trim()
+            };
+            let mut command = Command::new(uv_path);
+            command
+                .arg("run")
+                .arg("--no-project")
+                .arg("--python")
+                .arg(version)
+                .arg(worker_path)
+                .env("UV_PYTHON_DOWNLOADS", "never");
+            Ok(command)
+        }
+        ApiPythonRuntimeMode::CustomPython => {
+            let python_path = runtime
+                .custom_python_path
+                .as_ref()
+                .ok_or_else(|| "Python path is not configured".to_string())?;
+            let mut command = Command::new(python_path);
+            command.arg(worker_path);
+            Ok(command)
+        }
+    }
 }
 
 impl PythonWorker {
@@ -166,5 +198,51 @@ impl PythonWorker {
                 content_type: "text/plain; charset=utf-8",
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_command_uses_uv_managed_python_version() {
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::UvManaged,
+            uv_path: Some(PathBuf::from("/usr/bin/uv")),
+            custom_python_path: None,
+            python_version: "3.12".to_string(),
+        };
+
+        let command = python_worker_command(&runtime, PathBuf::from("/tmp/worker.py")).unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(command.get_program(), "/usr/bin/uv");
+        assert_eq!(
+            args,
+            vec!["run", "--no-project", "--python", "3.12", "/tmp/worker.py"]
+        );
+    }
+
+    #[test]
+    fn worker_command_uses_custom_python_path() {
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::CustomPython,
+            uv_path: None,
+            custom_python_path: Some(PathBuf::from("/opt/python/bin/python")),
+            python_version: "3.13".to_string(),
+        };
+
+        let command = python_worker_command(&runtime, PathBuf::from("/tmp/worker.py")).unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(command.get_program(), "/opt/python/bin/python");
+        assert_eq!(args, vec!["/tmp/worker.py"]);
     }
 }

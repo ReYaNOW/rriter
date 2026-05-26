@@ -1867,3 +1867,173 @@ fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
         None
     );
 }
+
+fn api_mock_test_route() -> crate::app::api_client::ApiRouteRow {
+    crate::app::api_client::ApiRouteRow {
+        tag: String::new(),
+        method: crate::app::api_client::ApiMethod::Get,
+        path: "/users".to_string(),
+        summary: String::new(),
+        operation_id: String::new(),
+        security: None,
+        path_params: Vec::new(),
+        query_params: Vec::new(),
+        request_body: None,
+        responses: Vec::new(),
+    }
+}
+
+fn open_api_mock_test_route(app: &mut App) -> crate::app::api_client::ApiSpecId {
+    let spec_id = crate::app::api_client::ApiSpecId(777);
+    let entry = crate::app::api_client::ApiSpecEntry {
+        id: spec_id,
+        title: "Mock API".to_string(),
+        version: "1".to_string(),
+        openapi_version: "3.1.0".to_string(),
+        source: crate::app::api_client::ApiSpecSource::Url(
+            "https://example.test/openapi.json".to_string(),
+        ),
+        last_loaded: None,
+        last_fetch_secs: None,
+        last_parse_secs: None,
+        last_url_status: None,
+        selected: true,
+        error: None,
+    };
+    let model = crate::app::api_client::ApiSpecModel {
+        id: spec_id,
+        title: "Mock API".to_string(),
+        version: "1".to_string(),
+        openapi_version: "3.1.0".to_string(),
+        servers: Vec::new(),
+        routes: vec![api_mock_test_route()],
+        security_schemes: Vec::new(),
+        root_security: Vec::new(),
+        schema_arena: Vec::new(),
+    };
+    app.ide_panel.api.specs.push(entry);
+    app.ide_panel.api.models.insert(spec_id, model);
+    app.open_api_route(spec_id, 0);
+    spec_id
+}
+
+#[test]
+fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let spec_id = open_api_mock_test_route(&mut app);
+
+    app.toggle_api_route_python(0);
+    let override_route = app.ide_panel.api.mock.route_overrides.first().unwrap();
+    assert!(!override_route.enabled);
+    assert!(override_route.python.as_ref().is_some_and(|script| script.enabled));
+
+    let entry = app.ide_panel.api.specs.first().unwrap();
+    let model = app.ide_panel.api.models.get(&spec_id).unwrap();
+    let routes =
+        crate::app::api_mock::merge::build_api_mock_routes([(entry, model)], &app.ide_panel.api.mock);
+    assert!(!routes.first().unwrap().enabled);
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let _ = app
+        .ide_panel
+        .api
+        .input_editor
+        .insert_str("\n    value = 42");
+    app.toggle_api_route_python(0);
+    assert!(
+        !app.ide_panel.api.mock.route_overrides[0]
+            .python
+            .as_ref()
+            .unwrap()
+            .enabled
+    );
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    assert!(
+        app.ide_panel
+            .api
+            .input_editor
+            .get_full_text()
+            .contains("value = 42")
+    );
+}
+
+#[test]
+fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let _ = app.ide_panel.api.input_editor.insert_str("\n    body_marker = 1");
+    assert!(
+        app.ide_panel
+            .api
+            .input_editor
+            .get_full_text()
+            .contains("body_marker")
+    );
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockPrelude { route_idx: 0 });
+    let _ = app.ide_panel.api.input_editor.insert_str("import os\n");
+    assert!(
+        app.ide_panel
+            .api
+            .input_editor
+            .get_full_text()
+            .contains("import os")
+    );
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let _ = app.ide_panel.api.input_editor.undo();
+    assert!(
+        !app.ide_panel
+            .api
+            .input_editor
+            .get_full_text()
+            .contains("body_marker")
+    );
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockPrelude { route_idx: 0 });
+    assert!(
+        app.ide_panel
+            .api
+            .input_editor
+            .get_full_text()
+            .contains("import os")
+    );
+
+    app.reset_api_route_python_part(
+        0,
+        crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude,
+    );
+    assert_eq!(app.ide_panel.api.input_editor.get_full_text(), "");
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let _ = app.ide_panel.api.input_editor.insert_str("\n    reset_me = 1");
+    app.reset_api_route_python_part(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body);
+    let body = app.ide_panel.api.input_editor.get_full_text();
+    assert!(!body.starts_with("    \n"));
+    assert!(body.starts_with("    return"));
+    assert!(body.contains("json_response"));
+    assert!(!body.contains("reset_me"));
+    assert!(
+        app.ide_panel
+            .api
+            .mock_highlight_target
+            .is_some_and(|(route_idx, part, _)| {
+                route_idx == 0 && part == crate::app::api_mock::ty_check::ApiMockSourcePart::Body
+            })
+    );
+    assert!(
+        app.ide_panel
+            .api
+            .mock_highlight_cache
+            .contains_key(&(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+    );
+    assert!(app.ide_panel.api.mock_ty_diagnostics.is_empty());
+}

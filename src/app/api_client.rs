@@ -3,18 +3,25 @@ use crate::app::api_mock::server::{
     apply_api_mock_server_event, drain_api_mock_server_events, start_api_mock_server,
     stop_api_mock_server,
 };
-use crate::app::api_mock::ty_check::spawn_api_mock_ty_check;
-use crate::app::api_mock::types::ApiMockState;
+use crate::app::api_mock::types::ApiMockServerEvent;
+use crate::app::api_mock::ty_check::{
+    build_api_mock_virtual_source, spawn_api_mock_ty_check, ApiMockSourcePart,
+    ApiMockTyDiagnostic,
+};
+use crate::app::api_mock::types::{
+    ApiMockState, default_api_mock_python_body, default_api_mock_python_script,
+};
 use crate::app::api_mock::{merge::build_api_mock_routes, types::ApiMockServerSnapshot};
 use crate::editor::Editor;
+use crate::highlighter::{ColorSpan, Highlighter};
 use crate::scroll::ScrollState;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
@@ -22,6 +29,7 @@ use url::{Host, Url};
 pub const API_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
 pub const API_MAX_SPEC_BYTES: usize = 8 * 1024 * 1024;
 pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+pub const API_MANUAL_MOCK_SPEC_ID: ApiSpecId = ApiSpecId(0);
 const API_MAX_MULTIPART_BODY_BYTES: usize = 64 * 1024 * 1024;
 const API_SCHEMA_MAX_DEPTH: usize = 12;
 const API_SCHEMA_MAX_COUNT: usize = 768;
@@ -408,6 +416,9 @@ pub struct ApiBodyFilePickResult {
 pub struct ApiResponseSummary {
     pub status: String,
     pub description: String,
+    pub content_type: String,
+    pub example: Option<String>,
+    pub schema: Option<ApiSchemaRef>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -467,6 +478,18 @@ pub struct ApiInputValue {
 pub struct ApiClientTabMeta {
     pub spec_id: ApiSpecId,
     pub title: String,
+    pub route_identity: Option<ApiClientRouteIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiClientRouteIdentity {
+    OpenApi {
+        spec_id: ApiSpecId,
+        route_idx: usize,
+    },
+    Manual {
+        stable_id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -658,6 +681,9 @@ impl Eq for ApiClientTabState {}
 pub enum ApiFocus {
     ImportUrl,
     MockProxyBase,
+    MockPythonUvPath,
+    MockPythonVersion,
+    MockPythonCustomPath,
     MockManualPath {
         manual_idx: usize,
     },
@@ -665,6 +691,9 @@ pub enum ApiFocus {
         route_idx: usize,
     },
     MockBody {
+        route_idx: usize,
+    },
+    MockSignature {
         route_idx: usize,
     },
     MockStaticResponse {
@@ -787,16 +816,99 @@ pub struct ApiClientState {
     pub loading: FxHashSet<ApiSpecId>,
     pub collapsed_tags: FxHashSet<(ApiSpecId, String)>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
+    pub expanded_mock_routes: FxHashSet<(ApiSpecId, usize)>,
     pub panel_scroll: ScrollState,
     pub route_scroll: ScrollState,
     pub next_request_id: u64,
     pub input_editor: Editor,
     pub input_scroll_x: ScrollState,
     pub focused: Option<ApiFocus>,
+    pub mock_guide_open: bool,
+    pub mock_guide_scroll: ScrollState,
+    pub mock_server_detail_open: bool,
+    pub mock_server_logs: Vec<ApiMockServerLogLine>,
+    pub mock_server_log_scroll: ScrollState,
+    pub mock_python_runtime_open: bool,
+    pub mock_python_version_picker_open: bool,
+    pub mock_python_versions_loading: bool,
+    pub mock_python_versions: Vec<ApiPythonVersionRow>,
+    pub mock_python_versions_scroll: ScrollState,
+    pub mock_python_install_running: bool,
+    pub mock_python_install_log: Vec<ApiPythonInstallLogLine>,
+    pub mock_python_install_log_scroll: ScrollState,
+    pub mock_ty_due: Option<Instant>,
+    pub mock_ty_pending: Option<(usize, u64)>,
+    pub mock_ty_diagnostics: Vec<ApiMockTyDiagnostic>,
+    pub mock_highlighter: Highlighter,
+    pub mock_highlight_target: Option<(usize, ApiMockSourcePart, u64)>,
+    pub mock_highlight_spans: Vec<ColorSpan>,
+    pub mock_highlight_cache: FxHashMap<(usize, ApiMockSourcePart), Vec<ColorSpan>>,
+    pub mock_python_scrolls: FxHashMap<(usize, ApiMockSourcePart), ScrollState>,
+    pub mock_python_scrolls_x: FxHashMap<(usize, ApiMockSourcePart), ScrollState>,
+    mock_python_editors: FxHashMap<(usize, ApiMockSourcePart), Editor>,
     pub last_resolved_host: Option<ApiResolvedHost>,
     body_json_validation: Option<ApiJsonValidationState>,
     body_json_validation_pending: Option<(ApiSpecId, usize, u64)>,
     body_json_validation_rx: Option<Receiver<ApiJsonValidationResult>>,
+    python_version_list_rx: Option<Receiver<ApiPythonVersionListResult>>,
+    python_install_rx: Option<Receiver<ApiPythonInstallEvent>>,
+    python_path_pick_rx: Option<Receiver<ApiPythonPathPickResult>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiMockServerLogLine {
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiPythonVersionRow {
+    pub version: String,
+    pub installed: bool,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiPythonInstallLogLine {
+    pub text: String,
+    pub kind: ApiPythonInstallLogKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiPythonInstallLogKind {
+    Info,
+    Ok,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ApiPythonRuntimeDialogLayout {
+    pub box_x: f32,
+    pub box_y: f32,
+    pub box_w: f32,
+    pub box_h: f32,
+    pub pad: f32,
+    pub content_w: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ApiPythonPathPickKind {
+    Uv,
+    CustomPython,
+}
+
+struct ApiPythonPathPickResult {
+    kind: ApiPythonPathPickKind,
+    path: Option<PathBuf>,
+}
+
+struct ApiPythonVersionListResult {
+    rows: Vec<ApiPythonVersionRow>,
+    error: Option<String>,
+}
+
+enum ApiPythonInstallEvent {
+    Line(ApiPythonInstallLogLine),
+    Done(Result<(), String>),
 }
 
 #[derive(Clone, Copy)]
@@ -830,16 +942,43 @@ impl Default for ApiClientState {
             loading: FxHashSet::default(),
             collapsed_tags: FxHashSet::default(),
             collapsed_route_roots: FxHashSet::default(),
+            expanded_mock_routes: FxHashSet::default(),
             panel_scroll: ScrollState::new(7.0),
             route_scroll: ScrollState::new(7.0),
             next_request_id: 1,
             input_editor: Editor::new(512),
             input_scroll_x: ScrollState::new(7.0),
             focused: None,
+            mock_guide_open: false,
+            mock_guide_scroll: ScrollState::new(7.0),
+            mock_server_detail_open: false,
+            mock_server_logs: Vec::new(),
+            mock_server_log_scroll: ScrollState::new(7.0),
+            mock_python_runtime_open: false,
+            mock_python_version_picker_open: false,
+            mock_python_versions_loading: false,
+            mock_python_versions: Vec::new(),
+            mock_python_versions_scroll: ScrollState::new(7.0),
+            mock_python_install_running: false,
+            mock_python_install_log: Vec::new(),
+            mock_python_install_log_scroll: ScrollState::new(7.0),
+            mock_ty_due: None,
+            mock_ty_pending: None,
+            mock_ty_diagnostics: Vec::new(),
+            mock_highlighter: Highlighter::new(),
+            mock_highlight_target: None,
+            mock_highlight_spans: Vec::new(),
+            mock_highlight_cache: FxHashMap::default(),
+            mock_python_scrolls: FxHashMap::default(),
+            mock_python_scrolls_x: FxHashMap::default(),
+            mock_python_editors: FxHashMap::default(),
             last_resolved_host: None,
             body_json_validation: None,
             body_json_validation_pending: None,
             body_json_validation_rx: None,
+            python_version_list_rx: None,
+            python_install_rx: None,
+            python_path_pick_rx: None,
         }
     }
 }
@@ -849,6 +988,7 @@ impl ApiClientState {
         let mut state = Self::default();
         state.auth = load_api_auth();
         state.mock = load_api_mocks();
+        clear_legacy_api_python_runtime_message(&mut state);
         if let Ok(content) = std::fs::read_to_string(api_specs_path()) {
             if let Ok(saved) = serde_json::from_str::<ApiSpecsPersist>(&content) {
                 state.specs = saved.specs;
@@ -942,12 +1082,7 @@ impl ApiClientState {
             port: self.mock.port,
             mode: self.mock.mode,
             proxy_base_url: self.mock.proxy_base_url.clone(),
-            uv_path: self
-                .mock
-                .uv
-                .configured_path
-                .clone()
-                .or_else(|| self.mock.uv.detected_path.clone()),
+            python_runtime: self.mock.uv.runtime_config(),
             routes: build_api_mock_routes(specs, &self.mock),
         }
     }
@@ -1005,6 +1140,8 @@ impl ApiClientState {
         self.loading.remove(&id);
         self.collapsed_tags.retain(|(spec_id, _)| *spec_id != id);
         self.collapsed_route_roots.remove(&id);
+        self.expanded_mock_routes
+            .retain(|(spec_id, _)| *spec_id != id);
         if self.selected_spec == Some(id) {
             self.selected_spec = self.specs.first().map(|entry| entry.id);
             for entry in &mut self.specs {
@@ -1043,9 +1180,13 @@ fn api_focus_targets_active_tab(
     match focus {
         ApiFocus::ImportUrl => true,
         ApiFocus::MockProxyBase => true,
+        ApiFocus::MockPythonUvPath => true,
+        ApiFocus::MockPythonVersion => true,
+        ApiFocus::MockPythonCustomPath => true,
         ApiFocus::MockManualPath { .. } => true,
         ApiFocus::MockPrelude { .. }
         | ApiFocus::MockBody { .. }
+        | ApiFocus::MockSignature { .. }
         | ApiFocus::MockStaticResponse { .. } => true,
         ApiFocus::AuthValue { spec_id, .. }
         | ApiFocus::AuthRefreshToken { spec_id, .. }
@@ -1541,7 +1682,8 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         components,
                         &mut model.schema_arena,
                     );
-                    let responses = parse_responses(op.get("responses"));
+                    let responses =
+                        parse_responses(op.get("responses"), components, &mut model.schema_arena);
                     model.routes.push(ApiRouteRow {
                         tag,
                         method,
@@ -2017,10 +2159,15 @@ fn schema_examples(schema: &Value) -> Vec<String> {
     deduped
 }
 
-fn parse_responses(value: Option<&Value>) -> Vec<ApiResponseSummary> {
+fn parse_responses(
+    value: Option<&Value>,
+    components: Option<&serde_json::Map<String, Value>>,
+    arena: &mut Vec<ApiSchema>,
+) -> Vec<ApiResponseSummary> {
     let mut out = Vec::new();
     if let Some(map) = value.and_then(Value::as_object) {
         for (status, body) in map {
+            let (content_type, example, schema) = parse_response_media(body, components, arena);
             out.push(ApiResponseSummary {
                 status: status.to_string(),
                 description: body
@@ -2028,11 +2175,48 @@ fn parse_responses(value: Option<&Value>) -> Vec<ApiResponseSummary> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+                content_type,
+                example,
+                schema,
             });
         }
     }
     out.sort_unstable_by(|a, b| a.status.cmp(&b.status));
     out
+}
+
+fn parse_response_media(
+    body: &Value,
+    components: Option<&serde_json::Map<String, Value>>,
+    arena: &mut Vec<ApiSchema>,
+) -> (String, Option<String>, Option<ApiSchemaRef>) {
+    let Some(content) = body.get("content").and_then(Value::as_object) else {
+        return (String::new(), None, None);
+    };
+    let Some((content_type, media)) = content
+        .get_key_value("application/json")
+        .or_else(|| content.get_key_value("application/problem+json"))
+        .or_else(|| content.iter().find(|(kind, _)| kind.contains("json")))
+        .or_else(|| content.iter().next())
+    else {
+        return (String::new(), None, None);
+    };
+    let example = media.get("example").and_then(value_to_string).or_else(|| {
+        media
+            .get("examples")
+            .and_then(Value::as_object)
+            .and_then(|examples| examples.values().next())
+            .and_then(|example| {
+                example
+                    .get("value")
+                    .and_then(value_to_string)
+                    .or_else(|| value_to_string(example))
+            })
+    });
+    let schema = media
+        .get("schema")
+        .and_then(|schema| normalize_schema(schema, components, arena, 0, &mut Vec::new()));
+    (content_type.to_string(), example, schema)
 }
 
 fn value_to_string(value: &Value) -> Option<String> {
@@ -2077,7 +2261,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     if api.import_error.is_some() {
         content_h += 24.0 * scale;
     }
-    content_h += 320.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 28.0 * scale;
+    content_h += 392.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 34.0 * scale;
     if api.specs.is_empty() {
         content_h += 34.0 * scale;
     }
@@ -2145,7 +2329,7 @@ pub fn api_tab_max_scroll(
     if !route.summary.is_empty() {
         content_h += 30.0 * scale;
     }
-    content_h += 314.0 * scale;
+    content_h += 558.0 * scale;
     content_h += 28.0 * scale;
     content_h += model.servers.len().max(1) as f32 * 34.0 * scale + 42.0 * scale;
     let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
@@ -2672,6 +2856,7 @@ pub fn json_body_is_valid(text: &str) -> bool {
 }
 
 pub const API_BODY_TEXT_SCALE: f32 = 1.0;
+pub(crate) const API_MOCK_TY_POPUP_BYTE: usize = usize::MAX;
 
 pub fn api_text_area_line_height(scale: f32) -> f32 {
     26.0 * scale
@@ -3299,6 +3484,11 @@ fn line_end_without_newline(editor: &Editor, line_idx: usize) -> usize {
         .unwrap_or(editor.len())
 }
 
+fn non_empty_path(text: &str) -> Option<PathBuf> {
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+}
+
 fn move_api_input_vertical(editor: &mut Editor, down: bool, shift: bool) {
     if shift {
         if editor.selection_anchor.is_none() {
@@ -3332,14 +3522,10 @@ fn api_line_byte_at_x(
     renderer: &mut crate::renderer::Renderer,
     line: &str,
     target_x: f32,
-    scale: f32,
 ) -> usize {
     let mut x = 0.0;
     for (byte_idx, ch) in line.char_indices() {
-        let adv = renderer
-            .get_ui_glyph(ch)
-            .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, scale))
-            .unwrap_or(8.0);
+        let adv = renderer.char_advance(ch);
         if target_x <= x + adv * 0.5 {
             return byte_idx;
         }
@@ -3348,32 +3534,83 @@ fn api_line_byte_at_x(
     line.len()
 }
 
-fn api_multiline_byte_at_pointer(
+fn api_mock_path_param_names(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter_map(|part| {
+            part.strip_prefix('{')
+                .and_then(|part| part.strip_suffix('}'))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn api_mock_sanitize_python_param(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        out.insert(0, '_');
+    }
+    if matches!(out.as_str(), "req" | "query" | "body" | "fields") {
+        out.push_str("_param");
+    }
+    out
+}
+
+pub(crate) fn api_mock_body_editor_text(text: &str) -> String {
+    let text = text
+        .strip_prefix("    \n")
+        .or_else(|| text.strip_prefix('\n'))
+        .unwrap_or(text);
+    let mut out = String::with_capacity(text.len() + 8);
+    for (idx, line) in text.lines().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if line.is_empty() || line.starts_with(char::is_whitespace) {
+            out.push_str(line);
+        } else {
+            out.push_str("    ");
+            out.push_str(line);
+        }
+    }
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn set_api_multiline_cursor_at_pointer(
+    editor: &mut Editor,
     renderer: &mut crate::renderer::Renderer,
-    text: &str,
     rect: (f32, f32, f32, f32),
     mx: f32,
     my: f32,
     scale: f32,
     scroll_y: f32,
-) -> usize {
-    let (x, y, w, h) = rect;
-    let text_x = x + 10.0 * scale;
-    let text_y = y + 10.0 * scale;
-    let line_h = api_text_area_line_height(scale);
-    let visible_h = (h - 16.0 * scale).max(line_h);
-    let max_scroll = api_text_area_max_scroll(text, visible_h, scale);
-    let scroll_y = scroll_y.clamp(0.0, max_scroll);
-    let target_line = ((my - text_y + scroll_y).max(0.0) / line_h).floor() as usize;
-    let target_x = (mx - text_x).clamp(0.0, (w - 20.0 * scale).max(0.0));
-    let mut line_start = 0usize;
-    for (line_idx, line) in text.split('\n').enumerate() {
-        if line_idx == target_line {
-            return line_start + api_line_byte_at_x(renderer, line, target_x, API_BODY_TEXT_SCALE);
-        }
-        line_start = line_start.saturating_add(line.len()).saturating_add(1);
-    }
-    text.len()
+    scroll_x: f32,
+    is_click: bool,
+) {
+    let (x, y, _, _) = rect;
+    let old_line_height = renderer.line_height;
+    let old_left_padding = renderer.left_padding;
+    let old_last_scroll_x = renderer.last_scroll_x;
+    let old_inlay_hints = std::mem::take(&mut renderer.current_python_inlay_hints);
+
+    renderer.line_height = api_text_area_line_height(scale);
+    renderer.left_padding = x + 10.0 * scale;
+    renderer.last_scroll_x = scroll_x;
+    editor.set_cursor_at_pos(mx, my - (y + 10.0 * scale) + scroll_y, renderer, is_click);
+
+    renderer.line_height = old_line_height;
+    renderer.left_padding = old_left_padding;
+    renderer.last_scroll_x = old_last_scroll_x;
+    renderer.current_python_inlay_hints = old_inlay_hints;
 }
 
 impl crate::app::App {
@@ -3420,6 +3657,7 @@ impl crate::app::App {
         };
         match id {
             crate::ui_system::UiId::ApiBodyInput(route_idx)
+            | crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx)
                 if state.route_idx == Some(route_idx) =>
             {
                 state.body_scroll.current
@@ -3429,6 +3667,27 @@ impl crate::app::App {
             {
                 state.response_scroll.current
             }
+            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls
+                .get(&(route_idx, ApiMockSourcePart::Prelude))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
+            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls
+                .get(&(route_idx, ApiMockSourcePart::Body))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
+            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls
+                .get(&(route_idx, ApiMockSourcePart::Signature))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
             _ => 0.0,
         }
     }
@@ -3448,6 +3707,27 @@ impl crate::app::App {
             {
                 state.response_scroll_x.current
             }
+            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls_x
+                .get(&(route_idx, ApiMockSourcePart::Prelude))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
+            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls_x
+                .get(&(route_idx, ApiMockSourcePart::Body))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
+            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls_x
+                .get(&(route_idx, ApiMockSourcePart::Signature))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
             _ => 0.0,
         }
     }
@@ -3493,6 +3773,33 @@ impl crate::app::App {
                         })
                         .unwrap_or_default()
                 }
+            }
+            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
+                .api_route_python_script(route_idx)
+                .map(|script| {
+                    if self.api_mock_python_focus_target()
+                        == Some((route_idx, ApiMockSourcePart::Prelude))
+                    {
+                        self.ide_panel.api.input_editor.get_full_text()
+                    } else {
+                        script.prelude.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
+                .api_route_python_script(route_idx)
+                .map(|script| {
+                    if self.api_mock_python_focus_target()
+                        == Some((route_idx, ApiMockSourcePart::Body))
+                    {
+                        self.ide_panel.api.input_editor.get_full_text()
+                    } else {
+                        api_mock_body_editor_text(&script.body)
+                    }
+                })
+                .unwrap_or_default(),
+            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
+                self.api_mock_signature_for_route(route_idx).unwrap_or_default()
             }
             _ => return 0.0,
         };
@@ -3570,6 +3877,130 @@ impl crate::app::App {
         }
     }
 
+    fn api_mock_part_for_ui(id: crate::ui_system::UiId) -> Option<(usize, ApiMockSourcePart)> {
+        match id {
+            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
+                Some((route_idx, ApiMockSourcePart::Prelude))
+            }
+            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
+                Some((route_idx, ApiMockSourcePart::Body))
+            }
+            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
+                Some((route_idx, ApiMockSourcePart::Signature))
+            }
+            _ => None,
+        }
+    }
+
+    fn sync_api_multiline_scroll_target(&mut self, id: crate::ui_system::UiId, immediate: bool) {
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let cursor = self.ide_panel.api.input_editor.cursor.min(text.len());
+        let line_h = api_text_area_line_height(scale);
+        let visible_h = (rect.3 - 16.0 * scale).max(line_h);
+        let visible_w = (rect.2 - 20.0 * scale).max(1.0);
+        let cursor_line = text[..cursor].bytes().filter(|byte| *byte == b'\n').count();
+        let line_start = text[..cursor]
+            .rfind('\n')
+            .map(|idx| idx.saturating_add(1))
+            .unwrap_or(0);
+        let cursor_line_text = &text[line_start..cursor];
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let cursor_x = renderer.measure_ui_width(cursor_line_text, API_BODY_TEXT_SCALE);
+        let max_scroll_x = api_text_area_max_scroll_x(&text, visible_w, |line| {
+            renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+        });
+        let max_scroll_y = api_text_area_max_scroll(&text, visible_h, scale);
+
+        let cursor_y = cursor_line as f32 * line_h;
+        let Some((meta, _)) = self.active_api_tab() else {
+            return;
+        };
+        let spec_id = meta.spec_id;
+        let mut scroll_y_current = self.api_text_scroll_for_ui(id);
+        let mut scroll_x_current = self.api_text_scroll_x_for_ui(id);
+        let edge = 10.0 * scale;
+        if cursor_y + line_h - scroll_y_current > visible_h {
+            scroll_y_current = cursor_y + line_h - visible_h + edge;
+        } else if cursor_y < scroll_y_current {
+            scroll_y_current = cursor_y;
+        }
+        if cursor_x - scroll_x_current > visible_w {
+            scroll_x_current = cursor_x - visible_w + edge;
+        } else if cursor_x < scroll_x_current {
+            scroll_x_current = cursor_x;
+        }
+        let target_y = scroll_y_current.clamp(0.0, max_scroll_y);
+        let target_x = scroll_x_current.clamp(0.0, max_scroll_x);
+
+        match id {
+            crate::ui_system::UiId::ApiBodyInput(route_idx)
+            | crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx) => {
+                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    && state.route_idx == Some(route_idx)
+                {
+                    state.body_scroll.target = target_y;
+                    state.body_scroll_x.target = target_x;
+                    if immediate {
+                        state.body_scroll.current = target_y;
+                        state.body_scroll.velocity = 0.0;
+                        state.body_scroll_x.current = target_x;
+                        state.body_scroll_x.velocity = 0.0;
+                    }
+                }
+            }
+            crate::ui_system::UiId::ApiResponseBody(route_idx) => {
+                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    && state.route_idx == Some(route_idx)
+                {
+                    state.response_scroll.target = target_y;
+                    state.response_scroll_x.target = target_x;
+                    if immediate {
+                        state.response_scroll.current = target_y;
+                        state.response_scroll.velocity = 0.0;
+                        state.response_scroll_x.current = target_x;
+                        state.response_scroll_x.velocity = 0.0;
+                    }
+                }
+            }
+            _ => {
+                if let Some(key) = Self::api_mock_part_for_ui(id) {
+                    let scroll_y = self
+                        .ide_panel
+                        .api
+                        .mock_python_scrolls
+                        .entry(key)
+                        .or_insert_with(|| ScrollState::new(7.0));
+                    scroll_y.target = target_y;
+                    if immediate {
+                        scroll_y.current = target_y;
+                        scroll_y.velocity = 0.0;
+                    }
+                    let scroll_x = self
+                        .ide_panel
+                        .api
+                        .mock_python_scrolls_x
+                        .entry(key)
+                        .or_insert_with(|| ScrollState::new(7.0));
+                    scroll_x.target = target_x;
+                    if immediate {
+                        scroll_x.current = target_x;
+                        scroll_x.velocity = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn drag_api_text_scrollbar_x_from_last_mouse(&mut self) -> bool {
         let Some((id, body)) = self.active_api_tab().and_then(|(_, state)| {
             let route_idx = state.route_idx?;
@@ -3613,6 +4044,16 @@ impl crate::app::App {
         match focus {
             ApiFocus::ImportUrl => Some((crate::ui_system::UiId::ApiImportUrlInput, false)),
             ApiFocus::MockProxyBase => Some((crate::ui_system::UiId::ApiMockProxyBaseInput, false)),
+            ApiFocus::MockPythonUvPath => {
+                Some((crate::ui_system::UiId::ApiMockPythonUvPathInput, false))
+            }
+            ApiFocus::MockPythonVersion => {
+                Some((crate::ui_system::UiId::ApiMockPythonVersionInput, false))
+            }
+            ApiFocus::MockPythonCustomPath => Some((
+                crate::ui_system::UiId::ApiMockPythonCustomPathInput,
+                false,
+            )),
             ApiFocus::MockManualPath { manual_idx } => Some((
                 crate::ui_system::UiId::ApiMockManualRoutePath(*manual_idx),
                 false,
@@ -3624,6 +4065,10 @@ impl crate::app::App {
             ApiFocus::MockBody { route_idx } => {
                 Some((crate::ui_system::UiId::ApiMockBodyInput(*route_idx), true))
             }
+            ApiFocus::MockSignature { route_idx } => Some((
+                crate::ui_system::UiId::ApiMockSignatureInput(*route_idx),
+                true,
+            )),
             ApiFocus::MockStaticResponse { route_idx } => Some((
                 crate::ui_system::UiId::ApiMockStaticResponseInput(*route_idx),
                 true,
@@ -3735,7 +4180,6 @@ impl crate::app::App {
             self.pulse_api_cursor_blink();
             return;
         }
-        let text = self.ide_panel.api.input_editor.get_full_text();
         let scroll_y = if multiline {
             self.api_text_scroll_for_ui(id)
         } else {
@@ -3753,8 +4197,20 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(renderer, &text, rect, mx + scroll_x, my, scale, scroll_y)
+            set_api_multiline_cursor_at_pointer(
+                &mut self.ide_panel.api.input_editor,
+                renderer,
+                rect,
+                mx,
+                my,
+                scale,
+                scroll_y,
+                scroll_x,
+                true,
+            );
+            self.ide_panel.api.input_editor.cursor
         } else {
+            let text = self.ide_panel.api.input_editor.get_full_text();
             let visible_w = (rect.2 - 16.0 * scale).max(0.0);
             let target_x = if mx <= rect.0 {
                 scroll_x
@@ -3763,11 +4219,26 @@ impl crate::app::App {
             } else {
                 scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
             };
-            api_line_byte_at_x(renderer, &text, target_x, 0.88)
+            api_line_byte_at_x(renderer, &text, target_x)
         };
         self.ide_panel.api.input_editor.cursor = cursor;
         self.ide_panel.api.input_editor.selection_anchor = Some(cursor);
-        if !multiline {
+        let now = std::time::Instant::now();
+        let dx = mx - self.last_click_pos.0;
+        let dy = my - self.last_click_pos.1;
+        if now.duration_since(self.last_click_time).as_millis() < 400 && dx * dx + dy * dy < 25.0 {
+            self.click_count = self.click_count.saturating_add(1);
+        } else {
+            self.click_count = 1;
+        }
+        self.last_click_time = now;
+        self.last_click_pos = (mx, my);
+        if self.click_count == 2 {
+            self.ide_panel.api.input_editor.select_word();
+        }
+        if multiline {
+            self.sync_api_multiline_scroll_target(id, true);
+        } else {
             self.sync_api_one_line_scroll_target(true);
         }
         self.pulse_api_cursor_blink();
@@ -3784,7 +4255,6 @@ impl crate::app::App {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return false;
         };
-        let text = self.ide_panel.api.input_editor.get_full_text();
         let scroll_y = self.api_text_scroll_for_ui(id);
         let scroll_x = if multiline {
             self.api_text_scroll_x_for_ui(id)
@@ -3798,8 +4268,20 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         let scale = renderer.scale_factor;
         let cursor = if multiline {
-            api_multiline_byte_at_pointer(renderer, &text, rect, mx + scroll_x, my, scale, scroll_y)
+            set_api_multiline_cursor_at_pointer(
+                &mut self.ide_panel.api.input_editor,
+                renderer,
+                rect,
+                mx,
+                my,
+                scale,
+                scroll_y,
+                scroll_x,
+                false,
+            );
+            self.ide_panel.api.input_editor.cursor
         } else {
+            let text = self.ide_panel.api.input_editor.get_full_text();
             let visible_w = (rect.2 - 16.0 * scale).max(0.0);
             let target_x = if mx <= rect.0 {
                 scroll_x
@@ -3808,7 +4290,7 @@ impl crate::app::App {
             } else {
                 scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
             };
-            api_line_byte_at_x(renderer, &text, target_x, 0.88)
+            api_line_byte_at_x(renderer, &text, target_x)
         };
         if self.ide_panel.api.input_editor.selection_anchor.is_none() {
             self.ide_panel.api.input_editor.selection_anchor =
@@ -3816,26 +4298,7 @@ impl crate::app::App {
         }
         self.ide_panel.api.input_editor.cursor = cursor;
         if multiline {
-            let Some((meta, _)) = self.active_api_tab() else {
-                return true;
-            };
-            let spec_id = meta.spec_id;
-            let max_scroll = self.api_text_max_scroll_x_for_ui(id);
-            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                let scroll = match id {
-                    crate::ui_system::UiId::ApiBodyInput(_) => &mut state.body_scroll_x,
-                    crate::ui_system::UiId::ApiResponseBody(_) => &mut state.response_scroll_x,
-                    _ => return true,
-                };
-                let edge = 18.0 * scale;
-                if mx < rect.0 + edge {
-                    scroll.scroll_by(-edge);
-                    scroll.clamp_target(0.0, max_scroll);
-                } else if mx > rect.0 + rect.2 - edge {
-                    scroll.scroll_by(edge);
-                    scroll.clamp_target(0.0, max_scroll);
-                }
-            }
+            self.sync_api_multiline_scroll_target(id, false);
         } else {
             let max_scroll = self.api_one_line_max_scroll_x_for_ui(id);
             let edge = 18.0 * scale;
@@ -3889,6 +4352,128 @@ impl crate::app::App {
                 name,
                 paths,
             });
+        });
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn trigger_api_python_path_picker(&mut self, kind: ApiPythonPathPickKind) {
+        let (tx, rx) = mpsc::channel();
+        self.ide_panel.api.python_path_pick_rx = Some(rx);
+        std::thread::spawn(move || {
+            let title = match kind {
+                ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
+                ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
+            };
+            let path = rfd::FileDialog::new().set_title(title).pick_file();
+            let _ = tx.send(ApiPythonPathPickResult { kind, path });
+        });
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn trigger_api_python_version_list(&mut self) {
+        let Some(uv_path) = self.ide_panel.api.mock.uv.selected_uv_path() else {
+            self.ide_panel.api.mock.uv.status =
+                crate::app::api_mock::types::ApiPythonRuntimeStatus::Missing;
+            self.ide_panel.api.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        self.ide_panel.api.python_version_list_rx = Some(rx);
+        self.ide_panel.api.mock_python_versions_loading = true;
+        self.ide_panel.api.mock_python_version_picker_open = true;
+        self.ide_panel.api.mock_python_versions_scroll.current = 0.0;
+        self.ide_panel.api.mock_python_versions_scroll.target = 0.0;
+        std::thread::spawn(move || {
+            let result = Command::new(uv_path)
+                .arg("python")
+                .arg("list")
+                .arg("--all-versions")
+                .output();
+            let payload = match result {
+                Ok(output) if output.status.success() => ApiPythonVersionListResult {
+                    rows: parse_uv_python_list(&String::from_utf8_lossy(&output.stdout)),
+                    error: None,
+                },
+                Ok(output) => ApiPythonVersionListResult {
+                    rows: Vec::new(),
+                    error: Some(format!(
+                        "Ошибка списка версий: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )),
+                },
+                Err(err) => ApiPythonVersionListResult {
+                    rows: Vec::new(),
+                    error: Some(format!("Ошибка запуска uv: {err}")),
+                },
+            };
+            let _ = tx.send(payload);
+        });
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn trigger_api_python_install(&mut self) {
+        if self.ide_panel.api.mock_python_install_running {
+            return;
+        }
+        let Some(uv_path) = self.ide_panel.api.mock.uv.selected_uv_path() else {
+            self.ide_panel.api.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
+            return;
+        };
+        let version = self.ide_panel.api.mock.uv.python_version.trim().to_string();
+        if version.is_empty() {
+            self.ide_panel.api.mock.uv.last_error = "Выберите версию Python.".to_string();
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.ide_panel.api.python_install_rx = Some(rx);
+        self.ide_panel.api.mock_python_install_running = true;
+        self.ide_panel.api.mock_python_install_log.clear();
+        self.ide_panel
+            .api
+            .mock_python_install_log
+            .push(ApiPythonInstallLogLine {
+                text: format!("uv python install {version}"),
+                kind: ApiPythonInstallLogKind::Info,
+            });
+        std::thread::spawn(move || {
+            let spawn = Command::new(uv_path)
+                .arg("python")
+                .arg("install")
+                .arg(&version)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn();
+            let mut child = match spawn {
+                Ok(child) => child,
+                Err(err) => {
+                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
+                        "Ошибка запуска uv: {err}"
+                    ))));
+                    return;
+                }
+            };
+            if let Some(stdout) = child.stdout.take() {
+                spawn_api_python_log_reader(stdout, tx.clone(), ApiPythonInstallLogKind::Info);
+            }
+            if let Some(stderr) = child.stderr.take() {
+                spawn_api_python_log_reader(stderr, tx.clone(), ApiPythonInstallLogKind::Error);
+            }
+            match child.wait() {
+                Ok(status) if status.success() => {
+                    let _ = tx.send(ApiPythonInstallEvent::Done(Ok(())));
+                }
+                Ok(status) => {
+                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
+                        "uv завершился с кодом {:?}",
+                        status.code()
+                    ))));
+                }
+                Err(err) => {
+                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
+                        "Ошибка ожидания uv: {err}"
+                    ))));
+                }
+            }
         });
     }
 
@@ -4050,7 +4635,16 @@ impl crate::app::App {
             is_highlight_complete: true,
             icon_key: "api",
             kind: crate::app::EditorTabKind::ApiClient(
-                ApiClientTabMeta { spec_id: id, title },
+                ApiClientTabMeta {
+                    spec_id: id,
+                    title,
+                    route_identity: api_state.route_idx.map(|route_idx| {
+                        ApiClientRouteIdentity::OpenApi {
+                            spec_id: id,
+                            route_idx,
+                        }
+                    }),
+                },
                 api_state,
             ),
         };
@@ -4126,7 +4720,11 @@ impl crate::app::App {
             is_highlight_complete: true,
             icon_key: "api",
             kind: crate::app::EditorTabKind::ApiClient(
-                ApiClientTabMeta { spec_id: id, title },
+                ApiClientTabMeta {
+                    spec_id: id,
+                    title,
+                    route_identity: None,
+                },
                 api_state,
             ),
         };
@@ -4159,10 +4757,11 @@ impl crate::app::App {
     pub fn open_api_route(&mut self, spec_id: ApiSpecId, route_idx: usize) {
         self.open_api_spec_tab(spec_id);
         let mut needs_input_sync = false;
-        if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+        if let Some((meta, state)) = self.active_api_tab_mut_for(spec_id) {
             state.remember_view_scroll();
             state.remember_route_state();
             state.auth_view = false;
+            meta.route_identity = Some(ApiClientRouteIdentity::OpenApi { spec_id, route_idx });
             if !state.restore_route_state(route_idx) {
                 state.route_idx = Some(route_idx);
                 state.response = None;
@@ -4187,6 +4786,143 @@ impl crate::app::App {
         self.save_tabs_state();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
+        }
+    }
+
+    pub fn open_api_manual_route(&mut self, manual_idx: usize) {
+        self.commit_api_focus();
+        let Some(route) = self
+            .ide_panel
+            .api
+            .mock
+            .manual_routes
+            .get(manual_idx)
+            .cloned()
+        else {
+            return;
+        };
+        let stable_id = route.stable_id.clone();
+        let title = api_manual_route_title(route.method, &route.path);
+        if let Some(idx) = self.tabs.iter().position(|tab| {
+            matches!(
+                &tab.kind,
+                crate::app::EditorTabKind::ApiClient(
+                    ApiClientTabMeta {
+                        route_identity:
+                            Some(ApiClientRouteIdentity::Manual { stable_id: tab_id }),
+                        ..
+                    },
+                    _
+                ) if tab_id == &stable_id
+            )
+        }) {
+            self.switch_to_tab(idx);
+            if let Some((meta, state)) = self.active_api_tab_mut_for(API_MANUAL_MOCK_SPEC_ID) {
+                meta.title = title.clone();
+                state.route_idx = Some(manual_idx);
+            }
+            self.base_title = title;
+            if let Some(window) = self.window.as_ref() {
+                crate::app::App::update_window_title(window, &self.base_title, false);
+                window.request_redraw();
+            }
+            return;
+        }
+
+        let api_state = ApiClientTabState {
+            route_idx: Some(manual_idx),
+            ..Default::default()
+        };
+        let tab = crate::app::EditorTab {
+            editor: Editor::new(16),
+            file_path: None,
+            base_title: title.clone(),
+            file_extension: String::new(),
+            scroll_y: ScrollState::new(7.0),
+            scroll_x: ScrollState::new(7.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            syntax_errors: Vec::new(),
+            last_sent_version: u64::MAX,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: true,
+            is_highlight_complete: true,
+            icon_key: "api",
+            kind: crate::app::EditorTabKind::ApiClient(
+                ApiClientTabMeta {
+                    spec_id: API_MANUAL_MOCK_SPEC_ID,
+                    title,
+                    route_identity: Some(ApiClientRouteIdentity::Manual { stable_id }),
+                },
+                api_state,
+            ),
+        };
+
+        if self.tabs.is_empty() {
+            self.editor = Editor::new(16);
+            self.file_path = None;
+            self.base_title = tab.base_title.clone();
+            self.file_extension.clear();
+            self.scroll_y = ScrollState::new(7.0);
+            self.scroll_x = ScrollState::new(7.0);
+            self.tabs.push(tab);
+            self.active_tab = 0;
+        } else {
+            self.sync_active_tab();
+            self.tabs.push(tab);
+            self.active_tab = self.tabs.len().saturating_sub(1);
+            self.sync_active_tab();
+        }
+        self.autocomplete_active = false;
+        self.show_welcome = false;
+        self.reveal_tab_now(self.active_tab);
+        if let Some(window) = self.window.as_ref() {
+            crate::app::App::update_window_title(window, &self.base_title, false);
+            window.request_redraw();
+        }
+        self.save_tabs_state();
+    }
+
+    fn sync_api_manual_route_tabs(&mut self) {
+        let routes = self
+            .ide_panel
+            .api
+            .mock
+            .manual_routes
+            .iter()
+            .enumerate()
+            .map(|(idx, route)| {
+                (
+                    idx,
+                    route.stable_id.clone(),
+                    api_manual_route_title(route.method, &route.path),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
+            let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind else {
+                continue;
+            };
+            let Some(ApiClientRouteIdentity::Manual { stable_id }) = &meta.route_identity else {
+                continue;
+            };
+            if let Some((manual_idx, _, title)) = routes.iter().find(|(_, id, _)| id == stable_id) {
+                meta.title = title.clone();
+                state.route_idx = Some(*manual_idx);
+                tab.base_title = title.clone();
+                if tab_idx == self.active_tab {
+                    self.base_title = title.clone();
+                }
+            } else {
+                meta.title = "Mock removed".to_string();
+                state.route_idx = None;
+                tab.base_title = meta.title.clone();
+                if tab_idx == self.active_tab {
+                    self.base_title = meta.title.clone();
+                }
+            }
         }
     }
 
@@ -4268,19 +5004,26 @@ impl crate::app::App {
 
     pub fn focus_api_input(&mut self, focus: ApiFocus) {
         let focus_changed = self.ide_panel.api.focused.as_ref() != Some(&focus);
-        self.commit_api_focus();
-        let is_array = self.api_focus_is_array_input(&focus);
-        let mut text = self.api_focus_text(&focus);
-        if is_array {
-            text = api_array_editor_text(&text);
-        }
-        let old_version = self.ide_panel.api.input_editor.version;
-        self.ide_panel.api.input_editor.set_text_clean(&text);
-        self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
-        self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
-        self.ide_panel.api.input_editor.selection_anchor =
-            Some(self.ide_panel.api.input_editor.cursor);
         if focus_changed {
+            self.commit_api_focus();
+            self.stash_active_api_mock_editor();
+            let is_array = self.api_focus_is_array_input(&focus);
+            let mut text = self.api_focus_text(&focus);
+            if is_array {
+                text = api_array_editor_text(&text);
+            }
+            let old_version = self.ide_panel.api.input_editor.version;
+            if let Some(key) = Self::api_mock_editor_key_for_focus(&focus)
+                && let Some(editor) = self.ide_panel.api.mock_python_editors.remove(&key)
+            {
+                self.ide_panel.api.input_editor = editor;
+            } else {
+                self.ide_panel.api.input_editor.set_text_clean(&text);
+                self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+            }
+            self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
+            self.ide_panel.api.input_editor.selection_anchor =
+                Some(self.ide_panel.api.input_editor.cursor);
             self.ide_panel.api.input_scroll_x.current = 0.0;
             self.ide_panel.api.input_scroll_x.target = 0.0;
             self.ide_panel.api.input_scroll_x.velocity = 0.0;
@@ -4294,6 +5037,9 @@ impl crate::app::App {
         self.ide_panel.file_tree_focused = false;
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
+        if focus_changed && let Some((route_idx, _)) = self.api_mock_python_focus_target() {
+            self.queue_api_mock_python_tools(route_idx);
+        }
     }
 
     fn focus_next_api_input(&mut self, reverse: bool) -> bool {
@@ -4330,6 +5076,24 @@ impl crate::app::App {
         match focus {
             ApiFocus::ImportUrl => self.ide_panel.api.input_editor.get_full_text(),
             ApiFocus::MockProxyBase => self.ide_panel.api.mock.proxy_base_url.clone(),
+            ApiFocus::MockPythonUvPath => self
+                .ide_panel
+                .api
+                .mock
+                .uv
+                .selected_uv_path()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            ApiFocus::MockPythonVersion => self.ide_panel.api.mock.uv.python_version.clone(),
+            ApiFocus::MockPythonCustomPath => self
+                .ide_panel
+                .api
+                .mock
+                .uv
+                .custom_python_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             ApiFocus::MockManualPath { manual_idx } => self
                 .ide_panel
                 .api
@@ -4344,18 +5108,24 @@ impl crate::app::App {
                 .unwrap_or_default(),
             ApiFocus::MockBody { route_idx } => self
                 .api_route_python_script(*route_idx)
-                .map(|script| script.body.clone())
+                .map(|script| api_mock_body_editor_text(&script.body))
+                .unwrap_or_default(),
+            ApiFocus::MockSignature { route_idx } => self
+                .api_mock_signature_for_route(*route_idx)
                 .unwrap_or_default(),
             ApiFocus::MockStaticResponse { route_idx } => self
                 .api_route_override(*route_idx)
                 .map(|override_route| match &override_route.response {
-                    crate::app::api_mock::types::ApiMockResponse::Generated => {
-                        "{\"mock\":true}".to_string()
-                    }
+                    crate::app::api_mock::types::ApiMockResponse::Generated => self
+                        .api_mock_generated_preview(*route_idx)
+                        .unwrap_or_else(|| "{}".to_string()),
                     crate::app::api_mock::types::ApiMockResponse::Json(text)
                     | crate::app::api_mock::types::ApiMockResponse::Text(text) => text.clone(),
                 })
-                .unwrap_or_else(|| "{\"mock\":true}".to_string()),
+                .unwrap_or_else(|| {
+                    self.api_mock_generated_preview(*route_idx)
+                        .unwrap_or_else(|| "{}".to_string())
+                }),
             ApiFocus::AuthValue { spec_id, scheme } => self
                 .ide_panel
                 .api
@@ -4470,6 +5240,13 @@ impl crate::app::App {
         }
     }
 
+    fn api_mock_generated_preview(&self, route_idx: usize) -> Option<String> {
+        let (meta, _) = self.active_api_tab()?;
+        let model = self.ide_panel.api.models.get(&meta.spec_id)?;
+        let route = model.routes.get(route_idx)?;
+        Some(api_generated_response_for_route(route, model).2)
+    }
+
     fn apply_response_token_to_auth(
         &mut self,
         route_idx: usize,
@@ -4543,6 +5320,23 @@ impl crate::app::App {
                 self.ide_panel.api.mock.proxy_base_url = text.trim().to_string();
                 self.ide_panel.api.persist();
             }
+            ApiFocus::MockPythonUvPath => {
+                self.ide_panel.api.mock.uv.configured_path = non_empty_path(&text);
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::MockPythonVersion => {
+                let version = text.trim();
+                self.ide_panel.api.mock.uv.python_version = if version.is_empty() {
+                    "3.13".to_string()
+                } else {
+                    version.to_string()
+                };
+                self.ide_panel.api.persist();
+            }
+            ApiFocus::MockPythonCustomPath => {
+                self.ide_panel.api.mock.uv.custom_python_path = non_empty_path(&text);
+                self.ide_panel.api.persist();
+            }
             ApiFocus::MockManualPath { manual_idx } => {
                 let mut path = text.trim().to_string();
                 if !path.starts_with('/') {
@@ -4554,6 +5348,7 @@ impl crate::app::App {
                     } else {
                         path
                     };
+                    self.sync_api_manual_route_tabs();
                     self.ide_panel.api.persist();
                 }
             }
@@ -4569,12 +5364,20 @@ impl crate::app::App {
                     self.ide_panel.api.persist();
                 }
             }
+            ApiFocus::MockSignature { .. } => {}
             ApiFocus::MockStaticResponse { route_idx } => {
                 self.ensure_api_route_override(route_idx);
+                let generated = self
+                    .api_mock_generated_preview(route_idx)
+                    .unwrap_or_else(|| "{}".to_string());
                 if let Some(override_route) = self.api_route_override_mut(route_idx) {
-                    override_route.response =
-                        crate::app::api_mock::types::ApiMockResponse::Json(text);
-                    override_route.enabled = true;
+                    let was_enabled = override_route.enabled;
+                    override_route.response = if text.trim() == generated.trim() {
+                        crate::app::api_mock::types::ApiMockResponse::Generated
+                    } else {
+                        crate::app::api_mock::types::ApiMockResponse::Json(text)
+                    };
+                    override_route.enabled = was_enabled;
                     self.ide_panel.api.persist();
                 }
             }
@@ -4705,6 +5508,8 @@ impl crate::app::App {
             id,
             crate::ui_system::UiId::ApiImportUrlInput
                 | crate::ui_system::UiId::ApiMockProxyBaseInput
+                | crate::ui_system::UiId::ApiMockPythonUvPathInput
+                | crate::ui_system::UiId::ApiMockPythonCustomPathInput
                 | crate::ui_system::UiId::ApiMockManualRoutePath(_)
                 | crate::ui_system::UiId::ApiAuthValue(_)
                 | crate::ui_system::UiId::ApiAuthRefreshToken(_)
@@ -4716,6 +5521,7 @@ impl crate::app::App {
                 | crate::ui_system::UiId::ApiBodyFieldInput(_, _)
                 | crate::ui_system::UiId::ApiResponseBody(_)
                 | crate::ui_system::UiId::ApiMockStaticResponseInput(_)
+                | crate::ui_system::UiId::ApiMockSignatureInput(_)
                 | crate::ui_system::UiId::ApiMockPreludeInput(_)
                 | crate::ui_system::UiId::ApiMockBodyInput(_)
         ) {
@@ -4747,15 +5553,44 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockServerToggle => {
                 self.toggle_api_mock_server();
             }
-            crate::ui_system::UiId::ApiMockBindLanToggle => {
+            crate::ui_system::UiId::ApiMockServerDetails => {
                 self.commit_api_focus();
-                self.ide_panel.api.mock.bind_host =
-                    if self.ide_panel.api.mock.bind_host == "127.0.0.1" {
-                        "0.0.0.0".to_string()
-                    } else {
-                        "127.0.0.1".to_string()
-                    };
-                self.ide_panel.api.persist();
+                self.ide_panel.api.mock_server_detail_open = true;
+                self.ide_panel.api.mock_guide_open = false;
+                self.ide_panel.api.mock_python_runtime_open = false;
+            }
+            crate::ui_system::UiId::ApiMockServerDetailsClose => {
+                self.ide_panel.api.mock_server_detail_open = false;
+            }
+            crate::ui_system::UiId::ApiMockServerLogArea => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+            }
+            crate::ui_system::UiId::ApiMockServerLogScrollY => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                let mx = self
+                    .renderer
+                    .as_ref()
+                    .map(|renderer| renderer.last_mouse_y)
+                    .unwrap_or(0.0);
+                if let Some(rect) = self
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::ApiMockServerLogArea)
+                {
+                    let max_scroll = api_mock_server_log_max_scroll(
+                        self.ide_panel.api.mock_server_logs.len(),
+                        rect.3,
+                        self.renderer
+                            .as_ref()
+                            .map(|renderer| renderer.scale_factor)
+                            .unwrap_or(1.0),
+                    );
+                    let ratio = ((mx - rect.1) / rect.3.max(1.0)).clamp(0.0, 1.0);
+                    self.ide_panel.api.mock_server_log_scroll.target = ratio * max_scroll;
+                    self.ide_panel.api.mock_server_log_scroll.current =
+                        self.ide_panel.api.mock_server_log_scroll.target;
+                }
             }
             crate::ui_system::UiId::ApiMockModeSelect => {
                 self.commit_api_focus();
@@ -4776,40 +5611,135 @@ impl crate::app::App {
                 self.focus_api_input(ApiFocus::MockProxyBase);
                 self.place_api_cursor_from_last_click(id, false);
             }
-            crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx) => {
-                self.focus_api_input(ApiFocus::MockManualPath { manual_idx });
-                self.place_api_cursor_from_last_click(id, false);
+            crate::ui_system::UiId::ApiMockGuideOpen => {
+                self.commit_api_focus();
+                self.ide_panel.api.mock_guide_open = true;
+                self.ide_panel.api.mock_server_detail_open = false;
+                self.ide_panel.api.mock_python_runtime_open = false;
             }
-            crate::ui_system::UiId::ApiMockChooseUv => {
-                crate::app::api_mock::python_bootstrap::refresh_uv_status(
+            crate::ui_system::UiId::ApiMockGuideClose => {
+                self.ide_panel.api.mock_guide_open = false;
+            }
+            crate::ui_system::UiId::ApiMockGuideBody
+            | crate::ui_system::UiId::ApiMockGuideScrollY => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+            }
+            crate::ui_system::UiId::ApiMockPythonManage => {
+                self.commit_api_focus();
+                clear_legacy_api_python_runtime_message(&mut self.ide_panel.api);
+                self.ide_panel.api.mock_python_runtime_open = true;
+                self.ide_panel.api.mock_guide_open = false;
+                self.ide_panel.api.mock_server_detail_open = false;
+                if matches!(
+                    self.ide_panel.api.mock.uv.mode,
+                    crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged
+                ) && self.ide_panel.api.mock.uv.selected_uv_path().is_none()
+                {
+                    crate::app::api_mock::python_bootstrap::refresh_uv_status(
+                        &mut self.ide_panel.api.mock.uv,
+                    );
+                }
+            }
+            crate::ui_system::UiId::ApiMockPythonManageClose => {
+                self.commit_api_focus();
+                self.ide_panel.api.mock_python_runtime_open = false;
+                self.ide_panel.api.mock_python_version_picker_open = false;
+            }
+            crate::ui_system::UiId::ApiMockPythonModeToggle => {
+                self.commit_api_focus();
+                clear_legacy_api_python_runtime_message(&mut self.ide_panel.api);
+                self.ide_panel.api.mock.uv.mode = match self.ide_panel.api.mock.uv.mode {
+                    crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged => {
+                        crate::app::api_mock::types::ApiPythonRuntimeMode::CustomPython
+                    }
+                    crate::app::api_mock::types::ApiPythonRuntimeMode::CustomPython => {
+                        crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged
+                    }
+                };
+                self.ide_panel.api.mock_python_version_picker_open = false;
+                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockPythonCheckRuntime => {
+                self.commit_api_focus();
+                crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
                     &mut self.ide_panel.api.mock.uv,
                 );
                 self.ide_panel.api.persist();
             }
-            crate::ui_system::UiId::ApiMockDownloadUv => {
-                self.ide_panel.api.mock.uv.last_error = if cfg!(windows) {
-                    "Run: powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+            crate::ui_system::UiId::ApiMockPythonPrepareVersion => {
+                self.commit_api_focus();
+                self.trigger_api_python_install();
+            }
+            crate::ui_system::UiId::ApiMockPythonPickUvPath => {
+                self.commit_api_focus();
+                self.trigger_api_python_path_picker(ApiPythonPathPickKind::Uv);
+            }
+            crate::ui_system::UiId::ApiMockPythonUvPathInput => {
+                self.focus_api_input(ApiFocus::MockPythonUvPath);
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiMockPythonVersionInput => {
+                self.commit_api_focus();
+                if self.ide_panel.api.mock_python_version_picker_open {
+                    self.ide_panel.api.mock_python_version_picker_open = false;
                 } else {
-                    "Run: curl -LsSf https://astral.sh/uv/install.sh | sh"
+                    self.trigger_api_python_version_list();
                 }
-                .to_string();
-                self.ide_panel.api.persist();
+            }
+            crate::ui_system::UiId::ApiMockPythonVersionOption(idx) => {
+                self.commit_api_focus();
+                if let Some(row) = self.ide_panel.api.mock_python_versions.get(idx) {
+                    self.ide_panel.api.mock.uv.python_version = row.version.clone();
+                    self.ide_panel.api.mock_python_version_picker_open = false;
+                    self.ide_panel.api.mock_python_versions_scroll.current = 0.0;
+                    self.ide_panel.api.mock_python_versions_scroll.target = 0.0;
+                    self.ide_panel.api.persist();
+                }
+            }
+            crate::ui_system::UiId::ApiMockPythonPickCustomPath => {
+                self.commit_api_focus();
+                self.trigger_api_python_path_picker(ApiPythonPathPickKind::CustomPython);
+            }
+            crate::ui_system::UiId::ApiMockPythonCustomPathInput => {
+                self.focus_api_input(ApiFocus::MockPythonCustomPath);
+                self.place_api_cursor_from_last_click(id, false);
+            }
+            crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx) => {
+                self.focus_api_input(ApiFocus::MockManualPath { manual_idx });
+                self.place_api_cursor_from_last_click(id, false);
             }
             crate::ui_system::UiId::ApiMockRouteEnable(route_idx) => {
                 self.toggle_api_route_mock(route_idx);
             }
+            crate::ui_system::UiId::ApiMockRouteDetailsToggle(route_idx) => {
+                self.commit_api_focus();
+                let Some((meta, _)) = self.active_api_tab() else {
+                    return true;
+                };
+                let key = (meta.spec_id, route_idx);
+                if self.ide_panel.api.expanded_mock_routes.contains(&key) {
+                    self.ide_panel.api.expanded_mock_routes.remove(&key);
+                } else {
+                    self.ide_panel.api.expanded_mock_routes.insert(key);
+                }
+            }
             crate::ui_system::UiId::ApiMockRoutePythonToggle(route_idx) => {
                 self.toggle_api_route_python(route_idx);
-            }
-            crate::ui_system::UiId::ApiMockRouteTyCheck(route_idx) => {
-                self.start_api_mock_ty_check(route_idx);
             }
             crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockStaticResponse { route_idx });
                 self.place_api_cursor_from_last_click(id, true);
             }
+            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
+                self.focus_api_input(ApiFocus::MockSignature { route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
             crate::ui_system::UiId::ApiMockAddManualRoute => {
                 self.add_api_manual_route();
+            }
+            crate::ui_system::UiId::ApiMockManualRouteOpen(manual_idx) => {
+                self.open_api_manual_route(manual_idx);
             }
             crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockPrelude { route_idx });
@@ -4818,6 +5748,12 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockBody { route_idx });
                 self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiMockPreludeReset(route_idx) => {
+                self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Prelude);
+            }
+            crate::ui_system::UiId::ApiMockBodyReset(route_idx) => {
+                self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Body);
             }
             crate::ui_system::UiId::ApiMockManualRouteMethod(manual_idx) => {
                 self.commit_api_focus();
@@ -4830,6 +5766,7 @@ impl crate::app::App {
                         ApiMethod::Delete => ApiMethod::Get,
                         ApiMethod::Head | ApiMethod::Options | ApiMethod::Trace => ApiMethod::Get,
                     };
+                    self.sync_api_manual_route_tabs();
                     self.ide_panel.api.persist();
                 }
             }
@@ -4838,6 +5775,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockManualRouteRemove(idx) => {
                 if idx < self.ide_panel.api.mock.manual_routes.len() {
                     self.ide_panel.api.mock.manual_routes.remove(idx);
+                    self.sync_api_manual_route_tabs();
                     self.ide_panel.api.persist();
                 }
             }
@@ -5372,6 +6310,74 @@ impl crate::app::App {
         true
     }
 
+    pub fn api_python_runtime_overlay_active(&self) -> bool {
+        self.ide_panel.api.mock_python_runtime_open
+    }
+
+    pub fn api_runtime_poll_pending(&self) -> bool {
+        self.ide_panel.api.python_version_list_rx.is_some()
+            || self.ide_panel.api.python_install_rx.is_some()
+            || self.ide_panel.api.python_path_pick_rx.is_some()
+    }
+
+    pub fn scroll_api_python_runtime_overlay(&mut self, dy: f32) -> bool {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return false;
+        };
+        let s = renderer.scale_factor;
+        let layout = api_python_runtime_dialog_layout(renderer.width, renderer.height, s);
+        let mx = renderer.last_mouse_x;
+        let my = renderer.last_mouse_y;
+        if self.ide_panel.api.mock_python_version_picker_open {
+            let rect = api_python_version_list_rect(layout, s);
+            if api_point_in_rect(mx, my, rect) {
+                let max_scroll =
+                    api_python_version_list_max_scroll(self.ide_panel.api.mock_python_versions.len(), s);
+                self.ide_panel.api.mock_python_versions_scroll.anim_speed = 7.0;
+                self.ide_panel.api.mock_python_versions_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .mock_python_versions_scroll
+                    .clamp_target(0.0, max_scroll);
+                return true;
+            }
+        }
+        if api_python_install_log_visible(&self.ide_panel.api) {
+            let rect = api_python_install_log_rect(layout, s);
+            if api_point_in_rect(mx, my, rect) {
+                let max_scroll = api_python_install_log_max_scroll(
+                    self.ide_panel.api.mock_python_install_log.len(),
+                    rect.3,
+                    s,
+                );
+                self.ide_panel.api.mock_python_install_log_scroll.anim_speed = 7.0;
+                self.ide_panel.api.mock_python_install_log_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .mock_python_install_log_scroll
+                    .clamp_target(0.0, max_scroll);
+                return true;
+            }
+        }
+        true
+    }
+
+    pub fn ui_id_is_api_python_runtime_overlay(id: crate::ui_system::UiId) -> bool {
+        matches!(
+            id,
+            crate::ui_system::UiId::ApiMockPythonManageClose
+                | crate::ui_system::UiId::ApiMockPythonModeToggle
+                | crate::ui_system::UiId::ApiMockPythonCheckRuntime
+                | crate::ui_system::UiId::ApiMockPythonPrepareVersion
+                | crate::ui_system::UiId::ApiMockPythonPickUvPath
+                | crate::ui_system::UiId::ApiMockPythonPickCustomPath
+                | crate::ui_system::UiId::ApiMockPythonVersionOption(_)
+                | crate::ui_system::UiId::ApiMockPythonUvPathInput
+                | crate::ui_system::UiId::ApiMockPythonVersionInput
+                | crate::ui_system::UiId::ApiMockPythonCustomPathInput
+        )
+    }
+
     pub fn toggle_api_mock_server(&mut self) {
         self.commit_api_focus();
         if matches!(
@@ -5381,15 +6387,21 @@ impl crate::app::App {
         ) {
             self.ide_panel.api.mock.server_status =
                 crate::app::api_mock::types::ApiMockServerStatus::Stopping;
+            push_api_mock_server_log(&mut self.ide_panel.api, "server stop requested".to_string());
             stop_api_mock_server();
             return;
         }
         let snapshot = self.ide_panel.api.mock_server_snapshot();
         self.ide_panel.api.mock.server_status =
             crate::app::api_mock::types::ApiMockServerStatus::Starting;
+        push_api_mock_server_log(
+            &mut self.ide_panel.api,
+            format!("server start requested {}:{}", snapshot.bind_host, snapshot.port),
+        );
         if let Err(err) = start_api_mock_server(snapshot) {
             self.ide_panel.api.mock.server_status =
-                crate::app::api_mock::types::ApiMockServerStatus::Failed(err);
+                crate::app::api_mock::types::ApiMockServerStatus::Failed(err.clone());
+            push_api_mock_server_log(&mut self.ide_panel.api, format!("server start failed: {err}"));
         }
     }
 
@@ -5456,7 +6468,7 @@ impl crate::app::App {
         if self.api_route_override(route_idx).is_some() {
             return;
         }
-        self.add_api_route_override(route_idx, true);
+        self.add_api_route_override(route_idx, false);
     }
 
     fn add_api_route_override(&mut self, route_idx: usize, enabled: bool) {
@@ -5527,8 +6539,8 @@ impl crate::app::App {
                 (item.source_key == source_key
                     && item.method == route.method
                     && item.path == route.path)
-                    .then_some(item.python.as_ref())
-                    .flatten()
+                .then_some(item.python.as_ref().filter(|script| script.enabled))
+                .flatten()
             })
     }
 
@@ -5563,9 +6575,274 @@ impl crate::app::App {
                 (item.source_key == source_key
                     && item.method == route.method
                     && item.path == route.path)
-                    .then_some(item.python.as_mut())
-                    .flatten()
+                .then_some(item.python.as_mut().filter(|script| script.enabled))
+                .flatten()
             })
+    }
+
+    fn api_mock_python_focus_target(&self) -> Option<(usize, ApiMockSourcePart)> {
+        match self.ide_panel.api.focused {
+            Some(ApiFocus::MockPrelude { route_idx }) => {
+                Some((route_idx, ApiMockSourcePart::Prelude))
+            }
+            Some(ApiFocus::MockBody { route_idx }) => Some((route_idx, ApiMockSourcePart::Body)),
+            _ => None,
+        }
+    }
+
+    fn api_mock_editor_key_for_focus(focus: &ApiFocus) -> Option<(usize, ApiMockSourcePart)> {
+        match focus {
+            ApiFocus::MockPrelude { route_idx } => Some((*route_idx, ApiMockSourcePart::Prelude)),
+            ApiFocus::MockBody { route_idx } => Some((*route_idx, ApiMockSourcePart::Body)),
+            _ => None,
+        }
+    }
+
+    fn stash_active_api_mock_editor(&mut self) {
+        let Some(key) = self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .and_then(Self::api_mock_editor_key_for_focus)
+        else {
+            return;
+        };
+        let editor = std::mem::replace(&mut self.ide_panel.api.input_editor, Editor::new(512));
+        self.ide_panel.api.mock_python_editors.insert(key, editor);
+    }
+
+    fn api_mock_route_context(
+        &self,
+        route_idx: usize,
+    ) -> Option<(ApiMethod, String, ApiRouteRow, ApiSpecModel)> {
+        let (meta, _) = self.active_api_tab()?;
+        let spec_id = meta.spec_id;
+        let model = self.ide_panel.api.models.get(&spec_id)?.clone();
+        let route = model.routes.get(route_idx)?.clone();
+        Some((route.method, route.path.clone(), route, model))
+    }
+
+    fn api_mock_signature_for_route(&self, route_idx: usize) -> Option<String> {
+        let (_, path, _, _) = self.api_mock_route_context(route_idx)?;
+        let mut out = String::from("def handler(\n    req: Request,");
+        for name in api_mock_path_param_names(&path) {
+            out.push_str("\n    ");
+            out.push_str(&api_mock_sanitize_python_param(&name));
+            out.push_str(": str,");
+        }
+        out.push_str("\n    query: Query,\n    body: Body | None,\n    fields: Fields,\n) -> dict[str, Any]:");
+        Some(out)
+    }
+
+    fn api_mock_script_for_tools(
+        &self,
+        route_idx: usize,
+    ) -> Option<crate::app::api_mock::types::ApiMockPythonScript> {
+        let mut script = self.api_route_python_script(route_idx)?.clone();
+        script.body = api_mock_body_editor_text(&script.body);
+        if let Some((focused_route, part)) = self.api_mock_python_focus_target()
+            && focused_route == route_idx
+        {
+            let text = self.ide_panel.api.input_editor.get_full_text();
+            match part {
+                ApiMockSourcePart::Prelude => script.prelude = text,
+                ApiMockSourcePart::Signature => {}
+                ApiMockSourcePart::Body => script.body = text,
+            }
+        }
+        Some(script)
+    }
+
+    fn api_mock_edit_text_for_part(
+        &self,
+        route_idx: usize,
+        part: ApiMockSourcePart,
+        script: &crate::app::api_mock::types::ApiMockPythonScript,
+    ) -> String {
+        if self.api_mock_python_focus_target() == Some((route_idx, part)) {
+            self.ide_panel.api.input_editor.get_full_text()
+        } else {
+            match part {
+                ApiMockSourcePart::Prelude => script.prelude.clone(),
+                ApiMockSourcePart::Signature => {
+                    self.api_mock_signature_for_route(route_idx).unwrap_or_default()
+                }
+                ApiMockSourcePart::Body => script.body.clone(),
+            }
+        }
+    }
+
+    fn api_mock_virtual_path(route_idx: usize) -> PathBuf {
+        std::env::temp_dir().join(format!("rriter_api_mock_route_{route_idx}.py"))
+    }
+
+    fn map_api_mock_spans_to_edit(
+        spans: &[ColorSpan],
+        virtual_source: &crate::app::api_mock::ty_check::ApiMockVirtualSource,
+        part: ApiMockSourcePart,
+    ) -> Vec<ColorSpan> {
+        let mut out = Vec::with_capacity(spans.len().min(128));
+        for span in spans {
+            match part {
+                ApiMockSourcePart::Prelude => {
+                    let start = span.start.max(virtual_source.prelude_start);
+                    let end = span.end.min(virtual_source.prelude_end);
+                    if start < end {
+                        out.push(ColorSpan {
+                            start: start - virtual_source.prelude_start,
+                            end: end - virtual_source.prelude_start,
+                            color: span.color,
+                        });
+                    }
+                }
+                ApiMockSourcePart::Signature => {
+                    let start = span.start.max(virtual_source.signature_start);
+                    let end = span.end.min(virtual_source.signature_end);
+                    if start < end {
+                        out.push(ColorSpan {
+                            start: start - virtual_source.signature_start,
+                            end: end - virtual_source.signature_start,
+                            color: span.color,
+                        });
+                    }
+                }
+                ApiMockSourcePart::Body => {
+                    for line in &virtual_source.body_lines {
+                        let start = span.start.max(line.source_start);
+                        let end = span.end.min(line.source_end);
+                        if start < end {
+                            out.push(ColorSpan {
+                                start: line.edit_start + start - line.source_start,
+                                end: line.edit_start + end - line.source_start,
+                                color: span.color,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn refresh_api_mock_python_highlight(&mut self, route_idx: usize, part: ApiMockSourcePart) {
+        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
+            return;
+        };
+        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
+            return;
+        };
+        let virtual_source = build_api_mock_virtual_source(method, &path, &route, &model, &script);
+        let edit_text = self.api_mock_edit_text_for_part(route_idx, part, &script);
+        let version = self.ide_panel.api.input_editor.version;
+        let edit_cursor = if self.api_mock_python_focus_target() == Some((route_idx, part)) {
+            self.ide_panel.api.input_editor.cursor
+        } else {
+            0
+        };
+        let source_cursor = virtual_source.edit_offset_to_source(
+            part,
+            &edit_text,
+            edit_cursor,
+        );
+        self.ide_panel.api.mock_highlight_spans = self
+            .ide_panel
+            .api
+            .mock_highlight_cache
+            .get(&(route_idx, part))
+            .cloned()
+            .unwrap_or_default();
+        self.ide_panel.api.mock_highlight_target = Some((route_idx, part, version));
+        let source = virtual_source.source.clone();
+        self.ide_panel.api.mock_highlighter.spans.clear();
+        self.ide_panel
+            .api
+            .mock_highlighter
+            .reset(version, source, "py".to_string(), source_cursor);
+        if self.ide_panel.api.mock_highlighter.sync_highlight_after_edit(
+            version,
+            None,
+            None,
+            None,
+            None,
+            Duration::from_millis(4),
+        ) {
+            let spans = self.ide_panel.api.mock_highlighter.spans.clone();
+            for cache_part in [
+                ApiMockSourcePart::Prelude,
+                ApiMockSourcePart::Signature,
+                ApiMockSourcePart::Body,
+            ] {
+                let edit_spans =
+                    Self::map_api_mock_spans_to_edit(&spans, &virtual_source, cache_part);
+                self.ide_panel
+                    .api
+                    .mock_highlight_cache
+                    .insert((route_idx, cache_part), edit_spans);
+            }
+            self.ide_panel.api.mock_highlight_spans = self
+                .ide_panel
+                .api
+                .mock_highlight_cache
+                .get(&(route_idx, part))
+                .cloned()
+                .unwrap_or_default();
+        }
+    }
+
+    fn queue_api_mock_python_tools(&mut self, route_idx: usize) {
+        if let Some((focused_route, part)) = self.api_mock_python_focus_target()
+            && focused_route == route_idx
+        {
+            self.refresh_api_mock_python_highlight(route_idx, part);
+            self.ide_panel.api.mock_ty_due = Some(Instant::now() + Duration::from_millis(450));
+        }
+    }
+
+    fn ensure_active_api_mock_highlight(&mut self) -> bool {
+        let Some((spec_id, route_idx)) = self
+            .active_api_tab()
+            .and_then(|(meta, state)| state.route_idx.map(|route_idx| (meta.spec_id, route_idx)))
+        else {
+            return false;
+        };
+        if !self
+            .ide_panel
+            .api
+            .expanded_mock_routes
+            .contains(&(spec_id, route_idx))
+        {
+            return false;
+        }
+        if self.api_route_python_script(route_idx).is_none() {
+            return false;
+        }
+        if self
+            .ide_panel
+            .api
+            .mock_highlight_target
+            .is_some_and(|(highlight_route, _, _)| highlight_route == route_idx)
+        {
+            return false;
+        }
+        let missing_cache = [
+            ApiMockSourcePart::Prelude,
+            ApiMockSourcePart::Signature,
+            ApiMockSourcePart::Body,
+        ]
+        .into_iter()
+        .any(|part| {
+            !self
+                .ide_panel
+                .api
+                .mock_highlight_cache
+                .contains_key(&(route_idx, part))
+        });
+        if !missing_cache {
+            return false;
+        }
+        self.refresh_api_mock_python_highlight(route_idx, ApiMockSourcePart::Body);
+        true
     }
 
     pub fn toggle_api_route_mock(&mut self, route_idx: usize) {
@@ -5670,7 +6947,7 @@ impl crate::app::App {
                     source_key,
                     method: route.method,
                     path: route.path,
-                    enabled: true,
+                    enabled: false,
                     response: crate::app::api_mock::types::ApiMockResponse::Generated,
                     python: None,
                     extra_input_fields: Vec::new(),
@@ -5684,19 +6961,60 @@ impl crate::app::App {
                 .len()
                 .saturating_sub(1)
         };
+        let focused_this_route = self
+            .api_mock_python_focus_target()
+            .is_some_and(|(focused_route, _)| focused_route == route_idx);
+        let mut disabled_active_script = false;
         if let Some(override_route) = self.ide_panel.api.mock.route_overrides.get_mut(idx) {
-            if override_route.python.is_some() {
-                override_route.python = None;
+            if let Some(script) = override_route.python.as_mut() {
+                script.enabled = !script.enabled;
+                disabled_active_script = !script.enabled;
             } else {
-                override_route.python = Some(crate::app::api_mock::types::ApiMockPythonScript {
-                    prelude: String::new(),
-                    body: "return json_response({\"ok\": True})".to_string(),
-                    timeout_ms: 1000,
-                });
-                override_route.enabled = true;
+                override_route.python = Some(default_api_mock_python_script());
             }
         }
+        if disabled_active_script && focused_this_route {
+            self.stash_active_api_mock_editor();
+            self.ide_panel.api.focused = None;
+        }
         self.ide_panel.api.persist();
+    }
+
+    pub fn reset_api_route_python_part(&mut self, route_idx: usize, part: ApiMockSourcePart) {
+        self.commit_api_focus();
+        let Some(script) = self.api_route_python_script_mut(route_idx) else {
+            return;
+        };
+        match part {
+            ApiMockSourcePart::Prelude => script.prelude.clear(),
+            ApiMockSourcePart::Signature => return,
+            ApiMockSourcePart::Body => script.body = default_api_mock_python_body(),
+        }
+        self.ide_panel
+            .api
+            .mock_python_editors
+            .remove(&(route_idx, part));
+        self.ide_panel
+            .api
+            .mock_highlight_cache
+            .retain(|(cached_route, _), _| *cached_route != route_idx);
+        self.ide_panel.api.mock_highlight_target = None;
+        self.ide_panel.api.mock_highlight_spans.clear();
+        self.ide_panel.api.mock_ty_diagnostics.clear();
+        if self.api_mock_python_focus_target() == Some((route_idx, part)) {
+            let text = match part {
+                ApiMockSourcePart::Prelude | ApiMockSourcePart::Signature => String::new(),
+                ApiMockSourcePart::Body => default_api_mock_python_body(),
+            };
+            let old_version = self.ide_panel.api.input_editor.version;
+            self.ide_panel.api.input_editor.set_text_clean(&text);
+            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+            self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
+            self.ide_panel.api.input_editor.selection_anchor =
+                Some(self.ide_panel.api.input_editor.cursor);
+        }
+        self.ide_panel.api.persist();
+        self.queue_api_mock_python_tools(route_idx);
     }
 
     pub fn add_api_manual_route(&mut self) {
@@ -5723,58 +7041,261 @@ impl crate::app::App {
                 output_fields: Vec::new(),
             });
         self.ide_panel.api.persist();
+        self.open_api_manual_route(next.saturating_sub(1));
     }
 
-    pub fn start_api_mock_ty_check(&mut self, route_idx: usize) {
-        self.commit_api_focus();
-        let Some((meta, _)) = self.active_api_tab() else {
+    fn start_api_mock_ty_check_now(&mut self, route_idx: usize, version: u64) {
+        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
             return;
         };
-        let spec_id = meta.spec_id;
-        let Some(route) = self
-            .ide_panel
-            .api
-            .models
-            .get(&spec_id)
-            .and_then(|model| model.routes.get(route_idx))
-            .cloned()
-        else {
-            return;
-        };
-        let Some(model) = self.ide_panel.api.models.get(&spec_id).cloned() else {
-            return;
-        };
-        self.ensure_api_route_override(route_idx);
-        let Some(script) = self.api_route_python_script(route_idx).cloned() else {
-            self.toggle_api_route_python(route_idx);
-            let Some(script) = self.api_route_python_script(route_idx).cloned() else {
-                return;
-            };
-            self.ide_panel.api.mock.check_status =
-                crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx };
-            self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
-                route_idx,
-                route.method,
-                route.path.clone(),
-                route,
-                model,
-                script,
-            ));
+        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
             return;
         };
         self.ide_panel.api.mock.check_status =
-            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx };
+            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx, version };
+        self.ide_panel.api.mock_ty_diagnostics.clear();
+        self.ide_panel.api.mock_ty_pending = Some((route_idx, version));
         self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
             route_idx,
-            route.method,
-            route.path.clone(),
+            version,
+            method,
+            path,
             route,
             model,
             script,
         ));
     }
 
+    pub(crate) fn api_mock_completion_focus(&self) -> Option<(usize, ApiMockSourcePart)> {
+        self.api_mock_python_focus_target()
+    }
+
+    pub(crate) fn api_input_current_word_prefix(&self) -> String {
+        let editor = &self.ide_panel.api.input_editor;
+        let mut p = editor.cursor;
+        while p > 0 {
+            let b = editor.byte_at(p - 1);
+            if !(b.is_ascii_alphanumeric() || b == b'_') {
+                break;
+            }
+            p -= 1;
+        }
+        if p == editor.cursor {
+            return String::new();
+        }
+        let mut out = Vec::with_capacity(editor.cursor - p);
+        for i in p..editor.cursor {
+            out.push(editor.byte_at(i));
+        }
+        String::from_utf8(out).unwrap_or_default()
+    }
+
+    fn api_input_after_python_member_dot(&self) -> bool {
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let cursor = self.ide_panel.api.input_editor.cursor.min(text.len());
+        let line_start = text[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+        let prefix = &text[line_start..cursor];
+        let bytes = prefix.as_bytes();
+        let mut idx = bytes.len();
+        while idx > 0 && (bytes[idx - 1].is_ascii_alphanumeric() || bytes[idx - 1] == b'_') {
+            idx -= 1;
+        }
+        idx >= 2 && bytes.get(idx - 1) == Some(&b'.')
+            && bytes
+                .get(idx - 2)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+    }
+
+    fn api_mock_completion_indices(prefix: &str, word: &str) -> Option<Vec<usize>> {
+        if prefix.is_empty() {
+            return Some(Vec::new());
+        }
+        let prefix = prefix.to_lowercase();
+        let word_lower = word.to_lowercase();
+        if let Some(start) = word_lower.find(&prefix) {
+            return Some((start..start + prefix.len()).collect());
+        }
+        None
+    }
+
+    fn api_mock_autocomplete_anchor(&mut self) -> Option<(f32, f32)> {
+        let focus = self.ide_panel.api.focused.as_ref()?;
+        let (id, multiline) = self.api_focus_ui_target(focus)?;
+        let rect = self.ui_registry.rect_for(id)?;
+        let renderer = self.renderer.as_mut()?;
+        let scale = renderer.scale_factor;
+        let text = self.ide_panel.api.input_editor.get_full_text();
+        let cursor = self.ide_panel.api.input_editor.cursor.min(text.len());
+        let line_start = text[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+        let line_idx = text[..line_start].bytes().filter(|b| *b == b'\n').count();
+        let x = rect.0
+            + 10.0 * scale
+            + renderer.measure_ui_width(&text[line_start..cursor], API_BODY_TEXT_SCALE);
+        let y = if multiline {
+            rect.1 + 10.0 * scale + line_idx as f32 * api_text_area_line_height(scale)
+        } else {
+            rect.1 + rect.3 * 0.55
+        };
+        Some((x, y))
+    }
+
+    pub(crate) fn request_api_mock_ty_autocomplete(&mut self, trigger: Option<&str>) {
+        let Some((route_idx, part)) = self.api_mock_python_focus_target() else {
+            return;
+        };
+        let prefix = self.api_input_current_word_prefix();
+        if trigger.is_none() && prefix.is_empty() && !self.api_input_after_python_member_dot() {
+            self.close_autocomplete();
+            return;
+        }
+        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
+            return;
+        };
+        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
+            return;
+        };
+        let virtual_source = build_api_mock_virtual_source(method, &path, &route, &model, &script);
+        let edit_text = self.ide_panel.api.input_editor.get_full_text();
+        let source_cursor = virtual_source.edit_offset_to_source(
+            part,
+            &edit_text,
+            self.ide_panel.api.input_editor.cursor,
+        );
+        let mut line_offsets = vec![0usize];
+        for (idx, b) in virtual_source.source.bytes().enumerate() {
+            if b == b'\n' {
+                line_offsets.push(idx + 1);
+            }
+        }
+        let (line, col) =
+            crate::lsp::offset_to_lsp_pos(&virtual_source.source, source_cursor, &line_offsets);
+        let path = Self::api_mock_virtual_path(route_idx);
+        let Some(lsp) = self.lsp.as_mut() else {
+            return;
+        };
+        lsp.notify_change(
+            &path,
+            "py",
+            &virtual_source.source,
+            self.ide_panel.api.input_editor.version as i32,
+        );
+        if let Some(id) = lsp.request_ty_completion(&path, "py", line, col, trigger) {
+            self.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+            self.autocomplete_pending_request_id = Some(id);
+            self.autocomplete_pending_request_mode = None;
+            self.autocomplete_pending_request_path = None;
+            self.autocomplete_pending_context_key = None;
+            self.autocomplete_apply_pending_response = false;
+            if !self.autocomplete_active {
+                self.autocomplete_anim_progress = 0.0;
+            }
+            self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+        }
+    }
+
+    pub(crate) fn update_api_mock_ty_autocomplete(
+        &mut self,
+        items: Vec<crate::lsp::LspCompletionItem>,
+    ) {
+        if self.api_mock_python_focus_target().is_none() {
+            return;
+        }
+        let prefix = self.api_input_current_word_prefix();
+        if prefix.is_empty() && !self.api_input_after_python_member_dot() {
+            self.close_autocomplete();
+            return;
+        }
+        let prefix_lower = prefix.to_lowercase();
+        let mut out = Vec::new();
+        for item in items.into_iter().take(120) {
+            let item: crate::app::AutocompleteItem = item.into();
+            if prefix_lower.is_empty() || item.word.to_lowercase().contains(&prefix_lower) {
+                if let Some(indices) = Self::api_mock_completion_indices(&prefix, &item.word) {
+                    out.push((item, indices));
+                }
+            }
+        }
+        out.sort_unstable_by_key(|(item, _)| {
+            let lower = item.word.to_lowercase();
+            (
+                !lower.starts_with(&prefix_lower),
+                matches!(item.kind, crate::highlighter::SymbolKind::Unknown),
+                item.word.len(),
+            )
+        });
+        out.truncate(60);
+        self.autocomplete_options = out;
+        self.autocomplete_active = !self.autocomplete_options.is_empty();
+        if !self.autocomplete_active {
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+            return;
+        }
+        self.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_scroll.current = 0.0;
+        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
+    }
+
+    pub(crate) fn apply_api_mock_autocomplete(&mut self) -> bool {
+        let Some((route_idx, _)) = self.api_mock_python_focus_target() else {
+            return false;
+        };
+        if !self.autocomplete_active || self.autocomplete_options.is_empty() {
+            return true;
+        }
+        let item = self.autocomplete_options[self.autocomplete_selected_idx]
+            .0
+            .clone();
+        let selected = item
+            .insert_text
+            .as_deref()
+            .or_else(|| item.text_edit.as_ref().map(|edit| edit.new_text.as_str()))
+            .unwrap_or(&item.word)
+            .to_string();
+        let prefix_len = self.api_input_current_word_prefix().len();
+        for _ in 0..prefix_len {
+            self.ide_panel.api.input_editor.backspace();
+        }
+        let _ = self.ide_panel.api.input_editor.insert_str(&selected);
+        if !item.additional_text_edits.is_empty()
+            && let Some(script) = self.api_route_python_script_mut(route_idx)
+        {
+            for edit in item.additional_text_edits {
+                let text = edit.new_text.trim_matches(|c| c == '\n' || c == '\r');
+                if text.starts_with("import ") || text.starts_with("from ") {
+                    if !script.prelude.trim().is_empty() && !script.prelude.ends_with('\n') {
+                        script.prelude.push('\n');
+                    }
+                    script.prelude.push_str(text);
+                    script.prelude.push('\n');
+                }
+            }
+        }
+        self.commit_api_focus();
+        self.queue_api_mock_python_tools(route_idx);
+        self.close_autocomplete();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        true
+    }
+
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        if key_event.state == winit::event::ElementState::Pressed
+            && ctrl
+            && key_event.physical_key
+                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Digit4)
+            && self.active_tab_is_api_client()
+        {
+            self.close_tab_at(self.active_tab);
+            return true;
+        }
         if self.ide_panel.api.focused.is_none() {
             return self.active_tab_is_api_client();
         }
@@ -5787,8 +7308,47 @@ impl crate::app::App {
         if key_event.state != winit::event::ElementState::Pressed {
             return true;
         }
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
+        if self.api_mock_python_focus_target().is_some() && self.autocomplete_active {
+            match key_event.physical_key {
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                    self.close_autocomplete();
+                    return true;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown) => {
+                    let len = self.autocomplete_options.len();
+                    if len > 0 {
+                        self.autocomplete_selected_idx = (self.autocomplete_selected_idx + 1) % len;
+                        self.ensure_autocomplete_visible();
+                    }
+                    return true;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) => {
+                    let len = self.autocomplete_options.len();
+                    if len > 0 {
+                        self.autocomplete_selected_idx = if self.autocomplete_selected_idx == 0 {
+                            len.saturating_sub(1)
+                        } else {
+                            self.autocomplete_selected_idx.saturating_sub(1)
+                        };
+                        self.ensure_autocomplete_visible();
+                    }
+                    return true;
+                }
+                winit::keyboard::PhysicalKey::Code(
+                    winit::keyboard::KeyCode::Enter
+                    | winit::keyboard::KeyCode::NumpadEnter
+                    | winit::keyboard::KeyCode::Tab,
+                ) => {
+                    self.apply_api_mock_autocomplete();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        let mock_python_target = self.api_mock_python_focus_target();
+        let input_version_before = self.ide_panel.api.input_editor.version;
+        let mut typed_text: Option<String> = None;
         let is_body = matches!(
             self.ide_panel.api.focused,
             Some(
@@ -5798,7 +7358,12 @@ impl crate::app::App {
                     | ApiFocus::MockStaticResponse { .. }
             )
         );
+        let is_signature = matches!(
+            self.ide_panel.api.focused,
+            Some(ApiFocus::MockSignature { .. })
+        );
         let is_response = matches!(self.ide_panel.api.focused, Some(ApiFocus::Response { .. }));
+        let is_readonly = is_response || is_signature;
         let is_array = self
             .ide_panel
             .api
@@ -5820,6 +7385,10 @@ impl crate::app::App {
                     self.start_api_url_import_from_input();
                 } else if is_array {
                     finish_api_array_editor_draft(&mut self.ide_panel.api.input_editor);
+                } else if is_signature {
+                } else if mock_python_target.is_some() {
+                    let _ = self.ide_panel.api.input_editor.insert_str("\n");
+                    typed_text = Some("\n".to_string());
                 } else if is_body && shift {
                     let _ = self.ide_panel.api.input_editor.insert_str("\n");
                 } else {
@@ -5830,20 +7399,37 @@ impl crate::app::App {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) if ctrl => {
                 self.ide_panel.api.input_editor.select_all();
             }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyW)
+                if ctrl && mock_python_target.is_some() =>
+            {
+                let text = self.ide_panel.api.input_editor.get_full_text();
+                if let Some((start, end)) = crate::highlighter::ast_select_expand_range(
+                    &text,
+                    "py",
+                    self.ide_panel.api.input_editor.cursor,
+                    self.ide_panel.api.input_editor.selection_anchor,
+                ) {
+                    self.ide_panel.api.input_editor.selection_anchor = Some(start);
+                    self.ide_panel.api.input_editor.cursor = end;
+                } else {
+                    self.ide_panel.api.input_editor.select_expand();
+                }
+                self.close_autocomplete();
+            }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC) if ctrl => {
                 if let Some(text) = self.ide_panel.api.input_editor.get_selection() {
                     self.set_clipboard_text(text);
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) if ctrl => {
-                if !is_response && let Some(text) = self.ide_panel.api.input_editor.get_selection()
+                if !is_readonly && let Some(text) = self.ide_panel.api.input_editor.get_selection()
                 {
                     self.set_clipboard_text(text);
                     self.ide_panel.api.input_editor.delete_selection();
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if ctrl => {
-                if !is_response && let Some(text) = self.get_clipboard_text() {
+                if !is_readonly && let Some(text) = self.get_clipboard_text() {
                     let clean = if is_body {
                         text
                     } else if is_array {
@@ -5852,25 +7438,26 @@ impl crate::app::App {
                         text.replace('\n', "").replace('\r', "")
                     };
                     let _ = self.ide_panel.api.input_editor.insert_str(&clean);
+                    typed_text = Some(clean);
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
-                if ctrl && shift && !is_response =>
+                if ctrl && shift && !is_readonly =>
             {
                 let _ = self.ide_panel.api.input_editor.redo();
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
-                if ctrl && !is_response =>
+                if ctrl && !is_readonly =>
             {
                 let _ = self.ide_panel.api.input_editor.undo();
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY)
-                if ctrl && !is_response =>
+                if ctrl && !is_readonly =>
             {
                 let _ = self.ide_panel.api.input_editor.redo();
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
-                if is_response {
+                if is_readonly {
                 } else if is_array && !ctrl {
                     backspace_api_array_editor(&mut self.ide_panel.api.input_editor);
                 } else if ctrl {
@@ -5880,7 +7467,7 @@ impl crate::app::App {
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) => {
-                if is_response {
+                if is_readonly {
                 } else if ctrl {
                     self.ide_panel.api.input_editor.delete_word_forward();
                 } else {
@@ -5902,12 +7489,12 @@ impl crate::app::App {
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp)
-                if is_body || is_response =>
+                if is_body || is_readonly =>
             {
                 move_api_input_vertical(&mut self.ide_panel.api.input_editor, false, shift);
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown)
-                if is_body || is_response =>
+                if is_body || is_readonly =>
             {
                 move_api_input_vertical(&mut self.ide_panel.api.input_editor, true, shift);
             }
@@ -5917,7 +7504,7 @@ impl crate::app::App {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::End) => {
                 self.ide_panel.api.input_editor.move_end(shift);
             }
-            _ if !is_response
+            _ if !is_readonly
                 && !ctrl
                 && !self.modifiers.alt_key()
                 && !self.modifiers.super_key() =>
@@ -5935,12 +7522,35 @@ impl crate::app::App {
                         text.replace('\n', "").replace('\r', "")
                     };
                     let _ = self.ide_panel.api.input_editor.insert_str(&clean);
+                    typed_text = Some(clean);
                 }
             }
             _ => {}
         }
-        if !is_body && !is_response && !is_array {
-            self.sync_api_one_line_scroll_target(false);
+        if let Some((route_idx, _)) = mock_python_target
+            && self.ide_panel.api.input_editor.version != input_version_before
+        {
+            self.queue_api_mock_python_tools(route_idx);
+            if let Some(text) = typed_text.as_deref()
+                && (text == "." || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            {
+                self.request_api_mock_ty_autocomplete((text == ".").then_some("."));
+            } else if self.autocomplete_active {
+                self.request_api_mock_ty_autocomplete(None);
+            }
+        }
+        if let Some((id, multiline)) = self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .and_then(|focus| self.api_focus_ui_target(focus))
+        {
+            if multiline {
+                self.sync_api_multiline_scroll_target(id, false);
+            } else if !is_array {
+                self.sync_api_one_line_scroll_target(false);
+            }
         }
         self.pulse_api_cursor_blink();
         self.queue_api_body_json_validation();
@@ -5956,6 +7566,10 @@ impl crate::app::App {
             return;
         };
         if state.pending_request_id.is_some() || state.pending {
+            return;
+        }
+        if let Some(ApiClientRouteIdentity::Manual { stable_id }) = &meta.route_identity {
+            self.start_active_manual_api_request(stable_id.clone());
             return;
         }
         let spec_id = meta.spec_id;
@@ -6098,40 +7712,197 @@ impl crate::app::App {
         }
     }
 
+    fn start_active_manual_api_request(&mut self, stable_id: String) {
+        let Some((manual_idx, route)) = self
+            .ide_panel
+            .api
+            .mock
+            .manual_routes
+            .iter()
+            .enumerate()
+            .find(|(_, route)| route.stable_id == stable_id)
+            .map(|(idx, route)| (idx, route.clone()))
+        else {
+            return;
+        };
+        let Some((meta, state)) = self.active_api_tab() else {
+            return;
+        };
+        if state.pending_request_id.is_some() || state.pending {
+            return;
+        }
+        let spec_id = meta.spec_id;
+        let server = ApiServer {
+            url: api_mock_lan_url(&self.ide_panel.api.mock),
+            description: String::new(),
+            variables: Vec::new(),
+        };
+        let url = match build_request_url(&server, &route.path, &[], &[]) {
+            Ok(url) => url,
+            Err(err) => {
+                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                    state.route_idx = Some(manual_idx);
+                    state.response = Some(ApiJobResponse {
+                        request_id: 0,
+                        spec_id,
+                        route_idx: manual_idx,
+                        status: None,
+                        elapsed_ms: 0,
+                        server_reach_ms: None,
+                        timing_text: String::new(),
+                        headers: Vec::new(),
+                        headers_text: String::new(),
+                        body: String::new(),
+                        truncated: false,
+                        error: Some(err),
+                        resolved_host: None,
+                    });
+                }
+                return;
+            }
+        };
+        let request_id = self.ide_panel.api.next_request_id.max(1);
+        self.ide_panel.api.next_request_id = request_id.saturating_add(1).max(1);
+        let job = ApiJobRequest {
+            request_id,
+            spec_id,
+            route_idx: manual_idx,
+            method: route.method,
+            resolved_host: resolve_api_url_host(&url),
+            url,
+            auth_parts: Vec::new(),
+            body_json: None,
+            body_form: None,
+            body_multipart: None,
+        };
+        if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+            state.route_idx = Some(manual_idx);
+            state.pending = true;
+            state.pending_request_id = Some(request_id);
+        }
+        self.api_request_rx
+            .push((request_id, spawn_api_request(job)));
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     pub fn poll_api_client(&mut self) -> bool {
         let mut changed = false;
         let events = drain_api_mock_server_events();
         if !events.is_empty() {
             for event in events {
-                apply_api_mock_server_event(&mut self.ide_panel.api.mock.server_status, event);
+                match event {
+                    ApiMockServerEvent::Log { text } => {
+                        push_api_mock_server_log(&mut self.ide_panel.api, text);
+                    }
+                    ApiMockServerEvent::Request {
+                        method,
+                        path,
+                        status,
+                        action,
+                    } => {
+                        push_api_mock_server_log(
+                            &mut self.ide_panel.api,
+                            format!("{method} {path} -> {status} · {action}"),
+                        );
+                    }
+                    other => {
+                        push_api_mock_server_log(
+                            &mut self.ide_panel.api,
+                            api_mock_server_event_text(&other),
+                        );
+                        apply_api_mock_server_event(
+                            &mut self.ide_panel.api.mock.server_status,
+                            other,
+                        );
+                    }
+                }
+            }
+            changed = true;
+        }
+        if self.ensure_active_api_mock_highlight() {
+            changed = true;
+        }
+        if let Some((route_idx, part, version)) = self.ide_panel.api.mock_highlight_target
+            && self.ide_panel.api.mock_highlighter.poll(version)
+        {
+            let spans = self.ide_panel.api.mock_highlighter.spans.clone();
+            if let Some((method, path, route, model)) = self.api_mock_route_context(route_idx)
+                && let Some(script) = self.api_mock_script_for_tools(route_idx)
+            {
+                let virtual_source =
+                    build_api_mock_virtual_source(method, &path, &route, &model, &script);
+                for cache_part in [
+                    ApiMockSourcePart::Prelude,
+                    ApiMockSourcePart::Signature,
+                    ApiMockSourcePart::Body,
+                ] {
+                    let edit_spans =
+                        Self::map_api_mock_spans_to_edit(&spans, &virtual_source, cache_part);
+                    self.ide_panel
+                        .api
+                        .mock_highlight_cache
+                        .insert((route_idx, cache_part), edit_spans);
+                }
+                self.ide_panel.api.mock_highlight_spans = self
+                    .ide_panel
+                    .api
+                    .mock_highlight_cache
+                    .get(&(route_idx, part))
+                    .cloned()
+                    .unwrap_or_default();
+            }
+            changed = true;
+        }
+        if self.api_mock_ty_rx.is_none()
+            && let Some(due) = self.ide_panel.api.mock_ty_due
+        {
+            if Instant::now() >= due {
+                self.ide_panel.api.mock_ty_due = None;
+                if let Some((route_idx, _)) = self.api_mock_python_focus_target() {
+                    let version = self.ide_panel.api.input_editor.version;
+                    self.start_api_mock_ty_check_now(route_idx, version);
+                }
             }
             changed = true;
         }
         if let Some(rx) = self.api_mock_ty_rx.take() {
             match rx.try_recv() {
                 Ok(result) => {
-                    self.ide_panel.api.mock.check_status = if result.ok {
-                        crate::app::api_mock::types::ApiMockCheckStatus::Ok {
-                            route_idx: result.route_idx,
-                            message: result.message,
-                        }
-                    } else {
-                        crate::app::api_mock::types::ApiMockCheckStatus::Failed {
-                            route_idx: result.route_idx,
-                            message: result.message,
-                        }
-                    };
-                    changed = true;
+                    if self.ide_panel.api.mock_ty_pending
+                        == Some((result.route_idx, result.version))
+                    {
+                        self.ide_panel.api.mock_ty_pending = None;
+                        self.ide_panel.api.mock_ty_diagnostics = result.diagnostics;
+                        self.ide_panel.api.mock.check_status = if result.ok {
+                            crate::app::api_mock::types::ApiMockCheckStatus::Ok {
+                                route_idx: result.route_idx,
+                                version: result.version,
+                                message: result.message,
+                            }
+                        } else {
+                            crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+                                route_idx: result.route_idx,
+                                version: result.version,
+                                message: result.message,
+                            }
+                        };
+                        changed = true;
+                    }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     self.api_mock_ty_rx = Some(rx);
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ide_panel.api.mock_ty_diagnostics.clear();
                     self.ide_panel.api.mock.check_status =
                         crate::app::api_mock::types::ApiMockCheckStatus::Failed {
                             route_idx: 0,
+                            version: 0,
                             message: "Ty check worker stopped".to_string(),
                         };
+                    self.ide_panel.api.mock_ty_pending = None;
                     changed = true;
                 }
             }
@@ -6173,6 +7944,113 @@ impl crate::app::App {
             if let Ok(result) = rx.try_recv() {
                 self.api_body_file_rx = None;
                 self.apply_api_body_file_pick(result);
+                changed = true;
+            }
+        }
+        if let Some(rx) = self.ide_panel.api.python_path_pick_rx.take() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    if let Some(path) = result.path {
+                        match result.kind {
+                            ApiPythonPathPickKind::Uv => {
+                                self.ide_panel.api.mock.uv.configured_path = Some(path);
+                                crate::app::api_mock::python_bootstrap::refresh_uv_status(
+                                    &mut self.ide_panel.api.mock.uv,
+                                );
+                            }
+                            ApiPythonPathPickKind::CustomPython => {
+                                self.ide_panel.api.mock.uv.custom_python_path = Some(path);
+                                crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
+                                    &mut self.ide_panel.api.mock.uv,
+                                );
+                            }
+                        }
+                        self.ide_panel.api.persist();
+                    }
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.ide_panel.api.python_path_pick_rx = Some(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    changed = true;
+                }
+            }
+        }
+        if let Some(rx) = self.ide_panel.api.python_version_list_rx.take() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.ide_panel.api.mock_python_versions_loading = false;
+                    if let Some(error) = result.error {
+                        self.ide_panel.api.mock.uv.last_error = error;
+                    } else {
+                        self.ide_panel.api.mock_python_versions = result.rows;
+                        self.ide_panel.api.mock.uv.last_error.clear();
+                    }
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.ide_panel.api.python_version_list_rx = Some(rx);
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ide_panel.api.mock_python_versions_loading = false;
+                    changed = true;
+                }
+            }
+        }
+        if let Some(rx) = self.ide_panel.api.python_install_rx.take() {
+            let mut keep = true;
+            loop {
+                match rx.try_recv() {
+                    Ok(ApiPythonInstallEvent::Line(line)) => {
+                        push_api_python_install_log(&mut self.ide_panel.api, line);
+                        changed = true;
+                    }
+                    Ok(ApiPythonInstallEvent::Done(result)) => {
+                        self.ide_panel.api.mock_python_install_running = false;
+                        keep = false;
+                        match result {
+                            Ok(()) => {
+                                self.ide_panel.api.mock.uv.status =
+                                    crate::app::api_mock::types::ApiPythonRuntimeStatus::Ready;
+                                self.ide_panel.api.mock.uv.last_error.clear();
+                                push_api_python_install_log(
+                                    &mut self.ide_panel.api,
+                                    ApiPythonInstallLogLine {
+                                        text: "Готово".to_string(),
+                                        kind: ApiPythonInstallLogKind::Ok,
+                                    },
+                                );
+                            }
+                            Err(err) => {
+                                self.ide_panel.api.mock.uv.status =
+                                    crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
+                                self.ide_panel.api.mock.uv.last_error = err.clone();
+                                push_api_python_install_log(
+                                    &mut self.ide_panel.api,
+                                    ApiPythonInstallLogLine {
+                                        text: err,
+                                        kind: ApiPythonInstallLogKind::Error,
+                                    },
+                                );
+                            }
+                        }
+                        self.ide_panel.api.persist();
+                        changed = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.ide_panel.api.mock_python_install_running = false;
+                        keep = false;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if keep && self.ide_panel.api.mock_python_install_running {
+                self.ide_panel.api.python_install_rx = Some(rx);
                 changed = true;
             }
         }
@@ -6445,6 +8323,71 @@ fn default_body_for_route(route: &ApiRouteRow, model: &ApiSpecModel) -> String {
     schema_example_json(schema_ref, model, 0)
 }
 
+pub(crate) fn api_generated_response_for_route(
+    route: &ApiRouteRow,
+    model: &ApiSpecModel,
+) -> (u16, &'static str, String) {
+    let response = route
+        .responses
+        .iter()
+        .find(|response| response.status.starts_with('2'))
+        .or_else(|| {
+            route
+                .responses
+                .iter()
+                .find(|response| response.status == "default")
+        })
+        .or_else(|| route.responses.first());
+    let status = response
+        .and_then(|response| response.status.parse::<u16>().ok())
+        .unwrap_or(200);
+    let content_type = response
+        .map(|response| response.content_type.as_str())
+        .unwrap_or("application/json");
+    let is_json = content_type.is_empty() || content_type.contains("json");
+    if let Some(example) = response.and_then(|response| response.example.as_ref()) {
+        if is_json && serde_json::from_str::<Value>(example).is_err() {
+            return (status, "application/json", "{}".to_string());
+        }
+        return (
+            status,
+            if is_json {
+                "application/json"
+            } else {
+                "text/plain; charset=utf-8"
+            },
+            example.clone(),
+        );
+    }
+    if let Some(schema_ref) = response.and_then(|response| response.schema) {
+        return (
+            status,
+            if is_json {
+                "application/json"
+            } else {
+                "text/plain; charset=utf-8"
+            },
+            schema_example_json(schema_ref, model, 0),
+        );
+    }
+    if is_json {
+        (status, "application/json", "{}".to_string())
+    } else {
+        (status, "text/plain; charset=utf-8", String::new())
+    }
+}
+
+pub(crate) fn api_mock_lan_url(mock: &ApiMockState) -> String {
+    match &mock.server_status {
+        crate::app::api_mock::types::ApiMockServerStatus::Running { url } => url.clone(),
+        _ => format!("http://0.0.0.0:{}", mock.port),
+    }
+}
+
+pub(crate) fn api_manual_route_title(method: ApiMethod, path: &str) -> String {
+    format!("Mock · {} {}", method.as_str(), path)
+}
+
 fn schema_example_json(schema_ref: ApiSchemaRef, model: &ApiSpecModel, depth: usize) -> String {
     if depth > 6 {
         return "null".to_string();
@@ -6600,6 +8543,199 @@ fn save_url_cache(id: ApiSpecId, raw: &str) {
 
 fn read_url_cache(id: ApiSpecId) -> Option<String> {
     std::fs::read_to_string(api_cache_dir().join(format!("{}.json", id.0))).ok()
+}
+
+pub(crate) fn api_python_runtime_dialog_layout(
+    width: f32,
+    height: f32,
+    scale: f32,
+) -> ApiPythonRuntimeDialogLayout {
+    let pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * scale;
+    let box_w = (crate::app::file_tree::FILE_TREE_DIALOG_W * scale).min(width - 32.0 * scale);
+    let box_h = (500.0 * scale).min(height - 32.0 * scale);
+    let box_x = ((width - box_w) / 2.0).round();
+    let box_y = ((height - box_h) / 2.0).round();
+    ApiPythonRuntimeDialogLayout {
+        box_x,
+        box_y,
+        box_w,
+        box_h,
+        pad,
+        content_w: box_w - pad * 2.0,
+    }
+}
+
+pub(crate) fn api_python_version_list_rect(
+    layout: ApiPythonRuntimeDialogLayout,
+    scale: f32,
+) -> (f32, f32, f32, f32) {
+    (
+        layout.box_x + layout.pad,
+        layout.box_y + 210.0 * scale,
+        layout.content_w,
+        158.0 * scale,
+    )
+}
+
+pub(crate) fn api_python_version_list_max_scroll(count: usize, scale: f32) -> f32 {
+    let row_h = api_python_version_row_height(scale);
+    let inner_h = (158.0 * scale - 8.0 * scale).max(row_h);
+    (count as f32 * row_h - inner_h).max(0.0)
+}
+
+pub(crate) fn api_python_version_row_height(scale: f32) -> f32 {
+    28.0 * scale
+}
+
+pub(crate) fn api_python_install_log_visible(api: &ApiClientState) -> bool {
+    api.mock_python_install_running || !api.mock_python_install_log.is_empty()
+}
+
+pub(crate) fn api_python_install_log_rect(
+    layout: ApiPythonRuntimeDialogLayout,
+    scale: f32,
+) -> (f32, f32, f32, f32) {
+    let y = layout.box_y + 286.0 * scale;
+    let btn_y = layout.box_y + layout.box_h - 64.0 * scale;
+    (
+        layout.box_x + layout.pad,
+        y,
+        layout.content_w,
+        (btn_y - y - 12.0 * scale).max(44.0 * scale),
+    )
+}
+
+pub(crate) fn api_python_install_log_max_scroll(count: usize, view_h: f32, scale: f32) -> f32 {
+    (count as f32 * api_python_install_log_line_height(scale) - view_h).max(0.0)
+}
+
+pub(crate) fn api_python_install_log_line_height(scale: f32) -> f32 {
+    18.0 * scale
+}
+
+fn api_point_in_rect(mx: f32, my: f32, rect: (f32, f32, f32, f32)) -> bool {
+    mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3
+}
+
+fn parse_uv_python_list(raw: &str) -> Vec<ApiPythonVersionRow> {
+    let mut rows = Vec::new();
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Some(first) = line.split_whitespace().next() else {
+            continue;
+        };
+        let Some(version) = first
+            .strip_prefix("cpython-")
+            .or_else(|| first.strip_prefix("python-"))
+        else {
+            continue;
+        };
+        let version = version
+            .split('-')
+            .next()
+            .unwrap_or(version)
+            .trim()
+            .to_string();
+        if version.is_empty() {
+            continue;
+        }
+        let installed = !line.contains("<download available>") && !line.contains("download only");
+        rows.push(ApiPythonVersionRow {
+            version,
+            installed,
+            detail: line.to_string(),
+        });
+        if rows.len() >= 80 {
+            break;
+        }
+    }
+    rows.sort_by(|a, b| b.version.cmp(&a.version));
+    rows.dedup_by(|a, b| a.version == b.version);
+    rows
+}
+
+fn spawn_api_python_log_reader<R>(
+    stream: R,
+    tx: mpsc::Sender<ApiPythonInstallEvent>,
+    kind: ApiPythonInstallLogKind,
+) where
+    R: std::io::Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines().map_while(Result::ok) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let _ = tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
+                text: line,
+                kind,
+            }));
+        }
+    });
+}
+
+fn push_api_python_install_log(api: &mut ApiClientState, line: ApiPythonInstallLogLine) {
+    api.mock_python_install_log.push(line);
+    if api.mock_python_install_log.len() > 24 {
+        api.mock_python_install_log.remove(0);
+    }
+    api.mock_python_install_log_scroll.current = 10_000.0;
+    api.mock_python_install_log_scroll.target = 10_000.0;
+}
+
+fn push_api_mock_server_log(api: &mut ApiClientState, text: String) {
+    let stamp = format_api_mock_log_time(now_epoch_secs());
+    api.mock_server_logs.push(ApiMockServerLogLine {
+        text: format!("[{stamp}] {text}"),
+    });
+    if api.mock_server_logs.len() > 80 {
+        api.mock_server_logs.remove(0);
+    }
+    api.mock_server_log_scroll.current = 1_000_000.0;
+    api.mock_server_log_scroll.target = 1_000_000.0;
+}
+
+pub(crate) fn api_mock_server_log_max_scroll(line_count: usize, visible_h: f32, s: f32) -> f32 {
+    let line_h = 20.0 * s;
+    (line_count as f32 * line_h + 12.0 * s - visible_h).max(0.0)
+}
+
+pub(crate) fn api_mock_guide_max_scroll(visible_h: f32, s: f32) -> f32 {
+    (720.0 * s - visible_h).max(0.0)
+}
+
+fn api_mock_server_event_text(event: &ApiMockServerEvent) -> String {
+    match event {
+        ApiMockServerEvent::Running { url } => format!("server ready: {url}"),
+        ApiMockServerEvent::Log { text } => text.clone(),
+        ApiMockServerEvent::Stopped => "server stopped".to_string(),
+        ApiMockServerEvent::Failed(err) => format!("server error: {err}"),
+        ApiMockServerEvent::Request {
+            method,
+            path,
+            status,
+            action,
+        } => format!("{method} {path} -> {status} · {action}"),
+    }
+}
+
+fn format_api_mock_log_time(epoch_secs: u64) -> String {
+    let secs = epoch_secs % 86_400;
+    let hour = secs / 3_600;
+    let minute = (secs % 3_600) / 60;
+    let second = secs % 60;
+    format!("{hour:02}:{minute:02}:{second:02}")
+}
+
+fn clear_legacy_api_python_runtime_message(api: &mut ApiClientState) {
+    let message = api.mock.uv.last_error.as_str();
+    if message.contains("uv run --python")
+        || message.contains("загрузит версию")
+        || message.contains("download python")
+        || message.contains("download Python")
+    {
+        api.mock.uv.last_error.clear();
+    }
 }
 
 #[cfg(test)]

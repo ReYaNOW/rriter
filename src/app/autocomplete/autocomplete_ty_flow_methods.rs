@@ -273,6 +273,10 @@ impl App {
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        if self.api_mock_completion_focus().is_some() {
+            self.update_api_mock_ty_autocomplete(items);
+            return;
+        }
         if autocomplete_trace_enabled() {
             println!(
                 "Autocomplete update_ty: incoming={} mode={:?} active={} opts_before={} pending={:?}",

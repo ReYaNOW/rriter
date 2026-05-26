@@ -69,10 +69,13 @@ pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiM
         ApiMockServerEvent::Running { url } => *status = ApiMockServerStatus::Running { url },
         ApiMockServerEvent::Stopped => *status = ApiMockServerStatus::Stopped,
         ApiMockServerEvent::Failed(err) => *status = ApiMockServerStatus::Failed(err),
+        ApiMockServerEvent::Log { .. } => {}
+        ApiMockServerEvent::Request { .. } => {}
     }
 }
 
 fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Receiver<()>) {
+    push_log_event("tokio runtime: creating multi-thread runtime");
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -87,6 +90,7 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
     };
 
     runtime.block_on(async move {
+        push_log_event("bind address: resolving");
         let addr = match socket_addr(&snapshot.bind_host, snapshot.port) {
             Ok(addr) => addr,
             Err(err) => {
@@ -95,6 +99,7 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
                 return;
             }
         };
+        push_log_event(&format!("tcp bind: {addr}"));
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(err) => {
@@ -105,10 +110,12 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
         };
         let local = listener.local_addr().ok();
         if let Some(local) = local {
+            push_log_event(&format!("listener ready: http://{local}"));
             push_event(ApiMockServerEvent::Running {
                 url: format!("http://{}", local),
             });
         }
+        push_log_event("axum router: building fallback router");
         let state = ApiMockAxumState {
             snapshot: Arc::new(snapshot),
             proxy_client: reqwest::Client::new(),
@@ -116,6 +123,7 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
         let app = Router::new()
             .fallback(any(handle_mock_request))
             .with_state(state);
+        push_log_event("axum serve: started");
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -138,11 +146,18 @@ async fn handle_mock_request(
     body: Bytes,
 ) -> Response {
     let Some(api_method) = api_method_from_http(&method) else {
-        return response_text(
+        let response = response_text(
             StatusCode::METHOD_NOT_ALLOWED,
             "text/plain",
             "method not allowed",
         );
+        push_request_event(
+            method.as_str(),
+            uri.path(),
+            response.status().as_u16(),
+            "method_not_allowed",
+        );
+        return response;
     };
     let path = uri.path();
     match resolve_api_mock_route(
@@ -152,9 +167,9 @@ async fn handle_mock_request(
         path,
     ) {
         ApiMockRouteDecision::Mock(route) => {
-            if let Some(script) = route.python.as_ref() {
+            if let Some(script) = route.python.as_ref().filter(|script| script.enabled) {
                 let request = python_request(&method, &uri, &headers, &body, &route.path);
-                return match call_python_route(state.snapshot.uv_path.as_deref(), script, request) {
+                let response = match call_python_route(&state.snapshot.python_runtime, script, request) {
                     Ok(output) => {
                         let status = StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
                         let mut builder = Response::builder()
@@ -173,14 +188,26 @@ async fn handle_mock_request(
                     }
                     Err(err) => response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err),
                 };
+                push_request_event(method.as_str(), path, response.status().as_u16(), "python");
+                return response;
             }
             let (status, content_type, text) = route.static_response_text();
             let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-            response_text(status, content_type, text)
+            let response = response_text(status, content_type, text);
+            push_request_event(method.as_str(), path, response.status().as_u16(), "mock");
+            response
         }
-        ApiMockRouteDecision::Proxy => proxy_request(state, method, uri, headers, body).await,
+        ApiMockRouteDecision::Proxy => {
+            let method_label = method.as_str().to_string();
+            let path_label = path.to_string();
+            let response = proxy_request(state, method, uri, headers, body).await;
+            push_request_event(&method_label, &path_label, response.status().as_u16(), "proxy");
+            response
+        }
         ApiMockRouteDecision::NotFound => {
-            response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found")
+            let response = response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found");
+            push_request_event(method.as_str(), path, response.status().as_u16(), "not_found");
+            response
         }
     }
 }
@@ -337,6 +364,21 @@ fn push_event(event: ApiMockServerEvent) {
     if let Ok(mut events) = EVENTS.lock() {
         events.push(event);
     }
+}
+
+fn push_request_event(method: &str, path: &str, status: u16, action: &str) {
+    push_event(ApiMockServerEvent::Request {
+        method: method.to_string(),
+        path: path.to_string(),
+        status,
+        action: action.to_string(),
+    });
+}
+
+fn push_log_event(text: &str) {
+    push_event(ApiMockServerEvent::Log {
+        text: text.to_string(),
+    });
 }
 
 fn clear_server_handle() {

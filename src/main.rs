@@ -191,18 +191,26 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
         ),
-        crate::app::EditorTabKind::ApiClient(meta, state) => Some(format!(
-            "API\t{}\t{}",
-            meta.spec_id.0,
-            if state.auth_view {
-                "auth".to_string()
-            } else {
-                state
-                    .route_idx
-                    .map(|idx| idx.to_string())
-                    .unwrap_or_default()
+        crate::app::EditorTabKind::ApiClient(meta, state) => {
+            if matches!(
+                meta.route_identity,
+                Some(crate::app::api_client::ApiClientRouteIdentity::Manual { .. })
+            ) {
+                return None;
             }
-        )),
+            Some(format!(
+                "API\t{}\t{}",
+                meta.spec_id.0,
+                if state.auth_view {
+                    "auth".to_string()
+                } else {
+                    state
+                        .route_idx
+                        .map(|idx| idx.to_string())
+                        .unwrap_or_default()
+                }
+            ))
+        }
         crate::app::EditorTabKind::GitDiff(_, _) => None,
     }
 }
@@ -557,6 +565,10 @@ mod tests {
             crate::app::api_client::ApiClientTabMeta {
                 spec_id: crate::app::api_client::ApiSpecId(42),
                 title: "Pets".to_string(),
+                route_identity: Some(crate::app::api_client::ApiClientRouteIdentity::OpenApi {
+                    spec_id: crate::app::api_client::ApiSpecId(42),
+                    route_idx: 7,
+                }),
             },
             crate::app::api_client::ApiClientTabState {
                 route_idx: Some(7),
@@ -586,6 +598,7 @@ mod tests {
             crate::app::api_client::ApiClientTabMeta {
                 spec_id: crate::app::api_client::ApiSpecId(42),
                 title: "Auth".to_string(),
+                route_identity: None,
             },
             crate::app::api_client::ApiClientTabState {
                 auth_view: true,

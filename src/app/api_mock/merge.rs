@@ -2,7 +2,9 @@ use super::types::{
     ApiMockMode, ApiMockRouteDecision, ApiMockRouteOrigin, ApiMockRuntimeRoute, ApiMockState,
     api_mock_route_key, api_mock_source_key,
 };
-use crate::app::api_client::{ApiMethod, ApiSpecEntry, ApiSpecModel};
+use crate::app::api_client::{
+    ApiMethod, ApiSpecEntry, ApiSpecModel, api_generated_response_for_route,
+};
 use std::collections::BTreeMap;
 
 pub fn build_api_mock_routes<'a>(
@@ -19,6 +21,9 @@ pub fn build_api_mock_routes<'a>(
             path: route.path.clone(),
             enabled: route.enabled,
             response: route.response.clone(),
+            generated_status: 200,
+            generated_content_type: "application/json",
+            generated_body: "{}".to_string(),
             python: route.python.clone(),
             input_fields: route.input_fields.clone(),
             output_fields: route.output_fields.clone(),
@@ -45,6 +50,8 @@ pub fn build_api_mock_routes<'a>(
             let output_fields = override_route
                 .map(|override_route| override_route.extra_output_fields.clone())
                 .unwrap_or_default();
+            let (generated_status, generated_content_type, generated_body) =
+                api_generated_response_for_route(route, model);
 
             out.push(ApiMockRuntimeRoute {
                 id: api_mock_route_key(&source_key, route.method, &route.path),
@@ -53,6 +60,9 @@ pub fn build_api_mock_routes<'a>(
                 path: route.path.clone(),
                 enabled,
                 response,
+                generated_status,
+                generated_content_type,
+                generated_body,
                 python,
                 input_fields,
                 output_fields,
@@ -138,7 +148,7 @@ pub fn api_mock_path_params(pattern: &str, path: &str) -> Option<BTreeMap<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::api_client::{ApiRouteRow, ApiSpecId, ApiSpecSource};
+    use crate::app::api_client::{ApiRouteRow, ApiSpecId, ApiSpecSource, parse_openapi_model};
 
     fn entry() -> ApiSpecEntry {
         ApiSpecEntry {
@@ -237,5 +247,65 @@ mod tests {
 
         assert_eq!(params.get("id").map(String::as_str), Some("42"));
         assert_eq!(params.get("post_id").map(String::as_str), Some("7"));
+    }
+
+    #[test]
+    fn generated_response_uses_openapi_schema_without_mock_marker() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Demo", "version": "1"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "description": "ok",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {"type": "string"},
+                                                "active": {"type": "boolean"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let entry = entry();
+        let model = parse_openapi_model(entry.id, &spec).expect("parse");
+        let routes = build_api_mock_routes([(&entry, &model)], &ApiMockState::default());
+        let (_, content_type, body) = routes[0].static_response_text();
+
+        assert_eq!(content_type, "application/json");
+        assert!(body.contains("\"name\""));
+        assert!(!body.contains("\"mock\""));
+    }
+
+    #[test]
+    fn manual_generated_response_falls_back_to_empty_json() {
+        let mut state = ApiMockState::default();
+        state
+            .manual_routes
+            .push(super::super::types::ApiManualRoute {
+                stable_id: "manual-1".to_string(),
+                method: ApiMethod::Get,
+                path: "/manual".to_string(),
+                enabled: true,
+                response: super::super::types::ApiMockResponse::Generated,
+                python: None,
+                input_fields: Vec::new(),
+                output_fields: Vec::new(),
+            });
+        let routes = build_api_mock_routes([], &state);
+        let (_, content_type, body) = routes[0].static_response_text();
+
+        assert_eq!(content_type, "application/json");
+        assert_eq!(body, "{}");
     }
 }

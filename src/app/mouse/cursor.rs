@@ -158,6 +158,13 @@ impl App {
             return;
         }
 
+        if self.api_python_runtime_overlay_active() {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         let window_size = self.window.as_ref().unwrap().inner_size();
         if !cursor_position_allows_editor_hover(
             position.x as f32,
@@ -239,6 +246,26 @@ impl App {
         if popup_selecting {
             self.window.as_ref().unwrap().request_redraw();
             return;
+        }
+
+        if self.active_tab_is_api_client() {
+            let in_api_hover_popup = HOVER_STATE.with(|state| {
+                let state = state.borrow();
+                state.popup.as_ref().is_some_and(|popup| {
+                    popup.byte_offset == crate::app::api_client::API_MOCK_TY_POPUP_BYTE
+                }) && state
+                    .popup_or_bridge_contains(
+                        px,
+                        py,
+                        self.renderer.as_ref().unwrap().width,
+                        self.renderer.as_ref().unwrap().scale_factor,
+                    )
+                    .0
+            });
+            if in_api_hover_popup {
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
         }
 
         if self

@@ -517,6 +517,28 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.api.input_scroll_x.update(dt) {
         needs_redraw = true;
     }
+    if app.ide_panel.api.mock_python_versions_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.api.mock_guide_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.api.mock_python_install_log_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.api.mock_server_log_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    for scroll in app.ide_panel.api.mock_python_scrolls.values_mut() {
+        if scroll.update(dt) {
+            needs_redraw = true;
+        }
+    }
+    for scroll in app.ide_panel.api.mock_python_scrolls_x.values_mut() {
+        if scroll.update(dt) {
+            needs_redraw = true;
+        }
+    }
     for tab in &mut app.tabs {
         if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
             if state.tab_scroll.update(dt) {
@@ -1389,7 +1411,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         idle_blink_enabled,
         hover_wake_at,
         hover_poll_pending,
-        !app.api_request_rx.is_empty() || app.api_mock_ty_rx.is_some(),
+        !app.api_request_rx.is_empty() || app.api_mock_ty_rx.is_some() || app.api_runtime_poll_pending(),
     ) {
         AboutWaitPlan::Wait => {
             if let Some(w) = app.window.as_ref() {

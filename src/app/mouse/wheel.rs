@@ -170,6 +170,11 @@ impl App {
         let (dx, dy) = wheel_delta(delta, lh);
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.api_python_runtime_overlay_active() {
+            self.scroll_api_python_runtime_overlay(dy);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if self.inline_git_popup.is_some() {
             let hovered_id = self.ui_registry.find_at(mx, my);
             if matches!(
@@ -635,15 +640,109 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let hovered_id = self.ui_registry.find_at(mx, my);
+            if self.ide_panel.api.mock_guide_open
+                && matches!(
+                    hovered_id,
+                    Some(
+                        crate::ui_system::UiId::ApiMockGuideBody
+                            | crate::ui_system::UiId::ApiMockGuideScrollY
+                    )
+                )
+            {
+                if let Some((_, _, _, guide_h)) = self
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
+                {
+                    let max_scroll =
+                        crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
+                    self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
+                    self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
+                    self.ide_panel
+                        .api
+                        .mock_guide_scroll
+                        .clamp_target(0.0, max_scroll);
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
+            if self.ide_panel.api.mock_server_detail_open
+                && matches!(
+                    hovered_id,
+                    Some(
+                        crate::ui_system::UiId::ApiMockServerLogArea
+                            | crate::ui_system::UiId::ApiMockServerLogScrollY
+                    )
+                )
+            {
+                let rect = self
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::ApiMockServerLogArea)
+                    .or_else(|| {
+                        hovered_id.and_then(|id| self.ui_registry.rect_for(id))
+                    });
+                if let Some((_, _, _, log_h)) = rect {
+                    let max_scroll = crate::app::api_client::api_mock_server_log_max_scroll(
+                        self.ide_panel.api.mock_server_logs.len(),
+                        log_h,
+                        s,
+                    );
+                    self.ide_panel.api.mock_server_log_scroll.anim_speed = 7.0;
+                    self.ide_panel.api.mock_server_log_scroll.scroll_by(dy);
+                    self.ide_panel
+                        .api
+                        .mock_server_log_scroll
+                        .clamp_target(0.0, max_scroll);
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
             let api_inner_scroll = hovered_id.and_then(|id| {
                 let rect = self.ui_registry.rect_for(id)?;
                 let (meta, state) = self.active_api_tab()?;
                 let visible_h = (rect.3 - 16.0 * s).max(18.0 * s);
                 match id {
                     crate::ui_system::UiId::ApiBodyInput(route_idx)
+                    | crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx)
                         if state.route_idx == Some(route_idx) =>
                     {
-                        let text = if matches!(
+                        let is_static =
+                            matches!(id, crate::ui_system::UiId::ApiMockStaticResponseInput(_));
+                        let text = if is_static {
+                            if matches!(
+                                self.ide_panel.api.focused,
+                                Some(crate::app::api_client::ApiFocus::MockStaticResponse {
+                                    route_idx: focused_route,
+                                }) if focused_route == route_idx
+                            ) {
+                                self.ide_panel.api.input_editor.get_full_text()
+                            } else {
+                                self.ide_panel
+                                    .api
+                                    .mock
+                                    .route_overrides
+                                    .iter()
+                                    .find(|item| {
+                                        self.ide_panel
+                                            .api
+                                            .models
+                                            .get(&meta.spec_id)
+                                            .and_then(|model| model.routes.get(route_idx))
+                                            .is_some_and(|route| {
+                                                item.method == route.method && item.path == route.path
+                                            })
+                                    })
+                                    .map(|item| match &item.response {
+                                        crate::app::api_mock::types::ApiMockResponse::Generated => {
+                                            String::new()
+                                        }
+                                        crate::app::api_mock::types::ApiMockResponse::Json(text)
+                                        | crate::app::api_mock::types::ApiMockResponse::Text(text) => {
+                                            text.clone()
+                                        }
+                                    })
+                                    .unwrap_or_else(|| state.body_json.clone())
+                            }
+                        } else if matches!(
                             self.ide_panel.api.focused,
                             Some(crate::app::api_client::ApiFocus::Body {
                                 spec_id,
@@ -656,7 +755,7 @@ impl App {
                         };
                         let max_scroll =
                             crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
-                        Some((meta.spec_id, route_idx, true, max_scroll))
+                        Some((meta.spec_id, route_idx, true, None, max_scroll))
                     }
                     crate::ui_system::UiId::ApiResponseBody(route_idx)
                         if state.route_idx == Some(route_idx) =>
@@ -684,15 +783,74 @@ impl App {
                         };
                         let max_scroll =
                             crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
-                        Some((meta.spec_id, route_idx, false, max_scroll))
+                        Some((meta.spec_id, route_idx, false, None, max_scroll))
+                    }
+                    crate::ui_system::UiId::ApiMockPreludeInput(route_idx)
+                    | crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
+                        let part = match id {
+                            crate::ui_system::UiId::ApiMockPreludeInput(_) => {
+                                crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude
+                            }
+                            _ => crate::app::api_mock::ty_check::ApiMockSourcePart::Body,
+                        };
+                        let focused_part = match self.ide_panel.api.focused {
+                            Some(crate::app::api_client::ApiFocus::MockPrelude {
+                                route_idx: focused_route,
+                            }) if focused_route == route_idx => Some(
+                                crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude,
+                            ),
+                            Some(crate::app::api_client::ApiFocus::MockBody {
+                                route_idx: focused_route,
+                            }) if focused_route == route_idx => {
+                                Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Body)
+                            }
+                            _ => None,
+                        };
+                        let text = if focused_part == Some(part) {
+                            self.ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            self.ide_panel
+                                .api
+                                .mock
+                                .route_overrides
+                                .iter()
+                                .find(|item| {
+                                    self.ide_panel
+                                        .api
+                                        .models
+                                        .get(&meta.spec_id)
+                                        .and_then(|model| model.routes.get(route_idx))
+                                        .is_some_and(|route| {
+                                            item.method == route.method && item.path == route.path
+                                        })
+                                })
+                                .and_then(|item| item.python.as_ref())
+                                .map(|script| match part {
+                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude => {
+                                        script.prelude.clone()
+                                    }
+                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Body => {
+                                        crate::app::api_client::api_mock_body_editor_text(
+                                            &script.body,
+                                        )
+                                    }
+                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Signature => {
+                                        String::new()
+                                    }
+                                })
+                                .unwrap_or_default()
+                        };
+                        let max_scroll =
+                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
+                        Some((meta.spec_id, route_idx, true, Some(part), max_scroll))
                     }
                     _ => None,
                 }
             });
-            if let Some((spec_id, route_idx, body, max_scroll)) = api_inner_scroll {
+            if let Some((spec_id, route_idx, body, mock_part, max_scroll)) = api_inner_scroll {
                 let horizontal_delta = if shift { dy } else { dx };
                 let prefer_horizontal = shift || dx.abs() > dy.abs();
-                if prefer_horizontal && horizontal_delta.abs() > 0.0 {
+                if mock_part.is_none() && prefer_horizontal && horizontal_delta.abs() > 0.0 {
                     let scroll_id = if body {
                         crate::ui_system::UiId::ApiBodyScrollX(route_idx)
                     } else {
@@ -716,7 +874,17 @@ impl App {
                     }
                 }
                 if max_scroll > 0.0 {
-                    if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                    if let Some(part) = mock_part {
+                        let scroll = self
+                            .ide_panel
+                            .api
+                            .mock_python_scrolls
+                            .entry((route_idx, part))
+                            .or_insert_with(|| crate::scroll::ScrollState::new(7.0));
+                        scroll.anim_speed = 7.0;
+                        scroll.scroll_by(dy);
+                        scroll.clamp_target(0.0, max_scroll);
+                    } else if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                         && state.route_idx == Some(route_idx)
                     {
                         let scroll = if body {
