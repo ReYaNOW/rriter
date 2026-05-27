@@ -1,3 +1,4 @@
+#[test]
 fn ide_mode_startup_tab_and_tab_close_paths_are_headless_safe() {
     let Some(mut app) = test_app() else {
         return;
@@ -246,7 +247,10 @@ fn switch_back_to_partial_large_tab_restarts_full_highlight_without_clearing_cac
     assert!(!app.highlighter.is_complete);
     assert_eq!(app.highlighter.current_version, 42);
     assert_eq!(app.highlighter.spans.len(), 1);
-    assert_eq!(app.highlighter.spans[0].color, crate::highlighter::DRACULA_PINK);
+    assert_eq!(
+        app.highlighter.spans[0].color,
+        crate::highlighter::DRACULA_PINK
+    );
 }
 
 #[test]
@@ -570,4 +574,3 @@ fn highlight_thresholds_and_prefix_edges_cover_non_default_paths() {
     app.editor.cursor = 3;
     assert_eq!(app.get_current_word_prefix(), "obj");
 }
-

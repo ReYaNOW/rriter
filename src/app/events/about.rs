@@ -1024,27 +1024,30 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         if let Some(lsp) = &mut app.lsp {
             // Умная синхронизация без аллокаций каждый кадр.
             // Обновляем UI только если статус или логи реально изменились.
-            let raw_servers = lsp.servers_info();
             let filter = app.ide_panel.current_lsp_log_filter();
-            let needs_update = app.ide_panel.lsp_log_filter_dirty
-                || app.ide_panel.lsp_log_filter_applied.as_ref() != Some(&filter)
-                || app.ide_panel.lsp_servers.len() != raw_servers.len()
-                || raw_servers.iter().any(|info| {
-                    app.ide_panel
-                        .lsp_servers
-                        .iter()
-                        .find(|ui| ui.name == info.name)
-                        .is_none_or(|ui| ui.status != info.status)
-                        || app
-                            .ide_panel
-                            .lsp_log_source_counts
-                            .get(info.name)
-                            .copied()
-                            .unwrap_or(0)
-                            != info.logs.len()
-                });
+            let needs_update = {
+                let summaries = lsp.server_summaries();
+                app.ide_panel.lsp_log_filter_dirty
+                    || app.ide_panel.lsp_log_filter_applied.as_ref() != Some(&filter)
+                    || app.ide_panel.lsp_servers.len() != summaries.len()
+                    || summaries.iter().any(|info| {
+                        app.ide_panel
+                            .lsp_servers
+                            .iter()
+                            .find(|ui| ui.name == info.name)
+                            .is_none_or(|ui| &ui.status != info.status)
+                            || app
+                                .ide_panel
+                                .lsp_log_source_counts
+                                .get(info.name)
+                                .copied()
+                                .unwrap_or(0)
+                                != info.log_count
+                    })
+            };
 
             if needs_update {
+                let raw_servers = lsp.servers_info();
                 app.ide_panel.lsp_log_source_counts.clear();
                 let mut ui_servers = raw_servers;
                 for info in &mut ui_servers {

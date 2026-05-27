@@ -1,3 +1,4 @@
+#[test]
 fn lsp_actions_noqa_workspace_edit_and_panel_log_sizes_headless() {
     let Some(mut app) = test_app() else {
         return;
@@ -665,12 +666,19 @@ fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
     app.toggle_api_route_python(0);
     let override_route = app.ide_panel.api.mock.route_overrides.first().unwrap();
     assert!(!override_route.enabled);
-    assert!(override_route.python.as_ref().is_some_and(|script| script.enabled));
+    assert!(
+        override_route
+            .python
+            .as_ref()
+            .is_some_and(|script| script.enabled)
+    );
 
     let entry = app.ide_panel.api.specs.first().unwrap();
     let model = app.ide_panel.api.models.get(&spec_id).unwrap();
-    let routes =
-        crate::app::api_mock::merge::build_api_mock_routes([(entry, model)], &app.ide_panel.api.mock);
+    let routes = crate::app::api_mock::merge::build_api_mock_routes(
+        [(entry, model)],
+        &app.ide_panel.api.mock,
+    );
     assert!(!routes.first().unwrap().enabled);
 
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
@@ -707,7 +715,11 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
     app.toggle_api_route_python(0);
 
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
-    let _ = app.ide_panel.api.input_editor.insert_str("\n    body_marker = 1");
+    let _ = app
+        .ide_panel
+        .api
+        .input_editor
+        .insert_str("\n    body_marker = 1");
     assert!(
         app.ide_panel
             .api
@@ -752,7 +764,11 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
     assert_eq!(app.ide_panel.api.input_editor.get_full_text(), "");
 
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
-    let _ = app.ide_panel.api.input_editor.insert_str("\n    reset_me = 1");
+    let _ = app
+        .ide_panel
+        .api
+        .input_editor
+        .insert_str("\n    reset_me = 1");
     app.reset_api_route_python_part(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body);
     let body = app.ide_panel.api.input_editor.get_full_text();
     assert!(!body.starts_with("    \n"));

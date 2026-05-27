@@ -152,13 +152,15 @@ impl App {
 
         if state == ElementState::Pressed {
             let in_hover_popup = HOVER_STATE.with(|hover_state| {
-                hover_state.borrow().popup_or_bridge_contains(
-                    mx,
-                    my,
-                    self.renderer.as_ref().unwrap().width,
-                    self.renderer.as_ref().unwrap().scale_factor,
-                )
-                .0
+                hover_state
+                    .borrow()
+                    .popup_or_bridge_contains(
+                        mx,
+                        my,
+                        self.renderer.as_ref().unwrap().width,
+                        self.renderer.as_ref().unwrap().scale_factor,
+                    )
+                    .0
             });
 
             if !in_hover_popup && clear_hover_popup(self.renderer.as_mut()) {
@@ -339,13 +341,15 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             let in_hover_popup = HOVER_STATE.with(|hover_state| {
-                hover_state.borrow().popup_or_bridge_contains(
-                    mx,
-                    my,
-                    self.renderer.as_ref().unwrap().width,
-                    self.renderer.as_ref().unwrap().scale_factor,
-                )
-                .0
+                hover_state
+                    .borrow()
+                    .popup_or_bridge_contains(
+                        mx,
+                        my,
+                        self.renderer.as_ref().unwrap().width,
+                        self.renderer.as_ref().unwrap().scale_factor,
+                    )
+                    .0
             });
 
             if !in_hover_popup {

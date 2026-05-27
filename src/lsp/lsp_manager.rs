@@ -1,3 +1,9 @@
+pub struct LspServerSummary<'a> {
+    pub name: &'static str,
+    pub status: &'a LspServerStatus,
+    pub log_count: usize,
+}
+
 pub struct LspManager {
     python: Option<LspProcess>,
     ty_process: Option<LspProcess>,
@@ -137,6 +143,25 @@ impl LspManager {
         if let Some(proc) = &mut self.ty_process {
             proc.notify_open(&path, &text, version, ws.as_ref());
         }
+    }
+
+    /// Лёгкая информация о серверах без клонирования логов.
+    pub fn server_summaries(&self) -> [LspServerSummary<'_>; 2] {
+        [
+            LspServerSummary {
+                name: RUFF_SERVER.program,
+                status: &self.python_status,
+                log_count: self
+                    .server_logs
+                    .get(RUFF_SERVER.program)
+                    .map_or(0, Vec::len),
+            },
+            LspServerSummary {
+                name: TY_SERVER.program,
+                status: &self.ty_status,
+                log_count: self.server_logs.get(TY_SERVER.program).map_or(0, Vec::len),
+            },
+        ]
     }
 
     /// Информация о серверах для UI
@@ -845,6 +870,35 @@ fn json_container_depth(node: tree_sitter::Node<'_>) -> usize {
         parent = p.parent();
     }
     depth
+}
+
+#[cfg(test)]
+mod lsp_manager_allocation_tests {
+    use super::*;
+
+    #[test]
+    fn server_summaries_report_counts_without_cloning_logs() {
+        let mut manager = LspManager::new(Vec::new());
+        manager.python_status = LspServerStatus::Running;
+        manager.server_logs.insert(
+            RUFF_SERVER.program,
+            vec![LogEntry {
+                text: "ruff log".to_string(),
+                spans: Vec::new(),
+                folds: Vec::new(),
+                created_at: Instant::now(),
+            }],
+        );
+
+        let summaries = manager.server_summaries();
+
+        assert_eq!(summaries[0].name, RUFF_SERVER.program);
+        assert_eq!(summaries[0].log_count, 1);
+        assert!(std::ptr::eq(summaries[0].status, &manager.python_status));
+        assert_eq!(summaries[1].name, TY_SERVER.program);
+        assert_eq!(summaries[1].log_count, 0);
+        assert!(std::ptr::eq(summaries[1].status, &manager.ty_status));
+    }
 }
 
 #[cfg(test)]

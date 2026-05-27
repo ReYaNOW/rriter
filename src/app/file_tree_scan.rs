@@ -1,10 +1,80 @@
 use super::*;
 use rayon::prelude::*;
-use std::path::Component;
+use std::{
+    path::{Component, Path},
+    sync::Arc,
+    time::SystemTime,
+};
 
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
     std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GitignoreFingerprint {
+    exists: bool,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+struct GitignoreCacheEntry {
+    fingerprint: GitignoreFingerprint,
+    gitignore: Arc<ignore::gitignore::Gitignore>,
+}
+
+static GITIGNORE_CACHE: once_cell::sync::Lazy<
+    std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, GitignoreCacheEntry>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+
+fn gitignore_fingerprint(gitignore_path: &Path) -> GitignoreFingerprint {
+    match std::fs::metadata(gitignore_path) {
+        Ok(metadata) => GitignoreFingerprint {
+            exists: true,
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        },
+        Err(_) => GitignoreFingerprint {
+            exists: false,
+            len: 0,
+            modified: None,
+        },
+    }
+}
+
+pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignore> {
+    let gitignore_path = root.join(".gitignore");
+    let fingerprint = gitignore_fingerprint(&gitignore_path);
+
+    if let Ok(cache) = GITIGNORE_CACHE.lock() {
+        if let Some(entry) = cache.get(root) {
+            if entry.fingerprint == fingerprint {
+                return Arc::clone(&entry.gitignore);
+            }
+        }
+    }
+
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    if fingerprint.exists {
+        let _ = builder.add(gitignore_path);
+    }
+    let gitignore = Arc::new(
+        builder
+            .build()
+            .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty()),
+    );
+
+    if let Ok(mut cache) = GITIGNORE_CACHE.lock() {
+        cache.insert(
+            root.to_path_buf(),
+            GitignoreCacheEntry {
+                fingerprint,
+                gitignore: Arc::clone(&gitignore),
+            },
+        );
+    }
+
+    gitignore
+}
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
     let cache = RASTERIZED_ICONS.lock().unwrap();
@@ -128,18 +198,12 @@ pub(super) fn scan_dir_parallel(
         return vec![me];
     }
 
-    let (dirs, files) = read_children(&path);
+    let (mut dirs, mut files) = read_children(&path);
 
     // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
     // это экономит поток-часы на игнорируемых поддеревьях.
-    let dirs: Vec<_> = dirs
-        .into_iter()
-        .filter(|(d_name, _)| !matches_ignore_pattern(d_name, all_patterns))
-        .collect();
-    let files: Vec<_> = files
-        .into_iter()
-        .filter(|(f_name, _)| !matches_ignore_pattern(f_name, all_patterns))
-        .collect();
+    dirs.retain(|(d_name, _)| !matches_ignore_pattern(d_name, all_patterns));
+    files.retain(|(f_name, _)| !matches_ignore_pattern(f_name, all_patterns));
 
     // Многопоточный обход дерева. flat_map в rayon собирает результаты
     // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
@@ -202,6 +266,7 @@ pub fn spawn_scan(
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
+        let all_patterns_refs: Vec<&str> = user_patterns.iter().map(String::as_str).collect();
         let full_nodes: Vec<FileNode> = roots
             .into_par_iter()
             .flat_map(|root| {
@@ -209,22 +274,12 @@ pub fn spawn_scan(
                     return Vec::new();
                 }
 
-                let mut builder = ignore::gitignore::GitignoreBuilder::new(&root);
-                let gitignore_path = root.join(".gitignore");
-                if gitignore_path.exists() {
-                    let _ = builder.add(gitignore_path);
-                }
-                let gitignore = builder
-                    .build()
-                    .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+                let gitignore = gitignore_for_root(&root);
 
                 let name = root
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| root.to_string_lossy().into_owned());
-
-                let all_patterns_refs: Vec<&str> =
-                    user_patterns.iter().map(|s| s.as_str()).collect();
 
                 scan_dir_parallel(
                     root.clone(),
@@ -233,7 +288,7 @@ pub fn spawn_scan(
                     &expanded,
                     true,
                     10,
-                    &gitignore,
+                    gitignore.as_ref(),
                     &all_patterns_refs,
                 )
             })
@@ -311,6 +366,18 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    fn temp_scan_root(test_name: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rriter_{test_name}_{}_{}",
+            std::process::id(),
+            stamp
+        ))
+    }
+
     #[test]
     fn git_internal_notify_paths_do_not_refresh_file_tree() {
         assert!(!notify_paths_need_file_tree_refresh([
@@ -324,5 +391,52 @@ mod tests {
         assert!(notify_paths_need_file_tree_refresh([Path::new(
             "/workspace/not.git/index"
         )]));
+    }
+
+    #[test]
+    fn gitignore_for_root_reuses_unchanged_cache_entry() {
+        let root = temp_scan_root("gitignore_cache_reuse");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+        let first = gitignore_for_root(&root);
+        let second = gitignore_for_root(&root);
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(
+            second
+                .matched_path_or_any_parents(root.join("target"), true)
+                .is_ignore()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gitignore_for_root_rebuilds_after_file_change() {
+        let root = temp_scan_root("gitignore_cache_rebuild");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+        let first = gitignore_for_root(&root);
+        assert!(
+            !first
+                .matched_path_or_any_parents(root.join("node_modules"), true)
+                .is_ignore()
+        );
+
+        std::fs::write(root.join(".gitignore"), "target/\nnode_modules/\n").unwrap();
+        let second = gitignore_for_root(&root);
+
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert!(
+            second
+                .matched_path_or_any_parents(root.join("node_modules"), true)
+                .is_ignore()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
