@@ -1,16 +1,17 @@
 use super::merge::{api_mock_path_params, resolve_api_mock_route};
 use super::python_worker::{PythonMockRequest, call_python_route};
 use super::types::{
-    ApiMockRouteDecision, ApiMockServerEvent, ApiMockServerSnapshot, ApiMockServerStatus,
+    ApiMockContractField, ApiMockContractFieldKind, ApiMockRouteDecision, ApiMockRuntimeRoute,
+    ApiMockServerEvent, ApiMockServerSnapshot, ApiMockServerStatus,
 };
 use crate::app::api_client::ApiMethod;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::Response;
 use axum::routing::any;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -168,7 +169,7 @@ async fn handle_mock_request(
     ) {
         ApiMockRouteDecision::Mock(route) => {
             if let Some(script) = route.python.as_ref().filter(|script| script.enabled) {
-                let request = python_request(&method, &uri, &headers, &body, &route.path);
+                let request = python_request(&method, &uri, &headers, &body, route);
                 let response =
                     match call_python_route(&state.snapshot.python_runtime, script, request) {
                         Ok(output) => {
@@ -232,7 +233,7 @@ fn python_request(
     uri: &Uri,
     headers: &HeaderMap,
     body: &Bytes,
-    route_pattern: &str,
+    route: &ApiMockRuntimeRoute,
 ) -> PythonMockRequest {
     let mut header_map = BTreeMap::new();
     for (name, value) in headers {
@@ -240,30 +241,240 @@ fn python_request(
             header_map.insert(name.as_str().to_string(), value.to_string());
         }
     }
-    let mut query = BTreeMap::new();
-    if let Some(raw_query) = uri.query() {
-        for pair in raw_query.split('&') {
-            if pair.is_empty() {
-                continue;
-            }
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next().unwrap_or_default();
-            let value = parts.next().unwrap_or_default();
-            query.insert(key.to_string(), value.to_string());
+    let mut raw_query = BTreeMap::<String, Vec<String>>::new();
+    if let Some(raw_query_text) = uri.query() {
+        for (key, value) in url::form_urlencoded::parse(raw_query_text.as_bytes()) {
+            raw_query
+                .entry(key.into_owned())
+                .or_default()
+                .push(value.into_owned());
         }
     }
-    let body = std::str::from_utf8(body)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())
-        .unwrap_or(Value::Null);
+    let query = values_from_pairs(&raw_query, &route.contract.query.fields);
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let (body, fields) = request_body_values(body, content_type, route);
+    let params = api_mock_path_params(&route.path, uri.path())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, value)| (name, Value::String(value)))
+        .collect();
     PythonMockRequest {
         method: method.as_str().to_string(),
         path: uri.path().to_string(),
         headers: header_map,
-        params: api_mock_path_params(route_pattern, uri.path()).unwrap_or_default(),
+        params,
         query,
         body,
+        fields,
     }
+}
+
+fn request_body_values(
+    body: &Bytes,
+    content_type: &str,
+    route: &ApiMockRuntimeRoute,
+) -> (Value, Value) {
+    if !route.contract.body.enabled {
+        return (Value::Null, Value::Object(Map::new()));
+    }
+    let lower_content_type = content_type.to_ascii_lowercase();
+    if lower_content_type.contains("application/x-www-form-urlencoded") {
+        let pairs = form_pairs(body);
+        let fields = values_from_pairs(&pairs, &route.contract.body.fields);
+        let fields_value = map_to_value(&fields);
+        return (fields_value.clone(), fields_value);
+    }
+    if lower_content_type.contains("multipart/form-data")
+        && let Some(pairs) = multipart_pairs(body, content_type)
+    {
+        let fields = values_from_pairs(&pairs, &route.contract.body.fields);
+        let fields_value = map_to_value(&fields);
+        return (fields_value.clone(), fields_value);
+    }
+    let parsed = std::str::from_utf8(body)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .unwrap_or_else(|| {
+            std::str::from_utf8(body)
+                .map(|text| Value::String(text.to_string()))
+                .unwrap_or(Value::Null)
+        });
+    if let Value::Object(map) = &parsed {
+        let body_map = values_from_json(map, &route.contract.body.fields);
+        (map_to_value(&body_map), Value::Object(Map::new()))
+    } else {
+        (parsed, Value::Object(Map::new()))
+    }
+}
+
+fn form_pairs(body: &Bytes) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::<String, Vec<String>>::new();
+    for (key, value) in url::form_urlencoded::parse(body.as_ref()) {
+        out.entry(key.into_owned())
+            .or_default()
+            .push(value.into_owned());
+    }
+    out
+}
+
+fn multipart_pairs(body: &Bytes, content_type: &str) -> Option<BTreeMap<String, Vec<String>>> {
+    let boundary = content_type
+        .split(';')
+        .filter_map(|part| part.trim().strip_prefix("boundary="))
+        .next()?
+        .trim_matches('"');
+    if boundary.is_empty() {
+        return None;
+    }
+    let marker = format!("--{boundary}");
+    let text = std::str::from_utf8(body).ok()?;
+    let mut out = BTreeMap::<String, Vec<String>>::new();
+    for raw_part in text.split(&marker).skip(1) {
+        let part = raw_part.trim_start_matches("\r\n");
+        if part.starts_with("--") {
+            break;
+        }
+        let Some((header_text, value_text)) = part.split_once("\r\n\r\n") else {
+            continue;
+        };
+        let Some(name) = multipart_field_name(header_text) else {
+            continue;
+        };
+        let value = multipart_file_name(header_text).unwrap_or_else(|| {
+            value_text
+                .trim_end_matches("\r\n")
+                .trim_end_matches("--")
+                .to_string()
+        });
+        out.entry(name).or_default().push(value);
+    }
+    Some(out)
+}
+
+fn multipart_field_name(headers: &str) -> Option<String> {
+    multipart_disposition_value(headers, "name")
+}
+
+fn multipart_file_name(headers: &str) -> Option<String> {
+    multipart_disposition_value(headers, "filename")
+}
+
+fn multipart_disposition_value(headers: &str, key: &str) -> Option<String> {
+    for line in headers.lines() {
+        let line = line.trim();
+        if !line
+            .to_ascii_lowercase()
+            .starts_with("content-disposition:")
+        {
+            continue;
+        }
+        for part in line.split(';').skip(1) {
+            let part = part.trim();
+            let Some(value) = part.strip_prefix(key).and_then(|rest| rest.strip_prefix('=')) else {
+                continue;
+            };
+            return Some(value.trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+fn values_from_pairs(
+    pairs: &BTreeMap<String, Vec<String>>,
+    fields: &[ApiMockContractField],
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    for field in fields.iter().filter(|field| field.enabled) {
+        let value = pairs
+            .get(&field.name)
+            .map(|values| typed_value_from_strings(field, values))
+            .or_else(|| super::contract::api_mock_default_json(field))
+            .unwrap_or(Value::Null);
+        insert_contract_value(&mut out, field, value);
+    }
+    out
+}
+
+fn values_from_json(
+    map: &Map<String, Value>,
+    fields: &[ApiMockContractField],
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    for field in fields.iter().filter(|field| field.enabled) {
+        let value = map
+            .get(&field.name)
+            .cloned()
+            .or_else(|| map.get(&field.python_name).cloned())
+            .or_else(|| super::contract::api_mock_default_json(field))
+            .unwrap_or(Value::Null);
+        insert_contract_value(&mut out, field, value);
+    }
+    out
+}
+
+fn insert_contract_value(
+    out: &mut BTreeMap<String, Value>,
+    field: &ApiMockContractField,
+    value: Value,
+) {
+    out.insert(field.python_name.clone(), value.clone());
+    if field.name != field.python_name {
+        out.insert(field.name.clone(), value);
+    }
+}
+
+fn typed_value_from_strings(field: &ApiMockContractField, values: &[String]) -> Value {
+    if matches!(field.kind, ApiMockContractFieldKind::Array) {
+        return Value::Array(
+            values
+                .iter()
+                .map(|value| typed_scalar_value(field.item_kind.unwrap_or(ApiMockContractFieldKind::String), value))
+                .collect(),
+        );
+    }
+    values
+        .last()
+        .map(|value| typed_scalar_value(field.kind, value))
+        .unwrap_or(Value::Null)
+}
+
+fn typed_scalar_value(kind: ApiMockContractFieldKind, value: &str) -> Value {
+    match kind {
+        ApiMockContractFieldKind::Integer => value
+            .parse::<i64>()
+            .map(|value| json!(value))
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+        ApiMockContractFieldKind::Number => value
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(value.to_string())),
+        ApiMockContractFieldKind::Boolean => match value.to_ascii_lowercase().as_str() {
+            "true" | "1" => Value::Bool(true),
+            "false" | "0" => Value::Bool(false),
+            _ => Value::String(value.to_string()),
+        },
+        ApiMockContractFieldKind::Object
+        | ApiMockContractFieldKind::Array
+        | ApiMockContractFieldKind::Any => {
+            serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
+        }
+        ApiMockContractFieldKind::String | ApiMockContractFieldKind::Bytes => {
+            Value::String(value.to_string())
+        }
+    }
+}
+
+fn map_to_value(map: &BTreeMap<String, Value>) -> Value {
+    Value::Object(
+        map.iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    )
 }
 
 async fn proxy_request(
@@ -421,5 +632,21 @@ mod tests {
         assert!(!safe_proxy_header(&HeaderName::from_static("connection")));
         assert!(!safe_proxy_header(&HeaderName::from_static("host")));
         assert!(safe_proxy_header(&HeaderName::from_static("authorization")));
+    }
+
+    #[test]
+    fn contract_query_values_keep_typed_last_value_and_python_name() {
+        let mut pairs = BTreeMap::new();
+        pairs.insert("page".to_string(), vec!["1".to_string(), "2".to_string()]);
+        let mut field = crate::app::api_mock::types::ApiMockContractField::new(
+            "page",
+            crate::app::api_mock::types::ApiMockContractFieldKind::Integer,
+            false,
+        );
+        field.default_value = Some("1".to_string());
+
+        let values = values_from_pairs(&pairs, &[field]);
+
+        assert_eq!(values.get("page"), Some(&serde_json::json!(2)));
     }
 }

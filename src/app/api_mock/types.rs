@@ -1,4 +1,7 @@
-use crate::app::api_client::{ApiMethod, ApiSpecEntry, ApiSpecSource};
+use crate::app::api_client::{
+    ApiMethod, ApiParam, ApiPrimitiveType, ApiRouteRow, ApiSchema, ApiSchemaKind, ApiSpecEntry,
+    ApiSpecModel, ApiSpecSource,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use url::Url;
@@ -100,32 +103,349 @@ pub struct ApiManualRoute {
 pub struct ApiMockPythonScript {
     #[serde(default = "default_mock_python_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub contract: ApiMockPythonContract,
+    #[serde(default)]
+    pub contract_source: String,
     pub prelude: String,
     pub body: String,
     pub timeout_ms: u64,
 }
 
 pub fn default_api_mock_python_body() -> String {
-    "    return json_response({\"ok\": True})".to_string()
+    "    return Response(ok=True)".to_string()
+}
+
+pub fn is_legacy_api_mock_python_body(text: &str) -> bool {
+    matches!(
+        text.trim(),
+        "return json_response({\"ok\": True})"
+            | "return json_response({})"
+            | "return Response(ok=True)"
+            | "response = Response()\n    response.ok = True\n    return response"
+    )
 }
 
 pub fn default_api_mock_python_script() -> ApiMockPythonScript {
     ApiMockPythonScript {
         enabled: true,
+        contract: ApiMockPythonContract::default(),
+        contract_source: String::new(),
         prelude: String::new(),
         body: default_api_mock_python_body(),
         timeout_ms: 1000,
     }
 }
 
-pub fn api_mock_path_param_names(path: &str) -> Vec<String> {
-    path.split('/')
-        .filter_map(|part| {
-            part.strip_prefix('{')
-                .and_then(|part| part.strip_suffix('}'))
-                .map(str::to_string)
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiMockPythonContract {
+    #[serde(default)]
+    pub path_params: ApiMockClassSpec,
+    #[serde(default)]
+    pub query: ApiMockClassSpec,
+    #[serde(default)]
+    pub body: ApiMockClassSpec,
+    #[serde(default)]
+    pub response: ApiMockClassSpec,
+}
+
+impl ApiMockPythonContract {
+    pub fn is_empty(&self) -> bool {
+        self.path_params.fields.is_empty()
+            && self.query.fields.is_empty()
+            && self.body.fields.is_empty()
+            && self.response.fields.is_empty()
+            && !self.response.enabled
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiMockClassSpec {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub fields: Vec<ApiMockContractField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiMockContractField {
+    pub name: String,
+    pub python_name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub kind: ApiMockContractFieldKind,
+    #[serde(default)]
+    pub item_kind: Option<ApiMockContractFieldKind>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub nullable: bool,
+    #[serde(default)]
+    pub enum_values: Vec<String>,
+    #[serde(default)]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+    #[serde(default)]
+    pub constraints: ApiMockFieldConstraints,
+}
+
+impl ApiMockContractField {
+    pub fn new(name: impl Into<String>, kind: ApiMockContractFieldKind, required: bool) -> Self {
+        let name = name.into();
+        Self {
+            python_name: api_mock_sanitize_python_param(&name),
+            name,
+            enabled: true,
+            kind,
+            item_kind: None,
+            required,
+            nullable: false,
+            enum_values: Vec::new(),
+            default_value: None,
+            examples: Vec::new(),
+            constraints: ApiMockFieldConstraints::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApiMockContractFieldKind {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Array,
+    Object,
+    Bytes,
+    #[default]
+    Any,
+}
+
+impl ApiMockContractFieldKind {
+    pub fn from_primitive(kind: ApiPrimitiveType) -> Self {
+        match kind {
+            ApiPrimitiveType::String | ApiPrimitiveType::Date | ApiPrimitiveType::DateTime => {
+                Self::String
+            }
+            ApiPrimitiveType::Integer => Self::Integer,
+            ApiPrimitiveType::Number => Self::Number,
+            ApiPrimitiveType::Boolean => Self::Boolean,
+            ApiPrimitiveType::Array => Self::Array,
+            ApiPrimitiveType::Object => Self::Object,
+            ApiPrimitiveType::Bytes => Self::Bytes,
+            ApiPrimitiveType::Unknown => Self::Any,
+        }
+    }
+
+    pub fn from_schema_kind(kind: ApiSchemaKind) -> Self {
+        match kind {
+            ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime => Self::String,
+            ApiSchemaKind::Integer => Self::Integer,
+            ApiSchemaKind::Number => Self::Number,
+            ApiSchemaKind::Boolean => Self::Boolean,
+            ApiSchemaKind::Array => Self::Array,
+            ApiSchemaKind::Object => Self::Object,
+            ApiSchemaKind::Bytes => Self::Bytes,
+            ApiSchemaKind::Unknown => Self::Any,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiMockFieldConstraints {
+    #[serde(default)]
+    pub min_length: Option<usize>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub minimum: Option<String>,
+    #[serde(default)]
+    pub maximum: Option<String>,
+    #[serde(default)]
+    pub exclusive_minimum: bool,
+    #[serde(default)]
+    pub exclusive_maximum: bool,
+    #[serde(default)]
+    pub min_items: Option<usize>,
+    #[serde(default)]
+    pub max_items: Option<usize>,
+    #[serde(default)]
+    pub nullable: bool,
+}
+
+pub fn api_mock_effective_contract(
+    script: &ApiMockPythonScript,
+    route: &ApiRouteRow,
+    model: &ApiSpecModel,
+) -> ApiMockPythonContract {
+    if script.contract.is_empty() {
+        default_contract_from_route(route, model)
+    } else {
+        let mut contract = script.contract.clone();
+        if !contract.response.enabled && contract.response.fields.is_empty() {
+            contract.response = response_class_from_route(route, model);
+        }
+        contract
+    }
+}
+
+pub fn default_contract_from_route(
+    route: &ApiRouteRow,
+    model: &ApiSpecModel,
+) -> ApiMockPythonContract {
+    let mut contract = ApiMockPythonContract::default();
+    contract.path_params.fields = route.path_params.iter().map(field_from_param).collect();
+    for name in api_mock_path_param_names(&route.path) {
+        if contract.path_params.fields.iter().any(|field| field.name == name) {
+            continue;
+        }
+        contract.path_params.fields.push(ApiMockContractField::new(
+            name,
+            ApiMockContractFieldKind::String,
+            true,
+        ));
+    }
+    contract.path_params.enabled = !contract.path_params.fields.is_empty();
+    contract.query.fields = route.query_params.iter().map(field_from_param).collect();
+    contract.query.enabled = !contract.query.fields.is_empty();
+    if let Some(schema_ref) = route.request_body.as_ref().and_then(|body| body.schema)
+        && let Some(schema) = model.schema_arena.get(schema_ref.0)
+    {
+        contract.body.fields = body_fields_from_schema(schema, model);
+        contract.body.enabled = true;
+    } else if route.request_body.is_some() {
+        contract.body.fields.push(ApiMockContractField::new(
+            "raw",
+            ApiMockContractFieldKind::Any,
+            route.request_body.as_ref().is_some_and(|body| body.required),
+        ));
+        contract.body.enabled = true;
+    }
+    contract.response = response_class_from_route(route, model);
+    contract
+}
+
+pub fn default_contract_for_manual_route(path: &str) -> ApiMockPythonContract {
+    let mut contract = ApiMockPythonContract::default();
+    contract.path_params.fields = api_mock_path_param_names(path)
+        .into_iter()
+        .map(|name| ApiMockContractField::new(name, ApiMockContractFieldKind::String, true))
+        .collect();
+    contract.path_params.enabled = !contract.path_params.fields.is_empty();
+    contract.response = default_response_class();
+    contract
+}
+
+fn field_from_param(param: &ApiParam) -> ApiMockContractField {
+    let mut field = ApiMockContractField::new(
+        param.name.clone(),
+        ApiMockContractFieldKind::from_primitive(param.primitive_type),
+        param.required,
+    );
+    field.item_kind = param
+        .item_type
+        .map(ApiMockContractFieldKind::from_primitive);
+    field.enum_values = param.enum_values.clone();
+    field.default_value = param.default_value.clone();
+    field.examples = param.examples.clone();
+    field.constraints = param.constraints.clone();
+    field.nullable = field.constraints.nullable;
+    field
+}
+
+fn body_fields_from_schema(schema: &ApiSchema, model: &ApiSpecModel) -> Vec<ApiMockContractField> {
+    if schema.properties.is_empty() {
+        let mut field = field_from_schema("raw", schema, false, model);
+        field.required = true;
+        return vec![field];
+    }
+    schema
+        .properties
+        .iter()
+        .filter_map(|prop| {
+            let schema = model.schema_arena.get(prop.schema.0)?;
+            Some(field_from_schema(&prop.name, schema, prop.required, model))
         })
         .collect()
+}
+
+fn response_class_from_route(route: &ApiRouteRow, model: &ApiSpecModel) -> ApiMockClassSpec {
+    let fields = route
+        .responses
+        .iter()
+        .find(|response| response.status.starts_with('2'))
+        .or_else(|| {
+            route
+                .responses
+                .iter()
+                .find(|response| response.status == "default")
+        })
+        .or_else(|| route.responses.first())
+        .and_then(|response| response.schema)
+        .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+        .map(|schema| body_fields_from_schema(schema, model))
+        .unwrap_or_default();
+    if fields.is_empty() {
+        default_response_class()
+    } else {
+        ApiMockClassSpec {
+            enabled: true,
+            fields,
+        }
+    }
+}
+
+fn default_response_class() -> ApiMockClassSpec {
+    let mut ok = ApiMockContractField::new("ok", ApiMockContractFieldKind::Boolean, false);
+    ok.default_value = Some("true".to_string());
+    ApiMockClassSpec {
+        enabled: true,
+        fields: vec![ok],
+    }
+}
+
+fn field_from_schema(
+    name: &str,
+    schema: &ApiSchema,
+    required: bool,
+    model: &ApiSpecModel,
+) -> ApiMockContractField {
+    let mut field = ApiMockContractField::new(
+        name.to_string(),
+        ApiMockContractFieldKind::from_schema_kind(schema.kind),
+        required,
+    );
+    field.item_kind = schema
+        .item
+        .and_then(|item_ref| model.schema_arena.get(item_ref.0))
+        .map(|item| ApiMockContractFieldKind::from_schema_kind(item.kind));
+    field.enum_values = schema.enum_values.clone();
+    field.default_value = schema.default_value.clone();
+    field.examples = schema.examples.clone();
+    field.constraints = schema.constraints.clone();
+    field.nullable = field.constraints.nullable;
+    field
+}
+
+pub fn api_mock_path_param_names(path: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = path;
+    while let Some(open) = rest.find('{') {
+        rest = &rest[open + 1..];
+        let Some(close) = rest.find('}') else {
+            break;
+        };
+        let name = &rest[..close];
+        if !name.is_empty() && !names.iter().any(|item| item == name) {
+            names.push(name.to_string());
+        }
+        rest = &rest[close + 1..];
+    }
+    names
 }
 
 pub fn api_mock_sanitize_python_param(name: &str) -> String {
@@ -267,6 +587,7 @@ pub struct ApiMockRuntimeRoute {
     pub generated_content_type: &'static str,
     pub generated_body: String,
     pub python: Option<ApiMockPythonScript>,
+    pub contract: ApiMockPythonContract,
     pub input_fields: Vec<ApiMockField>,
     pub output_fields: Vec<ApiMockField>,
     pub origin: ApiMockRouteOrigin,
@@ -375,5 +696,13 @@ mod tests {
             api_mock_route_key(&api_mock_source_key(&entry), ApiMethod::Get, "/users"),
             "https://example.test/openapi.json GET /users"
         );
+    }
+
+    #[test]
+    fn default_python_body_returns_response_class() {
+        assert_eq!(default_api_mock_python_body(), "    return Response(ok=True)");
+        assert!(is_legacy_api_mock_python_body(
+            "return json_response({\"ok\": True})"
+        ));
     }
 }

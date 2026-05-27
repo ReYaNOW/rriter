@@ -302,6 +302,7 @@ pub struct Renderer {
     pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,
     pub identical_words_cache: Vec<(usize, usize)>,
+    pub identical_words_cache_editor: usize,
     pub identical_words_cache_version: u64,
     pub identical_words_cache_cursor: usize,
     pub identical_words_cache_selection_anchor: Option<usize>,

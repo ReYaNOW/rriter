@@ -432,6 +432,12 @@ pub(super) fn source_signature_for_hover(
             }
         }
     }
+    if def_line_idx.is_none()
+        && let Some(symbol) = hovered_symbol.as_deref()
+        && let Some(class_hover) = source_class_signature_from_text(&text, symbol)
+    {
+        return Some(class_hover);
+    }
     if allow_nearby_fallback && def_line_idx.is_none() {
         for up in 0..=24usize {
             let idx = line_idx.saturating_sub(up);
@@ -728,11 +734,7 @@ pub(crate) fn source_function_signature_from_text(
     None
 }
 
-pub(crate) fn source_class_signature_from_definition_file(
-    path: &std::path::Path,
-    symbol: &str,
-) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
+fn source_class_signature_from_text(text: &str, symbol: &str) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
     let class_prefix = format!("class {symbol}");
 
@@ -749,8 +751,8 @@ pub(crate) fn source_class_signature_from_definition_file(
                 let mut in_string = false;
                 let mut string_char = ' ';
 
-                for i in idx..lines.len() {
-                    let l = lines[i].trim_end();
+                for l in lines.iter().skip(idx) {
+                    let l = l.trim_end();
                     let mut prev_char = ' ';
                     let mut colon_idx = None;
 
@@ -808,6 +810,14 @@ pub(crate) fn source_class_signature_from_definition_file(
         }
     }
     None
+}
+
+pub(crate) fn source_class_signature_from_definition_file(
+    path: &std::path::Path,
+    symbol: &str,
+) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    source_class_signature_from_text(&text, symbol)
 }
 
 pub(super) fn is_ident_byte(b: u8) -> bool {
@@ -1279,5 +1289,133 @@ pub(super) fn should_replace_simple_type_hover(clean_msg: &str) -> bool {
     {
         return false;
     }
+    true
+}
+
+pub(crate) fn source_hover_parts_for_editor(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    text: String,
+    module_path: Option<&str>,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<crate::lsp::HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
+    let (clean_msg, spans, line_kinds, inline_code_ranges) = crate::lsp::highlight_hover_text(&text);
+    let is_simple_type = should_replace_simple_type_hover(&clean_msg);
+    if !should_replace_hover_with_source_signature(&clean_msg) {
+        return (clean_msg, spans, line_kinds, inline_code_ranges);
+    }
+
+    let lsp_ty = is_simple_type.then_some(clean_msg.as_str());
+    if let Some(sig) =
+        source_signature_for_hover(editor, byte_offset, !is_simple_type, lsp_ty, module_path)
+    {
+        crate::lsp::highlight_hover_text(&sig)
+    } else {
+        (clean_msg, spans, line_kinds, inline_code_ranges)
+    }
+}
+
+pub(crate) fn source_hover_popup_for_editor(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    text: String,
+    module_path: Option<&str>,
+    anchor: (f32, f32),
+) -> crate::app::mouse::HoverPopup {
+    let (text, spans, line_kinds, inline_code_ranges) =
+        source_hover_parts_for_editor(editor, byte_offset, text, module_path);
+    crate::app::mouse::HoverPopup {
+        text,
+        spans,
+        line_kinds,
+        inline_code_ranges,
+        byte_offset,
+        anchor_x: anchor.0,
+        anchor_y: anchor.1,
+        offset_x: None,
+        offset_y: None,
+        anim_progress: 0.0,
+        scroll: crate::scroll::ScrollState::new(15.0),
+        layout_cache: None,
+    }
+}
+
+pub(crate) fn source_hover_popup_from_response_for_editor(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    text: String,
+    module_path: Option<&str>,
+    anchor: (f32, f32),
+) -> Option<crate::app::mouse::HoverPopup> {
+    let (clean_msg, _, _, _) = crate::lsp::highlight_hover_text(&text);
+    let hovered_symbol = symbol_at_offset(editor, byte_offset);
+    if clean_msg.trim() == "None" && hovered_symbol.as_deref() == Some("await") {
+        None
+    } else {
+        Some(source_hover_popup_for_editor(
+            editor,
+            byte_offset,
+            text,
+            module_path,
+            anchor,
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_source_hover_response_to_state<F>(
+    state: &mut crate::app::mouse::HoverState,
+    request_id: i32,
+    editor: &crate::editor::Editor,
+    state_byte_offset: usize,
+    editor_byte_offset: usize,
+    text: Option<String>,
+    module_path: Option<&str>,
+    anchor: (f32, f32),
+    request_definition: F,
+) -> bool
+where
+    F: FnOnce() -> Option<i32>,
+{
+    if state.request_id != Some(request_id) || state.byte_offset != Some(state_byte_offset) {
+        return false;
+    }
+    state.request_id = None;
+    let Some(text) = text else {
+        state.popup = None;
+        state.pending_popup = None;
+        state.rect = None;
+        return true;
+    };
+    let Some(mut popup) = source_hover_popup_from_response_for_editor(
+        editor,
+        editor_byte_offset,
+        text,
+        module_path,
+        anchor,
+    ) else {
+        state.popup = None;
+        state.pending_popup = None;
+        state.rect = None;
+        return true;
+    };
+    popup.byte_offset = state_byte_offset;
+    state.pending_popup = None;
+    state.definition_request_id = None;
+    state.hide_diagnostic_popup_until_ready();
+    state.definition_request_id = request_definition();
+    if state.definition_request_id.is_some() {
+        state.pending_popup = Some(popup);
+    } else {
+        state.finish_stale_combined_transition();
+        state.popup = Some(popup);
+    }
+    state.selection_anchor = None;
+    state.selection_cursor = None;
+    state.selecting = false;
     true
 }

@@ -643,11 +643,83 @@ fn api_line_byte_at_x(
     line.len()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ApiMockTyDiagLayout {
+    pub x_start: f32,
+    pub squiggle_y: f32,
+    pub squiggle_w: f32,
+    pub line_h: f32,
+    pub line_top: f32,
+    pub hit_top: f32,
+    pub byte_offset: usize,
+}
+
+pub(crate) fn api_byte_offset_for_char_col(line: &str, col: usize) -> usize {
+    line.char_indices()
+        .nth(col)
+        .map(|(idx, _)| idx)
+        .unwrap_or(line.len())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn api_mock_ty_diag_layout<F>(
+    text: &str,
+    diag: &ApiMockTyDiagnostic,
+    part: ApiMockSourcePart,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    s: f32,
+    scroll_y: f32,
+    scroll_x: f32,
+    mut measure: F,
+) -> Option<ApiMockTyDiagLayout>
+where
+    F: FnMut(&str) -> f32,
+{
+    if diag.part != part {
+        return None;
+    }
+    let line_h = api_text_area_line_height(s);
+    let first_line = (scroll_y / line_h).floor() as usize;
+    if diag.line < first_line {
+        return None;
+    }
+    let line_offset = scroll_y - first_line as f32 * line_h;
+    let visible_idx = diag.line - first_line;
+    let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+    if visible_idx >= max_lines {
+        return None;
+    }
+    let mut line_start = 0usize;
+    let mut line = None;
+    for (idx, candidate) in text.split('\n').enumerate() {
+        if idx == diag.line {
+            line = Some(candidate);
+            break;
+        }
+        line_start = line_start.saturating_add(candidate.len()).saturating_add(1);
+    }
+    let line = line?;
+    let start_byte = api_byte_offset_for_char_col(line, diag.start_col);
+    let end_byte = api_byte_offset_for_char_col(line, diag.end_col);
+    let x_start = x + measure(&line[..start_byte]) - scroll_x;
+    let x_end = x + measure(&line[..end_byte]) - scroll_x;
+    let base_y = y - line_offset + visible_idx as f32 * line_h;
+    let squiggle_w = (x_end - x_start).max(8.0 * s).min(w);
+    Some(ApiMockTyDiagLayout {
+        x_start: x_start.round(),
+        squiggle_y: (base_y + 3.0 * s).round(),
+        squiggle_w,
+        line_h,
+        line_top: base_y - api_text_area_baseline_offset(s),
+        hit_top: base_y - 14.0 * s,
+        byte_offset: line_start.saturating_add(start_byte),
+    })
+}
+
 pub(crate) fn api_mock_body_editor_text(text: &str) -> String {
-    let text = text
-        .strip_prefix("    \n")
-        .or_else(|| text.strip_prefix('\n'))
-        .unwrap_or(text);
     let mut out = String::with_capacity(text.len() + 8);
     for (idx, line) in text.lines().enumerate() {
         if idx > 0 {
@@ -669,7 +741,7 @@ pub(crate) fn api_mock_body_editor_text(text: &str) -> String {
 fn set_api_multiline_cursor_at_pointer(
     editor: &mut Editor,
     renderer: &mut crate::renderer::Renderer,
-    rect: (f32, f32, f32, f32),
+    cursor_left_x: f32,
     cursor_top_y: f32,
     mx: f32,
     my: f32,
@@ -678,16 +750,20 @@ fn set_api_multiline_cursor_at_pointer(
     scroll_x: f32,
     is_click: bool,
 ) {
-    let (x, _, _, _) = rect;
     let old_line_height = renderer.line_height;
     let old_left_padding = renderer.left_padding;
     let old_last_scroll_x = renderer.last_scroll_x;
     let old_inlay_hints = std::mem::take(&mut renderer.current_python_inlay_hints);
 
     renderer.line_height = api_text_area_line_height(scale);
-    renderer.left_padding = x + 10.0 * scale;
+    renderer.left_padding = cursor_left_x;
     renderer.last_scroll_x = scroll_x;
-    editor.set_cursor_at_pos(mx, my - cursor_top_y + scroll_y, renderer, is_click);
+    editor.set_cursor_at_pos(
+        mx,
+        my - cursor_top_y + scroll_y + renderer.line_height * 0.25,
+        renderer,
+        is_click,
+    );
     renderer.line_height = old_line_height;
     renderer.left_padding = old_left_padding;
     renderer.last_scroll_x = old_last_scroll_x;

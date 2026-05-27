@@ -9,6 +9,7 @@ use super::super::{
     hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
     is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte,
     suppress_hover_popup_until_mouse_move, type_hover_screen_y_matches_byte_line,
+    update_editor_hover_state_for_cursor,
 };
 
 #[test]
@@ -298,6 +299,22 @@ fn mouse_motion_resets_type_hover_request_wait() {
     assert!(state.request_id.is_none());
     assert!(state.definition_request_id.is_none());
     assert!(state.pending_popup.is_none());
+}
+
+#[test]
+fn shared_hover_target_update_restarts_after_click_clear() {
+    let mut editor = crate::editor::Editor::new(64);
+    editor.set_text_clean("json_response\njson_ressposnse");
+    let mut state = HoverState::default();
+
+    let should_clear_diag = update_editor_hover_state_for_cursor(
+        &mut state, &editor, 1, None, true, false, false, false,
+    );
+
+    assert_eq!(should_clear_diag, Some(true));
+    assert_eq!(state.byte_offset, Some(1));
+    assert_eq!(state.timer, 0.0);
+    assert!(state.request_id.is_none());
 }
 
 #[test]

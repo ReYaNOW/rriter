@@ -3,13 +3,14 @@ use crate::app::api_mock::server::{
     apply_api_mock_server_event, drain_api_mock_server_events, start_api_mock_server,
     stop_api_mock_server,
 };
+use crate::app::api_mock::contract::api_mock_default_handler_body;
 use crate::app::api_mock::ty_check::{
     ApiMockSourcePart, ApiMockTyDiagnostic, build_api_mock_virtual_source, spawn_api_mock_ty_check,
 };
 use crate::app::api_mock::types::ApiMockServerEvent;
 use crate::app::api_mock::types::{
-    ApiMockState, api_mock_path_param_names, api_mock_sanitize_python_param,
-    default_api_mock_python_body, default_api_mock_python_script,
+    ApiMockFieldConstraints, ApiMockState, default_contract_from_route,
+    default_api_mock_python_body, default_api_mock_python_script, is_legacy_api_mock_python_body,
 };
 use crate::app::api_mock::{merge::build_api_mock_routes, types::ApiMockServerSnapshot};
 use crate::editor::Editor;
@@ -307,6 +308,7 @@ pub struct ApiParam {
     pub example: Option<String>,
     pub examples: Vec<String>,
     pub description: String,
+    pub constraints: ApiMockFieldConstraints,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -381,6 +383,7 @@ pub struct ApiSchema {
     pub default_value: Option<String>,
     pub examples: Vec<String>,
     pub max_chars: Option<usize>,
+    pub constraints: ApiMockFieldConstraints,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -687,6 +690,9 @@ pub enum ApiFocus {
     MockManualPath {
         manual_idx: usize,
     },
+    MockContract {
+        route_idx: usize,
+    },
     MockPrelude {
         route_idx: usize,
     },
@@ -839,13 +845,16 @@ pub struct ApiClientState {
     pub mock_ty_due: Option<Instant>,
     pub mock_ty_pending: Option<(usize, u64)>,
     pub mock_ty_diagnostics: Vec<ApiMockTyDiagnostic>,
+    pub(crate) mock_hover_target: Option<ApiMockHoverTarget>,
+    pub(crate) mock_hover_request: Option<ApiMockHoverRequest>,
+    mock_lsp_opened: Option<(PathBuf, i32)>,
     pub mock_highlighter: Highlighter,
     pub mock_highlight_target: Option<(usize, ApiMockSourcePart, u64)>,
     pub mock_highlight_spans: Vec<ColorSpan>,
     pub mock_highlight_cache: FxHashMap<(usize, ApiMockSourcePart), Vec<ColorSpan>>,
     pub mock_python_scrolls: FxHashMap<(usize, ApiMockSourcePart), ScrollState>,
     pub mock_python_scrolls_x: FxHashMap<(usize, ApiMockSourcePart), ScrollState>,
-    mock_python_editors: FxHashMap<(usize, ApiMockSourcePart), Editor>,
+    pub(crate) mock_python_editors: FxHashMap<(usize, ApiMockSourcePart), Editor>,
     pub last_resolved_host: Option<ApiResolvedHost>,
     body_json_validation: Option<ApiJsonValidationState>,
     body_json_validation_pending: Option<(ApiSpecId, usize, u64)>,
@@ -853,6 +862,23 @@ pub struct ApiClientState {
     python_version_list_rx: Option<Receiver<ApiPythonVersionListResult>>,
     python_install_rx: Option<Receiver<ApiPythonInstallEvent>>,
     python_path_pick_rx: Option<Receiver<ApiPythonPathPickResult>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApiMockHoverTarget {
+    pub route_idx: usize,
+    pub part: ApiMockSourcePart,
+    pub edit_byte: usize,
+    pub version: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ApiMockHoverRequest {
+    pub request_id: i32,
+    pub target: ApiMockHoverTarget,
+    pub source: String,
+    pub source_cursor: usize,
+    pub anchor: (f32, f32),
 }
 
 #[derive(Clone, Debug)]
@@ -965,6 +991,9 @@ impl Default for ApiClientState {
             mock_ty_due: None,
             mock_ty_pending: None,
             mock_ty_diagnostics: Vec::new(),
+            mock_hover_target: None,
+            mock_hover_request: None,
+            mock_lsp_opened: None,
             mock_highlighter: Highlighter::new(),
             mock_highlight_target: None,
             mock_highlight_spans: Vec::new(),
@@ -1184,7 +1213,8 @@ fn api_focus_targets_active_tab(
         ApiFocus::MockPythonVersion => true,
         ApiFocus::MockPythonCustomPath => true,
         ApiFocus::MockManualPath { .. } => true,
-        ApiFocus::MockPrelude { .. }
+        ApiFocus::MockContract { .. }
+        | ApiFocus::MockPrelude { .. }
         | ApiFocus::MockBody { .. }
         | ApiFocus::MockSignature { .. }
         | ApiFocus::MockStaticResponse { .. } => true,
@@ -1292,6 +1322,7 @@ include!("api_client/api_client_request_runtime.rs");
 include!("api_client/api_client_app_text_methods.rs");
 include!("api_client/api_client_app_focus_methods.rs");
 include!("api_client/api_client_app_click_methods.rs");
+include!("api_client/api_client_app_mock_contract_methods.rs");
 include!("api_client/api_client_app_mock_methods.rs");
 include!("api_client/api_client_app_request_methods.rs");
 include!("api_client/api_client_defaults_persist.rs");

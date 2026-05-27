@@ -1,4 +1,5 @@
 use super::python_env::write_api_mock_worker;
+use super::contract::{api_mock_contract_state_text, api_mock_worker_arg_plan};
 use super::types::{ApiMockPythonScript, ApiPythonRuntimeConfig, ApiPythonRuntimeMode};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -16,9 +17,10 @@ pub struct PythonMockRequest {
     pub method: String,
     pub path: String,
     pub headers: BTreeMap<String, String>,
-    pub params: BTreeMap<String, String>,
-    pub query: BTreeMap<String, String>,
+    pub params: BTreeMap<String, Value>,
+    pub query: BTreeMap<String, Value>,
     pub body: Value,
+    pub fields: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,7 +159,13 @@ impl PythonWorker {
         let msg = json!({
             "id": id,
             "prelude": script.prelude,
-            "body": script.body,
+            "script_body": script.body,
+            "contract_source": if script.contract_source.trim().is_empty() {
+                api_mock_contract_state_text(&script.contract)
+            } else {
+                script.contract_source.clone()
+            },
+            "arg_plan": api_mock_worker_arg_plan(&script.contract),
             "req": {
                 "method": request.method,
                 "path": request.path,
@@ -166,7 +174,7 @@ impl PythonWorker {
             "params": request.params,
             "query": request.query,
             "body": request.body,
-            "fields": {},
+            "fields": request.fields,
         });
         serde_json::to_writer(&mut self.stdin, &msg).map_err(|err| err.to_string())?;
         self.stdin.write_all(b"\n").map_err(|err| err.to_string())?;

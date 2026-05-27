@@ -248,26 +248,6 @@ impl App {
             return;
         }
 
-        if self.active_tab_is_api_client() {
-            let in_api_hover_popup = HOVER_STATE.with(|state| {
-                let state = state.borrow();
-                state.popup.as_ref().is_some_and(|popup| {
-                    popup.byte_offset == crate::app::api_client::API_MOCK_TY_POPUP_BYTE
-                }) && state
-                    .popup_or_bridge_contains(
-                        px,
-                        py,
-                        self.renderer.as_ref().unwrap().width,
-                        self.renderer.as_ref().unwrap().scale_factor,
-                    )
-                    .0
-            });
-            if in_api_hover_popup {
-                self.window.as_ref().unwrap().request_redraw();
-                return;
-            }
-        }
-
         if self
             .renderer
             .as_ref()
@@ -510,93 +490,23 @@ impl App {
         }
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
-        let mut in_hover_popup = false;
-        let mut in_hover_source_line = false;
-
-        let (type_rect, popup_meta) = HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            (
-                state.rect,
-                state
-                    .popup
-                    .as_ref()
-                    .map(|popup| (popup.anchor_x, popup.anchor_y, popup.byte_offset)),
+        let (in_hover_popup, in_hover_source_line) = HOVER_STATE.with(|state| {
+            state.borrow().popup_safe_area_contains(
+                position.x as f32,
+                position.y as f32,
+                self.renderer.as_ref().unwrap().width,
+                s,
             )
         });
-        let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
-        let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
-
-        if type_rect.is_some() || diag_rect.is_some() {
-            let mut union_rect = diag_rect.unwrap_or_else(|| type_rect.unwrap());
-            if let (Some(r1), Some(r2)) = (diag_rect, type_rect) {
-                let x_min = r1.0.min(r2.0);
-                let y_min = r1.1.min(r2.1);
-                let x_max = (r1.0 + r1.2).max(r2.0 + r2.2);
-                let y_max = (r1.1 + r1.3).max(r2.1 + r2.3);
-                union_rect = (x_min, y_min, x_max - x_min, y_max - y_min);
-            }
-            let pad = 24.0 * s;
-            if position.x as f32 >= union_rect.0 - pad
-                && position.x as f32 <= union_rect.0 + union_rect.2 + pad
-                && position.y as f32 >= union_rect.1 - pad
-                && position.y as f32 <= union_rect.1 + union_rect.3 + pad
-            {
-                in_hover_popup = true;
-            }
-        }
-
-        if type_rect.is_some() || diag_rect_full.is_some() {
-            if let (Some((rx, ry, rw, rh)), Some((anchor_x, anchor_y, _popup_byte_offset))) =
-                (type_rect, popup_meta)
-            {
-                let (line_top_y, line_bottom_y) = hover_source_line_y_band(anchor_y, s);
-
-                let px = position.x as f32;
-                let py = position.y as f32;
-                if is_in_hover_popup_or_bridge(
-                    px,
-                    py,
-                    (rx, ry, rw, rh),
-                    anchor_x,
-                    anchor_y,
-                    line_top_y,
-                    line_bottom_y,
-                    self.renderer.as_ref().unwrap().width,
-                    s,
-                ) {
-                    in_hover_popup = true;
-                    if py >= line_top_y && py <= line_bottom_y {
-                        in_hover_source_line = true;
-                    }
-                }
-            }
-
-            if !in_hover_popup {
-                if let Some((rx, ry, rw, rh, anchor_x_start, anchor_x_end, anchor_y)) =
-                    diag_rect_full
-                {
-                    let anchor_x = (anchor_x_start + anchor_x_end) * 0.5;
-                    let (line_top_y, line_bottom_y) = hover_source_line_y_band(anchor_y, s);
-                    let px = position.x as f32;
-                    let py = position.y as f32;
-                    if is_in_hover_popup_or_bridge(
-                        px,
-                        py,
-                        (rx, ry, rw, rh),
-                        anchor_x,
-                        anchor_y,
-                        line_top_y,
-                        line_bottom_y,
-                        self.renderer.as_ref().unwrap().width,
-                        s,
-                    ) {
-                        in_hover_popup = true;
-                        if py >= line_top_y && py <= line_bottom_y {
-                            in_hover_source_line = true;
-                        }
-                    }
-                }
-            }
+        if self.update_api_mock_hover_from_cursor(
+            position.x as f32,
+            position.y as f32,
+            in_hover_popup,
+            in_hover_source_line,
+        ) {
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
         }
 
         let minimap_w = self.renderer.as_ref().unwrap().minimap_width;
@@ -802,88 +712,24 @@ impl App {
             let mut clear_diag_popup = false;
             HOVER_STATE.with(|state| {
                 let mut state = state.borrow_mut();
-                if editor_text_selecting {
-                    return;
-                }
-                if is_text_area {
-                    let normalized = normalize_hover_byte(&self.editor, byte_offset);
-                    if normalized.is_none() {
-                        if let Some(diag_byte) = diag_hover_byte {
-                            if !in_hover_popup {
-                                // We are over a diagnostic squiggle, but not a text word.
-                                // Trigger hover for the diagnostic!
-                                if state.byte_offset != Some(diag_byte) {
-                                    let keep_visible = state.popup.is_some();
-                                    state.byte_offset = Some(diag_byte);
-                                    state.timer = 0.0;
-                                    state.request_id = None;
-                                    state.definition_request_id = None;
-                                    state.pending_popup = None;
-                                    state.selection_anchor = None;
-                                    state.selection_cursor = None;
-                                    state.selecting = false;
-                                    if !keep_visible {
-                                        state.popup = None;
-                                        state.rect = None;
-                                    }
-                                }
-                            }
-                        } else if !in_hover_popup {
-                            if state.keep_active_combined_popup_on_empty_space() {
-                                return;
-                            }
-                            if state.byte_offset.is_some()
-                                && !state.should_keep_popup_through_empty_space()
-                            {
-                                if crate::render_view::hover_trace_enabled() {
-                                    println!("[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer.");
-                                }
-                                state.byte_offset = None;
-                                state.timer = 0.0;
-                                state.request_id = None;
-                                state.definition_request_id = None;
-                            }
-                        }
-                        return;
+                let keep_visible_popup = state.popup.is_some();
+                let old_byte = state.byte_offset;
+                if let Some(should_clear_diag) =
+                    crate::app::mouse::update_editor_hover_state_for_cursor(
+                        &mut state,
+                        &self.editor,
+                        byte_offset,
+                        diag_hover_byte,
+                        is_text_area,
+                        in_hover_popup,
+                        in_hover_source_line,
+                        editor_text_selecting,
+                    )
+                {
+                    if should_clear_diag && crate::render_view::hover_trace_enabled() {
+                        println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, old_byte, keep_visible_popup);
                     }
-                    let byte_offset = normalized.unwrap_or(byte_offset);
-                    let mut same_word = false;
-                    if let Some(old_byte) = state.byte_offset {
-                        let (old_start, old_end) = hover_token_bounds(&self.editor, old_byte);
-                        let (new_start, new_end) = hover_token_bounds(&self.editor, byte_offset);
-                        same_word = old_start == new_start && old_end == new_end;
-                    }
-                    if !same_word && state.should_lock_hover_target_while_popup_opens(Some(byte_offset)) {
-                        return;
-                    }
-                    if same_word && !in_hover_popup {
-                        let popup_matches_byte = state
-                            .popup
-                            .as_ref()
-                            .is_some_and(|popup| popup.byte_offset == byte_offset);
-                        if !popup_matches_byte {
-                            state.reset_type_hover_wait_after_mouse_motion();
-                        }
-                    }
-                    if !same_word && (!in_hover_popup || in_hover_source_line) {
-                        let keep_visible_popup = state.popup.is_some();
-                        if crate::render_view::hover_trace_enabled() {
-                            println!("[HOVER DEBUG] cursor -> new word ({}). old_byte: {:?}. keep_old_popup: {}. start 0.34s request timer.", byte_offset, state.byte_offset, keep_visible_popup);
-                        }
-                        clear_diag_popup = state.begin_type_hover_transition(byte_offset);
-                    }
-                } else if !in_hover_popup {
-                    if state.byte_offset.is_some()
-                        && !state.should_keep_popup_through_empty_space()
-                    {
-                        if crate::render_view::hover_trace_enabled() {
-                            println!("[HOVER DEBUG] cursor out of bounds. byte_offset=None. start 0.25s hide timer.");
-                        }
-                        state.byte_offset = None;
-                        state.timer = 0.0;
-                        state.request_id = None;
-                        state.definition_request_id = None;
-                    }
+                    clear_diag_popup = should_clear_diag;
                 }
             });
             if clear_diag_popup {

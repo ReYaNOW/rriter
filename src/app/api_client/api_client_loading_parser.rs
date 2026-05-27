@@ -629,6 +629,7 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
                 .and_then(value_to_string);
             let examples = parameter_examples(item, resolved_schema, resolved_item_schema);
             let example = examples.first().cloned();
+            let constraints = parse_schema_constraints(resolved_schema.or(schema));
             out.push(ApiParam {
                 name: name.to_string(),
                 location,
@@ -649,6 +650,7 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+                constraints,
             });
         }
     }
@@ -696,6 +698,70 @@ fn schema_enum_values(schema: Option<&Value>) -> Option<Vec<String>> {
         .get("enum")
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(value_to_string).collect())
+}
+
+fn parse_schema_constraints(schema: Option<&Value>) -> ApiMockFieldConstraints {
+    let Some(schema) = schema else {
+        return ApiMockFieldConstraints::default();
+    };
+    let mut constraints = ApiMockFieldConstraints {
+        min_length: schema
+            .get("minLength")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok()),
+        max_length: schema
+            .get("maxLength")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok()),
+        pattern: schema
+            .get("pattern")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        minimum: schema.get("minimum").and_then(numberish_to_string),
+        maximum: schema.get("maximum").and_then(numberish_to_string),
+        exclusive_minimum: schema
+            .get("exclusiveMinimum")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        exclusive_maximum: schema
+            .get("exclusiveMaximum")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        min_items: schema
+            .get("minItems")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok()),
+        max_items: schema
+            .get("maxItems")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok()),
+        nullable: schema
+            .get("nullable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || schema.get("type").and_then(Value::as_array).is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item.as_str().is_some_and(|kind| kind == "null"))
+            }),
+    };
+    if let Some(value) = schema.get("exclusiveMinimum").and_then(numberish_to_string) {
+        constraints.minimum = Some(value);
+        constraints.exclusive_minimum = true;
+    }
+    if let Some(value) = schema.get("exclusiveMaximum").and_then(numberish_to_string) {
+        constraints.maximum = Some(value);
+        constraints.exclusive_maximum = true;
+    }
+    constraints
+}
+
+fn numberish_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(text) if text.parse::<f64>().is_ok() => Some(text.to_string()),
+        _ => None,
+    }
 }
 
 fn resolve_parameter_ref<'a>(item: &'a Value, root: &'a Value) -> Option<&'a Value> {
@@ -766,6 +832,7 @@ fn normalize_schema_named(
         return None;
     }
     let idx = arena.len();
+    let constraints = parse_schema_constraints(Some(schema));
     arena.push(ApiSchema {
         name: name.to_string(),
         kind: schema_kind(schema),
@@ -774,10 +841,8 @@ fn normalize_schema_named(
         enum_values: schema_enum_values(Some(schema)).unwrap_or_default(),
         default_value: schema.get("default").and_then(value_to_string),
         examples: schema_examples(schema),
-        max_chars: schema
-            .get("maxLength")
-            .and_then(Value::as_u64)
-            .and_then(|v| usize::try_from(v).ok()),
+        max_chars: constraints.max_length,
+        constraints,
     });
     if matches!(arena[idx].kind, ApiSchemaKind::Object) {
         let required = schema

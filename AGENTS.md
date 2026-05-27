@@ -441,6 +441,9 @@ Entrypoints/state:
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
 * `src/app/api_client.rs` -> include shell for API client types/state and behavior chunks.
 * `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input, App methods, defaults/persist, tests.
+* `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
+* `src/app/api_mock/contract.rs` -> Python mock contract builder for signature, classes, worker arg plan, defaults, OpenAPI schema pieces.
+* `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON export patch/synthesis for selected spec and manual mock routes.
 * `src/app/autocomplete.rs` -> include shell for `App` autocomplete detail/request/update/apply behavior.
 * `src/app/autocomplete/*` -> autocomplete helper/method chunks split by detail flow, Ty flow, popup/apply flow.
 * `src/app/python_completion.rs` -> include shell for Python autocomplete/fold/source-owner helpers.
@@ -492,6 +495,7 @@ Rendering:
 * `src/render_view/root_frame_overlay_helpers.rs` -> root frame overlay/resize/search/notice helpers. Hot path.
 * `src/render_view/api_client_panel.rs`, `src/render_view/api_client_tab.rs` -> include shells for API panel/tab renderers.
 * `src/render_view/api_client_panel/*`, `src/render_view/api_client_tab/*` -> API client panel/tab renderer chunks.
+* `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract controls and locked contract block helpers.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.

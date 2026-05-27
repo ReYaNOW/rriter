@@ -116,13 +116,21 @@ impl App {
             | UiId::ApiMockPythonUvPathInput
             | UiId::ApiMockPythonVersionInput
             | UiId::ApiMockPythonCustomPathInput
+            | UiId::ApiMockExportOpenApi
             | UiId::ApiMockRouteEnable(_)
             | UiId::ApiMockRouteDetailsToggle(_)
             | UiId::ApiMockRoutePythonToggle(_)
+            | UiId::ApiMockContractQueryToggle(_)
+            | UiId::ApiMockContractBodyToggle(_)
+            | UiId::ApiMockContractQueryFieldToggle(_, _)
+            | UiId::ApiMockContractBodyFieldToggle(_, _)
             | UiId::ApiMockStaticResponseInput(_)
+            | UiId::ApiMockCombinedPython(_)
+            | UiId::ApiMockContractInput(_)
             | UiId::ApiMockSignatureInput(_)
             | UiId::ApiMockPreludeInput(_)
             | UiId::ApiMockBodyInput(_)
+            | UiId::ApiMockContractReset(_)
             | UiId::ApiMockPreludeReset(_)
             | UiId::ApiMockBodyReset(_)
             | UiId::ApiMockAddInputField(_)

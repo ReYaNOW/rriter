@@ -217,6 +217,71 @@ mod tests {
     }
 
     #[test]
+    fn api_text_area_top_matches_render_baseline_offset() {
+        assert_eq!(api_text_area_baseline_offset(1.0), 20.0);
+        assert_eq!(api_text_area_top_from_baseline(29.0, 1.0), 9.0);
+    }
+
+    #[test]
+    fn api_mock_autocomplete_anchor_uses_cursor_baseline_and_scroll_x() {
+        let rect = (100.0, 200.0, 300.0, 120.0);
+        let text = "seed\n    Response";
+        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+            crate::ui_system::UiId::ApiMockBodyInput(0),
+            rect,
+            1.0,
+            text,
+            text.len(),
+            12.0,
+            |prefix| prefix.len() as f32 * 7.0,
+        );
+
+        assert_eq!(x, 100.0 + 10.0 + "    Response".len() as f32 * 7.0 - 12.0);
+        assert_eq!(y, 200.0 + 9.0 + 26.0 + 20.0);
+    }
+
+    #[test]
+    fn api_mock_signature_autocomplete_anchor_uses_registered_left_edge() {
+        let rect = (140.0, 80.0, 360.0, 32.0);
+        let text = "def handler";
+        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+            crate::ui_system::UiId::ApiMockSignatureInput(0),
+            rect,
+            1.0,
+            text,
+            text.len(),
+            0.0,
+            |prefix| prefix.len() as f32 * 5.0,
+        );
+
+        assert_eq!(x, 140.0 + "def handler".len() as f32 * 5.0);
+        assert_eq!(y, 80.0 + 20.0);
+    }
+
+    #[test]
+    fn api_mock_hover_uses_editor_line_hitbox_for_vertical_mouse_range() {
+        let line_h = api_text_area_line_height(1.0);
+        let top_y = 100.0;
+
+        assert!(
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.25 - 0.1, top_y, 0.0, line_h)
+                .is_none()
+        );
+        assert!(
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.25, top_y, 0.0, line_h)
+                .is_some()
+        );
+        assert!(
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.75 - 0.1, top_y, 0.0, line_h)
+                .is_some()
+        );
+        assert!(
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.75, top_y, 0.0, line_h)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn api_tab_prefill_uses_selected_restored_route() {
         let model = parse_openapi_model(ApiSpecId(9), &sample_spec()).expect("parse");
         let post_idx = model
@@ -1164,9 +1229,9 @@ mod tests {
             }),
             ..Default::default()
         };
-        let tab_max = api_tab_max_scroll(Some(&model), &tab_state, 180.0, 1.0);
+        let tab_max = api_tab_max_scroll(Some(&model), &tab_state, None, 180.0, 1.0);
         assert!(tab_max.is_finite());
         assert!(tab_max > 0.0);
-        assert_eq!(api_tab_max_scroll(None, &tab_state, 180.0, 1.0), 0.0);
+        assert_eq!(api_tab_max_scroll(None, &tab_state, None, 180.0, 1.0), 0.0);
     }
 }

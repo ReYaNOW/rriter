@@ -780,7 +780,7 @@ impl Editor {
                     UndoRedoDelta::Replace(*offset, len, old_text.clone(), new_text.clone())
                 }
             };
-            self.cursor = step.cursor_before;
+            self.cursor = self.valid_cursor(step.cursor_before);
             self.selection_anchor = None;
             self.redo_stack.push_back(step);
             self.is_working_history = false;
@@ -838,7 +838,7 @@ impl Editor {
                     UndoRedoDelta::Replace(*offset, len, new_text.clone(), old_text.clone())
                 }
             };
-            self.cursor = step.cursor_after;
+            self.cursor = self.valid_cursor(step.cursor_after);
             self.selection_anchor = None;
             self.history.push_back(step);
             self.is_working_history = false;
@@ -989,6 +989,14 @@ impl Editor {
         self.gap_start += len;
         self.cursor += len;
         len
+    }
+
+    fn valid_cursor(&self, mut cursor: usize) -> usize {
+        cursor = cursor.min(self.len());
+        while cursor > 0 && !self.is_char_boundary(cursor) {
+            cursor -= 1;
+        }
+        cursor
     }
 
     pub fn replace_range(

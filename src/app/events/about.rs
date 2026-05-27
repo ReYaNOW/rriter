@@ -24,6 +24,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     let mut needs_redraw = false;
     let mut hover_wake_at: Option<Instant> = None;
     let mut hover_poll_pending = false;
+    let mut api_mock_hover_request_due = false;
 
     needs_redraw |= update_sticky_animation(
         &mut app.current_sticky_lines,
@@ -50,6 +51,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
 
+    let api_mock_hover_byte = if app.active_tab_is_api_client() {
+        app.ide_panel
+            .api
+            .mock_hover_target
+            .as_ref()
+            .map(|target| target.edit_byte)
+    } else {
+        None
+    };
+
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
         if let Some(popup) = &mut state.popup {
@@ -58,6 +69,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
         }
         if let Some(byte_offset) = state.byte_offset {
+            let is_api_mock_hover = api_mock_hover_byte == Some(byte_offset);
             let popup_matches_byte = state
                 .popup
                 .as_ref()
@@ -75,7 +87,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 state.timer += raw_dt;
                 if state.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
                     state.timer = 0.0;
-                    if app.is_ide_mode {
+                    if is_api_mock_hover {
+                        api_mock_hover_request_due = true;
+                    } else if app.is_ide_mode {
                         let target = if app.active_tab_is_git_diff() {
                             app.active_git_diff_lsp_hover_target(byte_offset)
                         } else {
@@ -131,6 +145,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
         }
     });
+    if api_mock_hover_request_due && app.request_active_api_mock_hover() {
+        hover_poll_pending = true;
+    }
 
     if app.show_settings && app.settings_tab == 0 && app.settings_ide_scroll.update(dt) {
         app.window.as_ref().unwrap().request_redraw();
@@ -720,10 +737,13 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         w.request_redraw();
                     }
                 } else if app.autocomplete_detail_request_id == Some(request_id) {
-                    app.remember_autocomplete_detail_cache(&items);
-                    if app.autocomplete_active {
+                    if app.api_mock_completion_focus().is_some() {
+                        app.merge_api_mock_autocomplete_details(items);
+                    } else if app.autocomplete_active {
+                        app.remember_autocomplete_detail_cache(&items);
                         app.merge_autocomplete_details(items);
                     } else {
+                        app.remember_autocomplete_detail_cache(&items);
                         app.finish_autocomplete_detail_request();
                     }
                     if let Some(w) = app.window.as_ref() {
@@ -776,65 +796,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         println!("--- HOVER TEXT ---\n{}\n------------------", t);
                     }
                 }
+                if app.apply_api_mock_hover_response(request_id, text.clone()) {
+                    continue;
+                }
                 crate::app::mouse::HOVER_STATE.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.request_id == Some(request_id) {
                         if crate::render_view::hover_trace_enabled() {
                             println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
                         }
-                        state.request_id = None;
-                        let Some(t) = text else {
-                            if crate::render_view::hover_trace_enabled() {
-                                println!("[HOVER DEBUG] Text is empty. Clearing popup.");
-                            }
-                            state.popup = None;
-                            state.pending_popup = None;
-                            state.rect = None;
-                            if let Some(w) = app.window.as_ref() {
-                                w.request_redraw();
-                            }
-                            return;
-                        };
                         if let Some(bo) = state.byte_offset {
-                            let (clean_msg, spans, line_kinds, inline_code_ranges) =
-                                crate::lsp::highlight_hover_text(&t);
-                            let hovered_symbol = symbol_at_offset(&app.editor, bo);
-                            if clean_msg.trim() == "None"
-                                && hovered_symbol.as_deref() == Some("await")
-                            {
-                                state.popup = None;
-                                state.pending_popup = None;
-                                state.rect = None;
-                                if let Some(w) = app.window.as_ref() {
-                                    w.request_redraw();
-                                }
-                                return;
-                            }
-                            let is_simple_type = should_replace_simple_type_hover(&clean_msg);
-                            let (clean_msg, spans, line_kinds, inline_code_ranges) =
-                                if should_replace_hover_with_source_signature(&clean_msg) {
-                                    let lsp_ty = if is_simple_type {
-                                        Some(clean_msg.as_str())
-                                    } else {
-                                        None
-                                    };
-                                    let current_mod = app.file_path.as_ref().and_then(|p| {
-                                        module_path_from_definition_path(p, &app.ide_workspaces)
-                                    });
-                                    if let Some(sig) = source_signature_for_hover(
-                                        &app.editor,
-                                        bo,
-                                        !is_simple_type,
-                                        lsp_ty,
-                                        current_mod.as_deref(),
-                                    ) {
-                                        crate::lsp::highlight_hover_text(&sig)
-                                    } else {
-                                        (clean_msg, spans, line_kinds, inline_code_ranges)
-                                    }
-                                } else {
-                                    (clean_msg, spans, line_kinds, inline_code_ranges)
-                                };
+                            let current_mod = app
+                                .file_path
+                                .as_ref()
+                                .and_then(|p| module_path_from_definition_path(p, &app.ide_workspaces));
                             let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
                                 0.0
                             } else {
@@ -853,51 +828,31 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                                 (0.0, 0.0)
                             };
 
-                            let popup = crate::app::mouse::HoverPopup {
-                                text: clean_msg,
-                                spans,
-                                line_kinds,
-                                inline_code_ranges,
-                                byte_offset: bo,
-                                anchor_x,
-                                anchor_y,
-                                offset_x: None,
-                                offset_y: None, anim_progress: 0.0,
-                                scroll: crate::scroll::ScrollState::new(15.0),
-                                layout_cache: None,
-                            };
-                            state.pending_popup = None;
-                            state.definition_request_id = None;
-                            state.hide_diagnostic_popup_until_ready();
-                            if let Some(path) = app.file_path.clone() {
+                            let definition_request = || {
+                                let path = app.file_path.clone()?;
                                 let (line, col) = crate::lsp::offset_to_lsp_pos(
                                     &app.editor.get_full_text(),
                                     bo,
                                     &app.editor.line_offsets,
                                 );
-                                state.definition_request_id = app.lsp.as_mut().and_then(|lsp| {
+                                app.lsp.as_mut().and_then(|lsp| {
                                     lsp.request_definition(&path, &app.file_extension, line, col)
-                                });
-                            } else {
-                                state.definition_request_id = None;
-                            }
-                            if state.definition_request_id.is_some() {
-                                if crate::render_view::hover_trace_enabled() {
-                                    println!("[HOVER DEBUG] Hover processed, waiting for definition req id: {:?}", state.definition_request_id);
+                                })
+                            };
+                            if apply_source_hover_response_to_state(
+                                &mut state,
+                                request_id,
+                                &app.editor,
+                                bo,
+                                bo,
+                                text,
+                                current_mod.as_deref(),
+                                (anchor_x, anchor_y),
+                                definition_request,
+                            ) {
+                                if let Some(w) = app.window.as_ref() {
+                                    w.request_redraw();
                                 }
-                                state.pending_popup = Some(popup);
-                            } else {
-                                if crate::render_view::hover_trace_enabled() {
-                                    println!("[HOVER DEBUG] Hover processed, showing popup instantly.");
-                                }
-                                state.finish_stale_combined_transition();
-                                state.popup = Some(popup);
-                            }
-                            state.selection_anchor = None;
-                            state.selection_cursor = None;
-                            state.selecting = false;
-                            if let Some(w) = app.window.as_ref() {
-                                w.request_redraw();
                             }
                         }
                     }

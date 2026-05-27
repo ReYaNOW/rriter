@@ -44,7 +44,7 @@ impl Renderer {
         w: f32,
         h: f32,
         s: f32,
-        editor: &crate::editor::Editor,
+        _editor: &crate::editor::Editor,
         ide_panel: &crate::app::IdePanelState,
         tab_meta: &crate::app::api_client::ApiClientTabMeta,
         tab_state: &crate::app::api_client::ApiClientTabState,
@@ -362,9 +362,9 @@ impl Renderer {
             w: 138.0 * s,
             h: btn_h,
             text: if python_enabled {
-                "Python вкл"
-            } else {
                 "Python выкл"
+            } else {
+                "Python вкл"
             }
             .to_string(),
             icon: Some(IconType::Api),
@@ -498,158 +498,245 @@ impl Renderer {
             cy += editor_h + 14.0 * s;
         } else {
             if let Some(script) = mock_override.and_then(|item| item.python.as_ref()).filter(|script| script.enabled) {
-                let mut mock_ty_popup_drawn = false;
-                for (label, id, part, focused, text) in [
+                let contract = api_mock_effective_contract(script, route, model);
+                cy = self.draw_api_mock_contract_controls(
+                    x + pad,
+                    cy,
+                    content_w,
+                    s,
+                    route_idx,
+                    &contract,
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                let prelude_focused = matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::MockPrelude { route_idx: f_route }) if f_route == route_idx
+                );
+                let contract_focused = matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::MockContract { route_idx: f_route }) if f_route == route_idx
+                );
+                let body_focused = matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::MockBody { route_idx: f_route }) if f_route == route_idx
+                );
+                let signature_focused = matches!(
+                    ide_panel.api.focused,
+                    Some(ApiFocus::MockSignature { route_idx: f_route }) if f_route == route_idx
+                );
+                let sections = [
                     (
                         "Подготовка: импорты и состояние",
                         crate::ui_system::UiId::ApiMockPreludeInput(route_idx),
+                        crate::ui_system::UiId::ApiMockPreludeReset(route_idx),
                         ApiMockSourcePart::Prelude,
-                        matches!(
-                            ide_panel.api.focused,
-                            Some(ApiFocus::MockPrelude { route_idx: f_route }) if f_route == route_idx
-                        ),
-                        if matches!(
-                            ide_panel.api.focused,
-                            Some(ApiFocus::MockPrelude { route_idx: f_route }) if f_route == route_idx
-                        ) {
+                        prelude_focused,
+                        if prelude_focused {
                             ide_panel.api.input_editor.get_full_text()
                         } else {
                             script.prelude.clone()
                         },
                     ),
                     (
+                        "Контракт: Query, Body, Response",
+                        crate::ui_system::UiId::ApiMockContractInput(route_idx),
+                        crate::ui_system::UiId::ApiMockContractReset(route_idx),
+                        ApiMockSourcePart::Contract,
+                        contract_focused,
+                        if contract_focused {
+                            ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            crate::app::api_mock::contract::api_mock_contract_source_text(
+                                script, route, model,
+                            )
+                        },
+                    ),
+                    (
                         "Обработчик",
                         crate::ui_system::UiId::ApiMockBodyInput(route_idx),
+                        crate::ui_system::UiId::ApiMockBodyReset(route_idx),
                         ApiMockSourcePart::Body,
-                        matches!(
-                            ide_panel.api.focused,
-                            Some(ApiFocus::MockBody { route_idx: f_route }) if f_route == route_idx
-                        ),
-                        if matches!(
-                            ide_panel.api.focused,
-                            Some(ApiFocus::MockBody { route_idx: f_route }) if f_route == route_idx
-                        ) {
+                        body_focused,
+                        if body_focused {
                             ide_panel.api.input_editor.get_full_text()
                         } else {
                             api_mock_body_editor_text(&script.body)
                         },
                     ),
-                ] {
+                ];
+                let header_h = 28.0 * s;
+                let line_gutter_w = 38.0 * s;
+                let body_signature = api_mock_handler_signature_text(&contract);
+                let combined_h = crate::app::api_client::api_mock_combined_editor_content_height(
+                    &sections[0].5,
+                    &sections[1].5,
+                    &body_signature,
+                    &sections[2].5,
+                    s,
+                );
+                let viewport_h =
+                    crate::app::api_client::api_mock_combined_editor_viewport_height(
+                        &body_signature,
+                        s,
+                    );
+                let combined_max_scroll = (combined_h - viewport_h).max(0.0);
+                let combined_scroll_key = (route_idx, ApiMockSourcePart::Body);
+                let combined_scroll_y = ide_panel
+                    .api
+                    .mock_python_scrolls
+                    .get(&combined_scroll_key)
+                    .map(|scroll| scroll.current.round())
+                    .unwrap_or(0.0)
+                    .clamp(0.0, combined_max_scroll);
+                let any_focused =
+                    prelude_focused || contract_focused || body_focused || signature_focused;
+                self.push_rounded_rect_border(
+                    x + pad,
+                    cy,
+                    content_w,
+                    viewport_h,
+                    6.0 * s,
+                    (1.0 * s).max(1.0),
+                    if any_focused {
+                        [0.60, 0.35, 0.85, 1.0]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.12]
+                    },
+                    [0.13, 0.14, 0.18, 1.0],
+                );
+                self.draw_api_line_number_gutter(x + pad, cy, line_gutter_w, viewport_h, s);
+                let viewport_clip = (x + pad, cy, content_w, viewport_h);
+                let viewport_visible_clip = api_rect_intersection(viewport_clip, tab_clip);
+                if let Some((vx, vy, vw, vh)) = viewport_visible_clip {
+                    ui_registry.register_blocker(
+                        crate::ui_system::UiId::ApiMockCombinedPython(route_idx),
+                        vx,
+                        vy,
+                        vw,
+                        vh,
+                        mx,
+                        my,
+                    );
+                }
+                let route_ty_diagnostics = if matches!(
+                    ide_panel.api.mock.check_status,
+                    crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+                        route_idx: checked,
+                        ..
+                    } if checked == route_idx
+                ) {
+                    ide_panel.api.mock_ty_diagnostics.as_slice()
+                } else {
+                    &[]
+                };
+                let mut mock_ty_popup_drawn = false;
+                if let Some(viewport_visible_clip) = viewport_visible_clip
+                    && self.begin_api_text_clip(viewport_visible_clip, tab_clip)
+                {
+                let mouse_in_viewport = mx >= viewport_visible_clip.0
+                    && mx <= viewport_visible_clip.0 + viewport_visible_clip.2
+                    && my >= viewport_visible_clip.1
+                    && my <= viewport_visible_clip.1 + viewport_visible_clip.3;
+                let mut section_y = cy - combined_scroll_y;
+                let mut first_line_no = 1usize;
+                for (label, id, reset_id, part, focused, text) in sections {
+                    let locked_text = if part == ApiMockSourcePart::Body {
+                        body_signature.clone()
+                    } else {
+                        String::new()
+                    };
+                    let locked_line_count = api_mock_locked_text_line_count(&locked_text);
+                    let locked_h = api_mock_locked_text_block_height(&locked_text, s);
+                    let input_h = (text.split('\n').count().max(1) as f32
+                        * api_text_area_line_height(s)
+                        + 16.0 * s)
+                        .max(112.0 * s);
+                    self.push_rect(
+                        x + pad + line_gutter_w,
+                        section_y,
+                        content_w - line_gutter_w,
+                        header_h,
+                        [1.0, 1.0, 1.0, 0.030],
+                    );
                     self.draw_string_scaled_stable(
                         label,
-                        x + pad,
-                        cy + 16.0 * s,
+                        x + pad + line_gutter_w + 10.0 * s,
+                        api_mock_contract_row_text_y(section_y, header_h, s),
                         [0.68, 0.70, 0.78, 1.0],
                         0.78,
                     );
-                    let reset_id = match part {
-                        ApiMockSourcePart::Prelude => {
-                            crate::ui_system::UiId::ApiMockPreludeReset(route_idx)
-                        }
-                        ApiMockSourcePart::Body => {
-                            crate::ui_system::UiId::ApiMockBodyReset(route_idx)
-                        }
-                        ApiMockSourcePart::Signature => {
-                            crate::ui_system::UiId::ApiMockBodyReset(route_idx)
-                        }
-                    };
-                    let reset_btn = IconButton {
-                        x: x + pad + content_w - 26.0 * s,
-                        y: cy - 2.0 * s,
-                        size: 24.0 * s,
-                        icon: Some(IconType::Reload),
-                        is_active: false,
-                        icon_size: Some(16.0 * s),
-                        active_square_width: None,
-                        custom_color: Some([0.76, 0.79, 0.88, 1.0]),
-                    };
-                    ui_registry.register_icon_button(
-                        reset_id,
-                        &reset_btn,
-                        self,
-                        mx,
-                        my,
-                        s,
-                        false,
-                    );
-                    cy += 22.0 * s;
-                    let locked_h = if part == ApiMockSourcePart::Body {
-                        api_mock_signature_block_height(&route.path, s)
-                    } else {
-                        0.0
-                    };
-                    let input_h = if part == ApiMockSourcePart::Body {
-                        112.0 * s + 3.0 * api_text_area_line_height(s)
-                    } else {
-                        112.0 * s
-                    };
-                    let editor_h = if part == ApiMockSourcePart::Body {
-                        locked_h + input_h
-                    } else {
-                        input_h
-                    };
-                    let line_gutter_w = 38.0 * s;
-                    self.push_rounded_rect_border(
-                        x + pad,
-                        cy,
-                        content_w,
-                        editor_h,
-                        6.0 * s,
-                        (1.0 * s).max(1.0),
-                        if focused {
-                            [0.60, 0.35, 0.85, 1.0]
-                        } else {
-                            [1.0, 1.0, 1.0, 0.12]
-                        },
-                        [0.13, 0.14, 0.18, 1.0],
-                    );
-                    if part == ApiMockSourcePart::Body {
-                        let signature_focused = matches!(
-                            ide_panel.api.focused,
-                            Some(ApiFocus::MockSignature { route_idx: f_route }) if f_route == route_idx
-                        );
-                        let sig_x = x + pad + line_gutter_w + 10.0 * s;
-                        let sig_y = cy + 8.0 * s;
-                        let sig_w = content_w - line_gutter_w - 20.0 * s;
-                        let sig_h = api_mock_signature_block_height(&route.path, s);
-                        let signature_text = api_mock_signature_text(&route.path);
-                        self.draw_api_line_number_gutter(
-                            x + pad,
-                            cy,
-                            line_gutter_w,
-                            locked_h,
-                            s,
-                        );
-                        if self.begin_api_text_clip((x + pad, cy, line_gutter_w, locked_h), tab_clip)
-                        {
-                            self.draw_api_editor_line_numbers(
-                                &signature_text,
-                                x + pad,
-                                line_gutter_w,
-                                sig_y + (api_text_area_line_height(s) * 0.75).round(),
-                                sig_h,
-                                s,
-                                0.0,
-                                1,
-                            );
-                            self.restore_api_tab_clip(tab_clip);
-                        }
-                        ui_registry.register_text_input(
-                            crate::ui_system::UiId::ApiMockSignatureInput(route_idx),
-                            sig_x,
-                            sig_y,
-                            sig_w,
-                            sig_h,
+                    if section_y + header_h >= cy && section_y <= cy + viewport_h {
+                        let reset_btn = IconButton {
+                            x: x + pad + content_w - 26.0 * s,
+                            y: section_y + ((header_h - 24.0 * s) * 0.5).round(),
+                            size: 24.0 * s,
+                            icon: Some(IconType::Reload),
+                            is_active: false,
+                            icon_size: Some(16.0 * s),
+                            active_square_width: None,
+                            custom_color: Some([0.76, 0.79, 0.88, 1.0]),
+                        };
+                        ui_registry.register_icon_button(
+                            reset_id,
+                            &reset_btn,
+                            self,
                             mx,
                             my,
+                            s,
+                            false,
                         );
+                    }
+                    self.push_rect(
+                        x + pad,
+                        (section_y + header_h).round(),
+                        content_w,
+                        1.0,
+                        [1.0, 1.0, 1.0, 0.08],
+                    );
+                    let content_y = section_y + header_h;
+                    if locked_h > 0.0 {
+                        let locked_x = x + pad + line_gutter_w + 10.0 * s;
+                        let locked_y = content_y + 8.0 * s;
+                        let locked_w = content_w - line_gutter_w - 20.0 * s;
+                        if self.begin_api_text_clip(
+                            (x + pad, content_y, line_gutter_w, locked_h),
+                            viewport_visible_clip,
+                        ) {
+                            self.draw_api_editor_line_numbers(
+                                &locked_text,
+                                x + pad,
+                                line_gutter_w,
+                                locked_y + api_text_area_baseline_offset(s),
+                                locked_h,
+                                s,
+                                0.0,
+                                first_line_no,
+                            );
+                            self.restore_api_tab_clip(viewport_visible_clip);
+                        }
+                        if mouse_in_viewport
+                            && locked_y + locked_h >= cy
+                            && locked_y <= cy + viewport_h
+                        {
+                            ui_registry.register_text_input(
+                                crate::ui_system::UiId::ApiMockSignatureInput(route_idx),
+                                locked_x,
+                                locked_y,
+                                locked_w,
+                                locked_h,
+                                mx,
+                                my,
+                            );
+                        }
                         if signature_focused {
                             self.draw_api_editor_selection_multiline(
                                 &ide_panel.api.input_editor,
-                                sig_x,
-                                sig_y,
-                                sig_w,
-                                sig_h,
+                                locked_x,
+                                locked_y,
+                                locked_w,
+                                locked_h,
                                 s,
                                 0.0,
                                 0.0,
@@ -662,70 +749,53 @@ impl Renderer {
                             .map(Vec::as_slice)
                             .unwrap_or(&[]);
                         self.draw_api_mock_locked_signature_line(
-                            &route.path,
+                            &locked_text,
+                            locked_h,
                             signature_spans,
-                            sig_x,
-                            sig_y,
-                            sig_w,
+                            locked_x,
+                            locked_y,
+                            locked_w,
                             s,
                         );
                         if signature_focused && blink_alpha > 0.5 {
                             self.draw_api_editor_cursor_multiline(
                                 &ide_panel.api.input_editor,
-                                sig_x,
-                                sig_y,
-                                sig_w,
-                                sig_h,
+                                locked_x,
+                                locked_y,
+                                locked_w,
+                                locked_h,
                                 s,
                                 0.0,
                                 0.0,
                             );
                         }
                     }
-                    let input_y = cy + locked_h;
+                    let input_y = content_y + locked_h;
                     let input_rect_x = x + pad;
                     let input_rect_w = content_w;
-                    ui_registry.register_text_input(
-                        id,
-                        input_rect_x + line_gutter_w,
-                        input_y,
-                        input_rect_w - line_gutter_w,
-                        input_h,
-                        mx,
-                        my,
-                    );
-                    self.draw_api_line_number_gutter(
-                        input_rect_x,
-                        input_y,
-                        line_gutter_w,
-                        input_h,
-                        s,
-                    );
-                    let scroll_key = (route_idx, part);
-                    let input_scroll_y = ide_panel
-                        .api
-                        .mock_python_scrolls
-                        .get(&scroll_key)
-                        .map(|scroll| scroll.current.round())
-                        .unwrap_or(0.0)
-                        .clamp(
-                            0.0,
-                            crate::app::api_client::api_text_area_max_scroll(
-                                &text,
-                                input_h - 16.0 * s,
-                                s,
-                            ),
+                    if mouse_in_viewport && input_y + input_h >= cy && input_y <= cy + viewport_h {
+                        ui_registry.register_text_input(
+                            id,
+                            input_rect_x + line_gutter_w,
+                            input_y,
+                            input_rect_w - line_gutter_w,
+                            input_h,
+                            mx,
+                            my,
                         );
+                    }
+                    let scroll_key = (route_idx, part);
+                    let input_scroll_y = 0.0;
                     let input_scroll_x = ide_panel
                         .api
                         .mock_python_scrolls_x
                         .get(&scroll_key)
                         .map(|scroll| scroll.current.round())
                         .unwrap_or(0.0);
-                    if self.begin_api_text_clip(
-                        (input_rect_x, input_y, line_gutter_w, input_h),
-                        tab_clip,
-                    ) {
+                        if self.begin_api_text_clip(
+                            (input_rect_x, input_y, line_gutter_w, input_h),
+                            viewport_visible_clip,
+                        ) {
                         self.draw_api_editor_line_numbers(
                             &text,
                             input_rect_x,
@@ -734,13 +804,9 @@ impl Renderer {
                             input_h - 16.0 * s,
                             s,
                             input_scroll_y,
-                            if part == ApiMockSourcePart::Body {
-                                api_mock_signature_lines(&route.path).len() + 1
-                            } else {
-                                1
-                            },
+                            first_line_no + locked_line_count,
                         );
-                        self.restore_api_tab_clip(tab_clip);
+                        self.restore_api_tab_clip(viewport_visible_clip);
                     }
                     let clip = (
                         input_rect_x + line_gutter_w + 10.0 * s,
@@ -748,19 +814,7 @@ impl Renderer {
                         input_rect_w - line_gutter_w - 20.0 * s,
                         input_h - 16.0 * s,
                     );
-                    if self.begin_api_text_clip(clip, tab_clip) {
-                        if focused {
-                            self.draw_api_editor_selection_multiline(
-                                &ide_panel.api.input_editor,
-                                input_rect_x + line_gutter_w + 10.0 * s,
-                                input_y + 10.0 * s,
-                                input_rect_w - line_gutter_w - 20.0 * s,
-                                input_h - 16.0 * s,
-                                s,
-                                input_scroll_y,
-                                input_scroll_x,
-                            );
-                        }
+                    if self.begin_api_text_clip(clip, viewport_visible_clip) {
                         let spans = if ide_panel.api.mock_highlight_target.is_some_and(
                             |(highlight_route, highlight_part, _)| {
                                 highlight_route == route_idx && highlight_part == part
@@ -775,39 +829,40 @@ impl Renderer {
                         } else {
                             &[]
                         };
-                        self.draw_python_text_area(
-                            &text,
-                            spans,
-                            input_rect_x + line_gutter_w + 10.0 * s,
-                            input_y + 29.0 * s,
-                            input_rect_w - line_gutter_w - 20.0 * s,
-                            input_h - 16.0 * s,
-                            s,
-                            input_scroll_y,
-                            input_scroll_x,
-                        );
-                        self.draw_api_text_scrollbar(
-                            &text,
-                            input_rect_x + input_rect_w - 8.0 * s,
-                            input_y + 8.0 * s,
-                            input_h - 16.0 * s,
-                            s,
-                            input_scroll_y,
-                        );
-                        let ty_diagnostics = if matches!(
-                            ide_panel.api.mock.check_status,
-                            crate::app::api_mock::types::ApiMockCheckStatus::Failed {
-                                route_idx: checked,
-                                ..
-                            } if checked == route_idx
-                        ) {
-                            ide_panel.api.mock_ty_diagnostics.as_slice()
+                        let source_editor = if focused {
+                            Some(&ide_panel.api.input_editor)
                         } else {
-                            &[]
+                            ide_panel.api.mock_python_editors.get(&scroll_key)
                         };
-                        let hovered_ty = self.draw_api_mock_ty_squiggles(
+                        if let Some(source_editor) = source_editor {
+                            self.draw_embedded_python_editor(
+                                source_editor,
+                                spans,
+                                input_rect_x + line_gutter_w + 10.0 * s,
+                                input_y + 29.0 * s,
+                                input_rect_w - line_gutter_w - 20.0 * s,
+                                input_scroll_y,
+                                input_scroll_x,
+                                focused,
+                                blink_alpha,
+                                ui_registry,
+                            );
+                        } else {
+                            self.draw_python_text_area(
+                                &text,
+                                spans,
+                                input_rect_x + line_gutter_w + 10.0 * s,
+                                input_y + 29.0 * s,
+                                input_rect_w - line_gutter_w - 20.0 * s,
+                                input_h - 16.0 * s,
+                                s,
+                                input_scroll_y,
+                                input_scroll_x,
+                            );
+                        }
+                        self.draw_api_mock_ty_squiggles(
                             &text,
-                            ty_diagnostics,
+                            route_ty_diagnostics,
                             part,
                             input_rect_x + line_gutter_w + 10.0 * s,
                             input_y + 29.0 * s,
@@ -816,40 +871,108 @@ impl Renderer {
                             s,
                             input_scroll_y,
                             input_scroll_x,
-                            mx,
-                            my,
                         );
-                        if focused && blink_alpha > 0.5 {
-                            self.draw_api_editor_cursor_multiline(
-                                &ide_panel.api.input_editor,
-                                input_rect_x + line_gutter_w + 10.0 * s,
-                                input_y + 10.0 * s,
-                                input_rect_w - line_gutter_w - 20.0 * s,
-                                input_h - 16.0 * s,
-                                s,
+                        self.restore_api_tab_clip(viewport_visible_clip);
+                        if part == ApiMockSourcePart::Body {
+                            let signature_source_editor = ide_panel
+                                .api
+                                .mock_hover_target
+                                .as_ref()
+                                .filter(|target| {
+                                    target.route_idx == route_idx
+                                        && target.part == ApiMockSourcePart::Signature
+                                })
+                                .and_then(|_| {
+                                    if matches!(
+                                        ide_panel.api.focused,
+                                        Some(ApiFocus::MockSignature { route_idx: f_route }) if f_route == route_idx
+                                    ) {
+                                        Some(&ide_panel.api.input_editor)
+                                    } else {
+                                        ide_panel
+                                            .api
+                                            .mock_python_editors
+                                            .get(&(route_idx, ApiMockSourcePart::Signature))
+                                    }
+                                });
+                            if !mock_ty_popup_drawn
+                                    && self.draw_existing_api_mock_ty_popup(
+                                        signature_source_editor,
+                                        route_ty_diagnostics,
+                                        input_rect_x + line_gutter_w + 10.0 * s,
+                                        content_y + 8.0 * s,
+                                        0.0,
+                                        0.0,
+                                        ide_panel,
+                                    ui_registry,
+                                    mx,
+                                    my,
+                                )
+                            {
+                                mock_ty_popup_drawn = true;
+                            }
+                        }
+                        let text_x = input_rect_x + line_gutter_w + 10.0 * s;
+                        let source_top_y =
+                            api_text_area_top_from_baseline(input_y + 29.0 * s, s);
+                        let source_editor = ide_panel
+                            .api
+                            .mock_hover_target
+                            .as_ref()
+                            .filter(|target| target.route_idx == route_idx && target.part == part)
+                            .and_then(|_| {
+                                if focused {
+                                    Some(&ide_panel.api.input_editor)
+                                } else {
+                                    ide_panel.api.mock_python_editors.get(&scroll_key)
+                                }
+                            });
+                        if !mock_ty_popup_drawn
+                            && self.draw_existing_api_mock_ty_popup(
+                                source_editor,
+                                route_ty_diagnostics,
+                                text_x,
+                                source_top_y,
                                 input_scroll_y,
                                 input_scroll_x,
-                            );
-                        }
-                        self.restore_api_tab_clip(tab_clip);
-                        if let Some((message, rect)) = hovered_ty {
-                            self.draw_api_mock_ty_popup(
-                                &message,
-                                rect,
-                                editor,
+                                ide_panel,
                                 ui_registry,
                                 mx,
                                 my,
-                            );
-                            mock_ty_popup_drawn = true;
-                        } else if !mock_ty_popup_drawn
-                            && self.draw_existing_api_mock_ty_popup(editor, ui_registry, mx, my)
+                            )
                         {
                             mock_ty_popup_drawn = true;
                         }
                     }
-                    cy += editor_h + 14.0 * s;
+                    let section_h = header_h + locked_h + input_h;
+                    section_y += section_h;
+                    first_line_no += locked_line_count + text.split('\n').count().max(1);
+                    if section_y < cy + combined_h - combined_scroll_y {
+                        self.push_rect(
+                            x + pad,
+                            section_y.round(),
+                            content_w,
+                            1.0,
+                            [1.0, 1.0, 1.0, 0.10],
+                        );
+                    }
                 }
+                self.restore_api_tab_clip(tab_clip);
+                }
+                if combined_max_scroll > 0.5 {
+                    let track_x = x + pad + content_w - 8.0 * s;
+                    let track_y = cy + 8.0 * s;
+                    let track_h = (viewport_h - 16.0 * s).max(1.0);
+                    let track_w = (3.0 * s).max(2.0);
+                    self.push_rect(track_x, track_y, track_w, track_h, [0.52, 0.54, 0.60, 0.22]);
+                    let thumb_h = (viewport_h / combined_h * track_h)
+                        .max(22.0 * s)
+                        .min(track_h);
+                    let thumb_y =
+                        track_y + (combined_scroll_y / combined_max_scroll) * (track_h - thumb_h);
+                    self.push_rect(track_x, thumb_y, track_w, thumb_h, [0.64, 0.66, 0.72, 0.70]);
+                }
+                cy += viewport_h + 14.0 * s;
             }
         }
         }

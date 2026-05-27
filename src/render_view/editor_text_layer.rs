@@ -108,6 +108,173 @@ mod tests {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn refresh_identical_words_cache(
+        &mut self,
+        editor: &Editor,
+        first: &str,
+        second: &str,
+        first_len: usize,
+        len: usize,
+        sel_start: usize,
+        sel_end: usize,
+    ) {
+        let cursor = editor.cursor.min(len);
+        let editor_key = editor as *const Editor as usize;
+        if self.identical_words_cache_editor == editor_key
+            && self.identical_words_cache_version == editor.version
+            && self.identical_words_cache_cursor == editor.cursor
+            && self.identical_words_cache_selection_anchor == editor.selection_anchor
+        {
+            return;
+        }
+
+        self.identical_words_cache.clear();
+        let mut target_word_str: Option<&str> = None;
+        let is_valid_word = |s: &str| -> bool {
+            s.chars().next().map_or(false, |c| !c.is_ascii_digit())
+                && s.as_bytes()
+                    .iter()
+                    .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+        };
+
+        if sel_start != sel_end {
+            let slen = sel_end - sel_start;
+            if slen < 100 {
+                if sel_end <= first_len {
+                    if let Some(s) = first.get(sel_start..sel_end)
+                        && is_valid_word(s)
+                    {
+                        target_word_str = Some(s);
+                    }
+                } else if sel_start >= first_len
+                    && let Some(s) = second.get((sel_start - first_len)..(sel_end - first_len))
+                    && is_valid_word(s)
+                {
+                    target_word_str = Some(s);
+                }
+            }
+        } else {
+            let mut p_start = cursor;
+            while p_start > 0 {
+                let b = editor.byte_at(p_start - 1);
+                if !is_ident_byte(b) {
+                    break;
+                }
+                p_start -= 1;
+            }
+            let mut p_end = cursor;
+            while p_end < len {
+                let b = editor.byte_at(p_end);
+                if !is_ident_byte(b) {
+                    break;
+                }
+                p_end += 1;
+            }
+            if p_end > p_start {
+                if p_end <= first_len {
+                    if let Some(s) = first.get(p_start..p_end)
+                        && is_valid_word(s)
+                    {
+                        target_word_str = Some(s);
+                    }
+                } else if p_start >= first_len
+                    && let Some(s) = second.get((p_start - first_len)..(p_end - first_len))
+                    && is_valid_word(s)
+                {
+                    target_word_str = Some(s);
+                }
+            }
+        }
+
+        if let Some(word) = target_word_str {
+            let first_bytes = first.as_bytes();
+            let second_bytes = second.as_bytes();
+            let w_len = word.len();
+            let full_len = first_len + second.len();
+
+            let get_byte = |idx: usize| -> u8 {
+                if idx < first_len {
+                    first_bytes[idx]
+                } else {
+                    second_bytes[idx - first_len]
+                }
+            };
+
+            let mut start = 0;
+            while let Some(idx) = first[start..].find(word) {
+                let abs_idx = start + idx;
+                let left_ok = if abs_idx == 0 {
+                    true
+                } else {
+                    !is_ident_byte(first_bytes[abs_idx - 1])
+                };
+                let right_ok = if abs_idx + w_len == full_len {
+                    true
+                } else {
+                    !is_ident_byte(get_byte(abs_idx + w_len))
+                };
+                if left_ok && right_ok {
+                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
+                }
+                start = abs_idx + w_len;
+            }
+
+            let boundary_start = first_len.saturating_sub(w_len - 1);
+            for i in boundary_start..first_len {
+                if i + w_len <= full_len {
+                    let mut matches = true;
+                    let w_bytes = word.as_bytes();
+                    for j in 0..w_len {
+                        if get_byte(i + j) != w_bytes[j] {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        let left_ok = if i == 0 {
+                            true
+                        } else {
+                            !is_ident_byte(get_byte(i - 1))
+                        };
+                        let right_ok = if i + w_len == full_len {
+                            true
+                        } else {
+                            !is_ident_byte(get_byte(i + w_len))
+                        };
+                        if left_ok && right_ok {
+                            self.identical_words_cache.push((i, i + w_len));
+                        }
+                    }
+                }
+            }
+
+            let mut start = 0;
+            while let Some(idx) = second[start..].find(word) {
+                let abs_idx = first_len + start + idx;
+                let left_ok = if abs_idx == 0 {
+                    true
+                } else {
+                    !is_ident_byte(get_byte(abs_idx - 1))
+                };
+                let right_ok = if abs_idx + w_len == full_len {
+                    true
+                } else {
+                    !is_ident_byte(second_bytes[start + idx + w_len])
+                };
+                if left_ok && right_ok {
+                    self.identical_words_cache.push((abs_idx, abs_idx + w_len));
+                }
+                start = start + idx + w_len;
+            }
+        }
+
+        self.identical_words_cache_version = editor.version;
+        self.identical_words_cache_editor = editor_key;
+        self.identical_words_cache_cursor = editor.cursor;
+        self.identical_words_cache_selection_anchor = editor.selection_anchor;
+    }
+
     fn inlay_text_bounds_y(&mut self, text: &str, scale: f32) -> Option<(f32, f32)> {
         let mut top = 0.0f32;
         let mut bottom = 0.0f32;

@@ -1,5 +1,9 @@
 #[allow(dead_code)]
+pub mod contract;
+#[allow(dead_code)]
 pub mod merge;
+#[allow(dead_code)]
+pub mod openapi_export;
 pub mod persist;
 pub mod python_bootstrap;
 pub mod python_env;

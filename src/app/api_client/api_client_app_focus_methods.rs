@@ -59,6 +59,9 @@ impl crate::app::App {
                 .get(*manual_idx)
                 .map(|route| route.path.clone())
                 .unwrap_or_default(),
+            ApiFocus::MockContract { route_idx } => self
+                .api_mock_contract_source_for_route(*route_idx)
+                .unwrap_or_default(),
             ApiFocus::MockPrelude { route_idx } => self
                 .api_route_python_script(*route_idx)
                 .map(|script| script.prelude.clone())
@@ -307,6 +310,35 @@ impl crate::app::App {
                     };
                     self.sync_api_manual_route_tabs();
                     self.ide_panel.api.persist();
+                }
+            }
+            ApiFocus::MockContract { route_idx } => {
+                let Some((_, _, route, model)) = self.api_mock_route_context(route_idx) else {
+                    return;
+                };
+                let default_contract =
+                    crate::app::api_mock::types::default_contract_from_route(&route, &model);
+                if let Some(script) = self.api_route_python_script_mut(route_idx) {
+                    let base = if script.contract.is_empty() {
+                        default_contract
+                    } else {
+                        script.contract.clone()
+                    };
+                    script.contract =
+                        crate::app::api_mock::contract::api_mock_contract_from_state_text(
+                            &base, &text,
+                        );
+                    let generated =
+                        crate::app::api_mock::contract::api_mock_contract_state_text(
+                            &script.contract,
+                        );
+                    script.contract_source = if text.trim() == generated.trim() {
+                        String::new()
+                    } else {
+                        text
+                    };
+                    self.ide_panel.api.persist();
+                    self.invalidate_api_mock_contract_tools(route_idx);
                 }
             }
             ApiFocus::MockPrelude { route_idx } => {

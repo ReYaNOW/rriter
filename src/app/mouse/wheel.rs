@@ -782,15 +782,17 @@ impl App {
                             crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
                         Some((meta.spec_id, route_idx, false, None, max_scroll))
                     }
-                    crate::ui_system::UiId::ApiMockPreludeInput(route_idx)
+                    crate::ui_system::UiId::ApiMockCombinedPython(route_idx)
+                    | crate::ui_system::UiId::ApiMockContractInput(route_idx)
+                    | crate::ui_system::UiId::ApiMockSignatureInput(route_idx)
+                    | crate::ui_system::UiId::ApiMockPreludeInput(route_idx)
                     | crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
-                        let part = match id {
-                            crate::ui_system::UiId::ApiMockPreludeInput(_) => {
-                                crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude
-                            }
-                            _ => crate::app::api_mock::ty_check::ApiMockSourcePart::Body,
-                        };
                         let focused_part = match self.ide_panel.api.focused {
+                            Some(crate::app::api_client::ApiFocus::MockContract {
+                                route_idx: focused_route,
+                            }) if focused_route == route_idx => Some(
+                                crate::app::api_mock::ty_check::ApiMockSourcePart::Contract,
+                            ),
                             Some(crate::app::api_client::ApiFocus::MockPrelude {
                                 route_idx: focused_route,
                             }) if focused_route == route_idx => Some(
@@ -803,43 +805,71 @@ impl App {
                             }
                             _ => None,
                         };
-                        let text = if focused_part == Some(part) {
+                        let route = self
+                            .ide_panel
+                            .api
+                            .models
+                            .get(&meta.spec_id)
+                            .and_then(|model| model.routes.get(route_idx))?;
+                        let script = self
+                            .ide_panel
+                            .api
+                            .mock
+                            .route_overrides
+                            .iter()
+                            .find(|item| item.method == route.method && item.path == route.path)
+                            .and_then(|item| item.python.as_ref())?;
+                        let prelude_text = if focused_part
+                            == Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude)
+                        {
                             self.ide_panel.api.input_editor.get_full_text()
                         } else {
-                            self.ide_panel
-                                .api
-                                .mock
-                                .route_overrides
-                                .iter()
-                                .find(|item| {
-                                    self.ide_panel
-                                        .api
-                                        .models
-                                        .get(&meta.spec_id)
-                                        .and_then(|model| model.routes.get(route_idx))
-                                        .is_some_and(|route| {
-                                            item.method == route.method && item.path == route.path
-                                        })
-                                })
-                                .and_then(|item| item.python.as_ref())
-                                .map(|script| match part {
-                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude => {
-                                        script.prelude.clone()
-                                    }
-                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Body => {
-                                        crate::app::api_client::api_mock_body_editor_text(
-                                            &script.body,
-                                        )
-                                    }
-                                    crate::app::api_mock::ty_check::ApiMockSourcePart::Signature => {
-                                        String::new()
-                                    }
-                                })
+                            script.prelude.clone()
+                        };
+                        let contract_text = if focused_part
+                            == Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Contract)
+                        {
+                            self.ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            self.api_mock_contract_source_for_route(route_idx)
                                 .unwrap_or_default()
                         };
-                        let max_scroll =
-                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
-                        Some((meta.spec_id, route_idx, true, Some(part), max_scroll))
+                        let body_text = if focused_part
+                            == Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Body)
+                        {
+                            self.ide_panel.api.input_editor.get_full_text()
+                        } else {
+                            crate::app::api_client::api_mock_body_editor_text(&script.body)
+                        };
+                        let model = self.ide_panel.api.models.get(&meta.spec_id)?;
+                        let contract =
+                            crate::app::api_mock::types::api_mock_effective_contract(
+                                script, route, model,
+                            );
+                        let signature_text =
+                            crate::app::api_mock::contract::api_mock_handler_signature_text(
+                                &contract,
+                            );
+                        let content_h =
+                            crate::app::api_client::api_mock_combined_editor_content_height(
+                                &prelude_text,
+                                &contract_text,
+                                &signature_text,
+                                &body_text,
+                                s,
+                            );
+                        let viewport_h =
+                            crate::app::api_client::api_mock_combined_editor_viewport_height(
+                                &signature_text,
+                                s,
+                            );
+                        Some((
+                            meta.spec_id,
+                            route_idx,
+                            true,
+                            Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Body),
+                            (content_h - viewport_h).max(0.0),
+                        ))
                     }
                     _ => None,
                 }
@@ -870,7 +900,8 @@ impl App {
                         return;
                     }
                 }
-                if max_scroll > 0.0 {
+                let force_page_scroll = shift && mock_part.is_some();
+                if max_scroll > 0.0 && !force_page_scroll {
                     if let Some(part) = mock_part {
                         let scroll = self
                             .ide_panel
@@ -897,23 +928,29 @@ impl App {
                     return;
                 }
             }
-            let model = self
-                .tabs
-                .get(self.active_tab)
-                .and_then(|tab| match &tab.kind {
-                    crate::app::EditorTabKind::ApiClient(meta, _) => {
-                        self.ide_panel.api.models.get(&meta.spec_id)
-                    }
-                    _ => None,
-                });
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
             let status_h = crate::render_view::ide_status_bar_height(s);
             let visible_h = (wh - tab_bar_h - status_h).max(0.0);
+            let max_scroll = self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::ApiClient(meta, state) => {
+                        let model = self.ide_panel.api.models.get(&meta.spec_id);
+                        Some(crate::app::api_client::api_tab_max_scroll(
+                            model,
+                            state,
+                            Some(&self.ide_panel.api),
+                            visible_h,
+                            s,
+                        ))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0.0);
             if let Some(crate::app::EditorTabKind::ApiClient(_, state)) =
                 self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
             {
-                let max_scroll =
-                    crate::app::api_client::api_tab_max_scroll(model, state, visible_h, s);
                 state.tab_scroll.anim_speed = 7.0;
                 state.tab_scroll.scroll_by(dy);
                 state.tab_scroll.clamp_target(0.0, max_scroll);

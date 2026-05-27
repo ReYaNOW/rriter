@@ -30,7 +30,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     if api.import_error.is_some() {
         content_h += 24.0 * scale;
     }
-    content_h += 392.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 34.0 * scale;
+    content_h += 434.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 34.0 * scale;
     if api.specs.is_empty() {
         content_h += 34.0 * scale;
     }
@@ -55,6 +55,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
 pub fn api_tab_max_scroll(
     model: Option<&ApiSpecModel>,
     tab_state: &ApiClientTabState,
+    api: Option<&ApiClientState>,
     visible_h: f32,
     scale: f32,
 ) -> f32 {
@@ -149,6 +150,25 @@ pub fn api_tab_max_scroll(
         }
     }
     content_h += 84.0 * scale;
+    if let Some(api) = api
+        && api.expanded_mock_routes.contains(&(model.id, route_idx))
+    {
+        let mock_override = api.mock.route_overrides.iter().find(|item| {
+            item.method == route.method
+                && item.path == route.path
+                && item.python.as_ref().is_some_and(|script| script.enabled)
+        });
+        content_h += if let Some(script) = mock_override.and_then(|item| item.python.as_ref()) {
+            let contract = crate::app::api_mock::types::api_mock_effective_contract(
+                script, route, model,
+            );
+            let signature_text =
+                crate::app::api_mock::contract::api_mock_handler_signature_text(&contract);
+            230.0 * scale + api_mock_combined_editor_viewport_height(&signature_text, scale)
+        } else {
+            230.0 * scale
+        };
+    }
     if let Some(response) = &tab_state.response {
         let response_text = api_response_text(response, tab_state.response_view);
         content_h += 62.0 * scale + api_response_text_area_height(response_text, scale);
@@ -625,10 +645,17 @@ pub fn json_body_is_valid(text: &str) -> bool {
 }
 
 pub const API_BODY_TEXT_SCALE: f32 = 1.0;
-pub(crate) const API_MOCK_TY_POPUP_BYTE: usize = usize::MAX;
 
 pub fn api_text_area_line_height(scale: f32) -> f32 {
     26.0 * scale
+}
+
+pub fn api_text_area_baseline_offset(scale: f32) -> f32 {
+    (api_text_area_line_height(scale) * 0.75).round()
+}
+
+pub fn api_text_area_top_from_baseline(baseline_y: f32, scale: f32) -> f32 {
+    baseline_y - api_text_area_baseline_offset(scale)
 }
 
 pub fn api_body_text_area_height(text: &str, scale: f32) -> f32 {
@@ -647,6 +674,40 @@ pub fn api_text_area_max_scroll(text: &str, visible_h: f32, scale: f32) -> f32 {
     let line_h = api_text_area_line_height(scale);
     let lines = text.split('\n').count().max(1) as f32;
     (lines * line_h - visible_h.max(line_h)).max(0.0)
+}
+
+pub fn api_mock_combined_editor_viewport_height(signature_text: &str, scale: f32) -> f32 {
+    let line_h = api_text_area_line_height(scale);
+    let signature_h = if signature_text.is_empty() {
+        0.0
+    } else {
+        signature_text.split('\n').count() as f32 * line_h + 12.0 * scale
+    };
+    3.0 * 28.0 * scale + 3.0 * 112.0 * scale + 3.0 * line_h + signature_h
+}
+
+pub fn api_mock_combined_editor_content_height(
+    prelude_text: &str,
+    contract_text: &str,
+    signature_text: &str,
+    body_text: &str,
+    scale: f32,
+) -> f32 {
+    let line_h = api_text_area_line_height(scale);
+    let text_h = |text: &str| {
+        (text.split('\n').count().max(1) as f32 * line_h + 16.0 * scale)
+            .max(112.0 * scale)
+    };
+    let signature_h = if signature_text.is_empty() {
+        0.0
+    } else {
+        signature_text.split('\n').count() as f32 * line_h + 12.0 * scale
+    };
+    3.0 * 28.0 * scale
+        + text_h(prelude_text)
+        + text_h(contract_text)
+        + signature_h
+        + text_h(body_text)
 }
 
 pub fn api_text_area_max_scroll_x<F>(text: &str, visible_w: f32, mut measure: F) -> f32

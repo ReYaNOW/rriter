@@ -48,7 +48,7 @@ fn python_current_call_named_args(text: &str, cursor: usize) -> FxHashSet<String
     out
 }
 
-fn ty_signature_parameter_items(
+pub(crate) fn ty_signature_parameter_items(
     names: Vec<String>,
     text: &str,
     cursor: usize,
@@ -857,6 +857,10 @@ impl App {
     }
 
     pub fn update_ty_signature_help_autocomplete(&mut self, parameters: Vec<String>) {
+        if self.api_mock_completion_focus().is_some() {
+            self.update_api_mock_ty_signature_help_autocomplete(parameters);
+            return;
+        }
         if self.autocomplete_mode != AutocompleteMode::TyContext
             || !cursor_inside_python_call_parens(&self.editor)
             || cursor_after_python_member_dot(&self.editor)

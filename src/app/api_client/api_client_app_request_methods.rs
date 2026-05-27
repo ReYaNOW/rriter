@@ -90,7 +90,12 @@ impl crate::app::App {
                 self.ide_panel.api.focused = None;
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab) => {
-                self.focus_next_api_input(shift);
+                if mock_python_target.is_some() {
+                    let _ = self.ide_panel.api.input_editor.insert_str("    ");
+                    typed_text = Some("    ".to_string());
+                } else {
+                    self.focus_next_api_input(shift);
+                }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
             | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
@@ -246,11 +251,25 @@ impl crate::app::App {
         {
             self.queue_api_mock_python_tools(route_idx);
             if let Some(text) = typed_text.as_deref()
-                && (text == "." || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                && (matches!(text, "." | "(" | ",")
+                    || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
             {
-                self.request_api_mock_ty_autocomplete((text == ".").then_some("."));
+                if matches!(text, ".")
+                    || self.api_input_after_python_member_dot()
+                    || self.api_input_inside_python_call_parens()
+                {
+                    self.request_api_mock_ty_autocomplete(
+                        matches!(text, "." | "(" | ",").then_some(text),
+                    );
+                } else {
+                    self.update_api_mock_tree_sitter_autocomplete();
+                }
             } else if self.autocomplete_active {
-                self.request_api_mock_ty_autocomplete(None);
+                if self.autocomplete_mode == crate::app::AutocompleteMode::TreeSitter {
+                    self.update_api_mock_tree_sitter_autocomplete();
+                } else {
+                    self.request_api_mock_ty_autocomplete(None);
+                }
             }
         }
         if let Some((id, multiline)) = self
@@ -548,6 +567,7 @@ impl crate::app::App {
                 let virtual_source =
                     build_api_mock_virtual_source(method, &path, &route, &model, &script);
                 for cache_part in [
+                    ApiMockSourcePart::Contract,
                     ApiMockSourcePart::Prelude,
                     ApiMockSourcePart::Signature,
                     ApiMockSourcePart::Body,
@@ -566,6 +586,11 @@ impl crate::app::App {
                     .get(&(route_idx, part))
                     .cloned()
                     .unwrap_or_default();
+                if self.api_mock_completion_focus() == Some((route_idx, part))
+                    && self.autocomplete_active
+                {
+                    self.update_api_mock_tree_sitter_autocomplete();
+                }
             }
             changed = true;
         }
@@ -575,8 +600,9 @@ impl crate::app::App {
             if Instant::now() >= due {
                 self.ide_panel.api.mock_ty_due = None;
                 if let Some((route_idx, _)) = self.api_mock_python_focus_target() {
-                    let version = self.ide_panel.api.input_editor.version;
-                    self.start_api_mock_ty_check_now(route_idx, version);
+                    if let Some(version) = self.api_mock_route_tools_version(route_idx) {
+                        self.start_api_mock_ty_check_now(route_idx, version);
+                    }
                 }
             }
             changed = true;

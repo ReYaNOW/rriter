@@ -54,9 +54,11 @@ pub(super) use hover_mouse_logic::{
 pub(crate) use hover_mouse_logic::{
     diagnostic_hover_byte_range_on_line, diagnostic_hover_type_target_at_x,
     hover_bytes_share_token, hover_content_y_in_line_hitbox, hover_screen_y_to_content_y,
-    hover_token_bounds, normalize_hover_byte,
+    hover_token_bounds, move_type_hover_to_empty_space, normalize_hover_byte,
+    update_editor_hover_state_for_cursor,
 };
 pub use hover_state_core::{
     HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,
-    hover_source_line_y_band, is_in_hover_popup_or_bridge,
 };
+#[cfg(test)]
+pub use hover_state_core::{hover_source_line_y_band, is_in_hover_popup_or_bridge};

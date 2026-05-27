@@ -1,10 +1,10 @@
+use super::contract::{
+    api_mock_contract_source_text, api_mock_handler_signature_text, api_mock_type_source_prefix,
+    api_mock_type_source_suffix,
+};
 use super::python_env::api_mock_python_dir;
-use super::types::{
-    ApiMockPythonScript, api_mock_path_param_names, api_mock_sanitize_python_param,
-};
-use crate::app::api_client::{
-    ApiMethod, ApiParam, ApiPrimitiveType, ApiRouteRow, ApiSchema, ApiSchemaKind, ApiSpecModel,
-};
+use super::types::{ApiMockPythonScript, api_mock_effective_contract};
+use crate::app::api_client::{ApiMethod, ApiRouteRow, ApiSpecModel};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
@@ -20,6 +20,7 @@ pub struct ApiMockTyCheckResult {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ApiMockSourcePart {
+    Contract,
     Prelude,
     Signature,
     Body,
@@ -42,9 +43,21 @@ pub struct ApiMockBodyLineMap {
     pub source_end: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiMockContractLineMap {
+    pub edit_start: usize,
+    pub edit_end: usize,
+    pub source_start: usize,
+    pub source_end: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiMockVirtualSource {
     pub source: String,
+    pub contract_text: String,
+    pub contract_start: usize,
+    pub contract_end: usize,
+    pub contract_lines: Vec<ApiMockContractLineMap>,
     pub prelude_start: usize,
     pub prelude_end: usize,
     pub signature_start: usize,
@@ -61,6 +74,17 @@ impl ApiMockVirtualSource {
     ) -> usize {
         let offset = offset.min(edit_text.len());
         match part {
+            ApiMockSourcePart::Contract => {
+                for line in &self.contract_lines {
+                    if offset >= line.edit_start && offset <= line.edit_end {
+                        return line.source_start.saturating_add(offset - line.edit_start);
+                    }
+                }
+                self.contract_lines
+                    .last()
+                    .map(|line| line.source_end)
+                    .unwrap_or(self.contract_end)
+            }
             ApiMockSourcePart::Prelude => self.prelude_start.saturating_add(offset),
             ApiMockSourcePart::Signature => self.signature_start.saturating_add(offset),
             ApiMockSourcePart::Body => {
@@ -83,6 +107,14 @@ impl ApiMockVirtualSource {
         source_offset: usize,
     ) -> Option<usize> {
         match part {
+            ApiMockSourcePart::Contract => self.contract_lines.iter().find_map(|line| {
+                if source_offset < line.source_start || source_offset > line.source_end {
+                    return None;
+                }
+                let edit_len = line.edit_end.saturating_sub(line.edit_start);
+                let source_col = source_offset.saturating_sub(line.source_start);
+                Some(line.edit_start + source_col.min(edit_len))
+            }),
             ApiMockSourcePart::Prelude => (source_offset >= self.prelude_start
                 && source_offset <= self.prelude_end)
                 .then_some(source_offset - self.prelude_start),
@@ -95,6 +127,16 @@ impl ApiMockVirtualSource {
                 )
             }),
         }
+    }
+
+    pub fn contract_source_span_to_edit(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Option<(usize, usize)> {
+        let start = self.source_offset_to_edit(ApiMockSourcePart::Contract, start)?;
+        let end = self.source_offset_to_edit(ApiMockSourcePart::Contract, end)?;
+        (start < end).then_some((start, end))
     }
 }
 
@@ -260,11 +302,17 @@ fn map_ty_location_to_edit(
     let prelude = virtual_source
         .source_offset_to_edit(ApiMockSourcePart::Prelude, source_offset)
         .map(|offset| (ApiMockSourcePart::Prelude, offset));
+    let contract = virtual_source
+        .source_offset_to_edit(ApiMockSourcePart::Contract, source_offset)
+        .map(|offset| (ApiMockSourcePart::Contract, offset));
     let body = virtual_source
         .source_offset_to_edit(ApiMockSourcePart::Body, source_offset)
         .map(|offset| (ApiMockSourcePart::Body, offset));
-    let (part, offset) = prelude.or(body)?;
+    let (part, offset) = contract.or(prelude).or(body)?;
     let edit_text = match part {
+        ApiMockSourcePart::Contract => {
+            virtual_source.contract_text.as_str()
+        }
         ApiMockSourcePart::Prelude => script.prelude.as_str(),
         ApiMockSourcePart::Signature => return None,
         ApiMockSourcePart::Body => script.body.as_str(),
@@ -333,6 +381,81 @@ fn next_token_end_col(line: &str, start_col: usize) -> usize {
     col
 }
 
+fn hidden_contract_source(
+    source: &str,
+    source_start: usize,
+) -> (String, Vec<ApiMockContractLineMap>) {
+    let mut out = String::with_capacity(source.len() + 64);
+    let mut maps = Vec::new();
+    let mut edit_start = 0usize;
+    for line in source.split_inclusive('\n') {
+        let line_body = line.strip_suffix('\n').unwrap_or(line);
+        let has_newline = line.ends_with('\n');
+        let hidden = hidden_contract_line(line_body);
+        if hidden_response_class_line(line_body) {
+            out.push_str("@dataclass\n");
+        }
+        let source_line_start = source_start + out.len();
+        out.push_str(&hidden);
+        if has_newline {
+            out.push('\n');
+        }
+        let edit_end = edit_start + line_body.len();
+        maps.push(ApiMockContractLineMap {
+            edit_start,
+            edit_end,
+            source_start: source_line_start,
+            source_end: source_line_start + hidden.len(),
+        });
+        edit_start = edit_end.saturating_add(has_newline as usize);
+    }
+    if source.is_empty() {
+        maps.push(ApiMockContractLineMap {
+            edit_start: 0,
+            edit_end: 0,
+            source_start,
+            source_end: source_start,
+        });
+    }
+    (out, maps)
+}
+
+fn hidden_response_class_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix("class Response") else {
+        return false;
+    };
+    rest.rfind(':').is_some()
+}
+
+fn hidden_contract_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let indent_len = line.len().saturating_sub(trimmed.len());
+    let Some(rest) = trimmed.strip_prefix("class Response") else {
+        return line.to_string();
+    };
+    let Some(colon_idx) = rest.rfind(':') else {
+        return line.to_string();
+    };
+    if rest[..colon_idx].contains("BaseModel") {
+        return line.to_string();
+    }
+    let indent = &line[..indent_len];
+    let header = rest[..colon_idx].trim();
+    let tail = &rest[colon_idx..];
+    if header.is_empty() {
+        format!("{indent}class Response(BaseModel){tail}")
+    } else if let Some(args) = header.strip_prefix('(').and_then(|text| text.strip_suffix(')')) {
+        if args.trim().is_empty() {
+            format!("{indent}class Response(BaseModel){tail}")
+        } else {
+            format!("{indent}class Response(BaseModel, {args}){tail}")
+        }
+    } else {
+        line.to_string()
+    }
+}
+
 #[cfg(test)]
 pub fn build_api_mock_ty_source(
     method: ApiMethod,
@@ -351,21 +474,22 @@ pub fn build_api_mock_virtual_source(
     model: &ApiSpecModel,
     script: &ApiMockPythonScript,
 ) -> ApiMockVirtualSource {
-    let mut out = String::with_capacity(script.prelude.len() + script.body.len() + 1024);
-    out.push_str("from __future__ import annotations\n");
-    out.push_str("from dataclasses import dataclass\n");
-    out.push_str("from typing import Any\n\n");
-    out.push_str("# Generated by RRiter. Locked route contract.\n");
-    out.push_str(&format!("# {} {}\n\n", method.as_str(), path));
-    out.push_str("@dataclass\nclass Request:\n");
-    out.push_str("    method: str\n    path: str\n    headers: dict[str, str]\n\n");
-    push_param_class(&mut out, "Query", &route.query_params);
-    push_body_class(&mut out, route, model);
-    out.push_str("@dataclass\nclass Fields:\n    values: dict[str, Any]\n\n");
-    out.push_str("@dataclass\nclass Output:\n    status: int = 200\n    headers: dict[str, str] | None = None\n    json: Any | None = None\n    text: str | None = None\n\n");
-    out.push_str("def json_response(data: Any, status: int = 200, headers: dict[str, str] | None = None) -> dict[str, Any]: ...\n");
-    out.push_str("def text_response(text: str, status: int = 200, headers: dict[str, str] | None = None) -> dict[str, Any]: ...\n");
-    out.push_str("def error_response(message: str, status: int = 500) -> dict[str, Any]: ...\n\n");
+    let contract = api_mock_effective_contract(script, route, model);
+    let contract_source = api_mock_contract_source_text(script, route, model);
+    let mut out = String::with_capacity(
+        script.prelude.len() + script.body.len() + contract_source.len() + 2048,
+    );
+    out.push_str(&api_mock_type_source_prefix(method, path));
+    out.push_str("# Editable contract classes\n");
+    let contract_start = out.len();
+    let (hidden_contract, contract_lines) = hidden_contract_source(&contract_source, contract_start);
+    out.push_str(&hidden_contract);
+    let contract_end = out.len();
+    if !contract_source.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push('\n');
+    out.push_str(&api_mock_type_source_suffix(&contract_source));
     out.push_str("# User prelude\n");
     let prelude_start = out.len();
     out.push_str(&script.prelude);
@@ -375,20 +499,12 @@ pub fn build_api_mock_virtual_source(
     }
     out.push('\n');
     let signature_start = out.len();
-    out.push_str("def handler(\n    req: Request,");
-    for name in api_mock_path_param_names(path) {
-        out.push_str("\n    ");
-        out.push_str(&api_mock_sanitize_python_param(&name));
-        out.push_str(": str,");
-    }
-    out.push_str(
-        "\n    query: Query,\n    body: Body | None,\n    fields: Fields,\n) -> dict[str, Any]:",
-    );
+    out.push_str(&api_mock_handler_signature_text(&contract));
     let signature_end = out.len();
     out.push('\n');
     let mut body_lines = Vec::new();
     if script.body.trim().is_empty() {
-        out.push_str("    return json_response({})\n");
+        out.push_str("    return Response(ok=True)\n");
     } else {
         let mut edit_start = 0usize;
         for line in script.body.lines() {
@@ -423,6 +539,10 @@ pub fn build_api_mock_virtual_source(
     }
     ApiMockVirtualSource {
         source: out,
+        contract_text: contract_source,
+        contract_start,
+        contract_end,
+        contract_lines,
         prelude_start,
         prelude_end,
         signature_start,
@@ -431,92 +551,11 @@ pub fn build_api_mock_virtual_source(
     }
 }
 
-fn push_param_class(out: &mut String, name: &str, params: &[ApiParam]) {
-    out.push_str("@dataclass\nclass ");
-    out.push_str(name);
-    out.push_str(":\n");
-    if params.is_empty() {
-        out.push_str("    pass\n\n");
-        return;
-    }
-    for param in params {
-        out.push_str("    ");
-        out.push_str(&api_mock_sanitize_python_param(&param.name));
-        out.push_str(": ");
-        out.push_str(python_primitive_type(param.primitive_type));
-        if !param.required {
-            out.push_str(" | None = None");
-        }
-        out.push('\n');
-    }
-    out.push('\n');
-}
-
-fn push_body_class(out: &mut String, route: &ApiRouteRow, model: &ApiSpecModel) {
-    out.push_str("@dataclass\nclass Body:\n");
-    let Some(schema_ref) = route.request_body.as_ref().and_then(|body| body.schema) else {
-        out.push_str("    pass\n\n");
-        return;
-    };
-    let Some(schema) = model.schema_arena.get(schema_ref.0) else {
-        out.push_str("    pass\n\n");
-        return;
-    };
-    if schema.properties.is_empty() {
-        out.push_str("    raw: Any | None = None\n\n");
-        return;
-    }
-    for prop in &schema.properties {
-        let field_ty = model
-            .schema_arena
-            .get(prop.schema.0)
-            .map(schema_python_type)
-            .unwrap_or("Any");
-        out.push_str("    ");
-        out.push_str(&api_mock_sanitize_python_param(&prop.name));
-        out.push_str(": ");
-        out.push_str(field_ty);
-        if !prop.required {
-            out.push_str(" | None = None");
-        }
-        out.push('\n');
-    }
-    out.push('\n');
-}
-
-fn schema_python_type(schema: &ApiSchema) -> &'static str {
-    match schema.kind {
-        ApiSchemaKind::String
-        | ApiSchemaKind::Date
-        | ApiSchemaKind::DateTime
-        | ApiSchemaKind::Bytes => "str",
-        ApiSchemaKind::Integer => "int",
-        ApiSchemaKind::Number => "float",
-        ApiSchemaKind::Boolean => "bool",
-        ApiSchemaKind::Array => "list[Any]",
-        ApiSchemaKind::Object => "dict[str, Any]",
-        ApiSchemaKind::Unknown => "Any",
-    }
-}
-
-fn python_primitive_type(kind: ApiPrimitiveType) -> &'static str {
-    match kind {
-        ApiPrimitiveType::String
-        | ApiPrimitiveType::Date
-        | ApiPrimitiveType::DateTime
-        | ApiPrimitiveType::Bytes => "str",
-        ApiPrimitiveType::Integer => "int",
-        ApiPrimitiveType::Number => "float",
-        ApiPrimitiveType::Boolean => "bool",
-        ApiPrimitiveType::Array => "list[str]",
-        ApiPrimitiveType::Object | ApiPrimitiveType::Unknown => "Any",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::api_client::ApiParamLocation;
+    use crate::app::api_client::{ApiParam, ApiParamLocation, ApiPrimitiveType};
+    use crate::app::api_mock::types::ApiMockFieldConstraints;
 
     #[test]
     fn ty_source_contains_locked_signature_and_models() {
@@ -539,6 +578,7 @@ mod tests {
                 example: None,
                 examples: Vec::new(),
                 description: String::new(),
+                constraints: ApiMockFieldConstraints::default(),
             }],
             request_body: None,
             responses: Vec::new(),
@@ -551,6 +591,8 @@ mod tests {
             &model,
             &ApiMockPythonScript {
                 enabled: true,
+                contract: Default::default(),
+                contract_source: String::new(),
                 prelude: String::new(),
                 body: "return json_response({\"id\": id})".to_string(),
                 timeout_ms: 1000,
@@ -559,6 +601,7 @@ mod tests {
 
         assert!(source.contains("class Query"));
         assert!(source.contains("page: int | None = None"));
+        assert!(source.contains("@dataclass\nclass Response(BaseModel):"));
         assert!(source.contains("def handler(\n    req: Request,\n    id: str,"));
     }
 
@@ -578,6 +621,8 @@ mod tests {
         };
         let script = ApiMockPythonScript {
             enabled: true,
+            contract: Default::default(),
+            contract_source: String::new(),
             prelude: "import math".to_string(),
             body: "value = 1\nreturn json_response({\"value\": value})".to_string(),
             timeout_ms: 1000,
@@ -622,6 +667,8 @@ mod tests {
         };
         let script = ApiMockPythonScript {
             enabled: true,
+            contract: Default::default(),
+            contract_source: String::new(),
             prelude: String::new(),
             body: "    return json_response({\"ok\": True})".to_string(),
             timeout_ms: 1000,
@@ -633,12 +680,12 @@ mod tests {
         assert!(
             virtual_source
                 .source
-                .contains(") -> dict[str, Any]:\n    return")
+                .contains(") -> Response | dict[str, Any]:\n    return")
         );
         assert!(
             !virtual_source
                 .source
-                .contains(") -> dict[str, Any]:\n\n    return")
+                .contains(") -> Response | dict[str, Any]:\n\n    return")
         );
     }
 
@@ -658,6 +705,8 @@ mod tests {
         };
         let script = ApiMockPythonScript {
             enabled: true,
+            contract: Default::default(),
+            contract_source: String::new(),
             prelude: String::new(),
             body: "\n    missing_name\n    return json_response({})".to_string(),
             timeout_ms: 1000,

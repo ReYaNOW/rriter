@@ -1,16 +1,18 @@
 use crate::app::api_client::{
-    API_BODY_TEXT_SCALE, API_MOCK_TY_POPUP_BYTE, ApiFocus, ApiParam, ApiResponseView, ApiSchema,
+    API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiResponseView, ApiSchema,
     ApiSchemaKind, ApiSecuritySchemeKind, api_array_edit_parts, api_array_value_parts,
     api_auth_related_route_count, api_auth_route_rank, api_auth_scheme_row_height,
     api_body_text_area_height, api_response_text, api_response_text_area_height,
     api_route_auth_missing, api_route_auth_scheme_indices, api_schema_allowed_values,
     api_generated_response_for_route, api_mock_body_editor_text, api_mock_lan_url,
     api_schema_is_array_input,
-    api_schema_is_file_input, api_schema_is_multi_file_input, api_text_area_line_height,
-    api_text_area_max_scroll_x, json_body_is_valid, write_api_path_display,
+    api_schema_is_file_input, api_schema_is_multi_file_input, api_text_area_baseline_offset,
+    api_text_area_line_height, api_text_area_max_scroll_x, api_text_area_top_from_baseline,
+    json_body_is_valid, write_api_path_display,
 };
+use crate::app::api_mock::contract::api_mock_handler_signature_text;
 use crate::app::api_mock::ty_check::ApiMockSourcePart;
-use crate::app::api_mock::types::{api_mock_path_param_names, api_mock_sanitize_python_param};
+use crate::app::api_mock::types::api_mock_effective_contract;
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconButton, IconType};
 use glow::HasContext;
@@ -28,49 +30,6 @@ struct ApiFieldRowLayout {
     input_h: f32,
     right_x: f32,
     right_w: f32,
-}
-
-fn api_mock_signature_lines(path: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    lines.push("def handler(".to_string());
-    lines.push("    req: Request,".to_string());
-    for name in api_mock_path_param_names(path) {
-        lines.push(format!(
-            "    {}: str,",
-            api_mock_sanitize_python_param(&name)
-        ));
-    }
-    lines.push("    query: Query,".to_string());
-    lines.push("    body: Body | None,".to_string());
-    lines.push("    fields: Fields,".to_string());
-    lines.push(") -> dict[str, Any]:".to_string());
-    lines
-}
-
-fn api_mock_signature_text(path: &str) -> String {
-    api_mock_signature_lines(path).join("\n")
-}
-
-fn api_mock_path_param_count(path: &str) -> usize {
-    let mut count = 0usize;
-    let mut rest = path;
-    while let Some(start) = rest.find('{') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('}') else {
-            break;
-        };
-        if !after[..end].trim().is_empty() {
-            count += 1;
-        }
-        rest = &after[end + 1..];
-    }
-    count
-}
-
-fn api_mock_signature_block_height(path: &str, s: f32) -> f32 {
-    let line_h = api_text_area_line_height(s);
-    let line_count = 6 + api_mock_path_param_count(path);
-    line_count as f32 * line_h + 12.0 * s
 }
 
 fn editor_line_number_text<'a>(line_no: usize, buf: &'a mut [u8; 20]) -> Option<&'a str> {
@@ -94,6 +53,7 @@ include!("api_client_tab/api_client_tab_main_renderer.rs");
 include!("api_client_tab/api_client_tab_auth_renderer.rs");
 include!("api_client_tab/api_client_tab_field_renderer.rs");
 include!("api_client_tab/api_client_tab_python_renderer.rs");
+include!("api_client_tab/api_client_tab_mock_contract_renderer.rs");
 
 fn api_rect_intersection(
     a: (f32, f32, f32, f32),
@@ -126,13 +86,6 @@ fn response_auth_token_flags(response: &crate::app::api_client::ApiJobResponse) 
             .and_then(serde_json::Value::as_str)
             .is_some(),
     )
-}
-
-fn byte_offset_for_char_col(line: &str, col: usize) -> usize {
-    line.char_indices()
-        .nth(col)
-        .map(|(idx, _)| idx)
-        .unwrap_or(line.len())
 }
 
 fn json_string_end(line: &str, start: usize) -> usize {

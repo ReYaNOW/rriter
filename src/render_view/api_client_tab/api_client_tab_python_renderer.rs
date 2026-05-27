@@ -1,7 +1,30 @@
+fn api_mock_ty_diagnostics_as_lsp(
+    diagnostics: &[crate::app::api_mock::ty_check::ApiMockTyDiagnostic],
+) -> Vec<crate::lsp::Diagnostic> {
+    diagnostics
+        .iter()
+        .map(|diag| crate::lsp::Diagnostic {
+            start_line: diag.line as u32,
+            start_col: diag.start_col as u32,
+            end_line: diag.line as u32,
+            end_col: diag.end_col as u32,
+            severity: crate::lsp::DiagSeverity::Error,
+            code: None,
+            code_href: None,
+            message: diag.message.clone(),
+            source: Some("ty".to_string()),
+            quickfixes: Vec::new(),
+            tags: Vec::new(),
+            spans: Vec::new(),
+        })
+        .collect()
+}
+
 impl Renderer {
     fn draw_api_mock_locked_signature_line(
         &mut self,
-        path: &str,
+        signature: &str,
+        block_h: f32,
         spans: &[crate::highlighter::ColorSpan],
         x: f32,
         y: f32,
@@ -9,19 +32,18 @@ impl Renderer {
         s: f32,
     ) {
         let line_h = api_text_area_line_height(s);
-        let signature = api_mock_signature_text(path);
         self.draw_python_text_area(
-            &signature,
+            signature,
             spans,
             x,
-            y + (line_h * 0.75).round(),
+            y + api_text_area_baseline_offset(s),
             w,
-            api_mock_signature_block_height(path, s),
+            block_h,
             s,
             0.0,
             0.0,
         );
-        let sep_y = y + (6 + api_mock_path_param_count(path)) as f32 * line_h + 2.0 * s;
+        let sep_y = y + signature.split('\n').count() as f32 * line_h + 2.0 * s;
         self.push_rect(x, sep_y.round(), w, 1.0, [1.0, 1.0, 1.0, 0.08]);
     }
 
@@ -57,8 +79,12 @@ impl Renderer {
         let first_line = (scroll_y / line_h).floor() as usize;
         let line_offset = scroll_y - first_line as f32 * line_h;
         let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let start_y = y - line_offset;
+        let viewport_h = self.height.max(1.0);
+        let first_visible = ((0.0 - start_y) / line_h).floor().max(0.0) as usize;
+        let last_visible = ((viewport_h - start_y) / line_h).ceil().max(0.0) as usize + 1;
         let line_count = text.split('\n').count();
-        for visible_idx in 0..max_lines {
+        for visible_idx in first_visible..last_visible.min(max_lines) {
             let line_idx = first_line + visible_idx;
             if line_idx >= line_count {
                 break;
@@ -81,191 +107,152 @@ impl Renderer {
         s: f32,
         scroll_y: f32,
         scroll_x: f32,
-        mx: f32,
-        my: f32,
-    ) -> Option<(String, (f32, f32, f32, f32))> {
-        let line_h = api_text_area_line_height(s);
-        let first_line = (scroll_y / line_h).floor() as usize;
-        let line_offset = scroll_y - first_line as f32 * line_h;
-        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
-        let mut hovered = None;
+    ) {
         for diag in diagnostics {
-            if diag.part != part || diag.line < first_line {
-                continue;
-            }
-            let visible_idx = diag.line - first_line;
-            if visible_idx >= max_lines {
-                continue;
-            }
-            let Some(line) = text.split('\n').nth(diag.line) else {
-                continue;
-            };
-            let start_byte = byte_offset_for_char_col(line, diag.start_col);
-            let end_byte = byte_offset_for_char_col(line, diag.end_col);
-            let x_start = x + self.api_mono_width(&line[..start_byte]) - scroll_x;
-            let x_end = x + self.api_mono_width(&line[..end_byte]) - scroll_x;
-            let base_y = y - line_offset + visible_idx as f32 * line_h;
-            let line_top = base_y - 19.0 * s;
-            let squiggle_y = base_y + 3.0 * s;
-            let squiggle_w = (x_end - x_start).max(8.0 * s).min(w);
-            self.push_squiggle(
-                x_start.round(),
-                squiggle_y.round(),
-                squiggle_w,
-                [1.0, 0.36, 0.36, 1.0],
-            );
-            let hit_top = base_y - 14.0 * s;
-            if mx >= x_start
-                && mx <= x_start + squiggle_w
-                && my >= hit_top
-                && my <= hit_top + line_h
-            {
-                hovered = Some((
-                    diag.message.clone(),
-                    (x_start.round(), line_top.round(), squiggle_w, line_h),
-                ));
+            if let Some(layout) = crate::app::api_client::api_mock_ty_diag_layout(
+                text,
+                diag,
+                part,
+                x,
+                y,
+                w,
+                h,
+                s,
+                scroll_y,
+                scroll_x,
+                |prefix| self.api_mono_width(prefix),
+            ) {
+                self.push_squiggle(
+                    layout.x_start,
+                    layout.squiggle_y,
+                    layout.squiggle_w,
+                    [1.0, 0.36, 0.36, 1.0],
+                );
             }
         }
-        hovered
-    }
-
-    fn draw_api_mock_ty_popup(
-        &mut self,
-        message: &str,
-        rect: (f32, f32, f32, f32),
-        editor: &crate::editor::Editor,
-        ui_registry: &mut crate::ui_system::UiRegistry,
-        mx: f32,
-        my: f32,
-    ) {
-        let text = message.lines().next().unwrap_or(message);
-        let (text, spans, line_kinds, inline_code_ranges) = crate::lsp::highlight_hover_text(text);
-        let source_anchor_x = rect.0 + rect.2 * 0.5;
-        let source_anchor_y = rect.1 + rect.3 * 0.5;
-        let scroll = crate::app::mouse::HOVER_STATE.with(|state| {
-            state
-                .borrow()
-                .popup
-                .as_ref()
-                .filter(|popup| {
-                    popup.byte_offset == API_MOCK_TY_POPUP_BYTE && popup.text == text
-                })
-                .map(|popup| popup.scroll.clone())
-                .unwrap_or_else(|| crate::scroll::ScrollState::new(15.0))
-        });
-        let mut popup = crate::app::mouse::HoverPopup {
-            text,
-            spans,
-            line_kinds,
-            inline_code_ranges,
-            byte_offset: API_MOCK_TY_POPUP_BYTE,
-            anchor_x: source_anchor_x,
-            anchor_y: source_anchor_y,
-            offset_x: None,
-            offset_y: None,
-            anim_progress: 1.0,
-            scroll,
-            layout_cache: None,
-        };
-        let render_scroll_y =
-            self.api_mock_ty_hover_render_scroll_y(editor, popup.byte_offset, rect.1);
-        let mut wants_pointer = false;
-        let (bx, by, bw, bh, max_scroll) = self.draw_hover_popup(
-            &mut popup,
-            None,
-            None,
-            editor,
-            ui_registry,
-            mx,
-            my,
-            render_scroll_y,
-            &mut wants_pointer,
-            1.0,
-            None,
-        );
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.byte_offset = Some(API_MOCK_TY_POPUP_BYTE);
-            state.put_type_popup_after_draw(Some(popup), Some((bx, by, bw, bh)), max_scroll);
-        });
-    }
-
-    fn api_mock_ty_hover_render_scroll_y(
-        &self,
-        editor: &crate::editor::Editor,
-        byte_offset: usize,
-        source_line_top: f32,
-    ) -> f32 {
-        let phys_line = editor
-            .line_offsets
-            .partition_point(|&offset| offset <= byte_offset)
-            .saturating_sub(1);
-        let vis_line_idx = self.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
-        vis_line_idx * self.line_height - source_line_top
     }
 
     fn draw_existing_api_mock_ty_popup(
         &mut self,
-        editor: &crate::editor::Editor,
+        source_editor: Option<&crate::editor::Editor>,
+        diagnostics: &[crate::app::api_mock::ty_check::ApiMockTyDiagnostic],
+        text_x: f32,
+        source_top_y: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+        ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
     ) -> bool {
-        let should_draw = crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            state
-                .popup
-                .as_ref()
-                .is_some_and(|popup| popup.byte_offset == API_MOCK_TY_POPUP_BYTE)
-                && state
-                    .popup_or_bridge_contains(mx, my, self.width, self.scale_factor)
-                    .0
-        });
-        if !should_draw {
-            crate::app::mouse::HOVER_STATE.with(|state| {
-                let mut state = state.borrow_mut();
-                if state
-                    .popup
-                    .as_ref()
-                    .is_some_and(|popup| popup.byte_offset == API_MOCK_TY_POPUP_BYTE)
-                {
-                    state.put_type_popup_after_draw(None, None, 0.0);
-                    state.byte_offset = None;
-                }
-            });
-            return false;
-        }
-        let Some(mut popup) = crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            let (popup, _, _) = state.take_type_popup_for_draw(false);
-            popup
-        }) else {
+        let Some(editor) = source_editor else {
             return false;
         };
-        let render_scroll_y = self.api_mock_ty_hover_render_scroll_y(
-            editor,
-            popup.byte_offset,
-            popup.anchor_y - api_text_area_line_height(self.scale_factor) * 0.5,
-        );
+        let should_draw = crate::app::mouse::HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            let target_matches = ide_panel.api.mock_hover_target.as_ref().is_some_and(|target| {
+                state.byte_offset == Some(target.edit_byte)
+                    || state
+                        .popup
+                        .as_ref()
+                        .is_some_and(|popup| popup.byte_offset == target.edit_byte)
+                    || state
+                        .pending_popup
+                        .as_ref()
+                        .is_some_and(|popup| popup.byte_offset == target.edit_byte)
+                    || state.combined_type_target() == Some(target.edit_byte)
+            });
+            target_matches
+                && (state.popup.is_some()
+                    || !state.diagnostic_popup_cache_is_empty()
+                    || state.rect.is_none()
+                    || state
+                        .popup_safe_area_contains(mx, my, self.width, self.scale_factor)
+                        .0)
+        });
+        if !should_draw {
+            return false;
+        }
+        let lsp_diagnostics = api_mock_ty_diagnostics_as_lsp(diagnostics);
+        let old_line_height = self.line_height;
+        let old_left_padding = self.left_padding;
+        let old_last_scroll_x = self.last_scroll_x;
+        let old_visual_lines = std::mem::take(&mut self.visual_lines);
+        let old_phys_to_visual = std::mem::take(&mut self.phys_to_visual);
+        let old_lsp_diagnostic_indices = std::mem::take(&mut self.lsp_diagnostic_indices);
+
+        self.line_height = api_text_area_line_height(self.scale_factor);
+        self.left_padding = text_x;
+        self.last_scroll_x = scroll_x;
+        self.phys_to_visual.extend(0..editor.line_offsets.len());
+        self.visual_lines
+            .reserve(editor.line_offsets.len().saturating_sub(self.visual_lines.len()));
+        for (line_idx, &byte_idx) in editor.line_offsets.iter().enumerate() {
+            self.visual_lines.push(crate::renderer::VisualLine {
+                byte_idx,
+                physical_line: line_idx + 1,
+                is_soft_wrap: false,
+                whitespace_px_width: 0.0,
+                text_px_width: 0.0,
+                y_offset: line_idx as f32 * self.line_height,
+                is_folded: false,
+                fold_suffix: ['\0'; 4],
+                fold_suffix_len: 0,
+            });
+        }
+        if let Some(target) = ide_panel.api.mock_hover_target.as_ref() {
+            self.lsp_diagnostic_indices.extend(
+                diagnostics
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, diag)| (diag.part == target.part).then_some(idx)),
+            );
+        }
+        let render_scroll_y = scroll_y - source_top_y;
+        if let Some(target) = ide_panel.api.mock_hover_target.as_ref() {
+            let (anchor_x, anchor_y) = crate::app::mouse::hover_anchor_for_byte(
+                self,
+                editor,
+                target.edit_byte,
+                render_scroll_y,
+            );
+            crate::app::mouse::HOVER_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                if let Some(popup) = state.popup.as_mut() {
+                    if popup.byte_offset == target.edit_byte
+                        && (popup.offset_x.is_none() || popup.offset_y.is_none())
+                    {
+                        popup.anchor_x = anchor_x;
+                        popup.anchor_y = anchor_y;
+                    }
+                }
+            });
+        }
+        let hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            state.hovered_diag_type_target
+        });
+
         let mut wants_pointer = false;
-        let (bx, by, bw, bh, max_scroll) = self.draw_hover_popup(
-            &mut popup,
-            None,
-            None,
+        self.draw_hover_overlays(
             editor,
+            &lsp_diagnostics,
+            ide_panel,
             ui_registry,
             mx,
             my,
+            scroll_x,
             render_scroll_y,
+            hovered_diag_type_target,
             &mut wants_pointer,
-            1.0,
-            None,
         );
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.byte_offset = Some(API_MOCK_TY_POPUP_BYTE);
-            state.put_type_popup_after_draw(Some(popup), Some((bx, by, bw, bh)), max_scroll);
-        });
+
+        self.line_height = old_line_height;
+        self.left_padding = old_left_padding;
+        self.last_scroll_x = old_last_scroll_x;
+        self.visual_lines = old_visual_lines;
+        self.phys_to_visual = old_phys_to_visual;
+        self.lsp_diagnostic_indices = old_lsp_diagnostic_indices;
         true
     }
 
@@ -289,6 +276,10 @@ impl Renderer {
         let first_line = (scroll_y / line_h).floor() as usize;
         let line_offset = scroll_y - first_line as f32 * line_h;
         let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let start_y = y - line_offset;
+        let viewport_h = self.height.max(1.0);
+        let first_visible = ((0.0 - start_y) / line_h).floor().max(0.0) as usize;
+        let last_visible = ((viewport_h - start_y) / line_h).ceil().max(0.0) as usize + 1;
         let mut byte_idx = 0usize;
         for (line_idx, line) in text.split('\n').enumerate() {
             let line_start = byte_idx;
@@ -298,8 +289,12 @@ impl Renderer {
                 continue;
             }
             let visible_idx = line_idx - first_line;
-            if visible_idx >= max_lines {
+            if visible_idx >= last_visible.min(max_lines) {
                 break;
+            }
+            if visible_idx < first_visible {
+                byte_idx = line_end.saturating_add(1);
+                continue;
             }
             let draw_y = y - line_offset + visible_idx as f32 * line_h;
             self.draw_spanned_api_line(
@@ -312,6 +307,98 @@ impl Renderer {
             );
             byte_idx = line_end.saturating_add(1);
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_embedded_python_editor(
+        &mut self,
+        editor: &crate::editor::Editor,
+        spans: &[crate::highlighter::ColorSpan],
+        x: f32,
+        baseline_y: f32,
+        w: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+        focused: bool,
+        blink_alpha: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let old_line_height = self.line_height;
+        let old_baseline_offset = self.baseline_offset;
+        let old_left_padding = self.left_padding;
+        let old_last_scroll_x = self.last_scroll_x;
+        let old_visual_lines = std::mem::take(&mut self.visual_lines);
+        let old_phys_to_visual = std::mem::take(&mut self.phys_to_visual);
+        let old_inlay_hints = std::mem::take(&mut self.current_python_inlay_hints);
+
+        self.line_height = api_text_area_line_height(self.scale_factor);
+        self.baseline_offset = api_text_area_baseline_offset(self.scale_factor);
+        self.left_padding = x;
+        self.last_scroll_x = scroll_x;
+        self.update_cache(editor, scroll_x, scroll_y, false);
+
+        let (first, second) = editor.text_parts();
+        let (sel_start, sel_end) = editor
+            .selection_anchor
+            .map(|anchor| (anchor.min(editor.cursor), anchor.max(editor.cursor)))
+            .unwrap_or((editor.cursor, editor.cursor));
+        let render_scroll_y = scroll_y + self.baseline_offset - baseline_y;
+        let empty_search: &[(usize, usize)] = &[];
+        let empty_inlay: &[crate::app::PythonInlayHint] = &[];
+        if focused {
+            self.refresh_identical_words_cache(
+                editor,
+                first,
+                second,
+                first.len(),
+                editor.len(),
+                sel_start,
+                sel_end,
+            );
+        } else {
+            self.identical_words_cache.clear();
+            self.identical_words_cache_editor = 0;
+            self.identical_words_cache_version = u64::MAX;
+            self.identical_words_cache_cursor = usize::MAX;
+            self.identical_words_cache_selection_anchor = None;
+        }
+
+        self.draw_editor_visible_text(
+            editor,
+            spans,
+            empty_search,
+            None,
+            first,
+            second,
+            editor.get_cached_indent_levels(),
+            first.len(),
+            editor.len(),
+            None,
+            sel_start,
+            sel_end,
+            scroll_x,
+            render_scroll_y,
+            x + w,
+            if focused { blink_alpha } else { 0.0 },
+            false,
+            !focused,
+            false,
+            self.scale_factor,
+            0,
+            self.visual_lines.len(),
+            ui_registry,
+            None,
+            None,
+            empty_inlay,
+        );
+
+        self.line_height = old_line_height;
+        self.baseline_offset = old_baseline_offset;
+        self.left_padding = old_left_padding;
+        self.last_scroll_x = old_last_scroll_x;
+        self.visual_lines = old_visual_lines;
+        self.phys_to_visual = old_phys_to_visual;
+        self.current_python_inlay_hints = old_inlay_hints;
     }
 
     fn draw_spanned_api_line(

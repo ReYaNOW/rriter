@@ -21,7 +21,7 @@ fn python_completion_context(file_extension: &str, text: &str) -> bool {
         })
 }
 
-fn autocomplete_detail_cache_item(
+pub(crate) fn autocomplete_detail_cache_item(
     item: &crate::lsp::LspCompletionItem,
 ) -> AutocompleteDetailCacheItem {
     AutocompleteDetailCacheItem {
@@ -32,7 +32,7 @@ fn autocomplete_detail_cache_item(
     }
 }
 
-fn apply_autocomplete_detail_cache_item(
+pub(crate) fn apply_autocomplete_detail_cache_item(
     item: &mut AutocompleteItem,
     cached: &AutocompleteDetailCacheItem,
     member_dot_context: bool,

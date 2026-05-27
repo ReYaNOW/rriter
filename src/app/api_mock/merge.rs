@@ -1,6 +1,7 @@
 use super::types::{
     ApiMockMode, ApiMockRouteDecision, ApiMockRouteOrigin, ApiMockRuntimeRoute, ApiMockState,
-    api_mock_route_key, api_mock_source_key,
+    api_mock_effective_contract, api_mock_route_key, api_mock_source_key,
+    default_contract_for_manual_route, default_contract_from_route,
 };
 use crate::app::api_client::{
     ApiMethod, ApiSpecEntry, ApiSpecModel, api_generated_response_for_route,
@@ -14,6 +15,20 @@ pub fn build_api_mock_routes<'a>(
     let mut out = Vec::new();
 
     for route in &state.manual_routes {
+        let python = route.python.clone().map(|mut script| {
+            if script.contract.is_empty() {
+                script.contract = default_contract_for_manual_route(&route.path);
+            } else if !script.contract.response.enabled
+                && script.contract.response.fields.is_empty()
+            {
+                script.contract.response = default_contract_for_manual_route(&route.path).response;
+            }
+            script
+        });
+        let contract = python
+            .as_ref()
+            .map(|script| script.contract.clone())
+            .unwrap_or_else(|| default_contract_for_manual_route(&route.path));
         out.push(ApiMockRuntimeRoute {
             id: format!("manual:{}", route.stable_id),
             source_key: "manual".to_string(),
@@ -24,7 +39,8 @@ pub fn build_api_mock_routes<'a>(
             generated_status: 200,
             generated_content_type: "application/json",
             generated_body: "{}".to_string(),
-            python: route.python.clone(),
+            python,
+            contract,
             input_fields: route.input_fields.clone(),
             output_fields: route.output_fields.clone(),
             origin: ApiMockRouteOrigin::Manual,
@@ -43,7 +59,16 @@ pub fn build_api_mock_routes<'a>(
             let response = override_route
                 .map(|override_route| override_route.response.clone())
                 .unwrap_or(super::types::ApiMockResponse::Generated);
-            let python = override_route.and_then(|override_route| override_route.python.clone());
+            let python = override_route.and_then(|override_route| {
+                override_route.python.clone().map(|mut script| {
+                    script.contract = api_mock_effective_contract(&script, route, model);
+                    script
+                })
+            });
+            let contract = python
+                .as_ref()
+                .map(|script| api_mock_effective_contract(script, route, model))
+                .unwrap_or_else(|| default_contract_from_route(route, model));
             let input_fields = override_route
                 .map(|override_route| override_route.extra_input_fields.clone())
                 .unwrap_or_default();
@@ -64,6 +89,7 @@ pub fn build_api_mock_routes<'a>(
                 generated_content_type,
                 generated_body,
                 python,
+                contract,
                 input_fields,
                 output_fields,
                 origin: ApiMockRouteOrigin::OpenApi,
@@ -84,7 +110,7 @@ pub fn resolve_api_mock_route<'a>(
         route.origin == ApiMockRouteOrigin::Manual
             && route.enabled
             && route.method == method
-            && route.path == path
+            && api_mock_path_matches(&route.path, path)
     }) {
         return ApiMockRouteDecision::Mock(route);
     }
@@ -130,19 +156,80 @@ pub fn api_mock_path_params(pattern: &str, path: &str) -> Option<BTreeMap<String
     loop {
         match (pattern_parts.next(), path_parts.next()) {
             (None, None) => return Some(params),
-            (Some(pattern_part), Some(path_part))
-                if pattern_part.starts_with('{') && pattern_part.ends_with('}') =>
-            {
-                if path_part.is_empty() {
-                    return None;
-                }
-                let name = &pattern_part[1..pattern_part.len().saturating_sub(1)];
-                params.insert(name.to_string(), path_part.to_string());
+            (Some(pattern_part), Some(path_part)) => {
+                match_path_segment(pattern_part, path_part, &mut params)?;
             }
-            (Some(pattern_part), Some(path_part)) if pattern_part == path_part => {}
             _ => return None,
         }
     }
+}
+
+fn match_path_segment(
+    pattern: &str,
+    path: &str,
+    params: &mut BTreeMap<String, String>,
+) -> Option<()> {
+    if !pattern.contains('{') {
+        return (pattern == path).then_some(());
+    }
+    let tokens = path_pattern_tokens(pattern)?;
+    let mut pos = 0usize;
+    for (idx, token) in tokens.iter().enumerate() {
+        match token {
+            PathPatternToken::Static(text) => {
+                if !path[pos..].starts_with(text) {
+                    return None;
+                }
+                pos = pos.saturating_add(text.len());
+            }
+            PathPatternToken::Param(name) => {
+                let next_static = tokens[idx + 1..].iter().find_map(|token| match token {
+                    PathPatternToken::Static(text) if !text.is_empty() => Some(text.as_str()),
+                    _ => None,
+                });
+                let end = if let Some(next_static) = next_static {
+                    path[pos..].find(next_static).map(|offset| pos + offset)?
+                } else {
+                    path.len()
+                };
+                if end <= pos {
+                    return None;
+                }
+                params.insert(name.clone(), path[pos..end].to_string());
+                pos = end;
+            }
+        }
+    }
+    (pos == path.len()).then_some(())
+}
+
+fn path_pattern_tokens(pattern: &str) -> Option<Vec<PathPatternToken>> {
+    let mut tokens = Vec::new();
+    let mut rest = pattern;
+    loop {
+        let Some(open) = rest.find('{') else {
+            if !rest.is_empty() {
+                tokens.push(PathPatternToken::Static(rest.to_string()));
+            }
+            return Some(tokens);
+        };
+        if open > 0 {
+            tokens.push(PathPatternToken::Static(rest[..open].to_string()));
+        }
+        rest = &rest[open + 1..];
+        let close = rest.find('}')?;
+        let name = &rest[..close];
+        if name.is_empty() {
+            return None;
+        }
+        tokens.push(PathPatternToken::Param(name.to_string()));
+        rest = &rest[close + 1..];
+    }
+}
+
+enum PathPatternToken {
+    Static(String),
+    Param(String),
 }
 
 #[cfg(test)]

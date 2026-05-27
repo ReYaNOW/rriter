@@ -374,6 +374,26 @@ impl Renderer {
             false,
         );
         cy += btn_h + 10.0 * s;
+        let export = Button {
+            x: x + pad,
+            y: cy,
+            w: (w - pad * 2.0).max(80.0 * s),
+            h: btn_h,
+            text: "Экспорт openapi.json".to_string(),
+            icon: Some(IconType::Save),
+            text_scale: 0.84,
+            icon_size: 17.0 * s,
+        };
+        ui_registry.register_button(
+            crate::ui_system::UiId::ApiMockExportOpenApi,
+            &export,
+            self,
+            mx,
+            my,
+            s,
+            false,
+        );
+        cy += btn_h + 10.0 * s;
         let mode_label = match api.mock.mode {
             ApiMockMode::MockAll => "Мокать все",
             ApiMockMode::MockSelectedOnly => "Только выбранные",

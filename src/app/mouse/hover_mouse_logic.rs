@@ -149,6 +149,104 @@ pub fn suppress_hover_popup_until_mouse_move(
     had_popup
 }
 
+pub(crate) fn move_type_hover_to_empty_space(state: &mut HoverState) -> bool {
+    if state.keep_active_combined_popup_on_empty_space() {
+        return true;
+    }
+    if state.byte_offset.is_some() && !state.should_keep_popup_through_empty_space() {
+        if crate::render_view::hover_trace_enabled() {
+            println!(
+                "[HOVER DEBUG] cursor -> empty space. byte_offset=None. start 0.25s hide timer."
+            );
+        }
+        state.byte_offset = None;
+        state.timer = 0.0;
+        state.request_id = None;
+        state.definition_request_id = None;
+        return true;
+    }
+    false
+}
+
+fn update_type_hover_target_from_cursor(
+    state: &mut HoverState,
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    in_hover_popup: bool,
+    in_hover_source_line: bool,
+) -> Option<bool> {
+    let same_word = hover_bytes_share_token(editor, state.byte_offset, Some(byte_offset));
+    if !same_word && state.should_lock_hover_target_while_popup_opens(Some(byte_offset)) {
+        return None;
+    }
+    if same_word && !in_hover_popup {
+        let popup_matches_byte = state
+            .popup
+            .as_ref()
+            .is_some_and(|popup| popup.byte_offset == byte_offset);
+        if !popup_matches_byte {
+            state.reset_type_hover_wait_after_mouse_motion();
+        }
+    }
+    if !same_word && (!in_hover_popup || in_hover_source_line) {
+        return Some(state.begin_type_hover_transition(byte_offset));
+    }
+    Some(false)
+}
+
+pub(crate) fn update_editor_hover_state_for_cursor(
+    state: &mut HoverState,
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+    diag_hover_byte: Option<usize>,
+    is_text_area: bool,
+    in_hover_popup: bool,
+    in_hover_source_line: bool,
+    editor_text_selecting: bool,
+) -> Option<bool> {
+    if editor_text_selecting {
+        return Some(false);
+    }
+    if is_text_area {
+        let normalized = normalize_hover_byte(editor, byte_offset);
+        if normalized.is_none() {
+            if let Some(diag_byte) = diag_hover_byte {
+                if !in_hover_popup && state.byte_offset != Some(diag_byte) {
+                    let keep_visible = state.popup.is_some();
+                    state.byte_offset = Some(diag_byte);
+                    state.timer = 0.0;
+                    state.request_id = None;
+                    state.definition_request_id = None;
+                    state.pending_popup = None;
+                    state.selection_anchor = None;
+                    state.selection_cursor = None;
+                    state.selecting = false;
+                    if !keep_visible {
+                        state.popup = None;
+                        state.rect = None;
+                    }
+                }
+            } else if !in_hover_popup {
+                move_type_hover_to_empty_space(state);
+            }
+            return Some(false);
+        }
+        let byte_offset = normalized.unwrap_or(byte_offset);
+        update_type_hover_target_from_cursor(
+            state,
+            editor,
+            byte_offset,
+            in_hover_popup,
+            in_hover_source_line,
+        )
+    } else {
+        if !in_hover_popup {
+            move_type_hover_to_empty_space(state);
+        }
+        Some(false)
+    }
+}
+
 pub(crate) fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: usize) -> bool {
     if byte_offset >= editor.len() {
         return false;

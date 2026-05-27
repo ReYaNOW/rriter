@@ -5,7 +5,7 @@ use super::types::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const API_MOCK_PERSIST_VERSION: u32 = 1;
+const API_MOCK_PERSIST_VERSION: u32 = 2;
 const API_MOCK_LAN_BIND_HOST: &str = "0.0.0.0";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,7 +100,9 @@ fn api_mock_data_dir() -> PathBuf {
 mod tests {
     use super::*;
     use crate::app::api_client::ApiMethod;
-    use crate::app::api_mock::types::{ApiMockResponse, ApiPythonRuntimeMode, ApiUvStatus};
+    use crate::app::api_mock::types::{
+        ApiMockResponse, ApiPythonRuntimeMode, ApiUvStatus, default_api_mock_python_script,
+    };
 
     #[test]
     fn persist_roundtrip_keeps_routes_and_uv_settings() {
@@ -197,6 +199,79 @@ mod tests {
         let loaded = load_api_mocks();
 
         assert_eq!(loaded.bind_host, "0.0.0.0");
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+    }
+
+    #[test]
+    fn old_python_mock_without_contract_loads_with_empty_contract() {
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let legacy = serde_json::json!({
+            "version": 1,
+            "bind_host": "0.0.0.0",
+            "port": 4010,
+            "mode": "MockAll",
+            "proxy_base_url": "",
+            "uv": ApiUvState::default(),
+            "route_overrides": [{
+                "source_key": "https://example.test/openapi.json",
+                "method": "Get",
+                "path": "/users",
+                "enabled": true,
+                "response": "Generated",
+                "python": {
+                    "enabled": true,
+                    "prelude": "",
+                    "body": "return json_response({})",
+                    "timeout_ms": 1000
+                },
+                "extra_input_fields": [],
+                "extra_output_fields": []
+            }],
+            "manual_routes": []
+        });
+        if let Some(dir) = api_mocks_path().parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(api_mocks_path(), serde_json::to_string_pretty(&legacy).unwrap())
+            .expect("write legacy");
+
+        let loaded = load_api_mocks();
+        let script = loaded.route_overrides[0].python.as_ref().expect("script");
+
+        assert!(script.contract.is_empty());
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+    }
+
+    #[test]
+    fn new_python_mock_contract_roundtrips() {
+        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let mut state = ApiMockState::default();
+        let mut script = default_api_mock_python_script();
+        script.contract.query.enabled = true;
+        script.contract.query.fields.push(
+            crate::app::api_mock::types::ApiMockContractField::new(
+                "page",
+                crate::app::api_mock::types::ApiMockContractFieldKind::Integer,
+                false,
+            ),
+        );
+        state.route_overrides.push(ApiMockRouteOverride {
+            source_key: "https://example.test/openapi.json".to_string(),
+            method: ApiMethod::Get,
+            path: "/users".to_string(),
+            enabled: true,
+            response: ApiMockResponse::Generated,
+            python: Some(script),
+            extra_input_fields: Vec::new(),
+            extra_output_fields: Vec::new(),
+        });
+
+        save_api_mocks(&state);
+        let loaded = load_api_mocks();
+        let script = loaded.route_overrides[0].python.as_ref().expect("script");
+
+        assert!(script.contract.query.enabled);
+        assert_eq!(script.contract.query.fields[0].name, "page");
         let _ = std::fs::remove_dir_all(api_mock_data_dir());
     }
 }

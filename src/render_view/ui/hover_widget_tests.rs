@@ -200,6 +200,20 @@ fn test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_a
 }
 
 #[test]
+fn test_pixel_frame_keeps_fractional_bottom_edge_fixed_when_popup_above_cursor() {
+    let target = (100.2, 100.3, 500.0, 300.0);
+    let anchor = (220.0, 520.0);
+    let near_done = (100.2, 100.6, 500.0, 299.7);
+    let final_frame = (100.2, 100.3, 500.0, 300.0);
+
+    let (_, y1, _, h1) = pixel_stable_hover_popup_frame(near_done, target, anchor);
+    let (_, y2, _, h2) = pixel_stable_hover_popup_frame(final_frame, target, anchor);
+
+    assert_eq!(y1 + h1, 400.0);
+    assert_eq!(y2 + h2, 400.0);
+}
+
+#[test]
 fn test_opening_hover_popup_animation_uses_stable_source_anchor() {
     let target = (100.0, 100.0, 500.0, 300.0);
     let progress = 0.55;

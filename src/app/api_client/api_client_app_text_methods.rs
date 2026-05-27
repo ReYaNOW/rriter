@@ -52,27 +52,10 @@ impl crate::app::App {
             {
                 state.response_scroll.current
             }
-            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
-                .ide_panel
-                .api
-                .mock_python_scrolls
-                .get(&(route_idx, ApiMockSourcePart::Prelude))
-                .map(|scroll| scroll.current)
-                .unwrap_or(0.0),
-            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
-                .ide_panel
-                .api
-                .mock_python_scrolls
-                .get(&(route_idx, ApiMockSourcePart::Body))
-                .map(|scroll| scroll.current)
-                .unwrap_or(0.0),
-            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => self
-                .ide_panel
-                .api
-                .mock_python_scrolls
-                .get(&(route_idx, ApiMockSourcePart::Signature))
-                .map(|scroll| scroll.current)
-                .unwrap_or(0.0),
+            crate::ui_system::UiId::ApiMockContractInput(_)
+            | crate::ui_system::UiId::ApiMockPreludeInput(_)
+            | crate::ui_system::UiId::ApiMockBodyInput(_)
+            | crate::ui_system::UiId::ApiMockSignatureInput(_) => 0.0,
             _ => 0.0,
         }
     }
@@ -92,6 +75,13 @@ impl crate::app::App {
             {
                 state.response_scroll_x.current
             }
+            crate::ui_system::UiId::ApiMockContractInput(route_idx) => self
+                .ide_panel
+                .api
+                .mock_python_scrolls_x
+                .get(&(route_idx, ApiMockSourcePart::Contract))
+                .map(|scroll| scroll.current)
+                .unwrap_or(0.0),
             crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
                 .ide_panel
                 .api
@@ -171,6 +161,19 @@ impl crate::app::App {
                     }
                 })
                 .unwrap_or_default(),
+            crate::ui_system::UiId::ApiMockContractInput(route_idx) => self
+                .api_route_python_script(route_idx)
+                .map(|_| {
+                    if self.api_mock_python_focus_target()
+                        == Some((route_idx, ApiMockSourcePart::Contract))
+                    {
+                        self.ide_panel.api.input_editor.get_full_text()
+                    } else {
+                        self.api_mock_contract_source_for_route(route_idx)
+                            .unwrap_or_default()
+                    }
+                })
+                .unwrap_or_default(),
             crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
                 .api_route_python_script(route_idx)
                 .map(|script| {
@@ -199,8 +202,13 @@ impl crate::app::App {
         let Some(renderer) = self.renderer.as_mut() else {
             return 0.0;
         };
+        let use_mono_width = Self::api_mock_part_for_ui(id).is_some();
         api_text_area_max_scroll_x(&text, visible_w, |line| {
-            renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+            if use_mono_width {
+                line.chars().map(|ch| renderer.char_advance(ch)).sum()
+            } else {
+                renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+            }
         })
     }
 
@@ -264,6 +272,9 @@ impl crate::app::App {
 
     fn api_mock_part_for_ui(id: crate::ui_system::UiId) -> Option<(usize, ApiMockSourcePart)> {
         match id {
+            crate::ui_system::UiId::ApiMockContractInput(route_idx) => {
+                Some((route_idx, ApiMockSourcePart::Contract))
+            }
             crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
                 Some((route_idx, ApiMockSourcePart::Prelude))
             }
@@ -275,6 +286,37 @@ impl crate::app::App {
             }
             _ => None,
         }
+    }
+
+    fn api_mock_combined_max_scroll_for_route(&self, route_idx: usize, scale: f32) -> f32 {
+        let Some((_, _, route, model)) = self.api_mock_route_context(route_idx) else {
+            return 0.0;
+        };
+        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
+            return 0.0;
+        };
+        let contract = crate::app::api_mock::types::api_mock_effective_contract(
+            &script, &route, &model,
+        );
+        let signature_text =
+            crate::app::api_mock::contract::api_mock_handler_signature_text(&contract);
+        let contract_text = if self.api_mock_python_focus_target()
+            == Some((route_idx, ApiMockSourcePart::Contract))
+        {
+            self.ide_panel.api.input_editor.get_full_text()
+        } else {
+            self.api_mock_contract_source_for_route(route_idx)
+                .unwrap_or_default()
+        };
+        let content_h = api_mock_combined_editor_content_height(
+            &script.prelude,
+            &contract_text,
+            &signature_text,
+            &script.body,
+            scale,
+        );
+        let viewport_h = api_mock_combined_editor_viewport_height(&signature_text, scale);
+        (content_h - viewport_h).max(0.0)
     }
 
     fn sync_api_multiline_scroll_target(&mut self, id: crate::ui_system::UiId, immediate: bool) {
@@ -297,12 +339,24 @@ impl crate::app::App {
             .map(|idx| idx.saturating_add(1))
             .unwrap_or(0);
         let cursor_line_text = &text[line_start..cursor];
+        let mock_part = Self::api_mock_part_for_ui(id);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let cursor_x = renderer.measure_ui_width(cursor_line_text, API_BODY_TEXT_SCALE);
+        let cursor_x = if mock_part.is_some() {
+            cursor_line_text
+                .chars()
+                .map(|ch| renderer.char_advance(ch))
+                .sum()
+        } else {
+            renderer.measure_ui_width(cursor_line_text, API_BODY_TEXT_SCALE)
+        };
         let max_scroll_x = api_text_area_max_scroll_x(&text, visible_w, |line| {
-            renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+            if mock_part.is_some() {
+                line.chars().map(|ch| renderer.char_advance(ch)).sum()
+            } else {
+                renderer.measure_ui_width(line, API_BODY_TEXT_SCALE)
+            }
         });
         let max_scroll_y = api_text_area_max_scroll(&text, visible_h, scale);
 
@@ -358,18 +412,7 @@ impl crate::app::App {
                 }
             }
             _ => {
-                if let Some(key) = Self::api_mock_part_for_ui(id) {
-                    let scroll_y = self
-                        .ide_panel
-                        .api
-                        .mock_python_scrolls
-                        .entry(key)
-                        .or_insert_with(|| ScrollState::new(7.0));
-                    scroll_y.target = target_y;
-                    if immediate {
-                        scroll_y.current = target_y;
-                        scroll_y.velocity = 0.0;
-                    }
+                if let Some(key @ (route_idx, _)) = mock_part {
                     let scroll_x = self
                         .ide_panel
                         .api
@@ -380,6 +423,33 @@ impl crate::app::App {
                     if immediate {
                         scroll_x.current = target_x;
                         scroll_x.velocity = 0.0;
+                    }
+                    if let Some(viewport) = self
+                        .ui_registry
+                        .rect_for(crate::ui_system::UiId::ApiMockCombinedPython(route_idx))
+                    {
+                        let max_scroll = self.api_mock_combined_max_scroll_for_route(route_idx, scale);
+                        let text_top_y = Self::api_multiline_cursor_top_y(id, rect, scale);
+                        let cursor_top = text_top_y + cursor_y;
+                        let cursor_bottom = cursor_top + line_h;
+                        let top_limit = viewport.1 + edge;
+                        let bottom_limit = viewport.1 + viewport.3 - edge;
+                        let scroll_y = self
+                            .ide_panel
+                            .api
+                            .mock_python_scrolls
+                            .entry((route_idx, ApiMockSourcePart::Body))
+                            .or_insert_with(|| ScrollState::new(7.0));
+                        if cursor_bottom > bottom_limit {
+                            scroll_y.target = scroll_y.current + cursor_bottom - bottom_limit;
+                        } else if cursor_top < top_limit {
+                            scroll_y.target = scroll_y.current - (top_limit - cursor_top);
+                        }
+                        scroll_y.target = scroll_y.target.clamp(0.0, max_scroll);
+                        if immediate {
+                            scroll_y.current = scroll_y.target;
+                            scroll_y.velocity = 0.0;
+                        }
                     }
                 }
             }
@@ -442,6 +512,10 @@ impl crate::app::App {
             ApiFocus::MockManualPath { manual_idx } => Some((
                 crate::ui_system::UiId::ApiMockManualRoutePath(*manual_idx),
                 false,
+            )),
+            ApiFocus::MockContract { route_idx } => Some((
+                crate::ui_system::UiId::ApiMockContractInput(*route_idx),
+                true,
             )),
             ApiFocus::MockPrelude { route_idx } => Some((
                 crate::ui_system::UiId::ApiMockPreludeInput(*route_idx),
@@ -555,7 +629,26 @@ impl crate::app::App {
     ) -> f32 {
         match id {
             crate::ui_system::UiId::ApiMockSignatureInput(_) => rect.1,
+            crate::ui_system::UiId::ApiMockContractInput(_)
+            | crate::ui_system::UiId::ApiMockPreludeInput(_)
+            | crate::ui_system::UiId::ApiMockBodyInput(_) => {
+                api_text_area_top_from_baseline(
+                    Self::api_mock_text_baseline_y(id, rect, scale),
+                    scale,
+                )
+            }
             _ => rect.1 + 10.0 * scale,
+        }
+    }
+
+    fn api_multiline_cursor_left_x(
+        id: crate::ui_system::UiId,
+        rect: (f32, f32, f32, f32),
+        scale: f32,
+    ) -> f32 {
+        match id {
+            crate::ui_system::UiId::ApiMockSignatureInput(_) => rect.0,
+            _ => rect.0 + 10.0 * scale,
         }
     }
 
@@ -596,7 +689,7 @@ impl crate::app::App {
             set_api_multiline_cursor_at_pointer(
                 &mut self.ide_panel.api.input_editor,
                 renderer,
-                rect,
+                Self::api_multiline_cursor_left_x(id, rect, scale),
                 Self::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
@@ -668,7 +761,7 @@ impl crate::app::App {
             set_api_multiline_cursor_at_pointer(
                 &mut self.ide_panel.api.input_editor,
                 renderer,
-                rect,
+                Self::api_multiline_cursor_left_x(id, rect, scale),
                 Self::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,

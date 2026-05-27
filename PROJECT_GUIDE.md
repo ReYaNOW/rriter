@@ -265,6 +265,9 @@ Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/ap
 Large app files use thin include shells to keep source chunks small:
 
 * `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input helpers, App method groups, defaults/persist, tests.
+* `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and async OpenAPI export entrypoint.
+* `src/app/api_mock/contract.rs` -> structured Python mock contract builder for handler signature, locked classes, runtime args, defaults, and schema export.
+* `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON patch/synthesis for selected spec plus manual mock routes.
 * `src/app/autocomplete/*` -> detail helpers, detail request/merge flow, Ty autocomplete flow, popup/apply flow.
 * `src/app/python_completion/*` -> source/module helpers and class/member helpers.
 * `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
@@ -543,6 +546,7 @@ Implementation is split through `include!`:
 * `src/render_view/root_frame_overlay_helpers.rs` -> overlay, resize, search, and notice helpers.
 * `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
 * `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
+* `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract toggles and locked class block rendering.
 
 Hot path.
 

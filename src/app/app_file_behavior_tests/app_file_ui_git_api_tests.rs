@@ -771,9 +771,7 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
         .insert_str("\n    reset_me = 1");
     app.reset_api_route_python_part(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body);
     let body = app.ide_panel.api.input_editor.get_full_text();
-    assert!(!body.starts_with("    \n"));
-    assert!(body.starts_with("    return"));
-    assert!(body.contains("json_response"));
+    assert_eq!(body, "    return Response(ok=True)");
     assert!(!body.contains("reset_me"));
     assert!(
         app.ide_panel
@@ -790,4 +788,162 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
             .contains_key(&(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
     );
     assert!(app.ide_panel.api.mock_ty_diagnostics.is_empty());
+}
+
+#[test]
+fn api_mock_signature_parameters_feed_autocomplete_like_python_editor() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel
+        .api
+        .input_editor
+        .set_text_clean("    result = make_item(");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+
+    app.update_api_mock_ty_signature_help_autocomplete(vec!["value".to_string()]);
+
+    assert!(app.autocomplete_active);
+    assert_eq!(app.autocomplete_options[0].0.word, "value");
+    assert_eq!(
+        app.autocomplete_options[0].0.insert_text.as_deref(),
+        Some("value=")
+    );
+    assert!(app.apply_api_mock_autocomplete());
+    assert_eq!(
+        app.ide_panel.api.input_editor.get_full_text(),
+        "    result = make_item(value="
+    );
+}
+
+#[test]
+fn api_mock_tree_sitter_completions_show_before_ty_merge() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    r");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.ide_panel.api.mock_highlighter.completions = vec![crate::highlighter::CompletionItem {
+        word: "Response".to_string(),
+        kind: crate::highlighter::SymbolKind::Class,
+        scope_start: 0,
+        scope_end: usize::MAX,
+    }];
+
+    app.update_api_mock_tree_sitter_autocomplete();
+
+    assert!(app.autocomplete_active);
+    assert_eq!(app.autocomplete_mode, crate::app::AutocompleteMode::TreeSitter);
+    assert_eq!(app.autocomplete_options[0].0.word, "Response");
+}
+
+#[test]
+fn api_mock_python_hover_uses_virtual_source_fallback() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+
+    let body = app.ide_panel.api.input_editor.get_full_text();
+    let edit_byte = body.find("Response").unwrap();
+    let target = crate::app::api_client::ApiMockHoverTarget {
+        route_idx: 0,
+        part: crate::app::api_mock::ty_check::ApiMockSourcePart::Body,
+        edit_byte,
+        version: app.ide_panel.api.input_editor.version,
+    };
+    let source = "class Response:\n    ok: bool = True\n\nreturn Response(ok=True)".to_string();
+    let source_cursor = source.rfind("Response").unwrap();
+    app.ide_panel.api.mock_hover_target = Some(target.clone());
+    app.ide_panel.api.mock_hover_request = Some(crate::app::api_client::ApiMockHoverRequest {
+        request_id: 77,
+        target,
+        source,
+        source_cursor,
+        anchor: (0.0, 0.0),
+    });
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.byte_offset = Some(edit_byte);
+        state.request_id = Some(77);
+        state.popup = None;
+        state.pending_popup = None;
+    });
+
+    assert!(app.apply_api_mock_hover_response(77, Some("None".to_string())));
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let popup_text = state.popup.as_ref().map(|popup| popup.text.as_str());
+        assert!(popup_text.is_some_and(|text| text.contains("class Response")));
+        state.popup = None;
+        state.byte_offset = None;
+    });
+}
+
+#[test]
+fn api_mock_hover_clears_old_popup_when_crossing_mock_editors() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.ui_registry.register_text_input(
+        crate::ui_system::UiId::ApiMockPreludeInput(0),
+        10.0,
+        10.0,
+        220.0,
+        80.0,
+        20.0,
+        20.0,
+    );
+
+    let old_target = crate::app::api_client::ApiMockHoverTarget {
+        route_idx: 0,
+        part: crate::app::api_mock::ty_check::ApiMockSourcePart::Body,
+        edit_byte: 3,
+        version: 1,
+    };
+    app.ide_panel.api.mock_hover_target = Some(old_target);
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        *state = crate::app::mouse::HoverState::default();
+        state.byte_offset = Some(3);
+        state.request_id = Some(44);
+        state.rect = Some((40.0, 40.0, 180.0, 90.0));
+        state.popup = Some(crate::app::mouse::HoverPopup {
+            text: "old".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 3,
+            anchor_x: 40.0,
+            anchor_y: 40.0,
+            offset_x: Some(6.0),
+            offset_y: Some(8.0),
+            anim_progress: 1.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        });
+    });
+
+    assert!(app.update_api_mock_hover_from_cursor(20.0, 20.0, false, false));
+
+    assert!(app.ide_panel.api.mock_hover_target.is_none());
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        assert!(state.popup.is_none());
+        assert!(state.byte_offset.is_none());
+        assert!(state.request_id.is_none());
+        assert!(state.rect.is_none());
+        *state = crate::app::mouse::HoverState::default();
+    });
 }

@@ -628,6 +628,36 @@ fn type_only_popup_stays_visible_while_next_word_loads() {
 }
 
 #[test]
+fn clear_active_combined_popup_drops_type_and_diagnostic_together() {
+    let mut state = HoverState::default();
+    state.byte_offset = Some(17);
+    state.popup = Some(crate::app::mouse::HoverPopup {
+        text: "old combined".to_string(),
+        spans: Vec::new(),
+        line_kinds: Vec::new(),
+        inline_code_ranges: Vec::new(),
+        byte_offset: 17,
+        anchor_x: 100.0,
+        anchor_y: 120.0,
+        offset_x: None,
+        offset_y: None,
+        anim_progress: 1.0,
+        scroll: crate::scroll::ScrollState::new(15.0),
+        layout_cache: None,
+    });
+    state.hovered_diag_type_target = Some(17);
+    state.hovered_diags_cache.push((2, 90.0, 100.0, 122.0, 180.0));
+    state.diag_rect = Some((90.0, 122.0, 240.0, 80.0, 90.0, 180.0, 111.0));
+
+    assert!(state.clear_active_combined_popup());
+    assert!(state.popup.is_none());
+    assert!(state.byte_offset.is_none());
+    assert!(state.diagnostic_popup_cache_is_empty());
+    assert!(state.diag_rect.is_none());
+    assert!(state.hovered_diag_type_target.is_none());
+}
+
+#[test]
 fn stale_visibility_can_still_show_existing_combined_popup() {
     let mut state = HoverState::default();
     state.stale_combined_popup = true;

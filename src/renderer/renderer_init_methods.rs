@@ -414,6 +414,7 @@ impl Renderer {
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,
                 identical_words_cache: Vec::with_capacity(64),
+                identical_words_cache_editor: 0,
                 identical_words_cache_version: u64::MAX,
                 identical_words_cache_cursor: usize::MAX,
                 identical_words_cache_selection_anchor: None,

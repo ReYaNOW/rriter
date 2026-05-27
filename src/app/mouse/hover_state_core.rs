@@ -33,6 +33,7 @@ pub struct HoverLayoutCache {
 
 pub type DiagnosticPopupRect = (f32, f32, f32, f32, f32, f32, f32);
 pub type HoveredDiagnostic = (usize, f32, f32, f32, f32);
+const HOVER_SOURCE_LINE_HALF_H_SCALE: f32 = 10.0;
 
 pub struct HoverState {
     pub request_id: Option<i32>,
@@ -422,6 +423,30 @@ impl HoverState {
         self.diag_hover_ready_after_stale = false;
     }
 
+    #[cfg(test)]
+    pub fn clear_active_combined_popup(&mut self) -> bool {
+        let had_combined = self.has_active_combined_type_popup()
+            || self.combined_type_target().is_some()
+            || self.diag_rect.is_some()
+            || !self.diagnostic_popup_cache_is_empty();
+        if !had_combined {
+            return false;
+        }
+        self.request_id = None;
+        self.definition_request_id = None;
+        self.popup = None;
+        self.pending_popup = None;
+        self.timer = 0.0;
+        self.byte_offset = None;
+        self.rect = None;
+        self.max_scroll = 0.0;
+        self.selection_anchor = None;
+        self.selection_cursor = None;
+        self.selecting = false;
+        self.reset_diagnostic_popup();
+        true
+    }
+
     pub fn popup_or_bridge_contains(
         &self,
         px: f32,
@@ -451,6 +476,15 @@ impl HoverState {
             }
         }
 
+        if let Some((rx, ry, rw, rh)) = self.rect
+            && px >= rx
+            && px <= rx + rw
+            && py >= ry
+            && py <= ry + rh
+        {
+            inside = true;
+        }
+
         if let (Some((rx, ry, rw, rh)), Some(popup)) = (self.rect, self.popup.as_ref()) {
             let (line_top_y, line_bottom_y) = hover_source_line_y_band(popup.anchor_y, scale);
             if is_in_hover_popup_or_bridge(
@@ -471,10 +505,48 @@ impl HoverState {
 
         (inside, source_line)
     }
+
+    pub fn popup_safe_area_contains(
+        &self,
+        px: f32,
+        py: f32,
+        viewport_w: f32,
+        scale: f32,
+    ) -> (bool, bool) {
+        let bridge = self.popup_or_bridge_contains(px, py, viewport_w, scale);
+        if bridge.0 {
+            return bridge;
+        }
+
+        let type_rect = self.rect;
+        let diag_rect = self.diag_rect.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
+        let mut union_rect = match (diag_rect, type_rect) {
+            (Some(diag), Some(ty)) => {
+                let x_min = diag.0.min(ty.0);
+                let y_min = diag.1.min(ty.1);
+                let x_max = (diag.0 + diag.2).max(ty.0 + ty.2);
+                let y_max = (diag.1 + diag.3).max(ty.1 + ty.3);
+                Some((x_min, y_min, x_max - x_min, y_max - y_min))
+            }
+            (Some(diag), None) => Some(diag),
+            (None, Some(ty)) => Some(ty),
+            (None, None) => None,
+        };
+        let Some((rx, ry, rw, rh)) = union_rect.take() else {
+            return bridge;
+        };
+
+        let pad = 24.0 * scale;
+        (
+            px >= rx - pad && px <= rx + rw + pad && py >= ry - pad && py <= ry + rh + pad,
+            false,
+        )
+    }
+
 }
 
 pub fn hover_source_line_y_band(anchor_y: f32, scale: f32) -> (f32, f32) {
-    let half_h = 10.0 * scale;
+    let half_h = HOVER_SOURCE_LINE_HALF_H_SCALE * scale;
     (anchor_y - half_h, anchor_y + half_h)
 }
 
@@ -497,11 +569,13 @@ pub fn is_in_hover_popup_or_bridge(
     let bridge_radius = 72.0 * scale;
 
     if ry + rh <= line_top_y {
-        if py > line_bottom_y {
+        if py < ry + rh || py > line_bottom_y {
             return false;
         }
-    } else if ry >= line_bottom_y && py < line_top_y {
-        return false;
+    } else if ry >= line_bottom_y {
+        if py < line_top_y || py > ry {
+            return false;
+        }
     }
 
     let target_x = anchor_x.clamp(rx, rx + rw);

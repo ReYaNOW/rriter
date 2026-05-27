@@ -215,6 +215,65 @@ fn hover_bridge_does_not_capture_above_type_anchor_band_when_popup_is_below() {
 }
 
 #[test]
+fn hover_bridge_does_not_extend_past_popup_edge_when_popup_is_below() {
+    let popup_rect = (650.0, 420.0, 200.0, 100.0);
+    let (line_top_y, line_bottom_y) = hover_source_line_y_band(354.0, 1.0);
+
+    assert!(is_in_hover_popup_or_bridge(
+        635.0,
+        390.0,
+        popup_rect,
+        620.0,
+        354.0,
+        line_top_y,
+        line_bottom_y,
+        1000.0,
+        1.0,
+    ));
+    assert!(!is_in_hover_popup_or_bridge(
+        620.0,
+        430.0,
+        popup_rect,
+        620.0,
+        354.0,
+        line_top_y,
+        line_bottom_y,
+        1000.0,
+        1.0,
+    ));
+}
+
+#[test]
+fn hover_bridge_does_not_extend_past_popup_edge_when_popup_is_above() {
+    let popup_rect = (650.0, 100.0, 200.0, 100.0);
+    let line_top_y = 288.0;
+    let line_bottom_y = 316.0;
+
+    assert!(is_in_hover_popup_or_bridge(
+        635.0,
+        244.0,
+        popup_rect,
+        620.0,
+        305.0,
+        line_top_y,
+        line_bottom_y,
+        1000.0,
+        1.0,
+    ));
+    assert!(!is_in_hover_popup_or_bridge(
+        620.0,
+        190.0,
+        popup_rect,
+        620.0,
+        305.0,
+        line_top_y,
+        line_bottom_y,
+        1000.0,
+        1.0,
+    ));
+}
+
+#[test]
 fn hover_bridge_handles_popup_shifted_away_from_anchor() {
     let popup_rect = (20.0, 100.0, 520.0, 180.0);
     let line_top_y = 288.0;
@@ -288,6 +347,20 @@ fn hover_bridge_keeps_popup_when_cursor_moves_slightly_sideways() {
         1000.0,
         1.0,
     ));
+}
+
+#[test]
+fn popup_rect_stays_safe_even_without_bridge_popup_anchor() {
+    let state = HoverState {
+        rect: Some((100.0, 80.0, 420.0, 220.0)),
+        popup: None,
+        ..HoverState::default()
+    };
+
+    let (inside, source_line) = state.popup_or_bridge_contains(510.0, 292.0, 900.0, 1.0);
+
+    assert!(inside);
+    assert!(!source_line);
 }
 
 // --- ГЛОБАЛЬНЫЕ ТЕСТЫ НА ВЕСЬ МОДУЛЬ HOVER ---

@@ -171,6 +171,41 @@ fn compute_hover_popup_anim_rect(
     (anim_x, anim_y, anim_w, anim_h)
 }
 
+fn pixel_stable_hover_popup_frame(
+    frame: (f32, f32, f32, f32),
+    target: (f32, f32, f32, f32),
+    anchor: (f32, f32),
+) -> (f32, f32, f32, f32) {
+    let (frame_x, frame_y, frame_w, frame_h) = frame;
+    let (target_x, target_y, target_w, target_h) = target;
+    let (anchor_x, anchor_y) = anchor;
+    let target_right = target_x + target_w;
+    let target_bottom = target_y + target_h;
+    let anchor_left = (anchor_x - target_x).abs() <= (anchor_x - target_right).abs();
+    let anchor_top = if anchor_y <= target_y {
+        true
+    } else if anchor_y >= target_bottom {
+        false
+    } else {
+        (anchor_y - target_y).abs() <= (anchor_y - target_bottom).abs()
+    };
+
+    let w = frame_w.round();
+    let h = frame_h.round();
+    let x = if anchor_left {
+        frame_x.round()
+    } else {
+        target_right.round() - w
+    };
+    let y = if anchor_top {
+        frame_y.round()
+    } else {
+        target_bottom.round() - h
+    };
+
+    (x, y, w, h)
+}
+
 fn stable_hover_animation_mouse(
     live_mx: f32,
     live_my: f32,
@@ -728,7 +763,11 @@ impl Renderer {
         };
 
         self.flush();
-        let (frame_x, frame_y, frame_w, frame_h) = pop.frame;
+        let (frame_x, frame_y, frame_w, frame_h) = pixel_stable_hover_popup_frame(
+            pop.frame,
+            (bx, by, box_w, combined_h),
+            (source_anchor_x, source_anchor_y),
+        );
         self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, 1.0);
 
         self.flush();
@@ -1269,7 +1308,11 @@ impl Renderer {
 
         if attached_diag.is_none() {
             self.flush();
-            let (frame_x, frame_y, frame_w, frame_h) = pop.frame;
+            let (frame_x, frame_y, frame_w, frame_h) = pixel_stable_hover_popup_frame(
+                pop.frame,
+                (bx, by, box_w, box_h),
+                (popup.anchor_x, popup.anchor_y),
+            );
             self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, opacity);
         }
 

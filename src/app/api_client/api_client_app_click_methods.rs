@@ -17,6 +17,7 @@ impl crate::app::App {
                 | crate::ui_system::UiId::ApiBodyFieldInput(_, _)
                 | crate::ui_system::UiId::ApiResponseBody(_)
                 | crate::ui_system::UiId::ApiMockStaticResponseInput(_)
+                | crate::ui_system::UiId::ApiMockContractInput(_)
                 | crate::ui_system::UiId::ApiMockSignatureInput(_)
                 | crate::ui_system::UiId::ApiMockPreludeInput(_)
                 | crate::ui_system::UiId::ApiMockBodyInput(_)
@@ -218,13 +219,36 @@ impl crate::app::App {
                     self.ide_panel.api.expanded_mock_routes.remove(&key);
                 } else {
                     self.ide_panel.api.expanded_mock_routes.insert(key);
+                    self.start_api_mock_route_tools_now(route_idx);
                 }
             }
             crate::ui_system::UiId::ApiMockRoutePythonToggle(route_idx) => {
-                self.toggle_api_route_python(route_idx);
+                if self.toggle_api_route_python(route_idx) {
+                    self.start_api_mock_route_tools_now(route_idx);
+                }
+            }
+            crate::ui_system::UiId::ApiMockExportOpenApi => {
+                self.trigger_api_mock_export_openapi();
+            }
+            crate::ui_system::UiId::ApiMockContractQueryToggle(route_idx) => {
+                self.toggle_api_mock_contract_query(route_idx);
+            }
+            crate::ui_system::UiId::ApiMockContractBodyToggle(route_idx) => {
+                self.toggle_api_mock_contract_body(route_idx);
+            }
+            crate::ui_system::UiId::ApiMockContractQueryFieldToggle(route_idx, field_idx) => {
+                self.toggle_api_mock_contract_query_field(route_idx, field_idx);
+            }
+            crate::ui_system::UiId::ApiMockContractBodyFieldToggle(route_idx, field_idx) => {
+                self.toggle_api_mock_contract_body_field(route_idx, field_idx);
             }
             crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockStaticResponse { route_idx });
+                self.place_api_cursor_from_last_click(id, true);
+            }
+            crate::ui_system::UiId::ApiMockCombinedPython(_) => {}
+            crate::ui_system::UiId::ApiMockContractInput(route_idx) => {
+                self.focus_api_input(ApiFocus::MockContract { route_idx });
                 self.place_api_cursor_from_last_click(id, true);
             }
             crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
@@ -247,6 +271,9 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPreludeReset(route_idx) => {
                 self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Prelude);
+            }
+            crate::ui_system::UiId::ApiMockContractReset(route_idx) => {
+                self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Contract);
             }
             crate::ui_system::UiId::ApiMockBodyReset(route_idx) => {
                 self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Body);

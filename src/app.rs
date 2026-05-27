@@ -17,6 +17,11 @@ use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_BYTES};
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
+pub(crate) use autocomplete::{
+    apply_autocomplete_detail_cache_item, autocomplete_detail_cache_item,
+    enrich_python_tree_sitter_options, tree_sitter_completion_options,
+    ty_signature_parameter_items,
+};
 pub use app_state::*;
 use glutin::display::GetGlDisplay;
 use python_completion::*;

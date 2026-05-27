@@ -89,6 +89,138 @@ fn append_python_import_edits_to_block(
     }
 }
 
+pub(crate) fn tree_sitter_completion_options(
+    completions: &[CompletionItem],
+    prefix: &str,
+    cursor: usize,
+    prefix_start: usize,
+    file_extension: &str,
+    trace_label: &str,
+) -> Vec<(AutocompleteItem, Vec<usize>)> {
+    let prefix_lower = prefix.to_lowercase();
+    let mut best_scopes: FxHashMap<String, CompletionItem> = FxHashMap::default();
+    for comp in completions {
+        if comp.scope_start == prefix_start
+            && matches!(
+                comp.kind,
+                SymbolKind::Variable
+                    | SymbolKind::Parameter
+                    | SymbolKind::Argument
+                    | SymbolKind::Unknown
+            )
+            && comp.word.to_lowercase().starts_with(&prefix_lower)
+        {
+            continue;
+        }
+        if cursor >= comp.scope_start && cursor <= comp.scope_end {
+            let current_size = comp.scope_end.saturating_sub(comp.scope_start);
+            if let Some(existing) = best_scopes.get(&comp.word) {
+                let ex_size = existing.scope_end.saturating_sub(existing.scope_start);
+                let prefer_parameter =
+                    comp.kind == SymbolKind::Parameter && existing.kind != SymbolKind::Parameter;
+                let keep_parameter =
+                    existing.kind == SymbolKind::Parameter && comp.kind != SymbolKind::Parameter;
+                if prefer_parameter || (!keep_parameter && current_size < ex_size) {
+                    best_scopes.insert(comp.word.clone(), comp.clone());
+                }
+            } else {
+                best_scopes.insert(comp.word.clone(), comp.clone());
+            }
+        }
+    }
+
+    if autocomplete_trace_enabled() {
+        println!(
+            "Autocomplete {trace_label}_scope: prefix={:?} completions={} best_scopes={}",
+            prefix,
+            completions.len(),
+            best_scopes.len()
+        );
+    }
+
+    let mut matches = Vec::with_capacity(best_scopes.len());
+    for (_, comp) in best_scopes {
+        let comp_lower = comp.word.to_lowercase();
+        if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
+            let is_prefix = comp_lower.starts_with(&prefix_lower);
+            let mut score = 0i64;
+            let scope_bonus = if comp.kind == SymbolKind::Keyword {
+                0
+            } else {
+                let scope_size = comp.scope_end.saturating_sub(comp.scope_start);
+                let sz = scope_size.min(i64::MAX as usize) as i64;
+                10_000_000 / (sz + 1).max(1)
+            };
+            score += scope_bonus;
+            score -= (comp.word.len() as i64) * 10;
+            matches.push((is_prefix, score, comp, indices));
+        }
+    }
+
+    matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
+        let scoped_self_priority = if file_extension == "py" && comp.kind == SymbolKind::Parameter
+        {
+            python_scoped_self_priority(&comp.word)
+        } else {
+            2
+        };
+        let type_priority = match comp.kind {
+            SymbolKind::Variable
+            | SymbolKind::Parameter
+            | SymbolKind::Argument
+            | SymbolKind::Property => 0,
+            SymbolKind::Function => 1,
+            SymbolKind::Class | SymbolKind::Module => 2,
+            SymbolKind::Builtin => 3,
+            SymbolKind::Keyword => 4,
+            SymbolKind::Unknown => 5,
+        };
+        let match_priority = if *is_prefix { 0 } else { 1 };
+        (
+            match_priority,
+            scoped_self_priority,
+            is_magic_python_name(&comp.word),
+            type_priority,
+            std::cmp::Reverse(*score),
+        )
+    });
+
+    matches
+        .into_iter()
+        .take(60)
+        .map(|m| (m.2.into(), m.3))
+        .collect()
+}
+
+pub(crate) fn enrich_python_tree_sitter_options(
+    options: &mut Vec<(AutocompleteItem, Vec<usize>)>,
+    file_extension: &str,
+    text: &str,
+    cursor: usize,
+) {
+    if file_extension != "py" {
+        return;
+    }
+    for (item, _) in options.iter_mut() {
+        assign_builtin_completion_module(item);
+        if item.kind == SymbolKind::Builtin {
+            item.kind = python_builtin_completion_kind(&item.word).unwrap_or(SymbolKind::Function);
+        }
+    }
+    if !options.is_empty() {
+        let imports = imported_python_symbols(text);
+        apply_import_modules_to_autocomplete_items(options, &imports);
+    }
+    if !options.is_empty() && let Some(owner) = python_enclosing_class_before_cursor(text, cursor) {
+        for (item, _) in options.iter_mut() {
+            if item.kind == SymbolKind::Parameter && matches!(item.word.as_str(), "self" | "cls") {
+                item.module = Some(owner.clone());
+                item.module_path = None;
+            }
+        }
+    }
+}
+
 impl App {
     pub fn update_autocomplete(&mut self) {
         self.trace_autocomplete_state("update_ts:begin");
@@ -124,104 +256,16 @@ impl App {
             return;
         }
 
-        let prefix_lower = prefix.to_lowercase();
         let cursor = self.editor.cursor;
         let prefix_start = cursor.saturating_sub(prefix.len());
-
-        let mut best_scopes: FxHashMap<String, CompletionItem> = FxHashMap::default();
-
-        for comp in &self.highlighter.completions {
-            if comp.scope_start == prefix_start
-                && matches!(
-                    comp.kind,
-                    SymbolKind::Variable
-                        | SymbolKind::Parameter
-                        | SymbolKind::Argument
-                        | SymbolKind::Unknown
-                )
-                && comp.word.to_lowercase().starts_with(&prefix_lower)
-            {
-                continue;
-            }
-            if cursor >= comp.scope_start && cursor <= comp.scope_end {
-                let current_size = comp.scope_end.saturating_sub(comp.scope_start);
-                if let Some(existing) = best_scopes.get(&comp.word) {
-                    let ex_size = existing.scope_end.saturating_sub(existing.scope_start);
-                    let prefer_parameter = comp.kind == SymbolKind::Parameter
-                        && existing.kind != SymbolKind::Parameter;
-                    let keep_parameter = existing.kind == SymbolKind::Parameter
-                        && comp.kind != SymbolKind::Parameter;
-                    if prefer_parameter || (!keep_parameter && current_size < ex_size) {
-                        best_scopes.insert(comp.word.clone(), comp.clone());
-                    }
-                } else {
-                    best_scopes.insert(comp.word.clone(), comp.clone());
-                }
-            }
-        }
-
-        let mut matches = Vec::with_capacity(best_scopes.len());
-        if autocomplete_trace_enabled() {
-            println!(
-                "Autocomplete update_ts_scope: prefix={:?} completions={} best_scopes={}",
-                prefix,
-                self.highlighter.completions.len(),
-                best_scopes.len()
-            );
-        }
-
-        for (_, comp) in best_scopes {
-            let comp_lower = comp.word.to_lowercase();
-            if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
-                let is_prefix = comp_lower.starts_with(&prefix_lower);
-                let mut score = 0i64;
-                let scope_bonus = if comp.kind == SymbolKind::Keyword {
-                    0
-                } else {
-                    let scope_size = comp.scope_end.saturating_sub(comp.scope_start);
-                    let sz = scope_size.min(i64::MAX as usize) as i64;
-                    10_000_000 / (sz + 1).max(1)
-                };
-                score += scope_bonus;
-                score -= (comp.word.len() as i64) * 10;
-                matches.push((is_prefix, score, comp, indices));
-            }
-        }
-
-        matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
-            let scoped_self_priority =
-                if self.file_extension == "py" && comp.kind == SymbolKind::Parameter {
-                    python_scoped_self_priority(&comp.word)
-                } else {
-                    2
-                };
-            let type_priority = match comp.kind {
-                SymbolKind::Variable
-                | SymbolKind::Parameter
-                | SymbolKind::Argument
-                | SymbolKind::Property => 0,
-                SymbolKind::Function => 1,
-                SymbolKind::Class | SymbolKind::Module => 2,
-                SymbolKind::Builtin => 3,
-                SymbolKind::Keyword => 4,
-                SymbolKind::Unknown => 5,
-            };
-
-            let match_priority = if *is_prefix { 0 } else { 1 };
-            (
-                match_priority,
-                scoped_self_priority,
-                is_magic_python_name(&comp.word),
-                type_priority,
-                std::cmp::Reverse(*score),
-            )
-        });
-
-        self.autocomplete_options = matches
-            .into_iter()
-            .take(60)
-            .map(|m| (m.2.into(), m.3))
-            .collect();
+        self.autocomplete_options = tree_sitter_completion_options(
+            &self.highlighter.completions,
+            &prefix,
+            cursor,
+            prefix_start,
+            &self.file_extension,
+            "update_ts",
+        );
         if autocomplete_trace_enabled() {
             let first = self
                 .autocomplete_options
@@ -240,35 +284,13 @@ impl App {
             self.autocomplete_options.clear();
             self.trace_autocomplete_state("update_ts:single_exact_clear");
         }
-        if self.file_extension == "py" {
-            for (item, _) in &mut self.autocomplete_options {
-                assign_builtin_completion_module(item);
-                if item.kind == SymbolKind::Builtin {
-                    item.kind =
-                        python_builtin_completion_kind(&item.word).unwrap_or(SymbolKind::Function);
-                }
-            }
-        }
-        if self.file_extension == "py" && !self.autocomplete_options.is_empty() {
-            let imports = imported_python_symbols(&self.editor.get_full_text());
-            apply_import_modules_to_autocomplete_items(&mut self.autocomplete_options, &imports);
-        }
-        if self.file_extension == "py"
-            && !self.autocomplete_options.is_empty()
-            && let Some(owner) = python_enclosing_class_before_cursor(
-                &self.editor.get_full_text(),
-                self.editor.cursor,
-            )
-        {
-            for (item, _) in &mut self.autocomplete_options {
-                if item.kind == SymbolKind::Parameter
-                    && matches!(item.word.as_str(), "self" | "cls")
-                {
-                    item.module = Some(owner.clone());
-                    item.module_path = None;
-                }
-            }
-        }
+        let editor_text = self.editor.get_full_text();
+        enrich_python_tree_sitter_options(
+            &mut self.autocomplete_options,
+            &self.file_extension,
+            &editor_text,
+            self.editor.cursor,
+        );
 
         if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
