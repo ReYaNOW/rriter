@@ -548,6 +548,17 @@ impl crate::app::App {
         }
     }
 
+    fn api_multiline_cursor_top_y(
+        id: crate::ui_system::UiId,
+        rect: (f32, f32, f32, f32),
+        scale: f32,
+    ) -> f32 {
+        match id {
+            crate::ui_system::UiId::ApiMockSignatureInput(_) => rect.1,
+            _ => rect.1 + 10.0 * scale,
+        }
+    }
+
     fn place_api_cursor_from_last_click(&mut self, id: crate::ui_system::UiId, multiline: bool) {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return;
@@ -586,6 +597,7 @@ impl crate::app::App {
                 &mut self.ide_panel.api.input_editor,
                 renderer,
                 rect,
+                Self::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,
@@ -657,6 +669,7 @@ impl crate::app::App {
                 &mut self.ide_panel.api.input_editor,
                 renderer,
                 rect,
+                Self::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,

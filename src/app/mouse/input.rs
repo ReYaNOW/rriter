@@ -2,6 +2,7 @@ use super::*;
 
 type Rect = (f32, f32, f32, f32);
 
+#[cfg(test)]
 fn union_rect(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
     match (a, b) {
         (None, None) => None,
@@ -16,6 +17,7 @@ fn union_rect(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
     }
 }
 
+#[cfg(test)]
 fn point_in_padded_rect(mx: f32, my: f32, rect: Rect, pad: f32) -> bool {
     mx >= rect.0 - pad
         && mx <= rect.0 + rect.2 + pad
@@ -149,16 +151,14 @@ impl App {
         }
 
         if state == ElementState::Pressed {
-            let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
-            let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
-            let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
-            let in_hover_popup = union_rect(diag_rect, type_rect).is_some_and(|rect| {
-                point_in_padded_rect(
+            let in_hover_popup = HOVER_STATE.with(|hover_state| {
+                hover_state.borrow().popup_or_bridge_contains(
                     mx,
                     my,
-                    rect,
-                    24.0 * self.renderer.as_ref().unwrap().scale_factor,
+                    self.renderer.as_ref().unwrap().width,
+                    self.renderer.as_ref().unwrap().scale_factor,
                 )
+                .0
             });
 
             if !in_hover_popup && clear_hover_popup(self.renderer.as_mut()) {
@@ -338,16 +338,14 @@ impl App {
                 self.close_autocomplete();
                 self.window.as_ref().unwrap().request_redraw();
             }
-            let type_rect = HOVER_STATE.with(|s| s.borrow().rect);
-            let diag_rect_full = HOVER_STATE.with(|s| s.borrow().diag_rect);
-            let diag_rect = diag_rect_full.map(|(x, y, w, h, _, _, _)| (x, y, w, h));
-            let in_hover_popup = union_rect(diag_rect, type_rect).is_some_and(|rect| {
-                point_in_padded_rect(
+            let in_hover_popup = HOVER_STATE.with(|hover_state| {
+                hover_state.borrow().popup_or_bridge_contains(
                     mx,
                     my,
-                    rect,
-                    24.0 * self.renderer.as_ref().unwrap().scale_factor,
+                    self.renderer.as_ref().unwrap().width,
+                    self.renderer.as_ref().unwrap().scale_factor,
                 )
+                .0
             });
 
             if !in_hover_popup {

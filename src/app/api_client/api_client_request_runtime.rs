@@ -670,6 +670,7 @@ fn set_api_multiline_cursor_at_pointer(
     editor: &mut Editor,
     renderer: &mut crate::renderer::Renderer,
     rect: (f32, f32, f32, f32),
+    cursor_top_y: f32,
     mx: f32,
     my: f32,
     scale: f32,
@@ -677,7 +678,7 @@ fn set_api_multiline_cursor_at_pointer(
     scroll_x: f32,
     is_click: bool,
 ) {
-    let (x, y, _, _) = rect;
+    let (x, _, _, _) = rect;
     let old_line_height = renderer.line_height;
     let old_left_padding = renderer.left_padding;
     let old_last_scroll_x = renderer.last_scroll_x;
@@ -686,7 +687,7 @@ fn set_api_multiline_cursor_at_pointer(
     renderer.line_height = api_text_area_line_height(scale);
     renderer.left_padding = x + 10.0 * scale;
     renderer.last_scroll_x = scroll_x;
-    editor.set_cursor_at_pos(mx, my - (y + 10.0 * scale) + scroll_y, renderer, is_click);
+    editor.set_cursor_at_pos(mx, my - cursor_top_y + scroll_y, renderer, is_click);
     renderer.line_height = old_line_height;
     renderer.left_padding = old_left_padding;
     renderer.last_scroll_x = old_last_scroll_x;

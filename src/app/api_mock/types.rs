@@ -106,7 +106,7 @@ pub struct ApiMockPythonScript {
 }
 
 pub fn default_api_mock_python_body() -> String {
-    "    \n    \n    return json_response({\"ok\": True})".to_string()
+    "    return json_response({\"ok\": True})".to_string()
 }
 
 pub fn default_api_mock_python_script() -> ApiMockPythonScript {
