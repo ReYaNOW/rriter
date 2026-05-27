@@ -118,6 +118,34 @@ pub fn default_api_mock_python_script() -> ApiMockPythonScript {
     }
 }
 
+pub fn api_mock_path_param_names(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter_map(|part| {
+            part.strip_prefix('{')
+                .and_then(|part| part.strip_suffix('}'))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+pub fn api_mock_sanitize_python_param(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        out.insert(0, '_');
+    }
+    if matches!(out.as_str(), "req" | "query" | "body" | "fields") {
+        out.push_str("_param");
+    }
+    out
+}
+
 fn default_mock_python_enabled() -> bool {
     true
 }
@@ -270,8 +298,12 @@ pub struct ApiMockServerSnapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiMockServerEvent {
-    Log { text: String },
-    Running { url: String },
+    Log {
+        text: String,
+    },
+    Running {
+        url: String,
+    },
     Stopped,
     Failed(String),
     Request {

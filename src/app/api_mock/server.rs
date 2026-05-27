@@ -169,25 +169,29 @@ async fn handle_mock_request(
         ApiMockRouteDecision::Mock(route) => {
             if let Some(script) = route.python.as_ref().filter(|script| script.enabled) {
                 let request = python_request(&method, &uri, &headers, &body, &route.path);
-                let response = match call_python_route(&state.snapshot.python_runtime, script, request) {
-                    Ok(output) => {
-                        let status = StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
-                        let mut builder = Response::builder()
-                            .status(status)
-                            .header("content-type", output.content_type);
-                        for (name, value) in output.headers {
-                            if let Ok(name) = HeaderName::from_bytes(name.as_bytes())
-                                && let Ok(value) = HeaderValue::from_str(&value)
-                            {
-                                builder = builder.header(name, value);
+                let response =
+                    match call_python_route(&state.snapshot.python_runtime, script, request) {
+                        Ok(output) => {
+                            let status =
+                                StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
+                            let mut builder = Response::builder()
+                                .status(status)
+                                .header("content-type", output.content_type);
+                            for (name, value) in output.headers {
+                                if let Ok(name) = HeaderName::from_bytes(name.as_bytes())
+                                    && let Ok(value) = HeaderValue::from_str(&value)
+                                {
+                                    builder = builder.header(name, value);
+                                }
                             }
+                            builder
+                                .body(Body::from(output.body))
+                                .unwrap_or_else(|_| Response::new(Body::empty()))
                         }
-                        builder
-                            .body(Body::from(output.body))
-                            .unwrap_or_else(|_| Response::new(Body::empty()))
-                    }
-                    Err(err) => response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err),
-                };
+                        Err(err) => {
+                            response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err)
+                        }
+                    };
                 push_request_event(method.as_str(), path, response.status().as_u16(), "python");
                 return response;
             }
@@ -201,12 +205,23 @@ async fn handle_mock_request(
             let method_label = method.as_str().to_string();
             let path_label = path.to_string();
             let response = proxy_request(state, method, uri, headers, body).await;
-            push_request_event(&method_label, &path_label, response.status().as_u16(), "proxy");
+            push_request_event(
+                &method_label,
+                &path_label,
+                response.status().as_u16(),
+                "proxy",
+            );
             response
         }
         ApiMockRouteDecision::NotFound => {
-            let response = response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found");
-            push_request_event(method.as_str(), path, response.status().as_u16(), "not_found");
+            let response =
+                response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found");
+            push_request_event(
+                method.as_str(),
+                path,
+                response.status().as_u16(),
+                "not_found",
+            );
             response
         }
     }

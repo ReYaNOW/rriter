@@ -1,0 +1,1172 @@
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn persist_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn sample_spec() -> Value {
+        serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Demo API", "version": "1.2.3"},
+            "servers": [
+                {"url": "https://api.example.com/{version}", "variables": {"version": {"default": "v1"}}}
+            ],
+            "components": {
+                "schemas": {
+                    "Pet": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "age": {"type": "integer"}
+                        }
+                    }
+                }
+            },
+            "paths": {
+                "/pets/{id}": {
+                    "get": {
+                        "tags": ["pets"],
+                        "summary": "Read pet",
+                        "parameters": [
+                            {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+                            {"name": "verbose", "in": "query", "schema": {"type": "boolean"}}
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    },
+                    "post": {
+                        "tags": ["pets"],
+                        "requestBody": {
+                            "content": {
+                                "application/json": {"schema": {"$ref": "#/components/schemas/Pet"}}
+                            }
+                        },
+                        "responses": {"201": {"description": "created"}}
+                    }
+                }
+            }
+        })
+    }
+
+    fn form_spec() -> Value {
+        serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Form API", "version": "1.0.0"},
+            "paths": {
+                "/token": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["username"],
+                                        "properties": {
+                                            "username": {"type": "string", "maxLength": 500},
+                                            "password": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        })
+    }
+
+    fn auth_spec() -> Value {
+        serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Auth API", "version": "1.0.0"},
+            "components": {
+                "securitySchemes": {
+                    "HeaderKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                    "QueryKey": {"type": "apiKey", "in": "query", "name": "api_key"},
+                    "CookieKey": {"type": "apiKey", "in": "cookie", "name": "session"},
+                    "BasicAuth": {"type": "http", "scheme": "basic"},
+                    "BearerJwt": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+                    "DigestAuth": {"type": "http", "scheme": "digest"},
+                    "OAuthAll": {
+                        "type": "oauth2",
+                        "flows": {
+                            "implicit": {"authorizationUrl": "/oauth/authorize", "scopes": {}},
+                            "password": {"tokenUrl": "/oauth/token", "scopes": {}},
+                            "clientCredentials": {"tokenUrl": "/oauth/token", "scopes": {}},
+                            "authorizationCode": {
+                                "authorizationUrl": "/oauth/authorize",
+                                "tokenUrl": "/oauth/token",
+                                "scopes": {}
+                            }
+                        }
+                    },
+                    "Oidc": {
+                        "type": "openIdConnect",
+                        "openIdConnectUrl": "/.well-known/openid-configuration"
+                    }
+                }
+            },
+            "security": [
+                {"HeaderKey": [], "BearerJwt": []},
+                {"QueryKey": []}
+            ],
+            "paths": {
+                "/items": {
+                    "get": {
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                },
+                "/basic": {
+                    "get": {
+                        "security": [{"BasicAuth": []}],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                },
+                "/public": {
+                    "get": {
+                        "security": [],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn stale_api_focus_clears_so_editor_ctrl_shortcuts_are_not_swallowed() {
+        let mut state = ApiClientState::default();
+        state.focused = Some(ApiFocus::Body {
+            spec_id: ApiSpecId(1),
+            route_idx: 0,
+        });
+
+        assert!(!state.clear_stale_keyboard_focus(Some((ApiSpecId(2), Some(0)))));
+        assert_eq!(state.focused, None);
+
+        state.focused = Some(ApiFocus::Response {
+            spec_id: ApiSpecId(1),
+            route_idx: 2,
+        });
+        assert!(state.clear_stale_keyboard_focus(Some((ApiSpecId(1), Some(2)))));
+        assert!(state.focused.is_some());
+
+        state.focused = Some(ApiFocus::ImportUrl);
+        assert!(state.clear_stale_keyboard_focus(None));
+    }
+
+    #[test]
+    fn api_input_vertical_arrows_move_cursor_and_shift_selects() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("abc\ndefg\nhi");
+        editor.cursor = 1;
+
+        move_api_input_vertical(&mut editor, true, false);
+        assert_eq!(editor.cursor, 5);
+        assert_eq!(editor.selection_anchor, None);
+
+        move_api_input_vertical(&mut editor, true, true);
+        assert_eq!(editor.cursor, 10);
+        assert_eq!(editor.selection_anchor, Some(5));
+
+        move_api_input_vertical(&mut editor, false, false);
+        assert_eq!(editor.cursor, 5);
+        assert_eq!(editor.selection_anchor, None);
+    }
+
+    #[test]
+    fn api_array_editor_uses_blocks_plus_draft() {
+        assert_eq!(api_array_editor_text("alpha\nbeta"), "alpha\nbeta\n");
+        assert_eq!(
+            api_array_edit_parts("alpha\nbeta\ngam"),
+            (vec!["alpha", "beta"], "gam")
+        );
+
+        let mut editor = Editor::new(64);
+        editor.set_text_clean(&api_array_editor_text("alpha\nbeta"));
+        editor.cursor = editor.len();
+        editor.selection_anchor = Some(editor.cursor);
+        editor.insert_str("gam");
+        finish_api_array_editor_draft(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\ngam\n");
+
+        backspace_api_array_editor(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+        editor.insert_str("x");
+        backspace_api_array_editor(&mut editor);
+        assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+    }
+
+    #[test]
+    fn api_text_area_horizontal_scroll_uses_longest_line() {
+        let max = api_text_area_max_scroll_x("short\nvery-long-line", 40.0, |line| {
+            line.len() as f32 * 10.0
+        });
+        assert_eq!(max, 120.0);
+        assert_eq!(
+            api_text_area_max_scroll_x("tiny", 100.0, |line| line.len() as f32 * 10.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn api_tab_prefill_uses_selected_restored_route() {
+        let model = parse_openapi_model(ApiSpecId(9), &sample_spec()).expect("parse");
+        let post_idx = model
+            .routes
+            .iter()
+            .position(|route| route.method == ApiMethod::Post)
+            .expect("post route");
+        let mut state = ApiClientTabState {
+            route_idx: Some(post_idx),
+            ..Default::default()
+        };
+
+        fill_api_tab_inputs(&mut state, &model.routes[post_idx], &model);
+
+        assert!(state.path_values.is_empty());
+        assert!(state.query_values.is_empty());
+        assert!(state.body_json.contains("\"name\": \"\""));
+        assert!(state.body_json.contains("\"age\": 0"));
+    }
+
+    #[test]
+    fn url_validation_rejects_bad_parts() {
+        assert!(validate_api_url("https://example.com/openapi.json").is_ok());
+        assert_eq!(
+            validate_api_url("ftp://example.com/openapi.json")
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::InvalidUrl
+        );
+        assert_eq!(
+            validate_api_url("http://[:::1]").unwrap_err().kind,
+            ApiLoadErrorKind::InvalidUrl
+        );
+        assert_eq!(
+            validate_api_url("https://-bad.example/openapi.json")
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::InvalidDomain
+        );
+        assert_eq!(
+            validate_api_url("https://api.example.com/docs#post-/items")
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::InvalidUrl
+        );
+    }
+
+    #[test]
+    fn parse_openapi_extracts_compact_routes_servers_and_schema() {
+        let model = parse_openapi_model(ApiSpecId(7), &sample_spec()).expect("parse");
+        assert_eq!(model.title, "Demo API");
+        assert_eq!(model.version, "1.2.3");
+        assert_eq!(model.openapi_version, "3.1.0");
+        assert_eq!(model.servers.len(), 1);
+        assert_eq!(model.routes.len(), 2);
+        assert_eq!(model.routes[0].tag, "pets");
+        assert_eq!(model.routes[0].method, ApiMethod::Get);
+        assert_eq!(model.routes[1].method, ApiMethod::Post);
+        assert_eq!(model.routes[0].path_params[0].name, "id");
+        assert_eq!(model.routes[0].query_params[0].name, "verbose");
+        assert!(!model.schema_arena.is_empty());
+    }
+
+    #[test]
+    fn parse_openapi_parameter_array_item_ref_keeps_enum() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Bookings", "version": "1.0.0"},
+            "components": {
+                "schemas": {
+                    "StateEnum": {
+                        "type": "string",
+                        "enum": ["CREATED", "ACCEPTED"],
+                        "default": "CREATED"
+                    }
+                }
+            },
+            "paths": {
+                "/car_washes/bookings": {
+                    "get": {
+                        "parameters": [
+                            {
+                                "name": "state_in",
+                                "in": "query",
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/StateEnum"}
+                                }
+                            }
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(12), &spec).expect("parse");
+        let param = &model.routes[0].query_params[0];
+        assert_eq!(param.name, "state_in");
+        assert_eq!(param.primitive_type, ApiPrimitiveType::Array);
+        assert_eq!(param.item_type, Some(ApiPrimitiveType::String));
+        assert_eq!(param.default_value.as_deref(), Some("CREATED"));
+        assert_eq!(param.enum_values, vec!["CREATED", "ACCEPTED"]);
+    }
+
+    #[test]
+    fn parse_openapi_date_and_datetime_types_keep_examples() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Dates", "version": "1.0.0"},
+            "paths": {
+                "/events": {
+                    "get": {
+                        "parameters": [
+                            {
+                                "name": "day",
+                                "in": "query",
+                                "schema": {"type": "string", "format": "date", "example": "2026-05-25"}
+                            }
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    },
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "starts_at": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "examples": ["2026-05-25T12:30:00Z"]
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(30), &spec).expect("parse");
+        let param = &model.routes[0].query_params[0];
+        assert_eq!(param.primitive_type, ApiPrimitiveType::Date);
+        assert_eq!(param.examples, vec!["2026-05-25"]);
+
+        let body = model.routes[1].request_body.as_ref().expect("body");
+        let root = body.schema.expect("schema");
+        let prop = model.schema_arena[root.0].properties[0].schema;
+        let schema = &model.schema_arena[prop.0];
+        assert_eq!(schema.kind, ApiSchemaKind::DateTime);
+        assert_eq!(schema.examples, vec!["2026-05-25T12:30:00Z"]);
+    }
+
+    #[test]
+    fn parse_openapi_security_schemes_and_operation_security() {
+        let model = parse_openapi_model(ApiSpecId(11), &auth_spec()).expect("parse");
+        assert_eq!(model.security_schemes.len(), 8);
+        assert_eq!(model.root_security.len(), 2);
+        let names = model
+            .security_schemes
+            .iter()
+            .map(|scheme| scheme.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"HeaderKey"));
+        assert!(names.contains(&"QueryKey"));
+        assert!(names.contains(&"CookieKey"));
+        assert!(names.contains(&"BasicAuth"));
+        assert!(names.contains(&"BearerJwt"));
+        assert!(names.contains(&"DigestAuth"));
+        assert!(names.contains(&"OAuthAll"));
+        assert!(names.contains(&"Oidc"));
+        assert!(model.security_schemes.iter().any(|scheme| matches!(
+            scheme.kind,
+            ApiSecuritySchemeKind::Http { ref scheme, ref bearer_format }
+                if scheme == "bearer" && bearer_format == "JWT"
+        )));
+        assert!(model.security_schemes.iter().any(|scheme| matches!(
+            scheme.kind,
+            ApiSecuritySchemeKind::OAuth2 { ref flows }
+                if flows == &vec![
+                    ApiOAuthFlow::Implicit,
+                    ApiOAuthFlow::Password,
+                    ApiOAuthFlow::ClientCredentials,
+                    ApiOAuthFlow::AuthorizationCode,
+                ]
+        )));
+        let public = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/public")
+            .expect("public route");
+        assert_eq!(public.security, Some(Vec::new()));
+    }
+
+    #[test]
+    fn auth_selection_respects_or_and_and_security_empty() {
+        let model = parse_openapi_model(ApiSpecId(12), &auth_spec()).expect("parse");
+        let items = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/items")
+            .expect("items route");
+        let public = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/public")
+            .expect("public route");
+        let mut auth = ApiAuthStore::default();
+        assert_eq!(
+            api_route_auth_scheme_indices(&model, items)
+                .iter()
+                .filter_map(|idx| model.security_schemes.get(*idx))
+                .map(|scheme| scheme.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["BearerJwt", "HeaderKey", "QueryKey"]
+        );
+        assert!(api_route_auth_scheme_indices(&model, public).is_empty());
+        assert!(api_route_auth_missing(&model, items, &auth));
+        assert!(!api_route_auth_missing(&model, public, &auth));
+
+        auth.entry_mut(model.id, "HeaderKey").value = "header-secret".to_string();
+        auth.entry_mut(model.id, "QueryKey").value = "query-secret".to_string();
+        assert!(!api_route_auth_missing(&model, items, &auth));
+
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert_eq!(
+            parts,
+            vec![ApiPreparedAuthPart::Query {
+                name: "api_key".to_string(),
+                value: "query-secret".to_string(),
+            }]
+        );
+
+        auth.entry_mut(model.id, "BearerJwt").access_token = "jwt".to_string();
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert_eq!(parts.len(), 2);
+        assert!(parts.contains(&ApiPreparedAuthPart::Header {
+            name: "X-API-Key".to_string(),
+            value: "header-secret".to_string(),
+        }));
+        assert!(parts.contains(&ApiPreparedAuthPart::Bearer {
+            token: "jwt".to_string(),
+        }));
+
+        auth.entry_mut(model.id, "BearerJwt").value = "refresh".to_string();
+        let parts = prepared_auth_for_route(&model, items, &auth);
+        assert!(parts.contains(&ApiPreparedAuthPart::Bearer {
+            token: "refresh".to_string(),
+        }));
+
+        assert!(prepared_auth_for_route(&model, public, &auth).is_empty());
+    }
+
+    #[test]
+    fn auth_request_assembly_sets_headers_cookies_query_and_basic() {
+        let mut url = "https://api.example.com/items".to_string();
+        append_auth_query(
+            &mut url,
+            &[ApiPreparedAuthPart::Query {
+                name: "api_key".to_string(),
+                value: "q v".to_string(),
+            }],
+        );
+        assert_eq!(url, "https://api.example.com/items?api_key=q+v");
+
+        let client = reqwest::blocking::Client::new();
+        let request = apply_auth_to_builder(
+            client.get("https://api.example.com/items"),
+            &[
+                ApiPreparedAuthPart::Header {
+                    name: "X-API-Key".to_string(),
+                    value: "secret".to_string(),
+                },
+                ApiPreparedAuthPart::Cookie {
+                    name: "session".to_string(),
+                    value: "abc".to_string(),
+                },
+                ApiPreparedAuthPart::Bearer {
+                    token: "jwt".to_string(),
+                },
+            ],
+        )
+        .build()
+        .expect("request");
+        assert_eq!(request.headers()["X-API-Key"], "secret");
+        assert_eq!(request.headers()["Cookie"], "session=abc");
+        assert_eq!(request.headers()["Authorization"], "Bearer jwt");
+
+        let basic = apply_auth_to_builder(
+            client.get("https://api.example.com/basic"),
+            &[ApiPreparedAuthPart::Basic {
+                username: "user".to_string(),
+                password: "pass".to_string(),
+            }],
+        )
+        .build()
+        .expect("request");
+        assert_eq!(basic.headers()["Authorization"], "Basic dXNlcjpwYXNz");
+    }
+
+    #[test]
+    fn auth_capture_saves_tokens_refresh_and_cookie_keys() {
+        let model = parse_openapi_model(ApiSpecId(13), &auth_spec()).expect("parse");
+        let mut auth = ApiAuthStore::default();
+        let response = ApiJobResponse {
+            request_id: 1,
+            spec_id: model.id,
+            route_idx: 0,
+            status: Some(200),
+            elapsed_ms: 1,
+            server_reach_ms: None,
+            timing_text: String::new(),
+            headers: vec![(
+                "set-cookie".to_string(),
+                "session=cookie-secret; HttpOnly; Path=/".to_string(),
+            )],
+            headers_text: String::new(),
+            body: serde_json::json!({
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "token_type": "Bearer",
+                "expires_in": 60,
+                "scope": "read write"
+            })
+            .to_string(),
+            truncated: false,
+            error: None,
+            resolved_host: None,
+        };
+
+        assert!(capture_response_auth(
+            &mut auth,
+            model.id,
+            &model.security_schemes,
+            &response
+        ));
+        let bearer = auth.entry(model.id, "BearerJwt").expect("bearer auth");
+        assert_eq!(bearer.access_token, "access");
+        assert_eq!(bearer.refresh_token, "refresh");
+        assert_eq!(bearer.value, "access");
+        assert_eq!(bearer.scopes, vec!["read".to_string(), "write".to_string()]);
+        assert!(bearer.expires_at.is_some());
+        assert_eq!(
+            auth.entry(model.id, "CookieKey")
+                .expect("cookie auth")
+                .value,
+            "cookie-secret"
+        );
+    }
+
+    #[test]
+    fn api_auth_persist_roundtrip_uses_separate_file() {
+        let _guard = persist_test_lock().lock().expect("lock");
+        let _ = std::fs::remove_dir_all(api_config_dir());
+
+        let mut auth = ApiAuthStore::default();
+        auth.entry_mut(ApiSpecId(7), "BearerJwt").access_token = "access".to_string();
+        auth.entry_mut(ApiSpecId(7), "BearerJwt").refresh_token = "refresh".to_string();
+        auth.entry_mut(ApiSpecId(7), "BasicAuth").username = "user".to_string();
+        auth.entry_mut(ApiSpecId(7), "BasicAuth").password = "pass".to_string();
+        save_api_auth(&auth);
+
+        let loaded = load_api_auth();
+        assert_eq!(
+            loaded
+                .entry(ApiSpecId(7), "BearerJwt")
+                .map(|entry| (entry.access_token.as_str(), entry.refresh_token.as_str())),
+            Some(("access", "refresh"))
+        );
+        assert_eq!(
+            loaded
+                .entry(ApiSpecId(7), "BasicAuth")
+                .map(|entry| (entry.username.as_str(), entry.password.as_str())),
+            Some(("user", "pass"))
+        );
+
+        let _ = std::fs::remove_dir_all(api_config_dir());
+    }
+
+    #[test]
+    fn api_method_display_and_sort_order_match_client_rows() {
+        assert_eq!(ApiMethod::Get.chip_str(), "GET");
+        assert_eq!(ApiMethod::Post.chip_str(), "POS");
+        assert_eq!(ApiMethod::Patch.chip_str(), "PAT");
+        assert_eq!(ApiMethod::Put.chip_str(), "PUT");
+        assert_eq!(ApiMethod::Delete.chip_str(), "DEL");
+        assert_eq!(ApiMethod::Head.chip_str(), "HEA");
+        assert_eq!(ApiMethod::Options.chip_str(), "OPT");
+        assert_eq!(ApiMethod::Trace.chip_str(), "TRA");
+
+        let mut methods = [
+            ApiMethod::Trace,
+            ApiMethod::Put,
+            ApiMethod::Get,
+            ApiMethod::Delete,
+            ApiMethod::Patch,
+            ApiMethod::Options,
+            ApiMethod::Post,
+            ApiMethod::Head,
+        ];
+        methods.sort_unstable_by_key(|method| (*method).sort_rank());
+        assert_eq!(
+            methods,
+            [
+                ApiMethod::Get,
+                ApiMethod::Post,
+                ApiMethod::Patch,
+                ApiMethod::Put,
+                ApiMethod::Delete,
+                ApiMethod::Head,
+                ApiMethod::Options,
+                ApiMethod::Trace,
+            ]
+        );
+    }
+
+    #[test]
+    fn api_path_display_spaces_path_params_without_changing_path() {
+        assert_eq!(
+            format_api_path_display("/sites/{id}/complete"),
+            "/sites/ {id} /complete"
+        );
+        assert_eq!(
+            format_api_path_display("/orgs/{org_id}/sites/{site_id}"),
+            "/orgs/ {org_id} /sites/ {site_id}"
+        );
+    }
+
+    #[test]
+    fn route_grouping_uses_sorted_tag_ranges() {
+        let model = parse_openapi_model(ApiSpecId(1), &sample_spec()).expect("parse");
+        let groups = grouped_route_ranges(&model.routes, &FxHashSet::default(), model.id);
+        assert_eq!(groups, vec![("pets".to_string(), 0, 2, false)]);
+    }
+
+    #[test]
+    fn json_validator_catches_trailing_comma() {
+        assert!(json_body_is_valid(r#"{"a": 1}"#));
+        assert!(!json_body_is_valid(r#"{"a": 1,}"#));
+    }
+
+    #[test]
+    fn request_url_builder_applies_server_vars_path_and_query() {
+        let server = ApiServer {
+            url: "https://api.example.com/{version}".to_string(),
+            description: String::new(),
+            variables: vec![ApiServerVariable {
+                name: "version".to_string(),
+                default_value: "v1".to_string(),
+            }],
+        };
+        let url = build_request_url(
+            &server,
+            "/pets/{id}",
+            &[ApiInputValue {
+                name: "id".to_string(),
+                value: "a b".to_string(),
+            }],
+            &[ApiInputValue {
+                name: "verbose".to_string(),
+                value: "true".to_string(),
+            }],
+        )
+        .expect("url");
+        assert_eq!(url, "https://api.example.com/v1/pets/a%20b?verbose=true");
+    }
+
+    #[test]
+    fn form_urlencoded_body_prefers_fields_over_json() {
+        let model = parse_openapi_model(ApiSpecId(21), &form_spec()).expect("parse");
+        let route = &model.routes[0];
+        let body = route.request_body.as_ref().expect("body");
+        assert_eq!(body.content_type, "application/x-www-form-urlencoded");
+        assert!(body.is_form_urlencoded);
+        assert!(!body.is_multipart);
+
+        let mut state = ApiClientTabState::default();
+        fill_api_tab_inputs(&mut state, route, &model);
+        assert_eq!(state.body_json, "");
+        assert_eq!(
+            state.body_values,
+            vec![
+                ApiInputValue {
+                    name: "username".to_string(),
+                    value: String::new(),
+                },
+                ApiInputValue {
+                    name: "password".to_string(),
+                    value: String::new(),
+                },
+            ]
+        );
+
+        let fields = [
+            ApiInputValue {
+                name: "username".to_string(),
+                value: "alice".to_string(),
+            },
+            ApiInputValue {
+                name: "password".to_string(),
+                value: String::new(),
+            },
+        ];
+        let pairs = api_form_pairs(&fields);
+        assert_eq!(pairs, vec![("username", "alice")]);
+    }
+
+    #[test]
+    fn json_body_uses_first_schema_example() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Body Example", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "examples": [
+                                            {"name": "Ada", "age": 37},
+                                            {"name": "Grace", "age": 85}
+                                        ],
+                                        "properties": {
+                                            "name": {"type": "string"},
+                                            "age": {"type": "integer"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(44), &spec).expect("parse");
+        let route = &model.routes[0];
+        assert_eq!(
+            default_body_for_route(route, &model),
+            "{\"name\":\"Ada\",\"age\":37}"
+        );
+    }
+
+    #[test]
+    fn form_urlencoded_ref_body_uses_schema_property_order() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Auth", "version": "1.0.0"},
+            "components": {
+                "schemas": {
+                    "Login": {
+                        "type": "object",
+                        "required": ["username", "password"],
+                        "properties": {
+                            "password": {"type": "string"},
+                            "username": {"type": "string"}
+                        }
+                    }
+                }
+            },
+            "paths": {
+                "/jwt/login": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": {"$ref": "#/components/schemas/Login"}
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(22), &spec).expect("parse");
+        let mut state = ApiClientTabState::default();
+        fill_api_tab_inputs(&mut state, &model.routes[0], &model);
+
+        assert_eq!(state.body_values[0].name, "password");
+        assert_eq!(state.body_values[1].name, "username");
+    }
+
+    #[test]
+    fn form_and_multipart_field_rows_stay_compact() {
+        let model = parse_openapi_model(ApiSpecId(24), &form_spec()).expect("parse");
+        let route = &model.routes[0];
+        let schema = route
+            .request_body
+            .as_ref()
+            .and_then(|body| body.schema)
+            .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+            .expect("schema");
+        let username = schema
+            .properties
+            .iter()
+            .find(|prop| prop.name == "username")
+            .and_then(|prop| model.schema_arena.get(prop.schema.0))
+            .expect("username");
+        assert_eq!(api_body_prop_row_height(username, &model, 1.0), 46.0);
+
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Upload", "version": "1.0.0"},
+            "paths": {
+                "/upload": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": {
+                                                "type": "string",
+                                                "enum": ["avatar", "cover", "doc"]
+                                            },
+                                            "file": {
+                                                "type": "string",
+                                                "format": "binary"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(25), &spec).expect("parse");
+        let route = &model.routes[0];
+        let schema = route
+            .request_body
+            .as_ref()
+            .and_then(|body| body.schema)
+            .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+            .expect("schema");
+        for prop in &schema.properties {
+            let prop_schema = model.schema_arena.get(prop.schema.0).expect("prop");
+            let expected = 46.0;
+            assert_eq!(api_body_prop_row_height(prop_schema, &model, 1.0), expected);
+        }
+    }
+
+    #[test]
+    fn auth_view_focus_uses_single_token_field_and_routes_include_refresh_flow() {
+        let model = parse_openapi_model(ApiSpecId(26), &auth_spec()).expect("parse");
+        let state = ApiClientTabState {
+            auth_view: true,
+            ..Default::default()
+        };
+        let order = api_focus_order_for_view(model.id, &model, &state);
+        assert!(order.contains(&ApiFocus::AuthValue {
+            spec_id: model.id,
+            scheme: "BearerJwt".to_string(),
+        }));
+        assert!(!order.contains(&ApiFocus::AuthRefreshToken {
+            spec_id: model.id,
+            scheme: "BearerJwt".to_string(),
+        }));
+
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "JWT", "version": "1.0.0"},
+            "paths": {
+                "/jwt/login": {"post": {"responses": {"200": {"description": "ok"}}}},
+                "/jwt/refresh": {"post": {"responses": {"200": {"description": "ok"}}}},
+                "/users": {"get": {"responses": {"200": {"description": "ok"}}}}
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(27), &spec).expect("parse");
+        assert_eq!(api_auth_related_route_count(&model), 2);
+        assert_eq!(api_auth_route_rank(&model.routes[0]), Some(0));
+        assert_eq!(api_auth_route_rank(&model.routes[1]), Some(1));
+        assert_eq!(api_auth_route_rank(&model.routes[2]), None);
+    }
+
+    #[test]
+    fn api_response_auth_token_detection_handles_access_or_refresh() {
+        let response = ApiJobResponse {
+            request_id: 1,
+            spec_id: ApiSpecId(28),
+            route_idx: 0,
+            status: Some(200),
+            elapsed_ms: 1,
+            server_reach_ms: None,
+            timing_text: String::new(),
+            headers: Vec::new(),
+            headers_text: String::new(),
+            body: r#"{"access_token":"a"}"#.to_string(),
+            truncated: false,
+            resolved_host: None,
+            error: None,
+        };
+        assert!(api_response_has_auth_tokens(&response));
+
+        let response = ApiJobResponse {
+            body: r#"{"refresh_token":"r"}"#.to_string(),
+            ..response
+        };
+        assert!(api_response_has_auth_tokens(&response));
+    }
+
+    #[test]
+    fn api_tab_keeps_response_when_switching_routes() {
+        let mut state = ApiClientTabState {
+            route_idx: Some(0),
+            path_values: vec![ApiInputValue {
+                name: "id".to_string(),
+                value: "first".to_string(),
+            }],
+            response: Some(ApiJobResponse {
+                request_id: 7,
+                spec_id: ApiSpecId(29),
+                route_idx: 0,
+                status: Some(200),
+                elapsed_ms: 3,
+                server_reach_ms: None,
+                timing_text: "3ms".to_string(),
+                headers: Vec::new(),
+                headers_text: String::new(),
+                body: "{\"ok\":true}".to_string(),
+                truncated: false,
+                error: None,
+                resolved_host: None,
+            }),
+            ..Default::default()
+        };
+        state.remember_route_state();
+        state.route_idx = Some(1);
+        state.path_values.clear();
+        state.response = None;
+
+        assert!(state.restore_route_state(0));
+        assert_eq!(state.path_values[0].value, "first");
+        assert_eq!(
+            state
+                .response
+                .as_ref()
+                .map(|response| response.body.as_str()),
+            Some("{\"ok\":true}")
+        );
+    }
+
+    #[test]
+    fn api_focus_order_tabs_through_form_fields() {
+        let model = parse_openapi_model(ApiSpecId(23), &form_spec()).expect("parse");
+        let state = ApiClientTabState {
+            route_idx: Some(0),
+            ..Default::default()
+        };
+        let order = api_focus_order_for_view(model.id, &model, &state);
+
+        assert_eq!(
+            order,
+            vec![
+                ApiFocus::BodyField {
+                    spec_id: model.id,
+                    route_idx: 0,
+                    name: "username".to_string(),
+                },
+                ApiFocus::BodyField {
+                    spec_id: model.id,
+                    route_idx: 0,
+                    name: "password".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_openapi_rejects_missing_or_old_version() {
+        assert_eq!(
+            parse_openapi_model(ApiSpecId(1), &serde_json::json!({}))
+                .unwrap_err()
+                .kind,
+            ApiLoadErrorKind::UnsupportedOpenApi
+        );
+        assert_eq!(
+            parse_openapi_model(
+                ApiSpecId(1),
+                &serde_json::json!({"openapi": "2.0", "paths": {}})
+            )
+            .unwrap_err()
+            .message,
+            "поддерживается OpenAPI 3.x"
+        );
+    }
+
+    #[test]
+    fn last_loaded_text_uses_now_then_minutes_without_seconds() {
+        let now = now_epoch_secs();
+        assert_eq!(
+            format_last_loaded_at(Some(now.saturating_sub(30)), now),
+            "только что"
+        );
+        assert_eq!(
+            format_last_loaded_at(Some(now.saturating_sub(60)), now),
+            "1 мин назад"
+        );
+        assert_eq!(format_last_loaded_at(None, now), "не загружено");
+        assert!(api_timing_visible_at(Some(now.saturating_sub(9)), now));
+        assert!(!api_timing_visible_at(Some(now.saturating_sub(10)), now));
+        assert!(!api_timing_visible_at(None, now));
+    }
+
+    #[test]
+    fn api_state_remove_spec_clears_model_loading_collapsed_and_selection() {
+        let first = ApiSpecId(1);
+        let second = ApiSpecId(2);
+        let mut state = ApiClientState::default();
+        state.specs.push(ApiSpecEntry {
+            id: first,
+            title: "One".to_string(),
+            version: String::new(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/one.json".to_string()),
+            last_loaded: Some(1),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: true,
+            error: None,
+        });
+        state.specs.push(ApiSpecEntry {
+            id: second,
+            title: "Two".to_string(),
+            version: String::new(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/two.json".to_string()),
+            last_loaded: Some(2),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: false,
+            error: None,
+        });
+        state.selected_spec = Some(first);
+        state.models.insert(first, ApiSpecModel::default());
+        state.loading.insert(first);
+        state.collapsed_tags.insert((first, "pets".to_string()));
+
+        assert_eq!(state.remove_spec(0), Some(first));
+        assert_eq!(state.selected_spec, Some(second));
+        assert!(!state.models.contains_key(&first));
+        assert!(!state.loading.contains(&first));
+        assert!(state.collapsed_tags.is_empty());
+        assert!(state.specs[0].selected);
+        assert_eq!(state.remove_spec(99), None);
+    }
+
+    #[test]
+    fn api_specs_persist_roundtrip_keeps_imported_sources_and_selection() {
+        let _guard = persist_test_lock().lock().expect("lock");
+        let _ = std::fs::remove_dir_all(api_config_dir());
+
+        let mut state = ApiClientState::default();
+        state.next_id = 8;
+        state.selected_spec = Some(ApiSpecId(7));
+        state.specs.push(ApiSpecEntry {
+            id: ApiSpecId(7),
+            title: "Persisted".to_string(),
+            version: "1.0".to_string(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.com/openapi.json".to_string()),
+            last_loaded: Some(123),
+            last_fetch_secs: Some(0.1234),
+            last_parse_secs: Some(0.0456),
+            last_url_status: Some(ApiUrlStatus::Ok(200)),
+            selected: true,
+            error: None,
+        });
+        save_url_cache(ApiSpecId(7), &sample_spec().to_string());
+        state.persist();
+
+        let loaded = ApiClientState::load_persisted();
+        assert_eq!(loaded.next_id, 8);
+        assert_eq!(loaded.selected_spec, Some(ApiSpecId(7)));
+        assert_eq!(loaded.specs.len(), 1);
+        assert_eq!(loaded.specs[0].title, "Persisted");
+        assert_eq!(
+            loaded.specs[0].source,
+            ApiSpecSource::Url("https://example.com/openapi.json".to_string())
+        );
+        assert_eq!(loaded.specs[0].last_loaded, Some(123));
+        assert_eq!(loaded.specs[0].last_fetch_secs, Some(0.1234));
+        assert_eq!(loaded.specs[0].last_parse_secs, Some(0.0456));
+        assert!(loaded.specs[0].selected);
+        assert!(loaded.models.contains_key(&ApiSpecId(7)));
+        assert!(loaded.loading.is_empty());
+
+        let _ = std::fs::remove_dir_all(api_config_dir());
+    }
+
+    #[test]
+    fn api_scroll_limits_are_finite_and_shrink_when_routes_collapsed() {
+        let mut state = ApiClientState::default();
+        let model = parse_openapi_model(ApiSpecId(5), &sample_spec()).expect("parse");
+        state.specs.push(ApiSpecEntry {
+            id: model.id,
+            title: model.title.clone(),
+            version: model.version.clone(),
+            openapi_version: model.openapi_version.clone(),
+            source: ApiSpecSource::Url("https://example.com/openapi.json".to_string()),
+            last_loaded: Some(1),
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: Some(ApiUrlStatus::Ok(200)),
+            selected: true,
+            error: None,
+        });
+        state.selected_spec = Some(model.id);
+        state.models.insert(model.id, model.clone());
+
+        let expanded = api_panel_max_scroll(&state, 120.0, 1.0);
+        state.collapsed_tags.insert((model.id, "pets".to_string()));
+        let collapsed = api_panel_max_scroll(&state, 120.0, 1.0);
+        assert!(expanded.is_finite());
+        assert!(collapsed.is_finite());
+        assert!(collapsed < expanded);
+
+        let tab_state = ApiClientTabState {
+            route_idx: Some(0),
+            response: Some(ApiJobResponse {
+                request_id: 0,
+                spec_id: model.id,
+                route_idx: 0,
+                status: Some(200),
+                elapsed_ms: 1,
+                server_reach_ms: Some(1),
+                timing_text: "1 ms (~1 ms до сервера)".to_string(),
+                headers: Vec::new(),
+                headers_text: String::new(),
+                body: "{}".to_string(),
+                truncated: false,
+                error: None,
+                resolved_host: None,
+            }),
+            ..Default::default()
+        };
+        let tab_max = api_tab_max_scroll(Some(&model), &tab_state, 180.0, 1.0);
+        assert!(tab_max.is_finite());
+        assert!(tab_max > 0.0);
+        assert_eq!(api_tab_max_scroll(None, &tab_state, 180.0, 1.0), 0.0);
+    }
+}

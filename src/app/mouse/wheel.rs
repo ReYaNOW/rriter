@@ -653,8 +653,7 @@ impl App {
                     .ui_registry
                     .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
                 {
-                    let max_scroll =
-                        crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
+                    let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
                     self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
                     self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
                     self.ide_panel
@@ -677,9 +676,7 @@ impl App {
                 let rect = self
                     .ui_registry
                     .rect_for(crate::ui_system::UiId::ApiMockServerLogArea)
-                    .or_else(|| {
-                        hovered_id.and_then(|id| self.ui_registry.rect_for(id))
-                    });
+                    .or_else(|| hovered_id.and_then(|id| self.ui_registry.rect_for(id)));
                 if let Some((_, _, _, log_h)) = rect {
                     let max_scroll = crate::app::api_client::api_mock_server_log_max_scroll(
                         self.ide_panel.api.mock_server_logs.len(),

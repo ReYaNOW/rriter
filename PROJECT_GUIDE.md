@@ -264,9 +264,11 @@ Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/ap
 
 Large app files use thin include shells to keep source chunks small:
 
+* `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input helpers, App method groups, defaults/persist, tests.
 * `src/app/autocomplete/*` -> detail helpers, detail request/merge flow, Ty autocomplete flow, popup/apply flow.
 * `src/app/python_completion/*` -> source/module helpers and class/member helpers.
 * `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
+* `src/app/app_file_behavior_tests/*` -> file/tab flow, IDE definition jumps, UI/Git/API cases.
 * `src/app/git_panel/*` -> Git panel types, `App` graph/actions, graph helpers, status/tests.
 
 ### `src/app/app_state.rs`
@@ -297,6 +299,8 @@ Responsibilities:
 * Redraw scheduling.
 
 Use when behavior changes every frame or needs event-loop wakeup.
+
+Helpers/tests split from the frame tick live in `src/app/events/about/*`.
 
 ### `src/app/events/source_hover.rs`
 
@@ -536,7 +540,9 @@ Implementation is split through `include!`:
 
 * `src/render_view/root_helpers.rs` -> frame constants/helpers/tests.
 * `src/render_view/root_frame_helpers.rs` -> inline-git and Git diff floating panel helpers.
+* `src/render_view/root_frame_overlay_helpers.rs` -> overlay, resize, search, and notice helpers.
 * `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
+* `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
 
 Hot path.
 
@@ -856,6 +862,8 @@ Responsibilities:
 * Response/event parsing.
 
 Use when protocol messages, capabilities, server commands, or wire format changes.
+
+Implementation chunks live in `src/lsp/protocol/*`: wire encoding/dispatch and value parsers.
 
 Protocol tests live in `src/lsp/protocol_tests.rs`.
 

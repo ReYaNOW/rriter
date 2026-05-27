@@ -437,7 +437,10 @@ Entrypoints/state:
 * `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling.
+* `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
+* `src/app/api_client.rs` -> include shell for API client types/state and behavior chunks.
+* `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input, App methods, defaults/persist, tests.
 * `src/app/autocomplete.rs` -> include shell for `App` autocomplete detail/request/update/apply behavior.
 * `src/app/autocomplete/*` -> autocomplete helper/method chunks split by detail flow, Ty flow, popup/apply flow.
 * `src/app/python_completion.rs` -> include shell for Python autocomplete/fold/source-owner helpers.
@@ -446,7 +449,8 @@ Entrypoints/state:
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
-* `src/app/app_file_behavior_tests.rs` -> app file/tab/search/UI behavior tests.
+* `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
+* `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
 
 Input:
 
@@ -485,6 +489,9 @@ Rendering:
 * `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.
 * `src/render_view.rs` -> include shell for frame draw orchestration and layer order. Hot path.
 * `src/render_view/root_*.rs` -> root render helpers and main frame renderer chunks. Hot path.
+* `src/render_view/root_frame_overlay_helpers.rs` -> root frame overlay/resize/search/notice helpers. Hot path.
+* `src/render_view/api_client_panel.rs`, `src/render_view/api_client_tab.rs` -> include shells for API panel/tab renderers.
+* `src/render_view/api_client_panel/*`, `src/render_view/api_client_tab/*` -> API client panel/tab renderer chunks.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
@@ -519,7 +526,8 @@ LSP:
 * `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
 * `src/lsp/lsp_process.rs`, `src/lsp/lsp_manager.rs` -> split process/supervisor code and manager facade.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
-* `src/lsp/protocol.rs` -> JSON-RPC framing, LSP encode/decode, wire parsing.
+* `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.
+* `src/lsp/protocol/*` -> protocol wire encoding/dispatch and value parser chunks.
 * `src/lsp/protocol_tests.rs` -> protocol parse/encode tests.
 * `src/lsp/hover.rs` -> hover text normalization/highlighting.
 * `src/lsp/python_hover_tests.rs` -> Python hover normalization/highlight tests.

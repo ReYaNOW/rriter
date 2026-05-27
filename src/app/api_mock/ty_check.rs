@@ -1,5 +1,7 @@
 use super::python_env::api_mock_python_dir;
-use super::types::ApiMockPythonScript;
+use super::types::{
+    ApiMockPythonScript, api_mock_path_param_names, api_mock_sanitize_python_param,
+};
 use crate::app::api_client::{
     ApiMethod, ApiParam, ApiPrimitiveType, ApiRouteRow, ApiSchema, ApiSchemaKind, ApiSpecModel,
 };
@@ -51,7 +53,12 @@ pub struct ApiMockVirtualSource {
 }
 
 impl ApiMockVirtualSource {
-    pub fn edit_offset_to_source(&self, part: ApiMockSourcePart, edit_text: &str, offset: usize) -> usize {
+    pub fn edit_offset_to_source(
+        &self,
+        part: ApiMockSourcePart,
+        edit_text: &str,
+        offset: usize,
+    ) -> usize {
         let offset = offset.min(edit_text.len());
         match part {
             ApiMockSourcePart::Prelude => self.prelude_start.saturating_add(offset),
@@ -70,7 +77,11 @@ impl ApiMockVirtualSource {
         }
     }
 
-    pub fn source_offset_to_edit(&self, part: ApiMockSourcePart, source_offset: usize) -> Option<usize> {
+    pub fn source_offset_to_edit(
+        &self,
+        part: ApiMockSourcePart,
+        source_offset: usize,
+    ) -> Option<usize> {
         match part {
             ApiMockSourcePart::Prelude => (source_offset >= self.prelude_start
                 && source_offset <= self.prelude_end)
@@ -79,8 +90,9 @@ impl ApiMockVirtualSource {
                 && source_offset <= self.signature_end)
                 .then_some(source_offset - self.signature_start),
             ApiMockSourcePart::Body => self.body_lines.iter().find_map(|line| {
-                (source_offset >= line.source_start && source_offset <= line.source_end)
-                    .then_some((line.edit_start + source_offset - line.source_start).min(line.edit_end))
+                (source_offset >= line.source_start && source_offset <= line.source_end).then_some(
+                    (line.edit_start + source_offset - line.source_start).min(line.edit_end),
+                )
             }),
         }
     }
@@ -97,7 +109,8 @@ pub fn spawn_api_mock_ty_check(
 ) -> Receiver<ApiMockTyCheckResult> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_api_mock_ty_check(route_idx, version, method, &path, &route, &model, &script);
+        let result =
+            run_api_mock_ty_check(route_idx, version, method, &path, &route, &model, &script);
         let _ = tx.send(result);
     });
     rx
@@ -220,10 +233,7 @@ fn parse_ty_line_col(line: &str) -> Option<(usize, usize)> {
     let mut nums = [0usize; 2];
     let mut found = 0usize;
     for part in line.rsplit(':') {
-        let digits: String = part
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
         if digits.is_empty() {
             continue;
         }
@@ -245,7 +255,8 @@ fn map_ty_location_to_edit(
     virtual_source: &ApiMockVirtualSource,
     script: &ApiMockPythonScript,
 ) -> Option<ApiMockTyDiagnostic> {
-    let source_offset = source_line_col_to_offset(&virtual_source.source, source_line_one, source_col_one)?;
+    let source_offset =
+        source_line_col_to_offset(&virtual_source.source, source_line_one, source_col_one)?;
     let prelude = virtual_source
         .source_offset_to_edit(ApiMockSourcePart::Prelude, source_offset)
         .map(|offset| (ApiMockSourcePart::Prelude, offset));
@@ -365,12 +376,14 @@ pub fn build_api_mock_virtual_source(
     out.push('\n');
     let signature_start = out.len();
     out.push_str("def handler(\n    req: Request,");
-    for name in path_param_names(path) {
+    for name in api_mock_path_param_names(path) {
         out.push_str("\n    ");
-        out.push_str(&sanitize_python_param(&name));
+        out.push_str(&api_mock_sanitize_python_param(&name));
         out.push_str(": str,");
     }
-    out.push_str("\n    query: Query,\n    body: Body | None,\n    fields: Fields,\n) -> dict[str, Any]:");
+    out.push_str(
+        "\n    query: Query,\n    body: Body | None,\n    fields: Fields,\n) -> dict[str, Any]:",
+    );
     let signature_end = out.len();
     out.push('\n');
     let mut body_lines = Vec::new();
@@ -428,7 +441,7 @@ fn push_param_class(out: &mut String, name: &str, params: &[ApiParam]) {
     }
     for param in params {
         out.push_str("    ");
-        out.push_str(&sanitize_python_param(&param.name));
+        out.push_str(&api_mock_sanitize_python_param(&param.name));
         out.push_str(": ");
         out.push_str(python_primitive_type(param.primitive_type));
         if !param.required {
@@ -460,7 +473,7 @@ fn push_body_class(out: &mut String, route: &ApiRouteRow, model: &ApiSpecModel) 
             .map(schema_python_type)
             .unwrap_or("Any");
         out.push_str("    ");
-        out.push_str(&sanitize_python_param(&prop.name));
+        out.push_str(&api_mock_sanitize_python_param(&prop.name));
         out.push_str(": ");
         out.push_str(field_ty);
         if !prop.required {
@@ -498,34 +511,6 @@ fn python_primitive_type(kind: ApiPrimitiveType) -> &'static str {
         ApiPrimitiveType::Array => "list[str]",
         ApiPrimitiveType::Object | ApiPrimitiveType::Unknown => "Any",
     }
-}
-
-fn path_param_names(path: &str) -> Vec<String> {
-    path.split('/')
-        .filter_map(|part| {
-            part.strip_prefix('{')
-                .and_then(|part| part.strip_suffix('}'))
-                .map(str::to_string)
-        })
-        .collect()
-}
-
-fn sanitize_python_param(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() || out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        out.insert(0, '_');
-    }
-    if matches!(out.as_str(), "req" | "query" | "body" | "fields") {
-        out.push_str("_param");
-    }
-    out
 }
 
 #[cfg(test)]
@@ -601,8 +586,11 @@ mod tests {
         let virtual_source =
             build_api_mock_virtual_source(ApiMethod::Post, "/items", &route, &model, &script);
         let edit_offset = script.body.find("json_response").unwrap();
-        let source_offset =
-            virtual_source.edit_offset_to_source(ApiMockSourcePart::Body, &script.body, edit_offset);
+        let source_offset = virtual_source.edit_offset_to_source(
+            ApiMockSourcePart::Body,
+            &script.body,
+            edit_offset,
+        );
 
         assert_eq!(
             &virtual_source.source[source_offset..source_offset + "json_response".len()],
@@ -612,8 +600,10 @@ mod tests {
             virtual_source.source_offset_to_edit(ApiMockSourcePart::Body, source_offset),
             Some(edit_offset)
         );
-        assert!(virtual_source.source[virtual_source.prelude_start..virtual_source.prelude_end]
-            .contains("import math"));
+        assert!(
+            virtual_source.source[virtual_source.prelude_start..virtual_source.prelude_end]
+                .contains("import math")
+        );
     }
 
     #[test]
@@ -640,8 +630,16 @@ mod tests {
         let virtual_source =
             build_api_mock_virtual_source(ApiMethod::Get, "/items", &route, &model, &script);
 
-        assert!(virtual_source.source.contains(") -> dict[str, Any]:\n    return"));
-        assert!(!virtual_source.source.contains(") -> dict[str, Any]:\n\n    return"));
+        assert!(
+            virtual_source
+                .source
+                .contains(") -> dict[str, Any]:\n    return")
+        );
+        assert!(
+            !virtual_source
+                .source
+                .contains(") -> dict[str, Any]:\n\n    return")
+        );
     }
 
     #[test]
