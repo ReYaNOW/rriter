@@ -1303,7 +1303,8 @@ pub(crate) fn source_hover_parts_for_editor(
     Vec<crate::lsp::HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    let (clean_msg, spans, line_kinds, inline_code_ranges) = crate::lsp::highlight_hover_text(&text);
+    let (clean_msg, spans, line_kinds, inline_code_ranges) =
+        crate::lsp::highlight_hover_text(&text);
     let is_simple_type = should_replace_simple_type_hover(&clean_msg);
     if !should_replace_hover_with_source_signature(&clean_msg) {
         return (clean_msg, spans, line_kinds, inline_code_ranges);

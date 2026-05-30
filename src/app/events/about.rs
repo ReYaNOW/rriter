@@ -737,9 +737,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         w.request_redraw();
                     }
                 } else if app.autocomplete_detail_request_id == Some(request_id) {
-                    if app.api_mock_completion_focus().is_some() {
-                        app.merge_api_mock_autocomplete_details(items);
-                    } else if app.autocomplete_active {
+                    if app.autocomplete_active {
                         app.remember_autocomplete_detail_cache(&items);
                         app.merge_autocomplete_details(items);
                     } else {
@@ -803,13 +801,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     let mut state = state.borrow_mut();
                     if state.request_id == Some(request_id) {
                         if crate::render_view::hover_trace_enabled() {
-                            println!("[HOVER DEBUG] Received response for req id: {}. Has text: {}", request_id, text.is_some());
+                            println!(
+                                "[HOVER DEBUG] Received response for req id: {}. Has text: {}",
+                                request_id,
+                                text.is_some()
+                            );
                         }
                         if let Some(bo) = state.byte_offset {
-                            let current_mod = app
-                                .file_path
-                                .as_ref()
-                                .and_then(|p| module_path_from_definition_path(p, &app.ide_workspaces));
+                            let current_mod = app.file_path.as_ref().and_then(|p| {
+                                module_path_from_definition_path(p, &app.ide_workspaces)
+                            });
                             let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
                                 0.0
                             } else {

@@ -704,6 +704,77 @@ pub(crate) fn hover_content_y_in_line_hitbox(
     content_y >= line_top_y + inset && content_y < line_top_y + line_height - inset
 }
 
+pub(crate) fn embedded_editor_hover_content_y_at_point(
+    my: f32,
+    top_y: f32,
+    scroll_y: f32,
+    line_height: f32,
+) -> Option<f32> {
+    if line_height <= 0.0 {
+        return None;
+    }
+    let content_y = my - top_y + scroll_y;
+    if content_y < 0.0 {
+        return None;
+    }
+    let line_top_y = (content_y / line_height).floor() * line_height;
+    hover_content_y_in_line_hitbox(content_y, line_top_y, line_height).then_some(content_y)
+}
+
+pub(crate) fn with_embedded_editor_hover_renderer_context<R>(
+    renderer: &mut crate::renderer::Renderer,
+    editor: &crate::editor::Editor,
+    left_x: f32,
+    scroll_x: f32,
+    line_height: f32,
+    f: impl FnOnce(&mut crate::renderer::Renderer) -> R,
+) -> R {
+    let old_line_height = renderer.line_height;
+    let old_left_padding = renderer.left_padding;
+    let old_last_scroll_x = renderer.last_scroll_x;
+    let old_phys_to_visual = std::mem::take(&mut renderer.phys_to_visual);
+    let old_inlay_hints = std::mem::take(&mut renderer.current_python_inlay_hints);
+
+    renderer.line_height = line_height;
+    renderer.left_padding = left_x;
+    renderer.last_scroll_x = scroll_x;
+    renderer.phys_to_visual.extend(0..editor.line_offsets.len());
+
+    let out = f(renderer);
+
+    renderer.line_height = old_line_height;
+    renderer.left_padding = old_left_padding;
+    renderer.last_scroll_x = old_last_scroll_x;
+    renderer.phys_to_visual = old_phys_to_visual;
+    renderer.current_python_inlay_hints = old_inlay_hints;
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn embedded_editor_hover_byte_at_point(
+    editor: &crate::editor::Editor,
+    renderer: &mut crate::renderer::Renderer,
+    left_x: f32,
+    top_y: f32,
+    mx: f32,
+    my: f32,
+    line_height: f32,
+    scroll_y: f32,
+    scroll_x: f32,
+) -> Option<usize> {
+    let content_y =
+        embedded_editor_hover_content_y_at_point(my, top_y, scroll_y, line_height)?;
+    let byte = with_embedded_editor_hover_renderer_context(
+        renderer,
+        editor,
+        left_x,
+        scroll_x,
+        line_height,
+        |renderer| renderer.get_byte_at_xy(editor, mx, content_y),
+    );
+    normalize_hover_byte(editor, byte)
+}
+
 #[cfg(test)]
 pub(crate) fn type_hover_screen_y_matches_byte_line(
     editor: &crate::editor::Editor,

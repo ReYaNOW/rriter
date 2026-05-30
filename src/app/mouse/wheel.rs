@@ -725,17 +725,20 @@ impl App {
                                             .get(&meta.spec_id)
                                             .and_then(|model| model.routes.get(route_idx))
                                             .is_some_and(|route| {
-                                                item.method == route.method && item.path == route.path
+                                                item.method == route.method
+                                                    && item.path == route.path
                                             })
                                     })
                                     .map(|item| match &item.response {
                                         crate::app::api_mock::types::ApiMockResponse::Generated => {
                                             String::new()
                                         }
-                                        crate::app::api_mock::types::ApiMockResponse::Json(text)
-                                        | crate::app::api_mock::types::ApiMockResponse::Text(text) => {
-                                            text.clone()
-                                        }
+                                        crate::app::api_mock::types::ApiMockResponse::Json(
+                                            text,
+                                        )
+                                        | crate::app::api_mock::types::ApiMockResponse::Text(
+                                            text,
+                                        ) => text.clone(),
                                     })
                                     .unwrap_or_else(|| state.body_json.clone())
                             }
@@ -790,14 +793,14 @@ impl App {
                         let focused_part = match self.ide_panel.api.focused {
                             Some(crate::app::api_client::ApiFocus::MockContract {
                                 route_idx: focused_route,
-                            }) if focused_route == route_idx => Some(
-                                crate::app::api_mock::ty_check::ApiMockSourcePart::Contract,
-                            ),
+                            }) if focused_route == route_idx => {
+                                Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Contract)
+                            }
                             Some(crate::app::api_client::ApiFocus::MockPrelude {
                                 route_idx: focused_route,
-                            }) if focused_route == route_idx => Some(
-                                crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude,
-                            ),
+                            }) if focused_route == route_idx => {
+                                Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude)
+                            }
                             Some(crate::app::api_client::ApiFocus::MockBody {
                                 route_idx: focused_route,
                             }) if focused_route == route_idx => {
@@ -842,10 +845,9 @@ impl App {
                             crate::app::api_client::api_mock_body_editor_text(&script.body)
                         };
                         let model = self.ide_panel.api.models.get(&meta.spec_id)?;
-                        let contract =
-                            crate::app::api_mock::types::api_mock_effective_contract(
-                                script, route, model,
-                            );
+                        let contract = crate::app::api_mock::types::api_mock_effective_contract(
+                            script, route, model,
+                        );
                         let signature_text =
                             crate::app::api_mock::contract::api_mock_handler_signature_text(
                                 &contract,

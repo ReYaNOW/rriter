@@ -646,7 +646,9 @@ fn clear_active_combined_popup_drops_type_and_diagnostic_together() {
         layout_cache: None,
     });
     state.hovered_diag_type_target = Some(17);
-    state.hovered_diags_cache.push((2, 90.0, 100.0, 122.0, 180.0));
+    state
+        .hovered_diags_cache
+        .push((2, 90.0, 100.0, 122.0, 180.0));
     state.diag_rect = Some((90.0, 122.0, 240.0, 80.0, 90.0, 180.0, 111.0));
 
     assert!(state.clear_active_combined_popup());

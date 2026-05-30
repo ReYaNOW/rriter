@@ -151,10 +151,7 @@ pub fn api_mock_default_handler_body(contract: &ApiMockPythonContract) -> String
     out
 }
 
-pub fn api_mock_type_source_prefix(
-    method: ApiMethod,
-    path: &str,
-) -> String {
+pub fn api_mock_type_source_prefix(method: ApiMethod, path: &str) -> String {
     let mut out = String::new();
     out.push_str("from __future__ import annotations\n");
     out.push_str("from dataclasses import dataclass\n");
@@ -249,12 +246,7 @@ fn parse_contract_class(
         if !in_class {
             continue;
         }
-        if line
-            .chars()
-            .next()
-            .is_some_and(|ch| !ch.is_whitespace())
-            && !trimmed.is_empty()
-        {
+        if line.chars().next().is_some_and(|ch| !ch.is_whitespace()) && !trimmed.is_empty() {
             in_class = false;
             continue;
         }
@@ -274,9 +266,9 @@ fn parse_contract_class(
         return None;
     }
     for base_field in &base.fields {
-        let exists = fields
-            .iter()
-            .any(|field| field.name == base_field.name || field.python_name == base_field.python_name);
+        let exists = fields.iter().any(|field| {
+            field.name == base_field.name || field.python_name == base_field.python_name
+        });
         if !exists {
             let mut field = base_field.clone();
             field.enabled = false;
@@ -289,10 +281,7 @@ fn parse_contract_class(
     })
 }
 
-fn parse_contract_field_line(
-    line: &str,
-    base: &ApiMockClassSpec,
-) -> Option<ApiMockContractField> {
+fn parse_contract_field_line(line: &str, base: &ApiMockClassSpec) -> Option<ApiMockContractField> {
     let (name, rest) = line.split_once(':')?;
     let name = name.trim();
     if name.is_empty() {
@@ -304,7 +293,9 @@ fn parse_contract_field_line(
         .iter()
         .find(|field| field.name == name || field.python_name == name)
         .cloned()
-        .unwrap_or_else(|| ApiMockContractField::new(name.to_string(), ApiMockContractFieldKind::Any, true));
+        .unwrap_or_else(|| {
+            ApiMockContractField::new(name.to_string(), ApiMockContractFieldKind::Any, true)
+        });
     field.name = name.to_string();
     field.python_name = api_mock_sanitize_python_param(name);
     field.enabled = true;
@@ -477,7 +468,11 @@ fn parse_string_marker(text: &str, marker: &str) -> Option<String> {
 }
 
 fn parse_string_or_number_marker(text: &str, marker: &str) -> Option<String> {
-    Some(parse_marker_arg(text, marker)?.trim_matches('"').to_string())
+    Some(
+        parse_marker_arg(text, marker)?
+            .trim_matches('"')
+            .to_string(),
+    )
 }
 
 fn parse_marker_arg(text: &str, marker: &str) -> Option<String> {
@@ -517,10 +512,7 @@ pub fn api_mock_python_type(field: &ApiMockContractField) -> String {
             ApiMockContractFieldKind::Boolean => "bool".to_string(),
             ApiMockContractFieldKind::Array => format!(
                 "list[{}]",
-                field
-                    .item_kind
-                    .map(base_python_type)
-                    .unwrap_or("Any")
+                field.item_kind.map(base_python_type).unwrap_or("Any")
             ),
             ApiMockContractFieldKind::Object => "dict[str, Any]".to_string(),
             ApiMockContractFieldKind::Bytes => "str".to_string(),
@@ -637,7 +629,9 @@ fn default_string_to_python(default: &str, kind: ApiMockContractFieldKind) -> St
             }
         }
         Value::Number(value) => value.to_string(),
-        Value::String(value) => serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".to_string()),
+        Value::String(value) => {
+            serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".to_string())
+        }
         Value::Array(items) => {
             let mut out = String::from("[");
             for (idx, item) in items.iter().enumerate() {
@@ -739,7 +733,10 @@ pub fn api_mock_openapi_schema_for_field(field: &ApiMockContractField) -> Value 
             item_field.kind = item_kind;
             item_field.item_kind = None;
             item_field.constraints = ApiMockFieldConstraints::default();
-            schema.insert("items".to_string(), api_mock_openapi_schema_for_field(&item_field));
+            schema.insert(
+                "items".to_string(),
+                api_mock_openapi_schema_for_field(&item_field),
+            );
         }
         ApiMockContractFieldKind::Object => {
             schema.insert("type".to_string(), Value::String("object".to_string()));
@@ -828,17 +825,18 @@ fn push_constraint_markers(out: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{ApiMockClassSpec, ApiMockContractField};
+    use super::*;
 
     #[test]
     fn signature_and_worker_plan_drop_disabled_parts() {
         let mut contract = ApiMockPythonContract::default();
         contract.path_params.enabled = true;
-        contract
-            .path_params
-            .fields
-            .push(ApiMockContractField::new("id", ApiMockContractFieldKind::String, true));
+        contract.path_params.fields.push(ApiMockContractField::new(
+            "id",
+            ApiMockContractFieldKind::String,
+            true,
+        ));
         contract.query.enabled = true;
         contract.query.fields.push(ApiMockContractField::new(
             "page",
@@ -917,10 +915,8 @@ mod tests {
             &spec,
         )
         .expect("parse");
-        let contract = crate::app::api_mock::types::default_contract_from_route(
-            &model.routes[0],
-            &model,
-        );
+        let contract =
+            crate::app::api_mock::types::default_contract_from_route(&model.routes[0], &model);
         let source = api_mock_contract_state_text(&contract);
         let body = api_mock_default_handler_body(&contract);
 

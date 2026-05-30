@@ -33,8 +33,16 @@ pub fn export_openapi_value(
             .filter(|script| script.enabled)
         {
             let contract = api_mock_effective_contract(script, route, model);
-            patch_operation_contract(operation, &contract.path_params, &contract.query, &contract.body);
-            operation.insert("responses".to_string(), python_response_value(&contract.response));
+            patch_operation_contract(
+                operation,
+                &contract.path_params,
+                &contract.query,
+                &contract.body,
+            );
+            operation.insert(
+                "responses".to_string(),
+                python_response_value(&contract.response),
+            );
         } else if let Some(override_route) = override_route {
             patch_operation_response(operation, &override_route.response);
         }
@@ -56,8 +64,16 @@ pub fn export_openapi_value(
             .unwrap_or_else(|| default_contract_for_manual_route(&route.path));
         let operation = ensure_operation_mut(&mut root, &route.path, route.method);
         operation.clear();
-        operation.insert("summary".to_string(), Value::String("RRiter mock".to_string()));
-        patch_operation_contract(operation, &contract.path_params, &contract.query, &contract.body);
+        operation.insert(
+            "summary".to_string(),
+            Value::String("RRiter mock".to_string()),
+        );
+        patch_operation_contract(
+            operation,
+            &contract.path_params,
+            &contract.query,
+            &contract.body,
+        );
         patch_operation_response(operation, &route.response);
     }
     root
@@ -80,7 +96,9 @@ pub fn export_mock_server_openapi_value(
         for route in &model.routes {
             write_route_operation(&mut root, route, model);
             let override_route = state.route_overrides.iter().find(|item| {
-                item.source_key == source_key && item.method == route.method && item.path == route.path
+                item.source_key == source_key
+                    && item.method == route.method
+                    && item.path == route.path
             });
             let operation = ensure_operation_mut(&mut root, &route.path, route.method);
             if let Some(script) = override_route
@@ -94,7 +112,10 @@ pub fn export_mock_server_openapi_value(
                     &contract.query,
                     &contract.body,
                 );
-                operation.insert("responses".to_string(), python_response_value(&contract.response));
+                operation.insert(
+                    "responses".to_string(),
+                    python_response_value(&contract.response),
+                );
             } else if let Some(override_route) = override_route {
                 patch_operation_response(operation, &override_route.response);
             }
@@ -141,7 +162,10 @@ fn write_route_operation(root: &mut Value, route: &ApiRouteRow, model: &ApiSpecM
     let operation = ensure_operation_mut(root, &route.path, route.method);
     operation.clear();
     operation.insert("summary".to_string(), Value::String(route.summary.clone()));
-    operation.insert("operationId".to_string(), Value::String(route.operation_id.clone()));
+    operation.insert(
+        "operationId".to_string(),
+        Value::String(route.operation_id.clone()),
+    );
     let mut params = Vec::new();
     params.extend(route.path_params.iter().map(param_to_openapi));
     params.extend(route.query_params.iter().map(param_to_openapi));
@@ -151,7 +175,10 @@ fn write_route_operation(root: &mut Value, route: &ApiRouteRow, model: &ApiSpecM
     if let Some(body) = &route.request_body {
         operation.insert("requestBody".to_string(), body_to_openapi(body, model));
     }
-    operation.insert("responses".to_string(), route_responses_to_openapi(route, model));
+    operation.insert(
+        "responses".to_string(),
+        route_responses_to_openapi(route, model),
+    );
 }
 
 fn append_manual_routes(root: &mut Value, state: &ApiMockState) {
@@ -172,8 +199,16 @@ fn append_manual_routes(root: &mut Value, state: &ApiMockState) {
             .unwrap_or_else(|| default_contract_for_manual_route(&route.path));
         let operation = ensure_operation_mut(root, &route.path, route.method);
         operation.clear();
-        operation.insert("summary".to_string(), Value::String("RRiter mock".to_string()));
-        patch_operation_contract(operation, &contract.path_params, &contract.query, &contract.body);
+        operation.insert(
+            "summary".to_string(),
+            Value::String("RRiter mock".to_string()),
+        );
+        patch_operation_contract(
+            operation,
+            &contract.path_params,
+            &contract.query,
+            &contract.body,
+        );
         patch_operation_response(operation, &route.response);
     }
 }
@@ -248,7 +283,10 @@ fn patch_operation_contract(
         operation.insert("parameters".to_string(), Value::Array(params));
     }
     if body_spec.enabled {
-        operation.insert("requestBody".to_string(), request_body_from_contract(body_spec));
+        operation.insert(
+            "requestBody".to_string(),
+            request_body_from_contract(body_spec),
+        );
     } else {
         operation.remove("requestBody");
     }
@@ -271,8 +309,14 @@ fn upsert_contract_params(params: &mut Vec<Value>, location: &str, spec: &ApiMoc
                 && param.get("name").and_then(Value::as_str) == Some(field.name.as_str());
             if same {
                 if let Some(obj) = param.as_object_mut() {
-                    obj.insert("schema".to_string(), api_mock_openapi_schema_for_field(field));
-                    obj.insert("required".to_string(), Value::Bool(field.required || location == "path"));
+                    obj.insert(
+                        "schema".to_string(),
+                        api_mock_openapi_schema_for_field(field),
+                    );
+                    obj.insert(
+                        "required".to_string(),
+                        Value::Bool(field.required || location == "path"),
+                    );
                 }
                 found = true;
                 break;
@@ -400,7 +444,8 @@ fn route_responses_to_openapi(route: &ApiRouteRow, model: &ApiSpecModel) -> Valu
             if let Some(example) = &response.example {
                 media.insert(
                     "example".to_string(),
-                    serde_json::from_str(example).unwrap_or_else(|_| Value::String(example.clone())),
+                    serde_json::from_str(example)
+                        .unwrap_or_else(|_| Value::String(example.clone())),
                 );
             }
             let mut content = Map::new();
@@ -478,7 +523,10 @@ fn schema_to_openapi(schema: &ApiSchema, model: &ApiSpecModel) -> Value {
         }
         ApiSchemaKind::Array => {
             out.insert("type".to_string(), Value::String("array".to_string()));
-            if let Some(item) = schema.item.and_then(|item_ref| model.schema_arena.get(item_ref.0)) {
+            if let Some(item) = schema
+                .item
+                .and_then(|item_ref| model.schema_arena.get(item_ref.0))
+            {
                 out.insert("items".to_string(), schema_to_openapi(item, model));
             }
         }

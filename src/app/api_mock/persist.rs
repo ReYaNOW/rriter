@@ -232,8 +232,11 @@ mod tests {
         if let Some(dir) = api_mocks_path().parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        std::fs::write(api_mocks_path(), serde_json::to_string_pretty(&legacy).unwrap())
-            .expect("write legacy");
+        std::fs::write(
+            api_mocks_path(),
+            serde_json::to_string_pretty(&legacy).unwrap(),
+        )
+        .expect("write legacy");
 
         let loaded = load_api_mocks();
         let script = loaded.route_overrides[0].python.as_ref().expect("script");
@@ -248,13 +251,15 @@ mod tests {
         let mut state = ApiMockState::default();
         let mut script = default_api_mock_python_script();
         script.contract.query.enabled = true;
-        script.contract.query.fields.push(
-            crate::app::api_mock::types::ApiMockContractField::new(
+        script
+            .contract
+            .query
+            .fields
+            .push(crate::app::api_mock::types::ApiMockContractField::new(
                 "page",
                 crate::app::api_mock::types::ApiMockContractFieldKind::Integer,
                 false,
-            ),
-        );
+            ));
         state.route_overrides.push(ApiMockRouteOverride {
             source_key: "https://example.test/openapi.json".to_string(),
             method: ApiMethod::Get,

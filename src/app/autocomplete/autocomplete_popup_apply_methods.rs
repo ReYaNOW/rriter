@@ -89,6 +89,90 @@ fn append_python_import_edits_to_block(
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct CompletionTextEditOp {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) new_text: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CompletionAppliedEdit {
+    pub(crate) offset: usize,
+    pub(crate) deleted_len: usize,
+    pub(crate) inserted_text: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CompletionApplyPlan {
+    pub(crate) ops: Vec<CompletionTextEditOp>,
+    pub(crate) primary_start: Option<usize>,
+    pub(crate) target_cursor: Option<usize>,
+    pub(crate) fallback_insert: String,
+    pub(crate) fallback_prefix_len: usize,
+}
+
+pub(crate) fn apply_completion_plan_to_editor(
+    editor: &mut Editor,
+    mut plan: CompletionApplyPlan,
+) -> Vec<CompletionAppliedEdit> {
+    let mut applied = Vec::new();
+    if plan.ops.is_empty() {
+        for _ in 0..plan.fallback_prefix_len {
+            if let Some((offset, len)) = editor.backspace() {
+                applied.push(CompletionAppliedEdit {
+                    offset,
+                    deleted_len: len,
+                    inserted_text: String::new(),
+                });
+            }
+        }
+        let (del_info, ins_len) = editor.insert_str(&plan.fallback_insert);
+        if let Some((offset, len)) = del_info {
+            applied.push(CompletionAppliedEdit {
+                offset,
+                deleted_len: len,
+                inserted_text: String::new(),
+            });
+        }
+        if ins_len > 0 {
+            applied.push(CompletionAppliedEdit {
+                offset: editor.cursor.saturating_sub(ins_len),
+                deleted_len: 0,
+                inserted_text: plan.fallback_insert,
+            });
+        }
+        return applied;
+    }
+
+    plan.ops
+        .sort_unstable_by(|a, b| b.start.cmp(&a.start).then(b.end.cmp(&a.end)));
+    for op in &plan.ops {
+        if op.start <= op.end {
+            let (offset, deleted_len, _) = editor.replace_range(op.start, op.end, &op.new_text);
+            applied.push(CompletionAppliedEdit {
+                offset,
+                deleted_len,
+                inserted_text: op.new_text.clone(),
+            });
+        }
+    }
+    if let (Some(primary_start), Some(mut target_cursor)) =
+        (plan.primary_start, plan.target_cursor)
+    {
+        for op in &plan.ops {
+            if op.end <= primary_start {
+                let old_len = op.end.saturating_sub(op.start);
+                let delta = op.new_text.len() as isize - old_len as isize;
+                target_cursor = ((target_cursor as isize) + delta).max(0) as usize;
+            }
+        }
+        editor.cursor = target_cursor.min(editor.len());
+        editor.selection_anchor = None;
+    }
+    applied
+}
+
 pub(crate) fn tree_sitter_completion_options(
     completions: &[CompletionItem],
     prefix: &str,
@@ -158,8 +242,7 @@ pub(crate) fn tree_sitter_completion_options(
     }
 
     matches.sort_unstable_by_key(|(is_prefix, score, comp, _)| {
-        let scoped_self_priority = if file_extension == "py" && comp.kind == SymbolKind::Parameter
-        {
+        let scoped_self_priority = if file_extension == "py" && comp.kind == SymbolKind::Parameter {
             python_scoped_self_priority(&comp.word)
         } else {
             2
@@ -211,7 +294,9 @@ pub(crate) fn enrich_python_tree_sitter_options(
         let imports = imported_python_symbols(text);
         apply_import_modules_to_autocomplete_items(options, &imports);
     }
-    if !options.is_empty() && let Some(owner) = python_enclosing_class_before_cursor(text, cursor) {
+    if !options.is_empty()
+        && let Some(owner) = python_enclosing_class_before_cursor(text, cursor)
+    {
         for (item, _) in options.iter_mut() {
             if item.kind == SymbolKind::Parameter && matches!(item.word.as_str(), "self" | "cls") {
                 item.module = Some(owner.clone());
@@ -221,17 +306,237 @@ pub(crate) fn enrich_python_tree_sitter_options(
     }
 }
 
+pub(crate) fn build_tree_sitter_autocomplete_options(
+    ctx: &AutocompleteEditorContext<'_>,
+    completions: &[CompletionItem],
+    trace_label: &str,
+) -> Vec<(AutocompleteItem, Vec<usize>)> {
+    let prefix = ctx.current_word_prefix();
+    let prefix_start = ctx.analysis_cursor.saturating_sub(prefix.len());
+    let mut options = tree_sitter_completion_options(
+        completions,
+        &prefix,
+        ctx.analysis_cursor,
+        prefix_start,
+        ctx.file_extension,
+        trace_label,
+    );
+    if options.len() == 1 && options[0].0.word == prefix {
+        options.clear();
+    }
+    enrich_python_tree_sitter_options(
+        &mut options,
+        ctx.file_extension,
+        ctx.analysis_text,
+        ctx.analysis_cursor,
+    );
+    options
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutocompletePopupKeyResult {
+    NotHandled,
+    Continue,
+    Consumed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutocompleteKeyAction {
+    None,
+    DismissAndContinue,
+    DismissAndConsume,
+    MoveDown,
+    MoveUp,
+    Apply,
+}
+
+pub(crate) fn autocomplete_key_action(
+    physical_key: winit::keyboard::PhysicalKey,
+) -> AutocompleteKeyAction {
+    match physical_key {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+            AutocompleteKeyAction::DismissAndConsume
+        }
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowLeft)
+        | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) => {
+            AutocompleteKeyAction::DismissAndContinue
+        }
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown) => {
+            AutocompleteKeyAction::MoveDown
+        }
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) => {
+            AutocompleteKeyAction::MoveUp
+        }
+        winit::keyboard::PhysicalKey::Code(
+            winit::keyboard::KeyCode::Enter
+            | winit::keyboard::KeyCode::NumpadEnter
+            | winit::keyboard::KeyCode::Tab,
+        ) => AutocompleteKeyAction::Apply,
+        _ => AutocompleteKeyAction::None,
+    }
+}
+
+pub(crate) fn autocomplete_next_index(
+    current: usize,
+    len: usize,
+    reverse: bool,
+    jump: bool,
+) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if jump && reverse {
+        return if current == 0 {
+            len - 1
+        } else if current < 5 {
+            0
+        } else {
+            current - 5
+        };
+    }
+    if jump {
+        return if current + 1 == len {
+            0
+        } else {
+            (current + 5).min(len - 1)
+        };
+    }
+    if reverse {
+        if current == 0 { len - 1 } else { current - 1 }
+    } else {
+        (current + 1) % len
+    }
+}
+
 impl App {
+    pub(crate) fn handle_active_autocomplete_key(
+        &mut self,
+        physical_key: winit::keyboard::PhysicalKey,
+        ctrl: bool,
+    ) -> AutocompletePopupKeyResult {
+        if !self.autocomplete_active {
+            return AutocompletePopupKeyResult::NotHandled;
+        }
+        match autocomplete_key_action(physical_key) {
+            AutocompleteKeyAction::DismissAndContinue => {
+                self.close_autocomplete();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                AutocompletePopupKeyResult::Continue
+            }
+            AutocompleteKeyAction::DismissAndConsume => {
+                self.close_autocomplete();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                AutocompletePopupKeyResult::Consumed
+            }
+            AutocompleteKeyAction::MoveDown => {
+                if !self.autocomplete_options.is_empty() {
+                    self.autocomplete_selected_idx = autocomplete_next_index(
+                        self.autocomplete_selected_idx,
+                        self.autocomplete_options.len(),
+                        false,
+                        ctrl,
+                    );
+                    self.autocomplete_hovered_idx = None;
+                    self.ensure_autocomplete_visible();
+                    self.request_active_autocomplete_detail_for_index(
+                        self.autocomplete_selected_idx,
+                    );
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                AutocompletePopupKeyResult::Consumed
+            }
+            AutocompleteKeyAction::MoveUp => {
+                if !self.autocomplete_options.is_empty() {
+                    self.autocomplete_selected_idx = autocomplete_next_index(
+                        self.autocomplete_selected_idx,
+                        self.autocomplete_options.len(),
+                        true,
+                        ctrl,
+                    );
+                    self.autocomplete_hovered_idx = None;
+                    self.ensure_autocomplete_visible();
+                    self.request_active_autocomplete_detail_for_index(
+                        self.autocomplete_selected_idx,
+                    );
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                AutocompletePopupKeyResult::Consumed
+            }
+            AutocompleteKeyAction::Apply => {
+                if !self.autocomplete_options.is_empty() {
+                    self.apply_autocomplete();
+                }
+                AutocompletePopupKeyResult::Consumed
+            }
+            AutocompleteKeyAction::None => AutocompletePopupKeyResult::NotHandled,
+        }
+    }
+
+    pub(crate) fn mark_pending_autocomplete_apply_for_key(
+        &mut self,
+        physical_key: winit::keyboard::PhysicalKey,
+    ) -> bool {
+        if self.autocomplete_mode != AutocompleteMode::TyContext
+            || self.autocomplete_pending_request_id.is_none()
+                && self.autocomplete_signature_request_id.is_none()
+            || !matches!(
+                physical_key,
+                winit::keyboard::PhysicalKey::Code(
+                    winit::keyboard::KeyCode::Enter
+                        | winit::keyboard::KeyCode::Tab
+                        | winit::keyboard::KeyCode::NumpadEnter
+                )
+            )
+        {
+            return false;
+        }
+        let editor = if self.api_mock_completion_focus().is_some() {
+            &self.ide_panel.api.input_editor
+        } else {
+            &self.editor
+        };
+        if !cursor_after_python_member_dot(editor) && !cursor_inside_python_call_parens(editor) {
+            return false;
+        }
+        self.autocomplete_apply_pending_response = true;
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        true
+    }
+
     pub fn update_autocomplete(&mut self) {
+        let Some(source) = self.active_autocomplete_source() else {
+            return;
+        };
+        self.update_tree_sitter_autocomplete_for_source(source);
+    }
+
+    pub(crate) fn update_tree_sitter_autocomplete_for_source(
+        &mut self,
+        source: ActiveAutocompleteSource,
+    ) {
         self.trace_autocomplete_state("update_ts:begin");
+        let Some(snapshot) = self.active_autocomplete_source_snapshot(source) else {
+            self.trace_autocomplete_state("update_ts:no_source");
+            return;
+        };
+        let prefix = snapshot.current_word_prefix();
         if self.autocomplete_active && self.autocomplete_mode != AutocompleteMode::TreeSitter {
-            let after_member_dot = cursor_after_python_member_dot(&self.editor);
-            let inside_call = cursor_inside_python_call_parens(&self.editor);
-            let empty_prefix = self.get_current_word_prefix().is_empty();
+            let after_member_dot = self.source_after_python_member_dot(source);
+            let inside_call = self.source_inside_python_call_parens(source);
             if self.autocomplete_mode == AutocompleteMode::TyContext
-                && (python_member_chain_too_deep(&self.editor)
+                && (self.source_member_chain_too_deep(source)
                     || (!after_member_dot && !inside_call)
-                    || (empty_prefix && !after_member_dot))
+                    || (prefix.is_empty() && !after_member_dot))
             {
                 self.close_autocomplete();
                 self.trace_autocomplete_state("update_ts:closed_non_ts_context");
@@ -239,33 +544,18 @@ impl App {
             self.trace_autocomplete_state("update_ts:skip_non_ts_active");
             return;
         }
-        let prefix = self.get_current_word_prefix();
         if prefix.is_empty() {
-            self.autocomplete_active = false;
-            self.autocomplete_options.clear();
-            self.autocomplete_mode = AutocompleteMode::TreeSitter;
-            self.autocomplete_rect = None;
-            self.autocomplete_anchor = None;
-            self.autocomplete_detail_popup = None;
-            self.autocomplete_detail_rect = None;
-            self.autocomplete_detail_placement = None;
-            self.autocomplete_detail_max_scroll = 0.0;
-            self.reset_autocomplete_detail_size();
-            crate::app::events::reset_autocomplete_frame_stats();
+            self.reset_autocomplete_for_empty_prefix();
             self.trace_autocomplete_state("update_ts:empty_prefix");
             return;
         }
 
-        let cursor = self.editor.cursor;
-        let prefix_start = cursor.saturating_sub(prefix.len());
-        self.autocomplete_options = tree_sitter_completion_options(
-            &self.highlighter.completions,
-            &prefix,
-            cursor,
-            prefix_start,
-            &self.file_extension,
-            "update_ts",
-        );
+        self.autocomplete_options = {
+            let editor = self.autocomplete_editor_for_source(source);
+            let completions = self.autocomplete_tree_sitter_completions_for_source(source);
+            let ctx = snapshot.editor_context(editor);
+            build_tree_sitter_autocomplete_options(&ctx, completions, "update_ts")
+        };
         if autocomplete_trace_enabled() {
             let first = self
                 .autocomplete_options
@@ -280,29 +570,22 @@ impl App {
                 first
             );
         }
-        if self.autocomplete_options.len() == 1 && self.autocomplete_options[0].0.word == prefix {
-            self.autocomplete_options.clear();
-            self.trace_autocomplete_state("update_ts:single_exact_clear");
-        }
-        let editor_text = self.editor.get_full_text();
-        enrich_python_tree_sitter_options(
-            &mut self.autocomplete_options,
-            &self.file_extension,
-            &editor_text,
-            self.editor.cursor,
-        );
-
         if !self.autocomplete_options.is_empty() {
             if !self.autocomplete_active {
                 self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_anchor = None;
+                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
+            } else if source.is_api_mock() {
+                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
             }
             self.autocomplete_scroll.current = 0.0;
             self.autocomplete_scroll.target = 0.0;
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
-            self.request_autocomplete_detail_for_index(0);
+            if source.is_api_mock() {
+                self.autocomplete_hovered_idx = None;
+            }
+            self.request_active_autocomplete_detail_for_index(0);
             self.trace_autocomplete_state("update_ts:active_end");
         } else {
             self.autocomplete_active = false;
@@ -360,19 +643,13 @@ impl App {
             .clone()
             .unwrap_or(selected_item.word.clone());
         let prefix_len = self.get_current_word_prefix().len();
-
-        for _ in 0..prefix_len {
-            if let Some((offset, len)) = self.editor.backspace() {
-                self.highlighter.shift_delete(offset, len);
-            }
-        }
-
-        let (del_info, ins_len) = self.editor.insert_str(&selected);
-        if let Some((offset, len)) = del_info {
-            self.highlighter.shift_delete(offset, len);
-        }
-        self.highlighter
-            .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
+        self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
+            ops: Vec::new(),
+            primary_start: None,
+            target_cursor: None,
+            fallback_insert: selected,
+            fallback_prefix_len: prefix_len,
+        });
 
         self.close_autocomplete();
         self.sync_after_autocomplete();
@@ -380,6 +657,22 @@ impl App {
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
+        }
+    }
+
+    fn apply_completion_plan_to_main_editor(&mut self, plan: CompletionApplyPlan) {
+        let applied = apply_completion_plan_to_editor(&mut self.editor, plan);
+        for edit in applied {
+            if edit.deleted_len > 0 {
+                self.highlighter.shift_delete(edit.offset, edit.deleted_len);
+            }
+            if !edit.inserted_text.is_empty() {
+                self.highlighter.shift_insert(
+                    edit.offset,
+                    edit.inserted_text.len(),
+                    Some(&edit.inserted_text),
+                );
+            }
         }
     }
 
@@ -408,19 +701,13 @@ impl App {
                 .unwrap_or(&item.word)
                 .to_string();
             let prefix_len = self.get_current_word_prefix().len();
-
-            for _ in 0..prefix_len {
-                if let Some((offset, len)) = self.editor.backspace() {
-                    self.highlighter.shift_delete(offset, len);
-                }
-            }
-
-            let (del_info, ins_len) = self.editor.insert_str(&selected);
-            if let Some((offset, len)) = del_info {
-                self.highlighter.shift_delete(offset, len);
-            }
-            self.highlighter
-                .shift_insert(self.editor.cursor - ins_len, ins_len, Some(&selected));
+            self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
+                ops: Vec::new(),
+                primary_start: None,
+                target_cursor: None,
+                fallback_insert: selected,
+                fallback_prefix_len: prefix_len,
+            });
 
             self.sync_after_autocomplete();
 
@@ -434,7 +721,7 @@ impl App {
         let text = self.editor.get_full_text();
         let main_start =
             crate::lsp::lsp_pos_to_offset(&text, main_edit.start_line, main_edit.start_col);
-        let mut target_cursor = main_start + main_edit.new_text.len();
+        let target_cursor = main_start + main_edit.new_text.len();
         let mut changes = item.additional_text_edits.clone();
         if self.autocomplete_mode == AutocompleteMode::TyImports {
             append_python_import_edits_to_block(
@@ -450,27 +737,19 @@ impl App {
         for change in &changes {
             let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
             let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
-            ops.push((start, end, change.new_text.clone()));
+            ops.push(CompletionTextEditOp {
+                start,
+                end,
+                new_text: change.new_text.clone(),
+            });
         }
-        ops.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-
-        for (start, end, new_text) in &ops {
-            if *start <= *end {
-                let (off, len, _) = self.editor.replace_range(*start, *end, new_text);
-                self.highlighter.shift_delete(off, len);
-                self.highlighter
-                    .shift_insert(off, new_text.len(), Some(new_text));
-            }
-        }
-
-        for (start, end, new_text) in &ops {
-            if *end <= main_start {
-                let delta = new_text.len() as isize - (*end - *start) as isize;
-                target_cursor = ((target_cursor as isize) + delta).max(0) as usize;
-            }
-        }
-        self.editor.cursor = target_cursor.min(self.editor.len());
-        self.editor.selection_anchor = None;
+        self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
+            ops,
+            primary_start: Some(main_start),
+            target_cursor: Some(target_cursor),
+            fallback_insert: item.insert_text.as_deref().unwrap_or(&item.word).to_string(),
+            fallback_prefix_len: self.get_current_word_prefix().len(),
+        });
         self.sync_after_autocomplete();
 
         if let Some(w) = self.window.as_ref() {
@@ -498,27 +777,12 @@ impl App {
         self.last_sent_version = self.editor.version;
     }
 
+    #[cfg(test)]
     pub(crate) fn python_member_dot_receiver_is_unavailable_self(&self) -> bool {
-        if self.file_extension != "py" {
-            return false;
-        }
-        let Some(receiver) = python_member_receiver_before_cursor(&self.editor) else {
-            return false;
-        };
-        if !matches!(receiver.as_str(), "self" | "cls") {
-            return false;
-        }
-        let cursor = self.editor.cursor.min(self.editor.len());
-        let lookup_cursor = if cursor > 0 && self.editor.byte_at(cursor - 1) == b'.' {
-            cursor - 1
-        } else {
-            cursor
-        };
-        !self.highlighter.completions.iter().any(|item| {
-            item.word == receiver
-                && item.kind == SymbolKind::Parameter
-                && lookup_cursor >= item.scope_start
-                && lookup_cursor <= item.scope_end
-        })
+        let source = ActiveAutocompleteSource::MainEditor;
+        self.active_autocomplete_source_snapshot(source)
+            .is_some_and(|snapshot| {
+                self.source_member_dot_receiver_is_unavailable_self(source, &snapshot)
+            })
     }
 }

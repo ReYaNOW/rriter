@@ -1,57 +1,5 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AutocompleteKeyAction {
-    None,
-    DismissAndContinue,
-    DismissAndConsume,
-    MoveDown,
-    MoveUp,
-    Apply,
-}
-
-fn autocomplete_key_action(physical_key: PhysicalKey) -> AutocompleteKeyAction {
-    match physical_key {
-        PhysicalKey::Code(KeyCode::Escape) => AutocompleteKeyAction::DismissAndConsume,
-        PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::ArrowRight) => {
-            AutocompleteKeyAction::DismissAndContinue
-        }
-        PhysicalKey::Code(KeyCode::ArrowDown) => AutocompleteKeyAction::MoveDown,
-        PhysicalKey::Code(KeyCode::ArrowUp) => AutocompleteKeyAction::MoveUp,
-        PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab) => {
-            AutocompleteKeyAction::Apply
-        }
-        _ => AutocompleteKeyAction::None,
-    }
-}
-
-fn autocomplete_next_index(current: usize, len: usize, reverse: bool, jump: bool) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    if jump && reverse {
-        return if current == 0 {
-            len - 1
-        } else if current < 5 {
-            0
-        } else {
-            current - 5
-        };
-    }
-    if jump {
-        return if current + 1 == len {
-            0
-        } else {
-            (current + 5).min(len - 1)
-        };
-    }
-    if reverse {
-        if current == 0 { len - 1 } else { current - 1 }
-    } else {
-        (current + 1) % len
-    }
-}
-
 fn sync_edit_line_range(
     edits: &[crate::highlighter::SyncEdit],
     line_offsets: &[usize],
@@ -172,69 +120,12 @@ impl App {
         }
 
         if self.autocomplete_active {
-            match autocomplete_key_action(physical_key) {
-                AutocompleteKeyAction::DismissAndContinue => {
-                    self.close_autocomplete();
-                    self.window.as_ref().unwrap().request_redraw();
-                }
-                AutocompleteKeyAction::DismissAndConsume => {
-                    self.close_autocomplete();
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-                AutocompleteKeyAction::MoveDown => {
-                    if !self.autocomplete_options.is_empty() {
-                        self.autocomplete_selected_idx = autocomplete_next_index(
-                            self.autocomplete_selected_idx,
-                            self.autocomplete_options.len(),
-                            false,
-                            ctrl,
-                        );
-                        self.autocomplete_hovered_idx = None;
-                        self.ensure_autocomplete_visible();
-                        self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
-                    }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-                AutocompleteKeyAction::MoveUp => {
-                    if !self.autocomplete_options.is_empty() {
-                        self.autocomplete_selected_idx = autocomplete_next_index(
-                            self.autocomplete_selected_idx,
-                            self.autocomplete_options.len(),
-                            true,
-                            ctrl,
-                        );
-                        self.autocomplete_hovered_idx = None;
-                        self.ensure_autocomplete_visible();
-                        self.request_autocomplete_detail_for_index(self.autocomplete_selected_idx);
-                    }
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-                AutocompleteKeyAction::Apply => {
-                    if !self.autocomplete_options.is_empty() {
-                        self.apply_autocomplete();
-                    }
-                    return;
-                }
-                AutocompleteKeyAction::None => {}
+            match self.handle_active_autocomplete_key(physical_key, ctrl) {
+                AutocompletePopupKeyResult::Consumed => return,
+                AutocompletePopupKeyResult::Continue | AutocompletePopupKeyResult::NotHandled => {}
             }
         }
-        if self.autocomplete_mode == AutocompleteMode::TyContext
-            && (self.autocomplete_pending_request_id.is_some()
-                || self.autocomplete_signature_request_id.is_some())
-            && matches!(
-                physical_key,
-                PhysicalKey::Code(KeyCode::Enter | KeyCode::Tab | KeyCode::NumpadEnter)
-            )
-            && (cursor_after_python_member_dot(&self.editor)
-                || cursor_inside_python_call_parens(&self.editor))
-        {
-            self.autocomplete_apply_pending_response = true;
-            if let Some(w) = self.window.as_ref() {
-                w.request_redraw();
-            }
+        if self.mark_pending_autocomplete_apply_for_key(physical_key) {
             return;
         }
 
@@ -1053,6 +944,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index};
 
     #[test]
     fn autocomplete_key_action_maps_navigation_and_apply_keys() {

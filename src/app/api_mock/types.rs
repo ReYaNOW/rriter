@@ -300,7 +300,12 @@ pub fn default_contract_from_route(
     let mut contract = ApiMockPythonContract::default();
     contract.path_params.fields = route.path_params.iter().map(field_from_param).collect();
     for name in api_mock_path_param_names(&route.path) {
-        if contract.path_params.fields.iter().any(|field| field.name == name) {
+        if contract
+            .path_params
+            .fields
+            .iter()
+            .any(|field| field.name == name)
+        {
             continue;
         }
         contract.path_params.fields.push(ApiMockContractField::new(
@@ -321,7 +326,10 @@ pub fn default_contract_from_route(
         contract.body.fields.push(ApiMockContractField::new(
             "raw",
             ApiMockContractFieldKind::Any,
-            route.request_body.as_ref().is_some_and(|body| body.required),
+            route
+                .request_body
+                .as_ref()
+                .is_some_and(|body| body.required),
         ));
         contract.body.enabled = true;
     }
@@ -700,7 +708,10 @@ mod tests {
 
     #[test]
     fn default_python_body_returns_response_class() {
-        assert_eq!(default_api_mock_python_body(), "    return Response(ok=True)");
+        assert_eq!(
+            default_api_mock_python_body(),
+            "    return Response(ok=True)"
+        );
         assert!(is_legacy_api_mock_python_body(
             "return json_response({\"ok\": True})"
         ));

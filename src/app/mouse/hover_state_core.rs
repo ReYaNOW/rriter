@@ -542,7 +542,6 @@ impl HoverState {
             false,
         )
     }
-
 }
 
 pub fn hover_source_line_y_band(anchor_y: f32, scale: f32) -> (f32, f32) {

@@ -373,7 +373,10 @@ fn multipart_disposition_value(headers: &str, key: &str) -> Option<String> {
         }
         for part in line.split(';').skip(1) {
             let part = part.trim();
-            let Some(value) = part.strip_prefix(key).and_then(|rest| rest.strip_prefix('=')) else {
+            let Some(value) = part
+                .strip_prefix(key)
+                .and_then(|rest| rest.strip_prefix('='))
+            else {
                 continue;
             };
             return Some(value.trim_matches('"').to_string());
@@ -431,7 +434,12 @@ fn typed_value_from_strings(field: &ApiMockContractField, values: &[String]) -> 
         return Value::Array(
             values
                 .iter()
-                .map(|value| typed_scalar_value(field.item_kind.unwrap_or(ApiMockContractFieldKind::String), value))
+                .map(|value| {
+                    typed_scalar_value(
+                        field.item_kind.unwrap_or(ApiMockContractFieldKind::String),
+                        value,
+                    )
+                })
                 .collect(),
         );
     }

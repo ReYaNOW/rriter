@@ -935,6 +935,13 @@ impl ApplicationHandler for App {
                             };
                             let (box_w, box_h) =
                                 self.stable_autocomplete_detail_size(natural_w, natural_h, max_h);
+                            let detail_byte_offset =
+                                self.active_autocomplete_detail_byte_offset();
+                            let detail_phys_line = self
+                                .active_autocomplete_detail_editor()
+                                .line_offsets
+                                .partition_point(|&o| o <= detail_byte_offset)
+                                .saturating_sub(1);
                             let (popup_x, popup_y, line_top_y) = {
                                 let r = self.renderer.as_mut().unwrap();
                                 let gap = 16.0 * r.scale_factor;
@@ -962,13 +969,9 @@ impl ApplicationHandler for App {
                                     2 => (clamp_x(rx), ry + rh + gap),
                                     _ => (clamp_x(rx), (ry - gap - box_h).max(margin)),
                                 };
-                                let phys_line = self
-                                    .editor
-                                    .line_offsets
-                                    .partition_point(|&o| o <= self.editor.cursor)
-                                    .saturating_sub(1);
                                 let vis_line_idx =
-                                    r.phys_to_visual.get(phys_line).copied().unwrap_or(0) as f32;
+                                    r.phys_to_visual.get(detail_phys_line).copied().unwrap_or(0)
+                                        as f32;
                                 (
                                     popup_x,
                                     popup_y,
@@ -978,28 +981,36 @@ impl ApplicationHandler for App {
                             if let Some(start) = perf_layout_start {
                                 perf_layout_ms = start.elapsed().as_secs_f64() * 1000.0;
                             }
-                            popup.byte_offset = self.editor.cursor;
+                            popup.byte_offset = detail_byte_offset;
                             popup.anchor_x = popup_x;
                             popup.anchor_y = popup_y;
                             popup.offset_x = Some(0.0);
                             popup.offset_y = Some(popup_y - line_top_y);
                             popup.anim_progress = detail_anim_progress;
                             let selection = self.autocomplete_detail_selection();
+                            let use_api_detail_editor =
+                                self.api_mock_completion_focus().is_some();
+                            let detail_editor = if use_api_detail_editor {
+                                &self.ide_panel.api.input_editor
+                            } else {
+                                &self.editor
+                            };
+                            let renderer = self.renderer.as_mut().unwrap();
+                            let ui_registry = &mut self.ui_registry;
                             let perf_detail_draw_start = perf_enabled.then(Instant::now);
-                            let (bx, by, bw, bh, max_scroll) =
-                                self.renderer.as_mut().unwrap().draw_hover_popup(
-                                    &mut popup,
-                                    None,
-                                    selection,
-                                    &self.editor,
-                                    &mut self.ui_registry,
-                                    mx,
-                                    my,
-                                    render_scroll_y,
-                                    &mut wants_pointer,
-                                    detail_opacity,
-                                    Some((box_w, box_h)),
-                                );
+                            let (bx, by, bw, bh, max_scroll) = renderer.draw_hover_popup(
+                                &mut popup,
+                                None,
+                                selection,
+                                detail_editor,
+                                ui_registry,
+                                mx,
+                                my,
+                                render_scroll_y,
+                                &mut wants_pointer,
+                                detail_opacity,
+                                Some((box_w, box_h)),
+                            );
                             if let Some(start) = perf_detail_draw_start {
                                 perf_detail_draw_ms = start.elapsed().as_secs_f64() * 1000.0;
                             }

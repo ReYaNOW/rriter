@@ -769,7 +769,7 @@ fn autocomplete_detail_request_replaces_stale_popup_with_placeholder() {
         layout_cache: None,
     });
 
-    app.request_autocomplete_detail_for_index(0);
+    app.request_active_autocomplete_detail_for_index(0);
 
     let popup = app.autocomplete_detail_popup.as_ref().unwrap();
     assert_eq!(popup.text, "Unknown");

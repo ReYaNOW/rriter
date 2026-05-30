@@ -129,11 +129,7 @@ impl ApiMockVirtualSource {
         }
     }
 
-    pub fn contract_source_span_to_edit(
-        &self,
-        start: usize,
-        end: usize,
-    ) -> Option<(usize, usize)> {
+    pub fn contract_source_span_to_edit(&self, start: usize, end: usize) -> Option<(usize, usize)> {
         let start = self.source_offset_to_edit(ApiMockSourcePart::Contract, start)?;
         let end = self.source_offset_to_edit(ApiMockSourcePart::Contract, end)?;
         (start < end).then_some((start, end))
@@ -310,9 +306,7 @@ fn map_ty_location_to_edit(
         .map(|offset| (ApiMockSourcePart::Body, offset));
     let (part, offset) = contract.or(prelude).or(body)?;
     let edit_text = match part {
-        ApiMockSourcePart::Contract => {
-            virtual_source.contract_text.as_str()
-        }
+        ApiMockSourcePart::Contract => virtual_source.contract_text.as_str(),
         ApiMockSourcePart::Prelude => script.prelude.as_str(),
         ApiMockSourcePart::Signature => return None,
         ApiMockSourcePart::Body => script.body.as_str(),
@@ -445,7 +439,10 @@ fn hidden_contract_line(line: &str) -> String {
     let tail = &rest[colon_idx..];
     if header.is_empty() {
         format!("{indent}class Response(BaseModel){tail}")
-    } else if let Some(args) = header.strip_prefix('(').and_then(|text| text.strip_suffix(')')) {
+    } else if let Some(args) = header
+        .strip_prefix('(')
+        .and_then(|text| text.strip_suffix(')'))
+    {
         if args.trim().is_empty() {
             format!("{indent}class Response(BaseModel){tail}")
         } else {
@@ -482,7 +479,8 @@ pub fn build_api_mock_virtual_source(
     out.push_str(&api_mock_type_source_prefix(method, path));
     out.push_str("# Editable contract classes\n");
     let contract_start = out.len();
-    let (hidden_contract, contract_lines) = hidden_contract_source(&contract_source, contract_start);
+    let (hidden_contract, contract_lines) =
+        hidden_contract_source(&contract_source, contract_start);
     out.push_str(&hidden_contract);
     let contract_end = out.len();
     if !contract_source.ends_with('\n') {

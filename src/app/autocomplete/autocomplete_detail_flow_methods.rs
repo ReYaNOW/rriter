@@ -1,3 +1,23 @@
+struct AutocompleteDetailRequestSource {
+    path: PathBuf,
+    file_extension: String,
+    text: String,
+    cursor: usize,
+    line_offsets: Vec<usize>,
+    context_key: String,
+    api_mock_base_version: Option<i32>,
+}
+
+fn line_offsets_for_text(text: &str) -> Vec<usize> {
+    let mut line_offsets = vec![0usize];
+    for (idx, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            line_offsets.push(idx + 1);
+        }
+    }
+    line_offsets
+}
+
 impl App {
     pub(crate) fn reset_autocomplete_detail_size(&mut self) {
         self.autocomplete_detail_min_width = 0.0;
@@ -151,6 +171,18 @@ impl App {
         }
     }
 
+    pub(crate) fn active_autocomplete_detail_editor(&self) -> &Editor {
+        if self.api_mock_completion_focus().is_some() {
+            &self.ide_panel.api.input_editor
+        } else {
+            &self.editor
+        }
+    }
+
+    pub(crate) fn active_autocomplete_detail_byte_offset(&self) -> usize {
+        self.active_autocomplete_detail_editor().cursor
+    }
+
     fn autocomplete_source_function_detail(
         &self,
         item: &AutocompleteItem,
@@ -176,11 +208,9 @@ impl App {
         let module_path = autocomplete_detail_module_path(item)?;
         let path = autocomplete_module_source_path(module_path, &self.ide_workspaces)?;
         let source = std::fs::read_to_string(&path).ok()?;
-        let source_module = crate::app::events::module_path_from_definition_path(
-            &path,
-            &self.ide_workspaces,
-        )
-        .or_else(|| Some(module_path.to_string()));
+        let source_module =
+            crate::app::events::module_path_from_definition_path(&path, &self.ide_workspaces)
+                .or_else(|| Some(module_path.to_string()));
         let detail = crate::app::events::source_function_signature_from_text(
             &source,
             &item.word,
@@ -319,7 +349,10 @@ impl App {
         });
         let mut detail_text = detail_result.text;
         if let Some(module) = module_path.as_deref()
-            && detail_text.lines().map(str::trim).find(|line| !line.is_empty())
+            && detail_text
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
                 == Some(module)
         {
             let stripped = detail_text
@@ -349,7 +382,7 @@ impl App {
             spans,
             line_kinds,
             inline_code_ranges,
-            byte_offset: self.editor.cursor,
+            byte_offset: self.active_autocomplete_detail_byte_offset(),
             anchor_x: 0.0,
             anchor_y: 0.0,
             offset_x: Some(0.0),
@@ -377,7 +410,7 @@ impl App {
             spans: Vec::new(),
             line_kinds: vec![crate::lsp::HoverLineKindPublic::Text],
             inline_code_ranges: Vec::new(),
-            byte_offset: self.editor.cursor,
+            byte_offset: self.active_autocomplete_detail_byte_offset(),
             anchor_x: 0.0,
             anchor_y: 0.0,
             offset_x: Some(0.0),
@@ -402,6 +435,59 @@ impl App {
             prefix,
             AutocompleteMode::TreeSitter,
         )
+    }
+
+    fn active_autocomplete_detail_request_source(&self) -> Option<AutocompleteDetailRequestSource> {
+        if let Some(source @ ActiveAutocompleteSource::ApiMock {
+            spec_id,
+            route_idx,
+            part,
+        }) = self.active_api_mock_autocomplete_source()
+        {
+            let snapshot = self.active_autocomplete_source_snapshot(source)?;
+            let prefix = snapshot.current_word_prefix();
+            let context_key = format!(
+                "api-mock:{}:{route_idx}:{part:?}:{}",
+                spec_id.0,
+                ty_autocomplete_context_key(
+                    &snapshot.analysis_text,
+                    &snapshot.line_offsets,
+                    snapshot.analysis_cursor,
+                    &prefix,
+                    AutocompleteMode::TreeSitter,
+                )
+            );
+            return Some(AutocompleteDetailRequestSource {
+                path: snapshot.path?,
+                file_extension: snapshot.file_extension,
+                text: snapshot.analysis_text,
+                cursor: snapshot.analysis_cursor,
+                line_offsets: snapshot.line_offsets,
+                context_key,
+                api_mock_base_version: Some(snapshot.version),
+            });
+        }
+
+        let path = self.file_path.clone()?;
+        let text = self.editor.get_full_text();
+        let prefix = self.get_current_word_prefix();
+        Some(AutocompleteDetailRequestSource {
+            path,
+            file_extension: self.file_extension.clone(),
+            cursor: self.editor.cursor,
+            line_offsets: self.editor.line_offsets.clone(),
+            context_key: self.current_autocomplete_detail_context_key(&text, &prefix),
+            text,
+            api_mock_base_version: None,
+        })
+    }
+
+    fn active_autocomplete_member_dot_context(&self) -> bool {
+        if let Some(source) = self.active_api_mock_autocomplete_source() {
+            self.source_after_python_member_dot(source)
+        } else {
+            cursor_after_python_member_dot(&self.editor)
+        }
     }
 
     fn autocomplete_detail_wanted_words(&self) -> FxHashSet<String> {
@@ -434,7 +520,7 @@ impl App {
         let Some(cached) = cache.items.get(&target).cloned() else {
             return false;
         };
-        let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        let member_dot_context = self.active_autocomplete_member_dot_context();
         if let Some((item, _)) = self.autocomplete_options.get_mut(idx) {
             apply_autocomplete_detail_cache_item(item, &cached, member_dot_context);
         }
@@ -477,7 +563,7 @@ impl App {
         self.autocomplete_detail_context_key = None;
     }
 
-    pub fn request_autocomplete_detail_for_index(&mut self, idx: usize) {
+    pub fn request_active_autocomplete_detail_for_index(&mut self, idx: usize) {
         self.trace_autocomplete_state("detail_request:begin");
         if self.autocomplete_mode != AutocompleteMode::TreeSitter {
             self.refresh_autocomplete_detail_popup();
@@ -494,25 +580,29 @@ impl App {
             self.trace_autocomplete_state("detail_request:local_detail");
             return;
         }
-        let Some(path) = self.file_path.clone() else {
+        let Some(source) = self.active_autocomplete_detail_request_source() else {
             self.set_autocomplete_detail_placeholder("Unknown");
-            self.trace_autocomplete_state("detail_request:no_path");
+            self.trace_autocomplete_state("detail_request:no_source");
             return;
         };
-        let text = self.editor.get_full_text();
-        let prefix = self.get_current_word_prefix();
-        let context_key = self.current_autocomplete_detail_context_key(&text, &prefix);
-        if self.apply_cached_autocomplete_detail_for_index(idx, &path, &context_key) {
+        if self.apply_cached_autocomplete_detail_for_index(idx, &source.path, &source.context_key) {
             self.trace_autocomplete_state("detail_request:cache_hit");
             return;
         }
         self.set_autocomplete_detail_placeholder("Loading...");
         if self.autocomplete_detail_word.as_deref() == Some(target_word.as_str())
             && self.autocomplete_detail_request_id.is_some()
-            && self.autocomplete_detail_request_path.as_ref() == Some(&path)
-            && self.autocomplete_detail_context_key.as_deref() == Some(context_key.as_str())
+            && self.autocomplete_detail_request_path.as_ref() == Some(&source.path)
+            && self.autocomplete_detail_context_key.as_deref() == Some(source.context_key.as_str())
         {
             self.trace_autocomplete_state("detail_request:dedupe");
+            return;
+        }
+        if let Some(base_version) = source.api_mock_base_version
+            && !self.notify_api_mock_lsp_source(&source.path, &source.text, base_version)
+        {
+            self.set_autocomplete_detail_placeholder("Unknown");
+            self.trace_autocomplete_state("detail_request:notify_failed");
             return;
         }
         let Some(lsp) = self.lsp.as_mut() else {
@@ -521,12 +611,14 @@ impl App {
             return;
         };
         let (line, col) =
-            crate::lsp::offset_to_lsp_pos(&text, self.editor.cursor, &self.editor.line_offsets);
-        if let Some(id) = lsp.request_ty_completion(&path, &self.file_extension, line, col, None) {
+            crate::lsp::offset_to_lsp_pos(&source.text, source.cursor, &source.line_offsets);
+        if let Some(id) =
+            lsp.request_ty_completion(&source.path, &source.file_extension, line, col, None)
+        {
             self.autocomplete_detail_request_id = Some(id);
             self.autocomplete_detail_word = Some(target_word);
-            self.autocomplete_detail_request_path = Some(path);
-            self.autocomplete_detail_context_key = Some(context_key);
+            self.autocomplete_detail_request_path = Some(source.path);
+            self.autocomplete_detail_context_key = Some(source.context_key);
             self.trace_autocomplete_state("detail_request:sent");
         }
     }
@@ -555,7 +647,7 @@ impl App {
                 .or_insert_with(|| autocomplete_detail_cache_item(item));
         }
         let mut target_changed = false;
-        let member_dot_context = cursor_after_python_member_dot(&self.editor);
+        let member_dot_context = self.active_autocomplete_member_dot_context();
         for (item, _) in &mut self.autocomplete_options {
             let Some(cached) = details.get(&item.word) else {
                 continue;
@@ -571,5 +663,4 @@ impl App {
         self.finish_autocomplete_detail_request();
         self.trace_autocomplete_state("merge_detail:end");
     }
-
 }

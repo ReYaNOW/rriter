@@ -5,8 +5,9 @@ BINARY_NAME = rriter
 
 # Базовые флаги оптимизации под 5700X3D + Быстрый линковщик LLD
 COMMON_RUSTFLAGS = -C target-cpu=native -C llvm-args=-fp-contract=fast -C link-arg=-fuse-ld=lld
-BUILD_STD = -Z build-std=core,alloc,std,panic_abort
+BUILD_STD = -Z build-std=core,alloc,std,panic_abort,test
 TARGET = x86_64-unknown-linux-gnu
+CODEX_ENV = HOME=/home/reyan RUSTUP_HOME=/home/reyan/.rustup CARGO_HOME=/home/reyan/.cargo
 
 # Настройки для быстрой сборки (DEBUG=2 дает трейсбеки, PANIC=abort работает с RUST_BACKTRACE)
 FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
@@ -18,9 +19,9 @@ MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C lto=fat -C symbol-mangling-version=v0 -C 
 TEST_FILTER ?=
 TEST ?=
 TEST_THREADS ?= 1
-BUILD_STD_TEST = -Z build-std=core,alloc,std,panic_abort,test
+BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max test test-one test-list test-hunt test-time clean
+.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time clean
 
 all: max
 
@@ -65,6 +66,10 @@ bloat-max:
 	--bin $(BINARY_NAME) \
 	--crates \
 	-n 40
+
+codex_test:
+	@$(CODEX_ENV) $(MAKE) test
+	@$(CODEX_ENV) $(MAKE) fast
 	
 # 3. Команда TEST
 # Главное: флаги идентичны команде 'fast', поэтому пересборки не будет.

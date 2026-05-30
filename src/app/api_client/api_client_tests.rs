@@ -8,6 +8,16 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[test]
+    fn api_mock_virtual_path_is_unique_per_spec_and_route() {
+        let a = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 0);
+        let b = crate::app::App::api_mock_virtual_path_for(ApiSpecId(2), 0);
+        let c = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 1);
+
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+    }
+
     fn sample_spec() -> Value {
         serde_json::json!({
             "openapi": "3.1.0",

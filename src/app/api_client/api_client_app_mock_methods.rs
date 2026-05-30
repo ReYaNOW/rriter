@@ -1,19 +1,33 @@
+#[cfg(test)]
 fn api_mock_hover_content_y_at_point(
     my: f32,
     top_y: f32,
     scroll_y: f32,
     line_h: f32,
 ) -> Option<f32> {
-    if line_h <= 0.0 {
-        return None;
-    }
-    let content_y = my - top_y + scroll_y;
-    if content_y < 0.0 {
-        return None;
-    }
-    let line_top_y = (content_y / line_h).floor() * line_h;
-    crate::app::mouse::hover_content_y_in_line_hitbox(content_y, line_top_y, line_h)
-        .then_some(content_y)
+    crate::app::mouse::embedded_editor_hover_content_y_at_point(my, top_y, scroll_y, line_h)
+}
+
+fn api_mock_import_text(text: &str) -> Option<&str> {
+    let text = text.trim_matches(|c| c == '\n' || c == '\r');
+    (text.starts_with("import ") || text.starts_with("from ")).then_some(text)
+}
+
+fn api_mock_lsp_edit_to_input_op(
+    virtual_source: &crate::app::api_mock::ty_check::ApiMockVirtualSource,
+    part: ApiMockSourcePart,
+    source: &str,
+    edit: &crate::lsp::TextChange,
+) -> Option<crate::app::CompletionTextEditOp> {
+    let start = crate::lsp::lsp_pos_to_offset(source, edit.start_line, edit.start_col);
+    let end = crate::lsp::lsp_pos_to_offset(source, edit.end_line, edit.end_col);
+    let start = virtual_source.source_offset_to_edit(part, start)?;
+    let end = virtual_source.source_offset_to_edit(part, end)?;
+    (start <= end).then(|| crate::app::CompletionTextEditOp {
+        start,
+        end,
+        new_text: edit.new_text.clone(),
+    })
 }
 
 impl crate::app::App {
@@ -38,8 +52,10 @@ impl crate::app::App {
         if self.ide_panel.api.mock_python_version_picker_open {
             let rect = api_python_version_list_rect(layout, s);
             if api_point_in_rect(mx, my, rect) {
-                let max_scroll =
-                    api_python_version_list_max_scroll(self.ide_panel.api.mock_python_versions.len(), s);
+                let max_scroll = api_python_version_list_max_scroll(
+                    self.ide_panel.api.mock_python_versions.len(),
+                    s,
+                );
                 self.ide_panel.api.mock_python_versions_scroll.anim_speed = 7.0;
                 self.ide_panel.api.mock_python_versions_scroll.scroll_by(dy);
                 self.ide_panel
@@ -58,7 +74,10 @@ impl crate::app::App {
                     s,
                 );
                 self.ide_panel.api.mock_python_install_log_scroll.anim_speed = 7.0;
-                self.ide_panel.api.mock_python_install_log_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .mock_python_install_log_scroll
+                    .scroll_by(dy);
                 self.ide_panel
                     .api
                     .mock_python_install_log_scroll
@@ -103,12 +122,18 @@ impl crate::app::App {
             crate::app::api_mock::types::ApiMockServerStatus::Starting;
         push_api_mock_server_log(
             &mut self.ide_panel.api,
-            format!("server start requested {}:{}", snapshot.bind_host, snapshot.port),
+            format!(
+                "server start requested {}:{}",
+                snapshot.bind_host, snapshot.port
+            ),
         );
         if let Err(err) = start_api_mock_server(snapshot) {
             self.ide_panel.api.mock.server_status =
                 crate::app::api_mock::types::ApiMockServerStatus::Failed(err.clone());
-            push_api_mock_server_log(&mut self.ide_panel.api, format!("server start failed: {err}"));
+            push_api_mock_server_log(
+                &mut self.ide_panel.api,
+                format!("server start failed: {err}"),
+            );
         }
     }
 
@@ -246,8 +271,8 @@ impl crate::app::App {
                 (item.source_key == source_key
                     && item.method == route.method
                     && item.path == route.path)
-                .then_some(item.python.as_ref().filter(|script| script.enabled))
-                .flatten()
+                    .then_some(item.python.as_ref().filter(|script| script.enabled))
+                    .flatten()
             })
     }
 
@@ -282,8 +307,8 @@ impl crate::app::App {
                 (item.source_key == source_key
                     && item.method == route.method
                     && item.path == route.path)
-                .then_some(item.python.as_mut().filter(|script| script.enabled))
-                .flatten()
+                    .then_some(item.python.as_mut().filter(|script| script.enabled))
+                    .flatten()
             })
     }
 
@@ -302,9 +327,7 @@ impl crate::app::App {
 
     fn api_mock_editor_key_for_focus(focus: &ApiFocus) -> Option<(usize, ApiMockSourcePart)> {
         match focus {
-            ApiFocus::MockContract { route_idx } => {
-                Some((*route_idx, ApiMockSourcePart::Contract))
-            }
+            ApiFocus::MockContract { route_idx } => Some((*route_idx, ApiMockSourcePart::Contract)),
             ApiFocus::MockPrelude { route_idx } => Some((*route_idx, ApiMockSourcePart::Prelude)),
             ApiFocus::MockBody { route_idx } => Some((*route_idx, ApiMockSourcePart::Body)),
             _ => None,
@@ -325,7 +348,7 @@ impl crate::app::App {
         self.ide_panel.api.mock_python_editors.insert(key, editor);
     }
 
-    fn api_mock_route_context(
+    pub(crate) fn api_mock_route_context(
         &self,
         route_idx: usize,
     ) -> Option<(ApiMethod, String, ApiRouteRow, ApiSpecModel)> {
@@ -336,7 +359,7 @@ impl crate::app::App {
         Some((route.method, route.path.clone(), route, model))
     }
 
-    fn api_mock_script_for_tools(
+    pub(crate) fn api_mock_script_for_tools(
         &self,
         route_idx: usize,
     ) -> Option<crate::app::api_mock::types::ApiMockPythonScript> {
@@ -379,23 +402,19 @@ impl crate::app::App {
             self.ide_panel.api.input_editor.get_full_text()
         } else {
             match part {
-                ApiMockSourcePart::Contract => {
-                    self.api_mock_contract_source_for_route(route_idx).unwrap_or_default()
-                }
+                ApiMockSourcePart::Contract => self
+                    .api_mock_contract_source_for_route(route_idx)
+                    .unwrap_or_default(),
                 ApiMockSourcePart::Prelude => script.prelude.clone(),
-                ApiMockSourcePart::Signature => {
-                    self.api_mock_signature_for_route(route_idx).unwrap_or_default()
-                }
+                ApiMockSourcePart::Signature => self
+                    .api_mock_signature_for_route(route_idx)
+                    .unwrap_or_default(),
                 ApiMockSourcePart::Body => script.body.clone(),
             }
         }
     }
 
-    fn ensure_api_mock_hover_editor(
-        &mut self,
-        route_idx: usize,
-        part: ApiMockSourcePart,
-    ) -> bool {
+    fn ensure_api_mock_hover_editor(&mut self, route_idx: usize, part: ApiMockSourcePart) -> bool {
         if self.api_mock_python_focus_target() == Some((route_idx, part)) {
             return true;
         }
@@ -413,23 +432,28 @@ impl crate::app::App {
         true
     }
 
-    fn api_mock_hover_editor(
-        &self,
-        route_idx: usize,
-        part: ApiMockSourcePart,
-    ) -> Option<&Editor> {
+    fn api_mock_hover_editor(&self, route_idx: usize, part: ApiMockSourcePart) -> Option<&Editor> {
         if self.api_mock_python_focus_target() == Some((route_idx, part)) {
             Some(&self.ide_panel.api.input_editor)
         } else {
-            self.ide_panel.api.mock_python_editors.get(&(route_idx, part))
+            self.ide_panel
+                .api
+                .mock_python_editors
+                .get(&(route_idx, part))
         }
     }
 
-    fn api_mock_virtual_path(route_idx: usize) -> PathBuf {
-        std::env::temp_dir().join(format!("rriter_api_mock_route_{route_idx}.py"))
+    pub(crate) fn api_mock_virtual_path_for(
+        spec_id: crate::app::api_client::ApiSpecId,
+        route_idx: usize,
+    ) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rriter_api_mock_spec_{}_route_{}.py",
+            spec_id.0, route_idx
+        ))
     }
 
-    fn notify_api_mock_lsp_source(
+    pub(crate) fn notify_api_mock_lsp_source(
         &mut self,
         virtual_path: &PathBuf,
         source: &str,
@@ -439,9 +463,8 @@ impl crate::app::App {
             .ide_panel
             .api
             .mock_lsp_opened
-            .as_ref()
-            .filter(|(path, _)| path == virtual_path)
-            .map(|(_, opened_version)| (true, base_version.max(opened_version.saturating_add(1))))
+            .get(virtual_path)
+            .map(|opened_version| (true, base_version.max(opened_version.saturating_add(1))))
             .unwrap_or((false, base_version));
         let Some(lsp) = self.lsp.as_mut() else {
             return false;
@@ -451,7 +474,10 @@ impl crate::app::App {
         } else {
             lsp.notify_open(virtual_path, "py", source, version);
         }
-        self.ide_panel.api.mock_lsp_opened = Some((virtual_path.clone(), version));
+        self.ide_panel
+            .api
+            .mock_lsp_opened
+            .insert(virtual_path.clone(), version);
         true
     }
 
@@ -468,14 +494,9 @@ impl crate::app::App {
         }
     }
 
-    fn api_mock_ui_for_part(
-        route_idx: usize,
-        part: ApiMockSourcePart,
-    ) -> crate::ui_system::UiId {
+    fn api_mock_ui_for_part(route_idx: usize, part: ApiMockSourcePart) -> crate::ui_system::UiId {
         match part {
-            ApiMockSourcePart::Contract => {
-                crate::ui_system::UiId::ApiMockContractInput(route_idx)
-            }
+            ApiMockSourcePart::Contract => crate::ui_system::UiId::ApiMockContractInput(route_idx),
             ApiMockSourcePart::Prelude => crate::ui_system::UiId::ApiMockPreludeInput(route_idx),
             ApiMockSourcePart::Signature => {
                 crate::ui_system::UiId::ApiMockSignatureInput(route_idx)
@@ -544,25 +565,14 @@ impl crate::app::App {
         scale: f32,
         f: impl FnOnce(&mut crate::renderer::Renderer) -> R,
     ) -> R {
-        let old_line_height = renderer.line_height;
-        let old_left_padding = renderer.left_padding;
-        let old_last_scroll_x = renderer.last_scroll_x;
-        let old_phys_to_visual = std::mem::take(&mut renderer.phys_to_visual);
-        let old_inlay_hints = std::mem::take(&mut renderer.current_python_inlay_hints);
-
-        renderer.line_height = api_text_area_line_height(scale);
-        renderer.left_padding = left_x;
-        renderer.last_scroll_x = scroll_x;
-        renderer.phys_to_visual.extend(0..editor.line_offsets.len());
-
-        let out = f(renderer);
-
-        renderer.line_height = old_line_height;
-        renderer.left_padding = old_left_padding;
-        renderer.last_scroll_x = old_last_scroll_x;
-        renderer.phys_to_visual = old_phys_to_visual;
-        renderer.current_python_inlay_hints = old_inlay_hints;
-        out
+        crate::app::mouse::with_embedded_editor_hover_renderer_context(
+            renderer,
+            editor,
+            left_x,
+            scroll_x,
+            api_text_area_line_height(scale),
+            f,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -577,18 +587,17 @@ impl crate::app::App {
         scroll_y: f32,
         scroll_x: f32,
     ) -> Option<usize> {
-        let content_y =
-            api_mock_hover_content_y_at_point(my, top_y, scroll_y, api_text_area_line_height(scale))?;
-        let byte = Self::with_api_mock_hover_renderer_context(
-            renderer,
+        crate::app::mouse::embedded_editor_hover_byte_at_point(
             editor,
+            renderer,
             left_x,
+            top_y,
+            mx,
+            my,
+            api_text_area_line_height(scale),
+            scroll_y,
             scroll_x,
-            scale,
-            |renderer| renderer.get_byte_at_xy(editor, mx, content_y),
-        );
-
-        crate::app::mouse::normalize_hover_byte(editor, byte)
+        )
     }
 
     fn api_mock_hover_anchor_for_target(
@@ -652,7 +661,12 @@ impl crate::app::App {
                 scale,
                 scroll_y,
                 scroll_x,
-                |prefix| prefix.chars().map(|ch| renderer.char_advance(ch)).sum::<f32>(),
+                |prefix| {
+                    prefix
+                        .chars()
+                        .map(|ch| renderer.char_advance(ch))
+                        .sum::<f32>()
+                },
             ) else {
                 continue;
             };
@@ -943,6 +957,26 @@ impl crate::app::App {
         out
     }
 
+    pub(crate) fn refresh_api_mock_highlight_cache_for_spans(
+        &mut self,
+        route_idx: usize,
+        spans: &[ColorSpan],
+        virtual_source: &crate::app::api_mock::ty_check::ApiMockVirtualSource,
+    ) {
+        for cache_part in [
+            ApiMockSourcePart::Contract,
+            ApiMockSourcePart::Prelude,
+            ApiMockSourcePart::Signature,
+            ApiMockSourcePart::Body,
+        ] {
+            let edit_spans = Self::map_api_mock_spans_to_edit(spans, virtual_source, cache_part);
+            self.ide_panel
+                .api
+                .mock_highlight_cache
+                .insert((route_idx, cache_part), edit_spans);
+        }
+    }
+
     fn api_mock_virtual_hover_source(
         &self,
         target: &ApiMockHoverTarget,
@@ -999,7 +1033,10 @@ impl crate::app::App {
             }
         }
         let (line, col) = crate::lsp::offset_to_lsp_pos(&source, source_cursor, &line_offsets);
-        let virtual_path = Self::api_mock_virtual_path(target.route_idx);
+        let Some(spec_id) = self.active_api_tab().map(|(meta, _)| meta.spec_id) else {
+            return false;
+        };
+        let virtual_path = Self::api_mock_virtual_path_for(spec_id, target.route_idx);
         let base_version = target.version.min(i32::MAX as u64) as i32;
         if !self.notify_api_mock_lsp_source(&virtual_path, &source, base_version) {
             return false;
@@ -1080,11 +1117,7 @@ impl crate::app::App {
         } else {
             0
         };
-        let source_cursor = virtual_source.edit_offset_to_source(
-            part,
-            &edit_text,
-            edit_cursor,
-        );
+        let source_cursor = virtual_source.edit_offset_to_source(part, &edit_text, edit_cursor);
         self.ide_panel.api.mock_highlight_spans = self
             .ide_panel
             .api
@@ -1099,28 +1132,14 @@ impl crate::app::App {
             .api
             .mock_highlighter
             .reset(version, source, "py".to_string(), source_cursor);
-        if self.ide_panel.api.mock_highlighter.sync_highlight_after_edit(
-            version,
-            None,
-            None,
-            None,
-            None,
-            Duration::from_millis(4),
-        ) {
+        if self
+            .ide_panel
+            .api
+            .mock_highlighter
+            .sync_highlight_after_edit(version, None, None, None, None, Duration::from_millis(4))
+        {
             let spans = self.ide_panel.api.mock_highlighter.spans.clone();
-            for cache_part in [
-                ApiMockSourcePart::Contract,
-                ApiMockSourcePart::Prelude,
-                ApiMockSourcePart::Signature,
-                ApiMockSourcePart::Body,
-            ] {
-                let edit_spans =
-                    Self::map_api_mock_spans_to_edit(&spans, &virtual_source, cache_part);
-                self.ide_panel
-                    .api
-                    .mock_highlight_cache
-                    .insert((route_idx, cache_part), edit_spans);
-            }
+            self.refresh_api_mock_highlight_cache_for_spans(route_idx, &spans, &virtual_source);
             self.ide_panel.api.mock_highlight_spans = self
                 .ide_panel
                 .api
@@ -1155,7 +1174,11 @@ impl crate::app::App {
             if !self.ensure_api_mock_hover_editor(route_idx, part) {
                 return None;
             }
-            let editor = self.ide_panel.api.mock_python_editors.get(&(route_idx, part))?;
+            let editor = self
+                .ide_panel
+                .api
+                .mock_python_editors
+                .get(&(route_idx, part))?;
             version = version.max(editor.version);
         }
         Some(version)
@@ -1307,13 +1330,7 @@ impl crate::app::App {
         else {
             return false;
         };
-        let Some(model) = self
-            .ide_panel
-            .api
-            .models
-            .get(&spec_id)
-            .cloned()
-        else {
+        let Some(model) = self.ide_panel.api.models.get(&spec_id).cloned() else {
             return false;
         };
         let Some(route) = model.routes.get(route_idx).cloned() else {
@@ -1410,7 +1427,9 @@ impl crate::app::App {
             }
             ApiMockSourcePart::Prelude => script.prelude.clear(),
             ApiMockSourcePart::Signature => return,
-            ApiMockSourcePart::Body => script.body = api_mock_default_handler_body(&script.contract),
+            ApiMockSourcePart::Body => {
+                script.body = api_mock_default_handler_body(&script.contract)
+            }
         }
         self.ide_panel
             .api
@@ -1484,13 +1503,7 @@ impl crate::app::App {
         self.ide_panel.api.mock_ty_diagnostics.clear();
         self.ide_panel.api.mock_ty_pending = Some((route_idx, version));
         self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
-            route_idx,
-            version,
-            method,
-            path,
-            route,
-            model,
-            script,
+            route_idx, version, method, path, route, model, script,
         ));
     }
 
@@ -1498,47 +1511,7 @@ impl crate::app::App {
         self.api_mock_python_focus_target()
     }
 
-    pub(crate) fn api_input_current_word_prefix(&self) -> String {
-        let editor = &self.ide_panel.api.input_editor;
-        let mut p = editor.cursor;
-        while p > 0 {
-            let b = editor.byte_at(p - 1);
-            if !(b.is_ascii_alphanumeric() || b == b'_') {
-                break;
-            }
-            p -= 1;
-        }
-        if p == editor.cursor {
-            return String::new();
-        }
-        let mut out = Vec::with_capacity(editor.cursor - p);
-        for i in p..editor.cursor {
-            out.push(editor.byte_at(i));
-        }
-        String::from_utf8(out).unwrap_or_default()
-    }
-
-    fn api_input_after_python_member_dot(&self) -> bool {
-        crate::app::cursor_after_python_member_dot(&self.ide_panel.api.input_editor)
-    }
-
-    fn api_input_inside_python_call_parens(&self) -> bool {
-        crate::app::cursor_inside_python_call_parens(&self.ide_panel.api.input_editor)
-    }
-
-    fn api_mock_completion_indices(prefix: &str, word: &str) -> Option<Vec<usize>> {
-        if prefix.is_empty() {
-            return Some(Vec::new());
-        }
-        let prefix = prefix.to_lowercase();
-        let word_lower = word.to_lowercase();
-        if let Some(start) = word_lower.find(&prefix) {
-            return Some((start..start + prefix.len()).collect());
-        }
-        None
-    }
-
-    fn api_mock_autocomplete_anchor(&mut self) -> Option<(f32, f32)> {
+    pub(crate) fn api_mock_autocomplete_anchor(&mut self) -> Option<(f32, f32)> {
         let focus = self.ide_panel.api.focused.as_ref()?;
         let (id, multiline) = self.api_focus_ui_target(focus)?;
         let rect = self.ui_registry.rect_for(id)?;
@@ -1584,362 +1557,45 @@ impl crate::app::App {
     }
 
     pub(crate) fn update_api_mock_tree_sitter_autocomplete(&mut self) {
-        if self.autocomplete_active
-            && self.autocomplete_mode != crate::app::AutocompleteMode::TreeSitter
-        {
-            let after_member_dot = self.api_input_after_python_member_dot();
-            let inside_call = self.api_input_inside_python_call_parens();
-            let empty_prefix = self.api_input_current_word_prefix().is_empty();
-            if self.autocomplete_mode == crate::app::AutocompleteMode::TyContext
-                && ((!after_member_dot && !inside_call) || (empty_prefix && !after_member_dot))
-            {
-                self.close_autocomplete();
-            }
-            return;
-        }
-        let Some((route_idx, part)) = self.api_mock_python_focus_target() else {
+        let Some(source) = self.active_api_mock_autocomplete_source() else {
             return;
         };
-        let prefix = self.api_input_current_word_prefix();
-        if prefix.is_empty() {
-            self.autocomplete_active = false;
-            self.autocomplete_options.clear();
-            self.autocomplete_mode = crate::app::AutocompleteMode::TreeSitter;
-            self.autocomplete_rect = None;
-            self.autocomplete_anchor = None;
-            self.autocomplete_detail_popup = None;
-            self.autocomplete_detail_rect = None;
-            self.autocomplete_detail_placement = None;
-            self.autocomplete_detail_max_scroll = 0.0;
-            self.reset_autocomplete_detail_size();
-            crate::app::events::reset_autocomplete_frame_stats();
-            return;
-        }
-        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
-            return;
-        };
-        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
-            return;
-        };
-        let virtual_source = build_api_mock_virtual_source(method, &path, &route, &model, &script);
-        let edit_text = self.ide_panel.api.input_editor.get_full_text();
-        let cursor = self.ide_panel.api.input_editor.cursor;
-        let source_cursor = virtual_source.edit_offset_to_source(part, &edit_text, cursor);
-        let edit_prefix_start = cursor.saturating_sub(prefix.len());
-        let source_prefix_start =
-            virtual_source.edit_offset_to_source(part, &edit_text, edit_prefix_start);
-        self.autocomplete_options = crate::app::tree_sitter_completion_options(
-            &self.ide_panel.api.mock_highlighter.completions,
-            &prefix,
-            source_cursor,
-            source_prefix_start,
-            "py",
-            "api_mock_update_ts",
-        );
-        if self.autocomplete_options.len() == 1 && self.autocomplete_options[0].0.word == prefix {
-            self.autocomplete_options.clear();
-        }
-        crate::app::enrich_python_tree_sitter_options(
-            &mut self.autocomplete_options,
-            "py",
-            &edit_text,
-            cursor,
-        );
-        if !self.autocomplete_options.is_empty() {
-            if !self.autocomplete_active {
-                self.autocomplete_anim_progress = 0.0;
-            }
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
-            self.autocomplete_mode = crate::app::AutocompleteMode::TreeSitter;
-            self.autocomplete_active = true;
-            self.autocomplete_selected_idx = 0;
-            self.autocomplete_hovered_idx = None;
-            self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
-            self.request_api_mock_autocomplete_detail_for_index(0);
-        } else {
-            self.autocomplete_active = false;
-        }
+        self.update_tree_sitter_autocomplete_for_source(source);
     }
 
     pub(crate) fn request_api_mock_ty_autocomplete(&mut self, trigger: Option<&str>) {
-        let Some((route_idx, part)) = self.api_mock_python_focus_target() else {
+        let Some(source) = self.active_api_mock_autocomplete_source() else {
             return;
         };
-        let prefix = self.api_input_current_word_prefix();
-        let after_member_dot = self.api_input_after_python_member_dot();
-        let inside_call = self.api_input_inside_python_call_parens();
-        if trigger.is_none() && prefix.is_empty() && !after_member_dot && !inside_call {
-            self.close_autocomplete();
-            return;
-        }
-        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
-            return;
-        };
-        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
-            return;
-        };
-        let virtual_source = build_api_mock_virtual_source(method, &path, &route, &model, &script);
-        let edit_text = self.ide_panel.api.input_editor.get_full_text();
-        let source_cursor = virtual_source.edit_offset_to_source(
-            part,
-            &edit_text,
-            self.ide_panel.api.input_editor.cursor,
+        self.request_ty_autocomplete_for_source(
+            source,
+            crate::app::AutocompleteMode::TyContext,
+            trigger,
         );
-        let mut line_offsets = vec![0usize];
-        for (idx, b) in virtual_source.source.bytes().enumerate() {
-            if b == b'\n' {
-                line_offsets.push(idx + 1);
-            }
-        }
-        let (line, col) =
-            crate::lsp::offset_to_lsp_pos(&virtual_source.source, source_cursor, &line_offsets);
-        let path = Self::api_mock_virtual_path(route_idx);
-        let base_version = self
-            .ide_panel
-            .api
-            .input_editor
-            .version
-            .min(i32::MAX as u64) as i32;
-        if !self.notify_api_mock_lsp_source(&path, &virtual_source.source, base_version) {
-            return;
-        }
-        let Some(lsp) = self.lsp.as_mut() else {
-            return;
-        };
-        let request_signature_help = inside_call && !after_member_dot;
-        let completion_id = if request_signature_help {
-            None
-        } else {
-            lsp.request_ty_completion(&path, "py", line, col, trigger)
-        };
-        let signature_id = if request_signature_help {
-            lsp.request_ty_signature_help(&path, "py", line, col, None)
-        } else {
-            None
-        };
-        if request_signature_help {
-            self.autocomplete_signature_items.clear();
-        } else {
-            self.autocomplete_signature_request_id = None;
-            self.autocomplete_signature_items.clear();
-        }
-        if let Some(id) = completion_id {
-            self.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
-            self.autocomplete_pending_request_id = Some(id);
-            self.autocomplete_pending_request_mode = None;
-            self.autocomplete_pending_request_path = None;
-            self.autocomplete_pending_context_key = None;
-            self.autocomplete_apply_pending_response = false;
-            if !self.autocomplete_active {
-                self.autocomplete_anim_progress = 0.0;
-            }
-            self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
-            self.autocomplete_detail_popup = None;
-            self.autocomplete_detail_rect = None;
-        }
-        if let Some(id) = signature_id {
-            self.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
-            self.autocomplete_signature_request_id = Some(id);
-            self.autocomplete_pending_request_id = None;
-            self.autocomplete_pending_request_mode = None;
-            self.autocomplete_pending_request_path = None;
-            self.autocomplete_pending_context_key = None;
-            self.autocomplete_apply_pending_response = false;
-            self.autocomplete_active = false;
-            self.autocomplete_options.clear();
-            self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
-            self.autocomplete_detail_popup = None;
-            self.autocomplete_detail_rect = None;
-        }
     }
 
     pub(crate) fn update_api_mock_ty_autocomplete(
         &mut self,
         items: Vec<crate::lsp::LspCompletionItem>,
     ) {
-        if self.api_mock_python_focus_target().is_none() {
+        let Some(source) = self.active_api_mock_autocomplete_source() else {
             return;
-        }
-        let prefix = self.api_input_current_word_prefix();
-        let after_member_dot = self.api_input_after_python_member_dot();
-        let inside_call = self.api_input_inside_python_call_parens();
-        if prefix.is_empty() && !after_member_dot && !inside_call {
-            self.close_autocomplete();
-            return;
-        }
-        let prefix_lower = prefix.to_lowercase();
-        let mut out = Vec::new();
-        let mut items: Vec<crate::app::AutocompleteItem> =
-            items.into_iter().take(120).map(Into::into).collect();
-        if inside_call && !after_member_dot && !self.autocomplete_signature_items.is_empty() {
-            let mut merged =
-                Vec::with_capacity(self.autocomplete_signature_items.len() + items.len());
-            merged.extend(
-                self.autocomplete_signature_items
-                    .iter()
-                    .cloned()
-                    .map(Into::into),
-            );
-            merged.extend(items);
-            items = merged;
-        }
-        for item in items {
-            if prefix_lower.is_empty() || item.word.to_lowercase().contains(&prefix_lower) {
-                if let Some(indices) = Self::api_mock_completion_indices(&prefix, &item.word) {
-                    out.push((item, indices));
-                }
-            }
-        }
-        out.sort_unstable_by_key(|(item, _)| {
-            let lower = item.word.to_lowercase();
-            (
-                !lower.starts_with(&prefix_lower),
-                matches!(item.kind, crate::highlighter::SymbolKind::Unknown),
-                item.word.len(),
-            )
-        });
-        out.truncate(60);
-        self.autocomplete_options = out;
-        self.autocomplete_active = !self.autocomplete_options.is_empty();
-        if !self.autocomplete_active {
-            self.autocomplete_detail_popup = None;
-            self.autocomplete_detail_rect = None;
-            return;
-        }
-        self.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
-        self.autocomplete_selected_idx = 0;
-        self.autocomplete_hovered_idx = None;
-        self.autocomplete_scroll.current = 0.0;
-        self.autocomplete_scroll.target = 0.0;
-        self.autocomplete_anchor = self.api_mock_autocomplete_anchor();
+        };
+        self.update_ty_autocomplete_for_source(source, items);
     }
 
     pub(crate) fn update_api_mock_ty_signature_help_autocomplete(
         &mut self,
         parameters: Vec<String>,
     ) {
-        if self.api_mock_python_focus_target().is_none()
-            || self.autocomplete_mode != crate::app::AutocompleteMode::TyContext
-            || !self.api_input_inside_python_call_parens()
-            || self.api_input_after_python_member_dot()
-        {
-            return;
-        }
-        let text = self.ide_panel.api.input_editor.get_full_text();
-        self.autocomplete_signature_items = crate::app::ty_signature_parameter_items(
-            parameters,
-            &text,
-            self.ide_panel.api.input_editor.cursor,
-        );
-        if !self.autocomplete_signature_items.is_empty() {
-            self.update_api_mock_ty_autocomplete(Vec::new());
-        }
-    }
-
-    pub(crate) fn request_api_mock_autocomplete_detail_for_index(&mut self, idx: usize) {
-        if self.autocomplete_mode != crate::app::AutocompleteMode::TreeSitter {
-            self.refresh_autocomplete_detail_popup();
-            return;
-        }
-        let Some((item, _)) = self.autocomplete_options.get(idx) else {
+        let Some(source) = self.active_api_mock_autocomplete_source() else {
             return;
         };
-        let target_word = item.word.clone();
-        if item.detail.is_some() {
-            self.refresh_autocomplete_detail_popup();
-            return;
-        }
-        let Some((route_idx, part)) = self.api_mock_python_focus_target() else {
-            return;
-        };
-        let Some((method, path, route, model)) = self.api_mock_route_context(route_idx) else {
-            return;
-        };
-        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
-            return;
-        };
-        let virtual_source = build_api_mock_virtual_source(method, &path, &route, &model, &script);
-        let edit_text = self.ide_panel.api.input_editor.get_full_text();
-        let source_cursor = virtual_source.edit_offset_to_source(
-            part,
-            &edit_text,
-            self.ide_panel.api.input_editor.cursor,
-        );
-        let mut line_offsets = vec![0usize];
-        for (idx, b) in virtual_source.source.bytes().enumerate() {
-            if b == b'\n' {
-                line_offsets.push(idx + 1);
-            }
-        }
-        let (line, col) =
-            crate::lsp::offset_to_lsp_pos(&virtual_source.source, source_cursor, &line_offsets);
-        let path = Self::api_mock_virtual_path(route_idx);
-        let base_version = self
-            .ide_panel
-            .api
-            .input_editor
-            .version
-            .min(i32::MAX as u64) as i32;
-        if !self.notify_api_mock_lsp_source(&path, &virtual_source.source, base_version) {
-            return;
-        }
-        let Some(lsp) = self.lsp.as_mut() else {
-            return;
-        };
-        if let Some(id) = lsp.request_ty_completion(&path, "py", line, col, None) {
-            self.autocomplete_detail_request_id = Some(id);
-            self.autocomplete_detail_word = Some(target_word);
-            self.autocomplete_detail_request_path = Some(path);
-            self.autocomplete_detail_context_key = Some(format!(
-                "api-mock:{route_idx}:{part:?}:{source_cursor}"
-            ));
-        }
-    }
-
-    pub(crate) fn merge_api_mock_autocomplete_details(
-        &mut self,
-        items: Vec<crate::lsp::LspCompletionItem>,
-    ) {
-        let Some(target) = self.autocomplete_detail_word.clone() else {
-            return;
-        };
-        let mut wanted = FxHashSet::default();
-        wanted.reserve(self.autocomplete_options.len() + 1);
-        for (item, _) in &self.autocomplete_options {
-            wanted.insert(item.word.clone());
-        }
-        wanted.insert(target.clone());
-
-        let mut details = FxHashMap::default();
-        for item in &items {
-            if !wanted.contains(item.label.as_str()) {
-                continue;
-            }
-            details
-                .entry(item.label.clone())
-                .or_insert_with(|| crate::app::autocomplete_detail_cache_item(item));
-        }
-
-        let mut target_changed = false;
-        let member_dot_context = self.api_input_after_python_member_dot();
-        for (item, _) in &mut self.autocomplete_options {
-            let Some(cached) = details.get(&item.word) else {
-                continue;
-            };
-            crate::app::apply_autocomplete_detail_cache_item(item, cached, member_dot_context);
-            if item.word == target {
-                target_changed = true;
-            }
-        }
-        if target_changed {
-            self.refresh_autocomplete_detail_popup();
-        }
-        self.finish_autocomplete_detail_request();
+        self.update_ty_signature_help_autocomplete_for_source(source, parameters);
     }
 
     pub(crate) fn apply_api_mock_autocomplete(&mut self) -> bool {
-        let Some((route_idx, _)) = self.api_mock_python_focus_target() else {
+        let Some((route_idx, part)) = self.api_mock_python_focus_target() else {
             return false;
         };
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
@@ -1948,27 +1604,77 @@ impl crate::app::App {
         let item = self.autocomplete_options[self.autocomplete_selected_idx]
             .0
             .clone();
-        let selected = item
-            .insert_text
-            .as_deref()
-            .or_else(|| item.text_edit.as_ref().map(|edit| edit.new_text.as_str()))
-            .unwrap_or(&item.word)
-            .to_string();
-        let prefix_len = self.api_input_current_word_prefix().len();
-        for _ in 0..prefix_len {
-            self.ide_panel.api.input_editor.backspace();
+        let edit_text = self.ide_panel.api.input_editor.get_full_text();
+        let virtual_source = self
+            .api_mock_route_context(route_idx)
+            .and_then(|(method, path, route, model)| {
+                self.api_mock_script_for_tools(route_idx).map(|script| {
+                    build_api_mock_virtual_source(method, &path, &route, &model, &script)
+                })
+            });
+        let mut ops = Vec::new();
+        let mut prelude_imports = Vec::new();
+        if let Some(virtual_source) = virtual_source.as_ref() {
+            if let Some(main_edit) = item.text_edit.as_ref()
+                && let Some(op) =
+                    api_mock_lsp_edit_to_input_op(virtual_source, part, &virtual_source.source, main_edit)
+            {
+                ops.push(op);
+            }
+            for edit in &item.additional_text_edits {
+                if let Some(text) = api_mock_import_text(&edit.new_text) {
+                    prelude_imports.push(text.to_string());
+                    continue;
+                }
+                if let Some(op) =
+                    api_mock_lsp_edit_to_input_op(virtual_source, part, &virtual_source.source, edit)
+                {
+                    ops.push(op);
+                }
+            }
         }
-        let _ = self.ide_panel.api.input_editor.insert_str(&selected);
-        if !item.additional_text_edits.is_empty()
-            && let Some(script) = self.api_route_python_script_mut(route_idx)
-        {
-            for edit in item.additional_text_edits {
-                let text = edit.new_text.trim_matches(|c| c == '\n' || c == '\r');
-                if text.starts_with("import ") || text.starts_with("from ") {
+        let selected = item.insert_text.as_deref().unwrap_or(&item.word).to_string();
+        let prefix_len = self
+            .active_api_mock_autocomplete_source()
+            .and_then(|source| self.active_autocomplete_source_snapshot(source))
+            .map(|snapshot| snapshot.current_word_prefix().len())
+            .unwrap_or(0);
+        let primary_start = ops.first().map(|op| op.start);
+        let target_cursor = ops
+            .first()
+            .map(|op| op.start.saturating_add(op.new_text.len()));
+        crate::app::apply_completion_plan_to_editor(
+            &mut self.ide_panel.api.input_editor,
+            crate::app::CompletionApplyPlan {
+                ops,
+                primary_start,
+                target_cursor,
+                fallback_insert: selected,
+                fallback_prefix_len: prefix_len,
+            },
+        );
+        if !prelude_imports.is_empty() {
+            if part == ApiMockSourcePart::Prelude {
+                let cursor_after_apply = self.ide_panel.api.input_editor.cursor;
+                let mut insert = String::new();
+                if !edit_text.trim().is_empty() && !edit_text.ends_with('\n') {
+                    insert.push('\n');
+                }
+                for text in prelude_imports {
+                    insert.push_str(&text);
+                    insert.push('\n');
+                }
+                let end = self.ide_panel.api.input_editor.len();
+                let _ = self.ide_panel.api.input_editor.replace_range(end, end, &insert);
+                self.ide_panel.api.input_editor.cursor =
+                    cursor_after_apply.min(self.ide_panel.api.input_editor.len());
+                self.ide_panel.api.input_editor.selection_anchor = None;
+            } else if let Some(script) = self.api_route_python_script_mut(route_idx) {
+                for text in prelude_imports {
                     if !script.prelude.trim().is_empty() && !script.prelude.ends_with('\n') {
                         script.prelude.push('\n');
                     }
-                    script.prelude.push_str(text);
+                    script.prelude.push_str(&text);
                     script.prelude.push('\n');
                 }
             }
@@ -1981,5 +1687,4 @@ impl crate::app::App {
         }
         true
     }
-
 }

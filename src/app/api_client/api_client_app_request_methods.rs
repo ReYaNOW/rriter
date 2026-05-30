@@ -24,43 +24,18 @@ impl crate::app::App {
         }
         let shift = self.modifiers.shift_key();
         if self.api_mock_python_focus_target().is_some() && self.autocomplete_active {
-            match key_event.physical_key {
-                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
-                    self.close_autocomplete();
-                    return true;
-                }
-                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown) => {
-                    let len = self.autocomplete_options.len();
-                    if len > 0 {
-                        self.autocomplete_selected_idx = (self.autocomplete_selected_idx + 1) % len;
-                        self.ensure_autocomplete_visible();
-                    }
-                    return true;
-                }
-                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) => {
-                    let len = self.autocomplete_options.len();
-                    if len > 0 {
-                        self.autocomplete_selected_idx = if self.autocomplete_selected_idx == 0 {
-                            len.saturating_sub(1)
-                        } else {
-                            self.autocomplete_selected_idx.saturating_sub(1)
-                        };
-                        self.ensure_autocomplete_visible();
-                    }
-                    return true;
-                }
-                winit::keyboard::PhysicalKey::Code(
-                    winit::keyboard::KeyCode::Enter
-                    | winit::keyboard::KeyCode::NumpadEnter
-                    | winit::keyboard::KeyCode::Tab,
-                ) => {
-                    self.apply_api_mock_autocomplete();
-                    return true;
-                }
-                _ => {}
+            match self.handle_active_autocomplete_key(key_event.physical_key, ctrl) {
+                crate::app::AutocompletePopupKeyResult::Consumed => return true,
+                crate::app::AutocompletePopupKeyResult::Continue
+                | crate::app::AutocompletePopupKeyResult::NotHandled => {}
             }
         }
         let mock_python_target = self.api_mock_python_focus_target();
+        if mock_python_target.is_some()
+            && self.mark_pending_autocomplete_apply_for_key(key_event.physical_key)
+        {
+            return true;
+        }
         let input_version_before = self.ide_panel.api.input_editor.version;
         let mut typed_text: Option<String> = None;
         let is_body = matches!(
@@ -254,9 +229,12 @@ impl crate::app::App {
                 && (matches!(text, "." | "(" | ",")
                     || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
             {
+                let mock_source = self.active_api_mock_autocomplete_source();
                 if matches!(text, ".")
-                    || self.api_input_after_python_member_dot()
-                    || self.api_input_inside_python_call_parens()
+                    || mock_source.is_some_and(|source| {
+                        self.source_after_python_member_dot(source)
+                            || self.source_inside_python_call_parens(source)
+                    })
                 {
                     self.request_api_mock_ty_autocomplete(
                         matches!(text, "." | "(" | ",").then_some(text),
@@ -566,19 +544,11 @@ impl crate::app::App {
             {
                 let virtual_source =
                     build_api_mock_virtual_source(method, &path, &route, &model, &script);
-                for cache_part in [
-                    ApiMockSourcePart::Contract,
-                    ApiMockSourcePart::Prelude,
-                    ApiMockSourcePart::Signature,
-                    ApiMockSourcePart::Body,
-                ] {
-                    let edit_spans =
-                        Self::map_api_mock_spans_to_edit(&spans, &virtual_source, cache_part);
-                    self.ide_panel
-                        .api
-                        .mock_highlight_cache
-                        .insert((route_idx, cache_part), edit_spans);
-                }
+                self.refresh_api_mock_highlight_cache_for_spans(
+                    route_idx,
+                    &spans,
+                    &virtual_source,
+                );
                 self.ide_panel.api.mock_highlight_spans = self
                     .ide_panel
                     .api

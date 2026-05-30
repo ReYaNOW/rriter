@@ -656,6 +656,46 @@ fn open_api_mock_test_route(app: &mut App) -> crate::app::api_client::ApiSpecId 
     spec_id
 }
 
+fn text_change_for_source_span(
+    source: &str,
+    start: usize,
+    end: usize,
+    new_text: &str,
+) -> crate::lsp::TextChange {
+    let mut line_offsets = vec![0usize];
+    for (idx, b) in source.bytes().enumerate() {
+        if b == b'\n' {
+            line_offsets.push(idx + 1);
+        }
+    }
+    let (start_line, start_col) = crate::lsp::offset_to_lsp_pos(source, start, &line_offsets);
+    let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(source, end, &line_offsets);
+    crate::lsp::TextChange {
+        start_line,
+        start_col,
+        end_line,
+        end_col,
+        new_text: new_text.to_string(),
+    }
+}
+
+fn api_lsp_item(
+    label: &str,
+    kind: crate::highlighter::SymbolKind,
+    module: Option<&str>,
+    detail: Option<&str>,
+) -> crate::lsp::LspCompletionItem {
+    crate::lsp::LspCompletionItem {
+        label: label.to_string(),
+        kind,
+        module: module.map(str::to_string),
+        detail: detail.map(str::to_string),
+        insert_text: None,
+        text_edit: None,
+        additional_text_edits: Vec::new(),
+    }
+}
+
 #[test]
 fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
     let Some(mut app) = test_app() else {
@@ -791,6 +831,60 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
 }
 
 #[test]
+fn api_mock_autocomplete_applies_lsp_text_edit_and_imports_to_prelude() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    Res");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+
+    let (method, path, route, model) = app.api_mock_route_context(0).unwrap();
+    let script = app.api_mock_script_for_tools(0).unwrap();
+    let virtual_source = crate::app::api_mock::ty_check::build_api_mock_virtual_source(
+        method, &path, &route, &model, &script,
+    );
+    let start = virtual_source.source.rfind("Res").unwrap();
+    let edit = text_change_for_source_span(
+        &virtual_source.source,
+        start,
+        start + "Res".len(),
+        "Response",
+    );
+    app.autocomplete_active = true;
+    app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+    app.autocomplete_options = vec![(
+        crate::app::AutocompleteItem {
+            word: "Response".to_string(),
+            kind: crate::highlighter::SymbolKind::Class,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: None,
+            module_path: None,
+            detail: None,
+            insert_text: None,
+            text_edit: Some(edit),
+            additional_text_edits: vec![crate::lsp::TextChange {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+                new_text: "from typing import Any\n".to_string(),
+            }],
+        },
+        Vec::new(),
+    )];
+
+    assert!(app.apply_api_mock_autocomplete());
+
+    let script = app.api_mock_script_for_tools(0).unwrap();
+    assert_eq!(script.body, "    Response");
+    assert!(script.prelude.contains("from typing import Any"));
+}
+
+#[test]
 fn api_mock_signature_parameters_feed_autocomplete_like_python_editor() {
     let Some(mut app) = test_app() else {
         return;
@@ -842,6 +936,247 @@ fn api_mock_tree_sitter_completions_show_before_ty_merge() {
     assert!(app.autocomplete_active);
     assert_eq!(app.autocomplete_mode, crate::app::AutocompleteMode::TreeSitter);
     assert_eq!(app.autocomplete_options[0].0.word, "Response");
+}
+
+#[test]
+fn api_mock_detail_popup_uses_api_editor_cursor_context() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.editor = editor_with("main_cursor_should_not_win");
+    app.editor.cursor = 0;
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    Response");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_active = true;
+    app.autocomplete_selected_idx = 0;
+    app.autocomplete_options = vec![(
+        crate::app::AutocompleteItem {
+            word: "Response".to_string(),
+            kind: crate::highlighter::SymbolKind::Class,
+            scope_start: 0,
+            scope_end: usize::MAX,
+            module: None,
+            module_path: None,
+            detail: Some("class Response".to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        },
+        Vec::new(),
+    )];
+
+    app.refresh_autocomplete_detail_popup();
+
+    let popup = app.autocomplete_detail_popup.as_ref().unwrap();
+    assert_eq!(popup.byte_offset, app.ide_panel.api.input_editor.cursor);
+    assert_ne!(popup.byte_offset, app.editor.cursor);
+}
+
+#[test]
+fn api_mock_popup_keys_move_selection_and_refresh_detail_like_editor() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.autocomplete_active = true;
+    app.autocomplete_mode = crate::app::AutocompleteMode::TreeSitter;
+    app.autocomplete_options = vec![
+        (
+            crate::app::AutocompleteItem {
+                word: "alpha".to_string(),
+                kind: crate::highlighter::SymbolKind::Function,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: None,
+                module_path: None,
+                detail: Some("alpha detail".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        ),
+        (
+            crate::app::AutocompleteItem {
+                word: "beta".to_string(),
+                kind: crate::highlighter::SymbolKind::Function,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: None,
+                module_path: None,
+                detail: Some("beta detail".to_string()),
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            Vec::new(),
+        ),
+    ];
+
+    let result = app.handle_active_autocomplete_key(
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown),
+        false,
+    );
+
+    assert_eq!(
+        result,
+        crate::app::AutocompletePopupKeyResult::Consumed
+    );
+    assert_eq!(app.autocomplete_selected_idx, 1);
+    assert!(
+        app.autocomplete_detail_popup
+            .as_ref()
+            .is_some_and(|popup| popup.text.contains("beta detail"))
+    );
+}
+
+#[test]
+fn api_mock_pending_enter_and_tab_share_main_autocomplete_gate() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    response.");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+    app.autocomplete_pending_request_id = Some(77);
+
+    assert!(app.mark_pending_autocomplete_apply_for_key(
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+    ));
+    assert!(app.autocomplete_apply_pending_response);
+
+    app.autocomplete_apply_pending_response = false;
+    app.autocomplete_pending_request_id = Some(78);
+    assert!(app.mark_pending_autocomplete_apply_for_key(
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab)
+    ));
+    assert!(app.autocomplete_apply_pending_response);
+}
+
+#[test]
+fn api_mock_ty_exact_single_match_closes_like_main_editor() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    model_dump");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_active = true;
+    app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+
+    app.update_api_mock_ty_autocomplete(vec![api_lsp_item(
+        "model_dump",
+        crate::highlighter::SymbolKind::Function,
+        Some("Response"),
+        Some("def Response.model_dump(self) -> dict"),
+    )]);
+
+    assert!(!app.autocomplete_active);
+    assert!(app.autocomplete_options.is_empty());
+}
+
+#[test]
+fn api_mock_ty_member_order_reuses_python_owner_and_private_ranking() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.ide_panel
+        .api
+        .mock
+        .route_overrides
+        .iter_mut()
+        .find_map(|override_route| override_route.python.as_mut())
+        .unwrap()
+        .prelude =
+        "class GrandBase:\n    grand_public: int\n\nclass BoxReadPublic(GrandBase):\n    base_public: int\n    _base_hidden: int\n\nclass BoxRead(BoxReadPublic):\n    current_public: int\n    _current_hidden: int\n"
+            .to_string();
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    box.");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
+
+    app.update_api_mock_ty_autocomplete(vec![
+        api_lsp_item(
+            "base_public",
+            crate::highlighter::SymbolKind::Class,
+            Some("int"),
+            Some("int"),
+        ),
+        api_lsp_item(
+            "_base_hidden",
+            crate::highlighter::SymbolKind::Class,
+            Some("int"),
+            Some("int"),
+        ),
+        api_lsp_item(
+            "grand_public",
+            crate::highlighter::SymbolKind::Class,
+            Some("int"),
+            Some("int"),
+        ),
+        api_lsp_item(
+            "current_public",
+            crate::highlighter::SymbolKind::Class,
+            Some("int"),
+            Some("int"),
+        ),
+        api_lsp_item(
+            "_current_hidden",
+            crate::highlighter::SymbolKind::Class,
+            Some("int"),
+            Some("int"),
+        ),
+        api_lsp_item(
+            "model_dump",
+            crate::highlighter::SymbolKind::Function,
+            Some("BoxRead"),
+            Some("def BoxRead.model_dump(self) -> dict"),
+        ),
+        api_lsp_item(
+            "base_method",
+            crate::highlighter::SymbolKind::Function,
+            Some("BoxReadPublic"),
+            Some("def BoxReadPublic.base_method(self) -> dict"),
+        ),
+        api_lsp_item(
+            "mro",
+            crate::highlighter::SymbolKind::Function,
+            Some("BoxRead"),
+            Some("def BoxRead.mro(self) -> list[type]"),
+        ),
+    ]);
+
+    let words = app
+        .autocomplete_options
+        .iter()
+        .map(|(item, _)| item.word.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        words,
+        vec![
+            "current_public",
+            "model_dump",
+            "_current_hidden",
+            "base_public",
+            "base_method",
+            "_base_hidden",
+            "grand_public",
+            "mro",
+        ]
+    );
 }
 
 #[test]

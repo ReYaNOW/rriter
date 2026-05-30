@@ -330,7 +330,7 @@ impl App {
                             } else {
                                 self.autocomplete_selected_idx = idx;
                                 self.autocomplete_hovered_idx = None;
-                                self.request_autocomplete_detail_for_index(idx);
+                                self.request_active_autocomplete_detail_for_index(idx);
                             }
                         }
                     }
